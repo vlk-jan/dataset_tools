@@ -123,9 +123,7 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
 
     # Process TF Static
     if tf_msgs:
-        T_lidar_to_base = save_calibration(
-            tf_msgs, reader, cam_conn, lidar_conn, scene_dir
-        )
+        T_lidar_to_base = get_lidar_transform(tf_msgs, reader, lidar_conn)
     else:
         T_lidar_to_base = np.eye(4)
 
@@ -181,11 +179,11 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
             pcd = np.vstack(
                 (points["x"], points["y"], points["z"], np.ones_like(points["x"]))
             ).T
-            pcd = (pcd @ T_lidar_to_base.T)[:, :3]
+            pcd = (pcd[~np.isnan(pcd).any(axis=1)] @ T_lidar_to_base.T)[:, :3]
             pcd = np.hstack((pcd, points["intensity"][:, None]))
             np.save(
                 scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
-                pcd[~np.isnan(pcd).any(axis=1)],
+                pcd,
             )
             pcd_idx += 1
             pcd_set.remove(t)
@@ -231,13 +229,13 @@ def save_intrinsics(reader, conns, cam_topic, scene_dir):
             break
 
 
-def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
+def get_lidar_transform(tf_msgs, reader, lidar_conn):
     # Extract frame IDs from first messages
     def get_frame(conn):
         for _, _, raw in reader.messages([conn]):
             return reader.deserialize(raw, conn.msgtype).header.frame_id
 
-    c_frame, l_frame = get_frame(cam_conn), get_frame(lidar_conn)
+    l_frame = get_frame(lidar_conn)
 
     G = nx.DiGraph()
     for tf in tf_msgs:
@@ -251,17 +249,7 @@ def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
         G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=Tr)
         G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=np.linalg.inv(Tr))
 
-    # 1. Save Cam to Lidar
-    try:
-        path = nx.shortest_path(G, source=l_frame, target=c_frame)
-        T = np.eye(4)
-        for i in range(len(path) - 1):
-            T = T @ G[path[i]][path[i + 1]]["transform"]
-        np.savetxt(save_dir / "T_cam_to_lidar.txt", T)
-    except Exception:
-        print(f"Failed to find TF path from {l_frame} to {c_frame}")
-
-    # 2. Extract Lidar to Base Link transform (NEW)
+    # Extract Lidar to Base Link transform
     base_frame = "base_link"
     T_lidar_to_base = np.eye(4)
     if base_frame in G:
@@ -269,7 +257,6 @@ def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
             path = nx.shortest_path(G, source=l_frame, target=base_frame)
             for i in range(len(path) - 1):
                 T_lidar_to_base = T_lidar_to_base @ G[path[i]][path[i + 1]]["transform"]
-            np.savetxt(save_dir / "T_lidar_to_base.txt", T_lidar_to_base)
         except Exception:
             print(f"Failed to find TF path from {l_frame} to {base_frame}")
     else:
