@@ -1,87 +1,89 @@
 #!/usr/bin/env python3
-import sys
-from rosbag2_py import (
-    SequentialReader,
-    SequentialWriter,
-    StorageOptions,
-    ConverterOptions,
-    TopicMetadata,
-)
-from rclpy.serialization import serialize_message, deserialize_message
-from rosidl_runtime_py.utilities import get_message
+import argparse
+from pathlib import Path
+
+from rosbags.highlevel import AnyReader
+from rosbags.rosbag2 import Writer
 
 
-def sort_bag(in_bag, out_bag):
-    # --- Open reader ---
-    reader = SequentialReader()
-    storage_options_in = StorageOptions(uri=in_bag, storage_id="mcap")
-    converter_options = ConverterOptions(
-        input_serialization_format="cdr", output_serialization_format="cdr"
-    )
-    reader.open(storage_options_in, converter_options)
+def sort_bag(input_path: Path, output_path: Path):
+    """Sort ROS2 bag messages by timestamp.
 
-    topic_types = reader.get_all_topics_and_types()
-
-    def typename(topic_name):
-        for topic_type in topic_types:
-            if topic_type.name == topic_name:
-                return topic_type.type
-        raise ValueError(f"topic {topic_name} not in bag")
-
-    # --- Load all messages ---
+    Args:
+        input_path: Path to the input bag (directory or mcap file).
+        output_path: Path to the output bag directory.
+    """
     messages = []
-    topics = {}
-    while reader.has_next():
-        topic, data, ts = reader.read_next()
 
-        try:
-            topic_type = typename(topic)
-            msg_type = get_message(topic_type)
-        except ModuleNotFoundError:
-            continue
-        if topic not in topics.keys():
-            topics[topic] = topic_type
-        msg = deserialize_message(data, msg_type)
+    print(f"Reading messages from {input_path}...")
+    with AnyReader([input_path]) as reader:
+        # Map to keep track of connection metadata for the writer
+        connections_info = {}
+        for conn in reader.connections:
+            connections_info[conn.id] = (conn.topic, conn.msgtype)
 
-        # Prefer header timestamp if present
-        if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
-            t = msg.header.stamp.sec * 1e9 + msg.header.stamp.nanosec
-        else:
-            t = ts
+        for connection, timestamp, rawdata in reader.messages():
+            # Deserialization is needed to check for header timestamps
+            try:
+                msg = reader.deserialize(rawdata, connection.msgtype)
+                # Prefer header timestamp if present (nanoseconds)
+                if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
+                    t = msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
+                else:
+                    t = timestamp
+            except Exception:
+                # Fallback to bag timestamp if deserialization fails
+                t = timestamp
 
-        messages.append((t, topic, msg))
+            messages.append((t, connection.topic, connection.msgtype, rawdata))
 
-    print(f"Loaded {len(messages)} messages. Sorting…")
-
-    # Sort by timestamp
+    print(f"Loaded {len(messages)} messages. Sorting...")
+    # Sort by the determined timestamp
     messages.sort(key=lambda x: x[0])
 
-    # --- Write new sorted bag ---
-    writer = SequentialWriter()
-    storage_options_out = StorageOptions(uri=out_bag, storage_id="mcap")
-    writer.open(storage_options_out, converter_options)
+    print(f"Writing sorted messages to {output_path}...")
 
-    # Register topics
-    for idx, topic in enumerate(topics.keys()):
-        writer.create_topic(
-            TopicMetadata(
-                id=idx,
-                name=topic,
-                type=topics[topic],
-                serialization_format="cdr",
-            )
-        )
+    # Ensure output directory doesn't exist to avoid rosbags Writer errors
+    if output_path.exists():
+        import shutil
 
-    # Write sorted messages
-    for t, topic, msg in messages:
-        writer.write(topic, serialize_message(msg), int(t))
+        print(f"Warning: Output path {output_path} exists. Removing it.")
+        shutil.rmtree(output_path)
 
-    print("Done. Output written to:", out_bag)
+    with Writer(output_path) as writer:
+        # Create connections in the new bag
+        topic_to_conn = {}
+
+        for t, topic, msgtype, rawdata in messages:
+            if topic not in topic_to_conn:
+                topic_to_conn[topic] = writer.add_connection(topic, msgtype)
+
+            # Write the raw data directly to avoid unnecessary re-serialization
+            writer.write(topic_to_conn[topic], t, rawdata)
+
+    print(f"Successfully wrote sorted bag to: {output_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Sort a ROS2 bag by header or bag timestamp."
+    )
+    parser.add_argument("input", type=str, help="Path to input ROS2 bag")
+    parser.add_argument(
+        "output", type=str, help="Path to output sorted bag (directory)"
+    )
+
+    args = parser.parse_args()
+
+    in_path = Path(args.input)
+    out_path = Path(args.output)
+
+    if not in_path.exists():
+        print(f"Error: Input path {in_path} does not exist.")
+        return
+
+    sort_bag(in_path, out_path)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: sort_mcap_bag.py input.mcap output_sorted.mcap")
-        sys.exit(1)
-
-    sort_bag(sys.argv[1], sys.argv[2])
+    main()
