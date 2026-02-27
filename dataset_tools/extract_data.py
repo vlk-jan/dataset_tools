@@ -2,255 +2,206 @@
 import argparse
 import traceback
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import cv2
 import numpy as np
 import networkx as nx
 from tqdm import tqdm
-from cv_bridge import CvBridge
 from rosbags.highlevel import AnyReader
 from tf_transformations import quaternion_matrix, translation_matrix
 
 
-def _worker(bag_path, output_dir, idx):
+def _worker(bag_path, output_dir, idx, cam_topic, lidar_topic, num_threads):
     scene_dir = output_dir / f"{idx:04d}"
     try:
         with AnyReader([bag_path]) as reader:
-            process_scene(reader, bag_path, scene_dir)
+            process_scene(reader, bag_path, scene_dir, cam_topic, lidar_topic)
         return True
     except Exception as e:
         print(f"Error processing {bag_path}: {e}\n{traceback.format_exc()}")
         return False
 
 
-def main(args):
-    input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
-    bag_files = sorted(input_dir.iterdir())
-    for file in bag_files:
-        if not file.is_dir():
-            bag_files.remove(file)
-
-    num_threads = 1
-
-    futures = []
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        for idx, bag_path in enumerate(bag_files):
-            futures.append(executor.submit(_worker, bag_path, output_dir, idx))
-
-        for _ in tqdm(
-            as_completed(futures), total=len(futures), desc="Processing scenes"
-        ):
-            pass
-
-
-def process_scene(reader, bag_path, scene_dir):
-    cv_bridge = CvBridge()
-
-    camera_topic = "/luxonis/oak/rgb/image_raw/compressed"
-    lidar_topic = "/livox/lidar_front"
-
-    camera_topic = "/luxonis/rear/rgb/image_raw/compressed"
-    lidar_topic = "/livox/lidar_rear"
-
+def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
     # Pre-cache connections
     conns = {c.topic: c for c in reader.connections}
     cam_conn = conns.get(camera_topic)
     lidar_conn = conns.get(lidar_topic)
+
     if not cam_conn or not lidar_conn:
-        print(f"Missing camera or lidar topic in {bag_path}")
+        print(
+            f"Missing topics in {bag_path}. Cam: {bool(cam_conn)}, Lidar: {bool(lidar_conn)}"
+        )
         return
 
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
 
-    cam_ts, pcd_ts = get_synced_timestamps(reader, cam_conn, lidar_conn)
-    data_ts_mean = (cam_ts + pcd_ts) / 2
-    np.savetxt(scene_dir / "data_ts.txt", data_ts_mean)
-    np.savetxt(scene_dir / "pcd_ts.txt", pcd_ts)
+    # Pass 1: Collect timestamps for synchronization
+    # We only deserialize headers for efficiency
+    cam_timestamps = []
+    lidar_timestamps = []
 
-    extract_images(cv_bridge, reader, cam_conn, scene_dir, cam_ts)
-    extract_pointclouds(reader, lidar_conn, scene_dir, pcd_ts)
+    # We also collect odom and joint states in this pass if they are small
+    odom_data = []  # (ts, transform)
+    joint_states = []
 
-    save_calibration(reader, conns, cam_conn, lidar_conn, scene_dir)
-    save_joint_states(reader, conns, scene_dir)
+    relevant_conns = [
+        cam_conn,
+        lidar_conn,
+        conns.get("/odom"),
+        conns.get("/joint_states"),
+        conns.get("/tf_static"),
+    ]
+    relevant_conns = [c for c in relevant_conns if c is not None]
 
-    odom_conn = conns.get("/odom")
-    odom_ts = extract_timestamps(reader, odom_conn)
+    tf_msgs = []
 
-    diff = np.abs(pcd_ts[:, None] - odom_ts[None, :])
-    ts1_to_ts2 = np.argmin(diff, axis=1)
-    timestamps = odom_ts[ts1_to_ts2]
+    for conn, timestamp, raw in reader.messages(relevant_conns):
+        msg = reader.deserialize(raw, conn.msgtype)
 
-    extract_odom_poses(reader, odom_conn, timestamps, scene_dir)
+        # Get header timestamp if available
+        t = timestamp
+        if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
+            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
+        if conn.topic == camera_topic:
+            cam_timestamps.append(t)
+        elif conn.topic == lidar_topic:
+            lidar_timestamps.append(t)
+        elif conn.topic == "/odom":
+            # Pre-calculate odom transform
+            pose = msg.pose.pose
+            Tt = translation_matrix([pose.position.x, pose.position.y, pose.position.z])
+            Tr = quaternion_matrix(
+                [
+                    pose.orientation.x,
+                    pose.orientation.y,
+                    pose.orientation.z,
+                    pose.orientation.w,
+                ]
+            )
+            odom_data.append((t, Tt @ Tr))
+        elif conn.topic == "/joint_states":
+            joint_states.append(np.r_[t, msg.position, msg.velocity, msg.effort])
+        elif conn.topic == "/tf_static":
+            tf_msgs.extend(msg.transforms)
 
-def extract_timestamps(reader, conn):
-    ts = []
-    for _, _, raw in reader.messages([conn]):
-        try:
-            msg = reader.deserialize(raw, conn.msgtype)
-        except UnicodeDecodeError as _:
-            continue
-        ts.append(msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9)
-    return np.array(ts, dtype=np.float64)
+    # Sync Timestamps (Mutual Nearest Neighbor)
+    cam_ts = np.array(cam_timestamps)
+    pcd_ts = np.array(lidar_timestamps)
 
+    if len(cam_ts) == 0 or len(pcd_ts) == 0:
+        return
 
-def get_synced_timestamps(reader, conn1, conn2):
-    ts1 = extract_timestamps(reader, conn1)
-    ts2 = extract_timestamps(reader, conn2)
-
-    # Vectorized mutual nearest matching
-    diff = np.abs(ts1[:, None] - ts2[None, :])
+    diff = np.abs(cam_ts[:, None] - pcd_ts[None, :])
     ts1_to_ts2 = np.argmin(diff, axis=1)
     ts2_to_ts1 = np.argmin(diff, axis=0)
-
     mask = np.array([ts2_to_ts1[j] == i for i, j in enumerate(ts1_to_ts2)])
-    return ts1[mask], ts2[ts1_to_ts2[mask]]
 
+    valid_cam_ts = cam_ts[mask]
+    valid_pcd_ts = pcd_ts[ts1_to_ts2[mask]]
 
-def extract_images(cv_bridge, reader, cam_conn, save_dir, valid_ts):
-    ts_set = set(valid_ts)  # tolerate float error
-    img_dir = save_dir / "images"
+    # Save metadata
+    np.savetxt(scene_dir / "data_ts.txt", (valid_cam_ts + valid_pcd_ts) / 2)
+    np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts)
 
-    idx = 0
-    used_set = set()
-    for _, _, raw in reader.messages([cam_conn]):
-        try:
-            msg = reader.deserialize(raw, cam_conn.msgtype)
-        except UnicodeDecodeError as _:
-            continue
-        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if ts not in ts_set:
-            continue
-        if ts in used_set:
-            continue
-        used_set.add(ts)
-        cv_img = cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        cv2.imwrite(str(img_dir / f"{idx:05d}.png"), cv_img)
-        idx += 1
+    if joint_states:
+        np.save(scene_dir / "joint_states.npy", np.vstack(joint_states))
 
-    # Extract intrinsics once
-    cam_info_topic = cam_conn.topic.replace("image_raw/compressed", "camera_info")
-    cam_info_conn = next(
-        (c for c in reader.connections if c.topic == cam_info_topic), None
-    )
-    if cam_info_conn:
-        _, _, raw = next(reader.messages([cam_info_conn]))
-        msg = reader.deserialize(raw, cam_info_conn.msgtype)
-        intrinsics = np.array(msg.k, dtype=np.float64).reshape(3, 3)
-        np.savetxt(save_dir / "camera_intrinsics.txt", intrinsics)
+    # Process TF Static
+    if tf_msgs:
+        save_calibration(tf_msgs, reader, cam_conn, lidar_conn, scene_dir)
 
+    # Pass 2: Extract heavy data (Images, Pointclouds)
+    cam_set = set(valid_cam_ts)
+    pcd_set = set(valid_pcd_ts)
 
-def extract_odom_poses(reader, odom_conn, timestamps, save_dir):
-    ts_set = set(timestamps)
-    prev_pose = None
-    transforms = []
-
-    used_ts = []
-    for _, _, raw in reader.messages([odom_conn]):
-        try:
-            msg = reader.deserialize(raw, odom_conn.msgtype)
-        except UnicodeDecodeError as _:
-            continue
-        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if ts not in ts_set:
-            continue
-
-        # Extract current pose
-        pose = msg.pose.pose
-        Tt = translation_matrix([pose.position.x, pose.position.y, pose.position.z])
-        Tr = quaternion_matrix(
-            [
-                pose.orientation.x,
-                pose.orientation.y,
-                pose.orientation.z,
-                pose.orientation.w,
-            ]
-        )
-
-        T = np.dot(Tt, Tr)
-        if prev_pose is None:
-            transform = np.eye(4)
-        else:
-            transform = np.linalg.inv(prev_pose) @ T
-
-        transforms.append(transform)
-        used_ts.append(ts)
-        prev_pose = T
-
-    transforms = np.array(transforms)
-    mask = [np.where(used_ts == x)[0] for x in timestamps]
-    transforms = transforms[mask].squeeze()
-    np.save(save_dir / "transforms.npy", transforms)
-
-
-def extract_pointclouds(reader, lidar_conn, save_dir, valid_ts):
-    ts_set = set(valid_ts)
-    cloud_dir = save_dir / "clouds"
-
-    endian_char = ">" if lidar_conn.msgtype.endswith("BigEndian") else "<"
-    dtype = np.dtype(
+    # Pointcloud dtype
+    endian = ">" if lidar_conn.msgtype.endswith("BigEndian") else "<"
+    pcd_dtype = np.dtype(
         [
-            ("x", endian_char + "f4"),
-            ("y", endian_char + "f4"),
-            ("z", endian_char + "f4"),
-            ("intensity", endian_char + "f4"),
-            ("tag", endian_char + "u1"),
-            ("line", endian_char + "u1"),
-            ("timestamp", endian_char + "f8"),
+            ("x", f"{endian}f4"),
+            ("y", f"{endian}f4"),
+            ("z", f"{endian}f4"),
+            ("intensity", f"{endian}f4"),
+            ("tag", f"{endian}u1"),
+            ("line", f"{endian}u1"),
+            ("timestamp", f"{endian}f8"),
         ]
     )
 
-    idx = 0
-    used_set = set()
-    for _, _, raw in reader.messages([lidar_conn]):
-        try:
-            msg = reader.deserialize(raw, lidar_conn.msgtype)
-        except UnicodeDecodeError as _:
-            continue
-        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if ts not in ts_set:
-            continue
-        if ts in used_set:
-            continue
-        used_set.add(ts)
+    img_idx = 0
+    pcd_idx = 0
 
-        points = np.frombuffer(msg.data, dtype=dtype)
-        pcd = np.vstack((points["x"], points["y"], points["z"], points["intensity"])).T
-        pcd = pcd[~np.isnan(pcd).any(axis=1)]
-        np.savez_compressed(cloud_dir / f"{idx:05d}.npz", points=pcd)
-        idx += 1
+    # For odom interpolation/matching
+    odom_ts = np.array([x[0] for x in odom_data])
+    odom_poses = [x[1] for x in odom_data]
+    transforms = []
+
+    for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
+        msg = reader.deserialize(raw, conn.msgtype)
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+
+        if conn.topic == camera_topic and t in cam_set:
+            # Use OpenCV directly (faster than cv_bridge)
+            np_arr = np.frombuffer(msg.data, np.uint8)
+            cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            cv2.imwrite(str(scene_dir / "images" / f"{img_idx:05d}.png"), cv_img)
+
+            # Extract Intrinsics once
+            if img_idx == 0:
+                save_intrinsics(reader, conns, camera_topic, scene_dir)
+
+            # Match Odom
+            idx = np.argmin(np.abs(odom_ts - t))
+            transforms.append(odom_poses[idx])
+
+            img_idx += 1
+            cam_set.remove(t)  # Handle duplicates
+
+        elif conn.topic == lidar_topic and t in pcd_set:
+            points = np.frombuffer(msg.data, dtype=pcd_dtype)
+            pcd = np.vstack(
+                (points["x"], points["y"], points["z"], points["intensity"])
+            ).T
+            np.save(
+                scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
+                pcd[~np.isnan(pcd).any(axis=1)],
+            )
+            pcd_idx += 1
+            pcd_set.remove(t)
+
+    # Process Odom Transforms (relative to first frame)
+    if transforms:
+        rel_transforms = [np.eye(4)]
+        first_inv = np.linalg.inv(transforms[0])
+        for i in range(1, len(transforms)):
+            rel_transforms.append(first_inv @ transforms[i])
+        np.save(scene_dir / "transforms.npy", np.array(rel_transforms))
 
 
-def save_calibration(reader, conns, cam_conn, lidar_conn, save_dir):
-    tf_conn = conns.get("/tf_static")
-    if not tf_conn:
-        print("No /tf_static topic found — skipping calibration.")
-        return
-
-    # Extract one message from each to get frame IDs
-    _, _, raw = next(reader.messages([cam_conn]))
-    cam_frame = reader.deserialize(raw, cam_conn.msgtype).header.frame_id
-    _, _, raw = next(reader.messages([lidar_conn]))
-    lidar_frame = reader.deserialize(raw, lidar_conn.msgtype).header.frame_id
-
-    tf_frames = [
-        t
-        for _, _, raw in reader.messages([tf_conn])
-        for msg in [reader.deserialize(raw, tf_conn.msgtype)]
-        for t in msg.transforms
-    ]
-
-    G = build_tf_tree(tf_frames)
-    T = compute_transform(G, cam_frame, lidar_frame)
-    if T is not None:
-        np.savetxt(save_dir / "T_cam_to_lidar.txt", T)
-    else:
-        print(f"Calibration failed between {cam_frame} and {lidar_frame}.")
+def save_intrinsics(reader, conns, cam_topic, scene_dir):
+    info_topic = cam_topic.replace("image_raw/compressed", "camera_info")
+    conn = conns.get(info_topic)
+    if conn:
+        for _, _, raw in reader.messages([conn]):
+            msg = reader.deserialize(raw, conn.msgtype)
+            np.savetxt(
+                scene_dir / "camera_intrinsics.txt", np.array(msg.k).reshape(3, 3)
+            )
+            break
 
 
-def build_tf_tree(tf_msgs):
+def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
+    # Extract frame IDs from first messages
+    def get_frame(conn):
+        for _, _, raw in reader.messages([conn]):
+            return reader.deserialize(raw, conn.msgtype).header.frame_id
+
+    c_frame, l_frame = get_frame(cam_conn), get_frame(lidar_conn)
+
     G = nx.DiGraph()
     for tf in tf_msgs:
         q = tf.transform.rotation
@@ -260,45 +211,45 @@ def build_tf_tree(tf_msgs):
             tf.transform.translation.y,
             tf.transform.translation.z,
         ]
-        parent, child = tf.header.frame_id, tf.child_frame_id
-        G.add_edge(parent, child, transform=Tr)
-        G.add_edge(child, parent, transform=np.linalg.inv(Tr))
-    return G
+        G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=Tr)
+        G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=np.linalg.inv(Tr))
 
-
-def compute_transform(G, source, target):
     try:
-        path = nx.shortest_path(G, source=target, target=source)
-    except nx.NetworkXNoPath:
-        return None
-    T = np.eye(4)
-    for i in range(len(path) - 1):
-        T = T @ G[path[i]][path[i + 1]]["transform"]
-    return T
+        path = nx.shortest_path(G, source=l_frame, target=c_frame)
+        T = np.eye(4)
+        for i in range(len(path) - 1):
+            T = T @ G[path[i]][path[i + 1]]["transform"]
+        np.savetxt(save_dir / "T_cam_to_lidar.txt", T)
+    except Exception:
+        print(f"Failed to find TF path from {l_frame} to {c_frame}")
 
 
-def save_joint_states(reader, conns, save_dir):
-    js_conn = conns.get("/joint_states")
-    data = []
-    for _, _, raw in reader.messages([js_conn]):
-        msg = reader.deserialize(raw, js_conn.msgtype)
-        ts = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        data.append(np.r_[ts, msg.position, msg.velocity, msg.effort])
-    data = np.vstack(data)
-    np.save(save_dir / "joint_states.npy", data)
-
-
-def parse_args():
+def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("input_dir", type=str)
+    parser.add_argument("output_dir", type=str)
     parser.add_argument(
-        "input_dir", type=str, help="Directory containing ROS2 bag files."
+        "--cam", type=str, default="/luxonis/oak/rgb/image_raw/compressed"
     )
-    parser.add_argument(
-        "output_dir", type=str, help="Directory to save extracted data."
-    )
-    return parser.parse_args()
+    parser.add_argument("--lidar", type=str, default="/livox/lidar_front")
+    parser.add_argument("--jobs", type=int, default=4)
+    args = parser.parse_args()
+
+    input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    bag_files = sorted([d for d in input_dir.iterdir() if d.is_dir()])
+
+    with ProcessPoolExecutor(max_workers=args.jobs) as executor:
+        futures = [
+            executor.submit(_worker, b, output_dir, i, args.cam, args.lidar, args.jobs)
+            for i, b in enumerate(bag_files)
+        ]
+        for _ in tqdm(
+            as_completed(futures), total=len(futures), desc="Processing bags"
+        ):
+            pass
 
 
 if __name__ == "__main__":
-    args = parse_args()
-    main(args)
+    main()
