@@ -9,10 +9,15 @@ import numpy as np
 import networkx as nx
 from tqdm import tqdm
 from rosbags.highlevel import AnyReader
-from tf_transformations import quaternion_matrix, translation_matrix
+from tf_transformations import (
+    quaternion_matrix,
+    translation_matrix,
+    euler_matrix,
+    euler_from_matrix,
+)
 
 
-def _worker(bag_path, output_dir, idx, cam_topic, lidar_topic, num_threads):
+def _worker(bag_path, output_dir, idx, cam_topic, lidar_topic):
     scene_dir = output_dir / f"{idx:04d}"
     try:
         with AnyReader([bag_path]) as reader:
@@ -45,12 +50,14 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
 
     # We also collect odom and joint states in this pass if they are small
     odom_data = []  # (ts, transform)
+    imu_data = []  # (ts, roll, pitch)
     joint_states = []
 
     relevant_conns = [
         cam_conn,
         lidar_conn,
         conns.get("/odom"),
+        conns.get("/ekf/imu/data"),
         conns.get("/joint_states"),
         conns.get("/tf_static"),
     ]
@@ -83,6 +90,10 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
                 ]
             )
             odom_data.append((t, Tt @ Tr))
+        elif conn.topic == "/ekf/imu/data":
+            q = msg.orientation
+            roll, pitch, _ = euler_from_matrix(quaternion_matrix([q.x, q.y, q.z, q.w]))
+            imu_data.append((t, roll, pitch))
         elif conn.topic == "/joint_states":
             joint_states.append(np.r_[t, msg.position, msg.velocity, msg.effort])
         elif conn.topic == "/tf_static":
@@ -145,7 +156,7 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
         if conn.topic == camera_topic and t in cam_set:
-            # Use OpenCV directly (faster than cv_bridge)
+            # Use OpenCV directly
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             cv2.imwrite(str(scene_dir / "images" / f"{img_idx:05d}.png"), cv_img)
@@ -180,6 +191,26 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
         for i in range(1, len(transforms)):
             rel_transforms.append(first_inv @ transforms[i])
         np.save(scene_dir / "transforms.npy", np.array(rel_transforms))
+
+    # Process gravity alignment
+    imu_ts = np.array([x[0] for x in imu_data])
+    imu_rolls = np.array([x[1] for x in imu_data])
+    imu_pitches = np.array([x[2] for x in imu_data])
+
+    gravity_aligns = []
+
+    for pcd_t in valid_pcd_ts:
+        # Find the closest IMU message to the Lidar timestamp
+        idx = np.argmin(np.abs(imu_ts - pcd_t))
+
+        roll = imu_rolls[idx]
+        pitch = imu_pitches[idx]
+
+        # Create the gravity alignment rotation matrix (corrects pitch/roll, ignores yaw)
+        R_align = euler_matrix(roll, pitch, 0.0)[:3, :3]
+        gravity_aligns.append(R_align)
+
+    np.save(scene_dir / "gravity_align.npy", np.array(gravity_aligns))
 
 
 def save_intrinsics(reader, conns, cam_topic, scene_dir):
@@ -242,7 +273,7 @@ def main():
 
     with ProcessPoolExecutor(max_workers=args.jobs) as executor:
         futures = [
-            executor.submit(_worker, b, output_dir, i, args.cam, args.lidar, args.jobs)
+            executor.submit(_worker, b, output_dir, i, args.cam, args.lidar)
             for i, b in enumerate(bag_files)
         ]
         for _ in tqdm(
