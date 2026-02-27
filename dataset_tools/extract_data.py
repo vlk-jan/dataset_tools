@@ -123,7 +123,11 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
 
     # Process TF Static
     if tf_msgs:
-        save_calibration(tf_msgs, reader, cam_conn, lidar_conn, scene_dir)
+        T_lidar_to_base = save_calibration(
+            tf_msgs, reader, cam_conn, lidar_conn, scene_dir
+        )
+    else:
+        T_lidar_to_base = np.eye(4)
 
     # Pass 2: Extract heavy data (Images, Pointclouds)
     cam_set = set(valid_cam_ts)
@@ -175,8 +179,10 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
         elif conn.topic == lidar_topic and t in pcd_set:
             points = np.frombuffer(msg.data, dtype=pcd_dtype)
             pcd = np.vstack(
-                (points["x"], points["y"], points["z"], points["intensity"])
+                (points["x"], points["y"], points["z"], np.ones_like(points["x"]))
             ).T
+            pcd = (pcd @ T_lidar_to_base.T)[:, :3]
+            pcd = np.hstack((pcd, points["intensity"][:, None]))
             np.save(
                 scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
                 pcd[~np.isnan(pcd).any(axis=1)],
@@ -245,6 +251,7 @@ def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
         G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=Tr)
         G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=np.linalg.inv(Tr))
 
+    # 1. Save Cam to Lidar
     try:
         path = nx.shortest_path(G, source=l_frame, target=c_frame)
         T = np.eye(4)
@@ -253,6 +260,22 @@ def save_calibration(tf_msgs, reader, cam_conn, lidar_conn, save_dir):
         np.savetxt(save_dir / "T_cam_to_lidar.txt", T)
     except Exception:
         print(f"Failed to find TF path from {l_frame} to {c_frame}")
+
+    # 2. Extract Lidar to Base Link transform (NEW)
+    base_frame = "base_link"
+    T_lidar_to_base = np.eye(4)
+    if base_frame in G:
+        try:
+            path = nx.shortest_path(G, source=l_frame, target=base_frame)
+            for i in range(len(path) - 1):
+                T_lidar_to_base = T_lidar_to_base @ G[path[i]][path[i + 1]]["transform"]
+            np.savetxt(save_dir / "T_lidar_to_base.txt", T_lidar_to_base)
+        except Exception:
+            print(f"Failed to find TF path from {l_frame} to {base_frame}")
+    else:
+        print(f"Frame '{base_frame}' not found in TF static tree.")
+
+    return T_lidar_to_base
 
 
 def main():
