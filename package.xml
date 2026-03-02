@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <package format="3">
   <name>dataset_tools</name>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <description>Tools for the extraction of data from Helhest bag files.</description>
   <author email="vlkjan6@fel.cvut.cz">Jan Vlk</author>
   <maintainer email="vlkjan6@fel.cvut.cz">Jan Vlk</maintainer>

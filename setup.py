@@ -6,7 +6,7 @@ package_name = "dataset_tools"
 
 setup(
     name=package_name,
-    version="1.0.0",
+    version="1.0.1",
     packages=find_packages(exclude=["test"]),
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     maintainer="vlkjan6",
     maintainer_email="vlkjan6@fel.cvut.cz",
-    description="TODO: Package description",
+    description="Tools for the extraction of data from Helhest bag files.",
     license="BSD-3-Clause",
     tests_require=["pytest"],
     entry_points={
