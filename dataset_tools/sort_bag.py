@@ -18,9 +18,7 @@ def sort_bag(input_path: Path, output_path: Path):
     print(f"Reading messages from {input_path}...")
     with AnyReader([input_path]) as reader:
         # Map to keep track of connection metadata for the writer
-        connections_info = {}
-        for conn in reader.connections:
-            connections_info[conn.id] = (conn.topic, conn.msgtype)
+        typestore = reader.typestore
 
         for connection, timestamp, rawdata in reader.messages():
             # Deserialization is needed to check for header timestamps
@@ -50,13 +48,13 @@ def sort_bag(input_path: Path, output_path: Path):
         print(f"Warning: Output path {output_path} exists. Removing it.")
         shutil.rmtree(output_path)
 
-    with Writer(output_path) as writer:
+    with Writer(output_path, version=8) as writer:
         # Create connections in the new bag
         topic_to_conn = {}
 
         for t, topic, msgtype, rawdata in messages:
             if topic not in topic_to_conn:
-                topic_to_conn[topic] = writer.add_connection(topic, msgtype)
+                topic_to_conn[topic] = writer.add_connection(topic, msgtype, typestore=typestore)
 
             # Write the raw data directly to avoid unnecessary re-serialization
             writer.write(topic_to_conn[topic], t, rawdata)
