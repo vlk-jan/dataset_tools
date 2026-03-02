@@ -114,12 +114,24 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
     valid_cam_ts = cam_ts[mask]
     valid_pcd_ts = pcd_ts[ts1_to_ts2[mask]]
 
+    # Sort timestamps to handle out-of-order messages
+    sort_idx = np.argsort(valid_cam_ts)
+    valid_cam_ts = valid_cam_ts[sort_idx]
+    valid_pcd_ts = valid_pcd_ts[sort_idx]
+
+    # Map timestamps to their chronological frame indices
+    cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
+    pcd_ts_to_idx = {ts: i for i, ts in enumerate(valid_pcd_ts)}
+
     # Save metadata
     np.savetxt(scene_dir / "data_ts.txt", (valid_cam_ts + valid_pcd_ts) / 2)
     np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts)
 
     if joint_states:
-        np.save(scene_dir / "joint_states.npy", np.vstack(joint_states))
+        # Sort joint states by timestamp (column 0) before saving
+        js_arr = np.vstack(joint_states)
+        js_arr = js_arr[np.argsort(js_arr[:, 0])]
+        np.save(scene_dir / "joint_states.npy", js_arr)
 
     # Process TF Static
     if tf_msgs:
@@ -145,36 +157,38 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
         ]
     )
 
-    img_idx = 0
-    pcd_idx = 0
-
     # For odom interpolation/matching
     odom_ts = np.array([x[0] for x in odom_data])
     odom_poses = [x[1] for x in odom_data]
-    transforms = []
+
+    transforms_dict = {}
+    intrinsics_saved = False
 
     for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
         msg = reader.deserialize(raw, conn.msgtype)
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
         if conn.topic == camera_topic and t in cam_set:
+            img_idx = cam_ts_to_idx[t]  # Get correct chronological index
+
             # Use OpenCV directly
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             cv2.imwrite(str(scene_dir / "images" / f"{img_idx:05d}.png"), cv_img)
 
             # Extract Intrinsics once
-            if img_idx == 0:
+            if not intrinsics_saved:
                 save_intrinsics(reader, conns, camera_topic, scene_dir)
+                intrinsics_saved = True
 
-            # Match Odom
+            # Match Odom and save via dict instead of list append
             idx = np.argmin(np.abs(odom_ts - t))
-            transforms.append(odom_poses[idx])
+            transforms_dict[img_idx] = odom_poses[idx]
 
-            img_idx += 1
             cam_set.remove(t)  # Handle duplicates
 
         elif conn.topic == lidar_topic and t in pcd_set:
+            pcd_idx = pcd_ts_to_idx[t]  # Get correct chronological index
             points = np.frombuffer(msg.data, dtype=pcd_dtype)
             pcd = np.vstack(
                 (points["x"], points["y"], points["z"], np.ones_like(points["x"]))
@@ -185,11 +199,12 @@ def process_scene(reader, bag_path, scene_dir, camera_topic, lidar_topic):
                 scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
                 pcd,
             )
-            pcd_idx += 1
             pcd_set.remove(t)
 
     # Process Odom Transforms (relative to first frame)
-    if transforms:
+    if transforms_dict:
+        # Reconstruct sequential list based on chronological indices
+        transforms = [transforms_dict[i] for i in range(len(valid_cam_ts))]
         rel_transforms = [np.eye(4)]
         first_inv = np.linalg.inv(transforms[0])
         for i in range(1, len(transforms)):
