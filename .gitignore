@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+*.so
+cloudini_shim/build/
+cloudini_shim/cloudini/
+slurm_out/

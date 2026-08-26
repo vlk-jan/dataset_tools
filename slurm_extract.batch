@@ -1,0 +1,20 @@
+#!/bin/bash
+
+#SBATCH --job-name=helhest_extract
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --time=4:00:00
+#SBATCH --partition=cpufast
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.out
+#SBATCH --error=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.err
+
+# Extract the 26-08-21-stromovka-roads bags (Odin1 + Fixposition stack).
+# The venv was built with the container's Python 3.12 — must run inside the sif.
+singularity exec --bind /mnt/personal /mnt/personal/vlkjan6/helhest_new/helhest-jazzy.sif \
+    /home/vlkjan6/projects/dataset_tools/.venv/bin/python \
+    /home/vlkjan6/projects/dataset_tools/dataset_tools/extract_data.py \
+    /mnt/personal/vlkjan6/helhest_new/bags_raw \
+    /mnt/personal/vlkjan6/helhest_new \
+    --jobs 8
