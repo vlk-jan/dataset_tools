@@ -56,9 +56,9 @@ HELHEST/
 │   ├── camera_intrinsics.txt     3×3 K
 │   ├── T_cam_to_lidar.txt        4×4 camera→LiDAR extrinsic
 │   ├── gravity_align.npy         (F, 3, 3) rotation removing roll/pitch per frame
-│   ├── transforms.npy            (F, 4, 4) odometry pose per frame, relative to frame 0
+│   ├── transforms.npy            (F, 4, 4) LIVE /odom pose from the bag per frame, relative to frame 0 (NOT Point-LIO)
 │   ├── joint_states.npy          (J, 10): t, pos×3, vel×3, effort×3 (wheel order: left, rear, right)
-│   ├── odometry.txt              [optional] Point-LIO trajectory, see below
+│   ├── odometry.txt              [optional] offline Point-LIO trajectory (the ground truth used by DRIFT), see below
 │   ├── trajectory.txt            [some scenes] identical copy of odometry.txt
 │   ├── height_maps/00000.npz …   [derived] per-frame BEV height map, key `height_map` (128,128) float64, 0.1 m cells, ±6.4 m
 │   ├── height_masks/00000.npz …  [derived] key `validity` (128,128) uint8 (measured/extrapolated), `height_threshold`
@@ -86,9 +86,13 @@ matching of camera and LiDAR header stamps, so unmatched frames were dropped.
 
 i.e. the timestamp followed by the row-major 4×4 pose of the robot base in the
 odometry frame. It runs at 10 Hz with occasional 1–4 s dropouts; it may start
-after the scene begins or stop before it ends (see table). `transforms.npy`
-holds the pose nearest to each camera frame, re-anchored so that
-`transforms[0] = I`.
+after the scene begins or stop before it ends (see table); its stamps are not
+strictly monotonic (sort before interpolating). **`transforms.npy` is a
+different trajectory**: it holds the robot's *live* `/odom` from the bag
+(wheel/EKF odometry recorded on the robot), matched to each frame and
+re-anchored so that `transforms[0] = I`. The two disagree by tens of metres
+over a scene; use `odometry.txt` for ground truth and treat `transforms.npy`
+as a rough live estimate.
 
 **Coordinate frames.** Clouds are in the robot **base frame** (`base_link`: x
 forward, y left, z up, origin at the robot base). `gravity_align[i]` is the
@@ -209,7 +213,9 @@ level in `gravity_align`.
   existing data: `pts[:, 0] += 0.34` before use (the `height_maps` were built
   from the offset clouds and inherit the shift; regenerate them). Odometry,
   gravity alignment and images are unaffected. `dataset_tools` ≥ 2026-08-28
-  extracts correctly.
+  extracts correctly. Independent check: the no-return cluster (next item)
+  sits at (−0.170, 0, +0.145) in every scene of all three sessions, exactly
+  the mirror of the mount position.
 - **~10 k of the ~20 k points per frame are invalid.** Livox reports
   non-returns as (0, 0, 0); after the base transform they all sit at one
   point near the origin (x ≈ −0.17, z ≈ 0.145 in the published data). Filter by
@@ -228,10 +234,9 @@ level in `gravity_align`.
   25 %. 0021: ~11 s on its side (88°) around frames 1675–1785, then recovers.
   0023 holds 30–44° for ~48 s nosed into a root bank. Downstream code that
   assumes a level robot should filter on `gravity_align` (e.g. tilt > 45°).
-- **One-frame glitch in 0040.** `transforms.npy` jumps 8.3 m between frames
-  721 and 722 (0.1 s apart) although `odometry.txt` is smooth there — a
-  mis-matched odometry row during extraction. Re-derive the pose from
-  `odometry.txt` for that frame if it matters.
+- **One-frame glitch in 0040.** `transforms.npy` (live `/odom`) jumps 8.3 m
+  between frames 721 and 722; `odometry.txt` is smooth there and frame
+  indexing is intact. Irrelevant if you use `odometry.txt`.
 - **Stationary/near-stationary scenes:** 0037 has zero wheel motion (1989
   identical frames); 0033 and 0034 are ≥89 % idle; 0004, 0007 and 0019 spend
   most of their time parked. Several long scenes are 30–50 % idle.
