@@ -85,7 +85,8 @@ matching of camera and LiDAR header stamps, so unmatched frames were dropped.
 ```
 
 i.e. the timestamp followed by the row-major 4×4 pose of the robot base in the
-odometry frame. It runs at 10 Hz with occasional 1–4 s dropouts; it may start
+odometry frame — **note: the LiDAR frame, mirrored vs. `base_link`, see
+§5**. It runs at 10 Hz with occasional 1–4 s dropouts; it may start
 after the scene begins or stop before it ends (see table); its stamps are not
 strictly monotonic (sort before interpolating). **`transforms.npy` is a
 different trajectory**: it holds the robot's *live* `/odom` from the bag
@@ -216,6 +217,22 @@ level in `gravity_align`.
   extracts correctly. Independent check: the no-return cluster (next item)
   sits at (−0.170, 0, +0.145) in every scene of all three sessions, exactly
   the mirror of the mount position.
+- **`odometry.txt` is the LiDAR's pose, mirrored relative to `base_link`
+  (found 2026-08-28).** Point-LIO was run on the raw Livox stream without the
+  mount extrinsic, so `odometry.txt` gives the pose of `livox_front_frame` —
+  which is mounted upside down — in a world frame whose z points *down*.
+  Relative to the base frame of the clouds this negates y and z and inverts
+  the yaw: a left turn in reality is a right turn in `odometry.txt`. Evidence:
+  yaw rate from `odometry.txt` is negatively correlated with the wheel-speed
+  differential (right − left; r = −0.54…−0.81) and with the robot's live
+  `/odom` in `transforms.npy` (r = −0.68…−0.90) in every scene tested, and
+  registering consecutive scans through turns with the mirrored poses
+  improves from ~1–2 m to ~0.2–0.5 m misalignment. Convert to a base-frame
+  pose in a z-up world with `T_base = X @ T @ inv(X)`, where
+  `X = [[1,0,0,0.17],[0,-1,0,0],[0,0,-1,0.145],[0,0,0,1]]` (the
+  `base_link → livox_front_frame` transform, R_x(π) with the +0.34 m x
+  correction already implied). Translation magnitudes and the x/forward
+  component are unaffected; consumers that only use forward speed are fine.
 - **~10 k of the ~20 k points per frame are invalid.** Livox reports
   non-returns as (0, 0, 0); after the base transform they all sit at one
   point near the origin (x ≈ −0.17, z ≈ 0.145 in the published data). Filter by
