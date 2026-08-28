@@ -1,17 +1,31 @@
 #!/usr/bin/env python3
+"""Rewrite a ROS 2 bag with its messages ordered by header timestamp."""
+
+from __future__ import annotations
+
 import argparse
+import shutil
+import sys
 from pathlib import Path
 
 from rosbags.highlevel import AnyReader
 from rosbags.rosbag2 import Writer
 
+try:
+    from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
+except ImportError:
+    import rosbags_compat  # noqa: F401
 
-def sort_bag(input_path: Path, output_path: Path):
+
+def sort_bag(input_path: Path, output_path: Path) -> int:
     """Sort ROS2 bag messages by timestamp.
 
     Args:
         input_path: Path to the input bag (directory or mcap file).
         output_path: Path to the output bag directory.
+
+    Returns:
+        The number of messages written.
     """
     messages = []
 
@@ -43,8 +57,6 @@ def sort_bag(input_path: Path, output_path: Path):
 
     # Ensure output directory doesn't exist to avoid rosbags Writer errors
     if output_path.exists():
-        import shutil
-
         print(f"Warning: Output path {output_path} exists. Removing it.")
         shutil.rmtree(output_path)
 
@@ -54,15 +66,18 @@ def sort_bag(input_path: Path, output_path: Path):
 
         for t, topic, msgtype, rawdata in messages:
             if topic not in topic_to_conn:
-                topic_to_conn[topic] = writer.add_connection(topic, msgtype, typestore=typestore)
+                topic_to_conn[topic] = writer.add_connection(
+                    topic, msgtype, typestore=typestore
+                )
 
             # Write the raw data directly to avoid unnecessary re-serialization
             writer.write(topic_to_conn[topic], t, rawdata)
 
     print(f"Successfully wrote sorted bag to: {output_path}")
+    return len(messages)
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Sort a ROS2 bag by header or bag timestamp."
     )
@@ -71,17 +86,18 @@ def main():
         "output", type=str, help="Path to output sorted bag (directory)"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     in_path = Path(args.input)
     out_path = Path(args.output)
 
     if not in_path.exists():
-        print(f"Error: Input path {in_path} does not exist.")
-        return
+        print(f"Error: Input path {in_path} does not exist.", file=sys.stderr)
+        return 2
 
     sort_bag(in_path, out_path)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

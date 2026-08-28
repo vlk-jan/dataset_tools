@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataset_tools"
+version = "1.0.1"
+description = "Tools for extracting the HELHEST robot dataset from ROS 2 bags."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "BSD-3-Clause" }
+authors = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
+maintainers = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
+keywords = ["robotics", "ros2", "rosbag", "dataset", "lidar", "helhest"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "rosbags>=0.9",
+    "numpy>=1.24",
+    "opencv-python-headless>=4.5",
+    "networkx>=2.8",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/vlk-jan/dataset_tools"
+Source = "https://github.com/vlk-jan/dataset_tools"
+
+# Kept in sync with setup.py: the ROS/ament build reads setup.py, plain pip
+# reads this file, and both must install the same console scripts.
+[project.scripts]
+helhest-extract = "dataset_tools.extract_data:main"
+helhest-validate = "dataset_tools.validate_scene:main"
+helhest-sort-bag = "dataset_tools.sort_bag:main"
+odom_recorder = "dataset_tools.odom_node:main"
+
+[tool.setuptools]
+packages = ["dataset_tools"]
+
+[tool.setuptools.package-data]
+dataset_tools = ["libcloudini_shim.so"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.black]
+line-length = 88

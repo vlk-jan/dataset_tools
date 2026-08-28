@@ -10,11 +10,26 @@
 #SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.out
 #SBATCH --error=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.err
 
+set -euo pipefail
+
 # Extract the 26-08-21-stromovka-roads bags (Odin1 + Fixposition stack).
-# The venv was built with the container's Python 3.12 — must run inside the sif.
-singularity exec --bind /mnt/personal /mnt/personal/vlkjan6/helhest_new/helhest-jazzy.sif \
-    /home/vlkjan6/projects/dataset_tools/.venv/bin/python \
-    /home/vlkjan6/projects/dataset_tools/dataset_tools/extract_data.py \
-    /mnt/personal/vlkjan6/helhest_new/bags_raw \
-    /mnt/personal/vlkjan6/helhest_new \
-    --jobs 8
+#
+# The venv was built with the container's Python 3.12, so it must run inside
+# the sif. Bind every filesystem that is read or written: neither /mnt/data nor
+# /mnt/personal is mounted inside the container by default.
+#
+# Already-complete scenes are skipped, so re-queueing this job resumes the run.
+
+REPO=/home/vlkjan6/projects/dataset_tools
+SIF=/mnt/personal/vlkjan6/helhest_new/helhest-jazzy.sif
+BAGS=/mnt/personal/vlkjan6/helhest_new/bags_raw
+OUT=/mnt/personal/vlkjan6/helhest_new
+
+singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
+    "$REPO/.venv/bin/python" "$REPO/dataset_tools/extract_data.py" \
+    "$BAGS" "$OUT" --jobs 8
+
+# Sanity-check what came out (non-zero exit on structural problems).
+singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
+    "$REPO/.venv/bin/python" "$REPO/dataset_tools/validate_scene.py" \
+    "$OUT" --csv "$OUT/validation.csv"

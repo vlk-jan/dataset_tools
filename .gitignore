@@ -5,3 +5,9 @@ __pycache__/
 cloudini_shim/build/
 cloudini_shim/cloudini/
 slurm_out/
+
+# Python packaging / test artefacts
+build/
+dist/
+*.egg-info/
+.pytest_cache/

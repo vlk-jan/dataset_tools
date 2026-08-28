@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
+"""Extract HELHEST scenes from ROS 2 bags (rosbag2 sqlite3 or mcap).
+
+One scene directory is written per input bag; see README.md for the exact
+output format. Bags are read with the pure-Python ``rosbags`` library, so no
+ROS installation is required.
+"""
+
+from __future__ import annotations
+
 import argparse
+import csv
+import logging
 import math
+import re
+import sys
 import traceback
-from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
 
 import cv2
 import numpy as np
@@ -12,15 +27,31 @@ from tqdm import tqdm
 from rosbags.highlevel import AnyReader
 
 try:
-    from dataset_tools import cloudini
-except ImportError:
+    from dataset_tools import cloudini, rosbags_compat  # noqa: F401  (patches rosbags)
+except ImportError:  # when the file is run directly from dataset_tools/
     import cloudini
+    import rosbags_compat  # noqa: F401
+
+
+LOG = logging.getLogger("helhest.extract")
+
+SCENE_DIR_RE = re.compile(r"^\d{4,}$")
+#: Written as the very last step of a scene, so its presence marks completion.
+SENTINEL_FILE = "source_bag.txt"
+SCENES_CSV = "scenes.csv"
+SCENES_PARTS_DIR = ".scenes_parts"
+SCENES_CSV_HEADER = ["scene", "bag", "start_time", "frames"]
+
+STATUS_OK = "ok"
+STATUS_SKIPPED = "skipped"
+STATUS_EMPTY = "empty"
+STATUS_FAILED = "failed"
 
 
 # ---------------------------------------------------------------------------
 # Small transform helpers (replacing tf_transformations, 'sxyz' convention)
 # ---------------------------------------------------------------------------
-def quaternion_matrix(q):
+def quaternion_matrix(q: Sequence[float]) -> np.ndarray:
     """4x4 homogeneous rotation matrix from quaternion [x, y, z, w]."""
     x, y, z, w = q
     n = x * x + y * y + z * z + w * w
@@ -36,7 +67,7 @@ def quaternion_matrix(q):
     return T
 
 
-def euler_matrix(roll, pitch, yaw):
+def euler_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     """4x4 matrix R = Rz(yaw) @ Ry(pitch) @ Rx(roll) ('sxyz')."""
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
@@ -50,7 +81,7 @@ def euler_matrix(roll, pitch, yaw):
     return T
 
 
-def roll_pitch_from_quat(q):
+def roll_pitch_from_quat(q: Sequence[float]) -> tuple[float, float]:
     """Roll and pitch ('sxyz') of quaternion [x, y, z, w]."""
     R = quaternion_matrix(q)
     roll = math.atan2(R[2, 1], R[2, 2])
@@ -58,7 +89,7 @@ def roll_pitch_from_quat(q):
     return roll, pitch
 
 
-def pose_to_matrix(pose):
+def pose_to_matrix(pose) -> np.ndarray:
     T = quaternion_matrix(
         [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
     )
@@ -73,7 +104,7 @@ def pose_to_matrix(pose):
 PC2_DTYPES = {1: "i1", 2: "u1", 3: "i2", 4: "u2", 5: "i4", 6: "u4", 7: "f4", 8: "f8"}
 
 
-def fields_to_dtype(fields, point_step, big_endian=False):
+def fields_to_dtype(fields, point_step: int, big_endian: bool = False) -> np.dtype:
     endian = ">" if big_endian else "<"
     return np.dtype(
         {
@@ -85,7 +116,7 @@ def fields_to_dtype(fields, point_step, big_endian=False):
     )
 
 
-def cloud_to_xyzi(msg):
+def cloud_to_xyzi(msg) -> np.ndarray:
     """PointCloud2 or CompressedPointCloud2 message -> (N, 4) float32 [x y z i]."""
     if hasattr(msg, "compressed_data"):  # point_cloud_interfaces/CompressedPointCloud2
         data = cloudini.decode(bytes(msg.compressed_data))
@@ -113,23 +144,35 @@ def cloud_to_xyzi(msg):
 # ---------------------------------------------------------------------------
 # TF helpers
 # ---------------------------------------------------------------------------
-def build_tf_graph(tf_msgs):
+def build_tf_graph(tf_msgs: Iterable) -> nx.DiGraph:
+    """Build a bidirectional frame graph from TF messages.
+
+    A TF message with ``header.frame_id = parent`` and ``child_frame_id = child``
+    carries the pose of the child in the parent frame, i.e. the matrix ``M``
+    with ``p_parent = M @ p_child``. Every edge ``a -> b`` of the graph stores
+    the *point map* from ``a`` to ``b`` (``p_b = E @ p_a``), so the edge
+    ``parent -> child`` holds ``inv(M)`` and ``child -> parent`` holds ``M``.
+    """
     G = nx.DiGraph()
     for tf in tf_msgs:
         q = tf.transform.rotation
-        Tr = quaternion_matrix([q.x, q.y, q.z, q.w])
-        Tr[:3, 3] = [
+        M = quaternion_matrix([q.x, q.y, q.z, q.w])
+        M[:3, 3] = [
             tf.transform.translation.x,
             tf.transform.translation.y,
             tf.transform.translation.z,
         ]
-        G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=Tr)
-        G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=np.linalg.inv(Tr))
+        G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=np.linalg.inv(M))
+        G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=M)
     return G
 
 
-def get_transform(G, src_frame, dst_frame):
-    """Transform T such that p_dst = T @ p_src, or None if no TF path exists."""
+def get_transform(G: nx.DiGraph, src_frame, dst_frame) -> np.ndarray | None:
+    """Transform T such that ``p_dst = T @ p_src``, or None if no TF path exists.
+
+    Edges store point maps along their direction (see :func:`build_tf_graph`),
+    so the maps are chained right-to-left along the shortest path.
+    """
     if src_frame == dst_frame:
         return np.eye(4)
     if src_frame not in G or dst_frame not in G:
@@ -140,24 +183,249 @@ def get_transform(G, src_frame, dst_frame):
         return None
     T = np.eye(4)
     for i in range(len(path) - 1):
-        T = T @ G[path[i]][path[i + 1]]["transform"]
+        T = G[path[i]][path[i + 1]]["transform"] @ T
     return T
 
 
 # ---------------------------------------------------------------------------
-def _worker(bag_path, output_dir, idx, args):
+# Camera/lidar synchronisation
+# ---------------------------------------------------------------------------
+def nearest_idx(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """For each value in ``a``, the index of the nearest value in *sorted* ``b``."""
+    if len(b) == 1:
+        return np.zeros(len(a), dtype=int)
+    pos = np.clip(np.searchsorted(b, a), 1, len(b) - 1)
+    return np.where(a - b[pos - 1] <= b[pos] - a, pos - 1, pos)
+
+
+def sync_timestamps(
+    cam_timestamps: Sequence[float], lidar_timestamps: Sequence[float]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mutual nearest-neighbour match between camera and lidar timestamps.
+
+    Both inputs are sorted first (bags may contain out-of-order messages). A
+    pair is kept only if each stamp is the other's nearest neighbour, which
+    drops frames that have no counterpart. Uses ``searchsorted``, so memory
+    stays O(n) instead of the O(n*m) full distance matrix.
+
+    Returns the matched (camera, lidar) timestamps, in chronological order.
+    """
+    cam_ts = np.sort(np.asarray(cam_timestamps, dtype=float))
+    pcd_ts = np.sort(np.asarray(lidar_timestamps, dtype=float))
+    if len(cam_ts) == 0 or len(pcd_ts) == 0:
+        return cam_ts[:0], pcd_ts[:0]
+
+    cam_to_pcd = nearest_idx(cam_ts, pcd_ts)
+    pcd_to_cam = nearest_idx(pcd_ts, cam_ts)
+    mask = pcd_to_cam[cam_to_pcd] == np.arange(len(cam_ts))
+    return cam_ts[mask], pcd_ts[cam_to_pcd[mask]]
+
+
+# ---------------------------------------------------------------------------
+# Bag discovery, scene bookkeeping
+# ---------------------------------------------------------------------------
+@dataclass
+class SceneResult:
+    """Outcome of one bag -> scene extraction (returned by worker processes)."""
+
+    index: int
+    bag: str
+    status: str
+    frames: int = 0
+    start_time: float = float("nan")
+    message: str = ""
+
+
+def is_bag_dir(path: Path) -> bool:
+    """A rosbag2 directory is anything that carries a ``metadata.yaml``."""
+    return path.is_dir() and (path / "metadata.yaml").is_file()
+
+
+def find_bags(input_dir: Path) -> list[Path]:
+    """Bags under ``input_dir``; ``input_dir`` itself may also be a single bag."""
+    if not input_dir.exists():
+        raise FileNotFoundError(f"input path does not exist: {input_dir}")
+    if is_bag_dir(input_dir):
+        return [input_dir]
+    if not input_dir.is_dir():
+        raise NotADirectoryError(f"input path is not a directory: {input_dir}")
+
+    subdirs = sorted(d for d in input_dir.iterdir() if d.is_dir())
+    bags = [d for d in subdirs if is_bag_dir(d)]
+    ignored = [d.name for d in subdirs if not is_bag_dir(d)]
+    if ignored:
+        LOG.warning(
+            "ignoring %d directory/ies without metadata.yaml in %s: %s",
+            len(ignored),
+            input_dir,
+            ", ".join(ignored[:10]) + (" ..." if len(ignored) > 10 else ""),
+        )
+    return bags
+
+
+def parse_scene_selection(tokens: Sequence[str] | None):
+    """Build a predicate from ``--scenes`` tokens.
+
+    Tokens may be scene indices (``7``), inclusive index ranges (``3-9``) or
+    bag directory names; they may also be comma-separated inside one argument.
+    Returns ``None`` when nothing was requested (i.e. everything is selected).
+    """
+    if not tokens:
+        return None
+
+    indices: set[int] = set()
+    names: set[str] = set()
+    for raw in tokens:
+        for token in str(raw).split(","):
+            token = token.strip()
+            if not token:
+                continue
+            match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", token)
+            if match:
+                lo, hi = int(match.group(1)), int(match.group(2))
+                indices.update(range(min(lo, hi), max(lo, hi) + 1))
+            elif token.isdigit():
+                indices.add(int(token))
+            else:
+                names.add(token.rstrip("/"))
+
+    def selected(index: int, bag_name: str) -> bool:
+        return index in indices or bag_name in names
+
+    return selected
+
+
+def _count_lines(path: Path) -> int:
+    with path.open("rb") as handle:
+        return sum(1 for line in handle if line.strip())
+
+
+def _count_files(directory: Path, suffix: str) -> int:
+    if not directory.is_dir():
+        return 0
+    return sum(1 for p in directory.iterdir() if p.suffix == suffix)
+
+
+def scene_frame_counts(scene_dir: Path) -> dict[str, int]:
+    """Per-modality frame counts of an extracted scene (missing -> absent key)."""
+    counts: dict[str, int] = {}
+    counts["images"] = _count_files(scene_dir / "images", ".png")
+    counts["clouds"] = _count_files(scene_dir / "clouds", ".npy")
+    for name in ("data_ts.txt", "pcd_ts.txt"):
+        if (scene_dir / name).is_file():
+            counts[name] = _count_lines(scene_dir / name)
+    return counts
+
+
+def scene_is_complete(scene_dir: Path) -> bool:
+    """True if the scene was extracted to the end and its counts line up."""
+    if not (scene_dir / SENTINEL_FILE).is_file():
+        return False
+    counts = scene_frame_counts(scene_dir)
+    if len(counts) < 4:  # a timestamp file is missing entirely
+        return False
+    values = set(counts.values())
+    return len(values) == 1 and values != {0}
+
+
+def _scene_row(scene_dir: Path) -> list[str] | None:
+    """Reconstruct a ``scenes.csv`` row from an already extracted scene."""
+    sentinel = scene_dir / SENTINEL_FILE
+    if not sentinel.is_file():
+        return None
+    bag = sentinel.read_text().strip()
+    frames = _count_files(scene_dir / "images", ".png")
+    start = ""
+    data_ts = scene_dir / "data_ts.txt"
+    if data_ts.is_file():
+        with data_ts.open() as handle:
+            first = handle.readline().strip()
+        if first:
+            start = f"{float(first):.6f}"
+    return [scene_dir.name, bag, start, str(frames)]
+
+
+def write_scene_part(parts_dir: Path, result: SceneResult) -> None:
+    """One CSV line per worker; the parent merges them (multiprocessing-safe)."""
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    start = "" if math.isnan(result.start_time) else f"{result.start_time:.6f}"
+    row = [f"{result.index:04d}", result.bag, start, str(result.frames)]
+    with (parts_dir / f"{result.index:04d}.csv").open("w", newline="") as handle:
+        csv.writer(handle).writerow(row)
+
+
+def merge_scenes_csv(output_dir: Path) -> Path:
+    """Rewrite ``<output_dir>/scenes.csv`` from worker parts + finished scenes."""
+    parts_dir = output_dir / SCENES_PARTS_DIR
+    rows: dict[str, list[str]] = {}
+
+    if parts_dir.is_dir():
+        for part in sorted(parts_dir.glob("*.csv")):
+            with part.open(newline="") as handle:
+                for row in csv.reader(handle):
+                    if row:
+                        rows[row[0]] = row
+
+    for scene_dir in sorted(output_dir.iterdir()):
+        if not scene_dir.is_dir() or not SCENE_DIR_RE.match(scene_dir.name):
+            continue
+        if scene_dir.name in rows:
+            continue
+        row = _scene_row(scene_dir)
+        if row is not None:
+            rows[row[0]] = row
+
+    csv_path = output_dir / SCENES_CSV
+    with csv_path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(SCENES_CSV_HEADER)
+        for key in sorted(rows):
+            writer.writerow(rows[key])
+
+    if parts_dir.is_dir():
+        for part in parts_dir.glob("*.csv"):
+            part.unlink()
+        try:
+            parts_dir.rmdir()
+        except OSError:  # someone else is still writing; harmless
+            pass
+    return csv_path
+
+
+# ---------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------
+def _ensure_logging() -> None:
+    """Worker processes started without fork inherit no logging configuration."""
+    if not logging.getLogger().handlers:
+        setup_logging(False)
+
+
+def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
+    _ensure_logging()
     scene_dir = output_dir / f"{idx:04d}"
     try:
         with AnyReader([bag_path]) as reader:
-            process_scene(reader, bag_path, scene_dir, args)
-        return True
-    except Exception as e:
-        print(f"Error processing {bag_path}: {e}\n{traceback.format_exc()}")
-        return False
+            result = process_scene(reader, bag_path, scene_dir, args)
+        result.index = idx
+    except Exception as exc:  # noqa: BLE001 - one bad bag must not kill the run
+        LOG.error("failed to process %s:\n%s", bag_path, traceback.format_exc())
+        result = SceneResult(
+            index=idx,
+            bag=bag_path.name,
+            status=STATUS_FAILED,
+            message=f"{type(exc).__name__}: {exc}",
+        )
+    # Only finished scenes go into scenes.csv; failures are reported in the
+    # end-of-run summary instead.
+    if result.status == STATUS_OK:
+        write_scene_part(output_dir / SCENES_PARTS_DIR, result)
+    return result
 
 
-def process_scene(reader, bag_path, scene_dir, args):
+def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     camera_topic, lidar_topic = args.cam, args.lidar
+    result = SceneResult(index=-1, bag=bag_path.name, status=STATUS_OK)
 
     # Pre-cache connections
     conns = {c.topic: c for c in reader.connections}
@@ -165,10 +433,15 @@ def process_scene(reader, bag_path, scene_dir, args):
     lidar_conn = conns.get(lidar_topic)
 
     if not cam_conn or not lidar_conn:
-        print(
-            f"Missing topics in {bag_path}. Cam: {bool(cam_conn)}, Lidar: {bool(lidar_conn)}"
-        )
-        return
+        missing = [
+            topic
+            for topic, conn in ((camera_topic, cam_conn), (lidar_topic, lidar_conn))
+            if conn is None
+        ]
+        LOG.warning("%s: missing topic(s) %s; scene skipped", bag_path.name, missing)
+        result.status = STATUS_EMPTY
+        result.message = f"missing topic(s): {', '.join(missing)}"
+        return result
 
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
@@ -235,37 +508,33 @@ def process_scene(reader, bag_path, scene_dir, args):
         elif conn.topic == "/cmd_vel":
             tw = msg.twist if hasattr(msg, "twist") else msg
             cmd_vels.append(
-                np.r_[t, tw.linear.x, tw.linear.y, tw.linear.z,
-                      tw.angular.x, tw.angular.y, tw.angular.z]
+                np.r_[
+                    t,
+                    tw.linear.x,
+                    tw.linear.y,
+                    tw.linear.z,
+                    tw.angular.x,
+                    tw.angular.y,
+                    tw.angular.z,
+                ]
             )
         elif conn.topic == "/tf_static":
             tf_msgs.extend(msg.transforms)
 
-    # Sync Timestamps (Mutual Nearest Neighbor)
-    cam_ts = np.array(cam_timestamps)
-    pcd_ts = np.array(lidar_timestamps)
+    # Sync timestamps (mutual nearest neighbour)
+    valid_cam_ts, valid_pcd_ts = sync_timestamps(cam_timestamps, lidar_timestamps)
 
-    if len(cam_ts) == 0 or len(pcd_ts) == 0:
-        return
-
-    # Work in sorted order (also handles out-of-order messages); searchsorted
-    # keeps memory O(n) instead of the O(n*m) full distance matrix.
-    cam_ts = np.sort(cam_ts)
-    pcd_ts = np.sort(pcd_ts)
-
-    def nearest_idx(a, b):
-        """For each value in `a`, index of the nearest value in sorted `b`."""
-        if len(b) == 1:
-            return np.zeros(len(a), dtype=int)
-        pos = np.clip(np.searchsorted(b, a), 1, len(b) - 1)
-        return np.where(a - b[pos - 1] <= b[pos] - a, pos - 1, pos)
-
-    ts1_to_ts2 = nearest_idx(cam_ts, pcd_ts)
-    ts2_to_ts1 = nearest_idx(pcd_ts, cam_ts)
-    mask = ts2_to_ts1[ts1_to_ts2] == np.arange(len(cam_ts))
-
-    valid_cam_ts = cam_ts[mask]
-    valid_pcd_ts = pcd_ts[ts1_to_ts2[mask]]
+    if len(valid_cam_ts) == 0:
+        LOG.warning(
+            "%s: no synchronised camera/lidar pairs (%d camera, %d lidar messages); "
+            "scene left empty",
+            bag_path.name,
+            len(cam_timestamps),
+            len(lidar_timestamps),
+        )
+        result.status = STATUS_EMPTY
+        result.message = f"no synced pairs ({len(cam_timestamps)} cam, {len(lidar_timestamps)} lidar)"
+        return result
 
     # Map timestamps to their chronological frame indices
     cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
@@ -283,6 +552,10 @@ def process_scene(reader, bag_path, scene_dir, args):
         if rows:
             arr = np.vstack(rows)
             np.save(scene_dir / f"{name}.npy", arr[np.argsort(arr[:, 0])])
+        else:
+            LOG.info(
+                "%s: no messages on /%s; %s.npy not written", bag_path.name, name, name
+            )
 
     # Process TF Static
     tf_graph = build_tf_graph(tf_msgs) if tf_msgs else nx.DiGraph()
@@ -295,9 +568,12 @@ def process_scene(reader, bag_path, scene_dir, args):
             T_lidar_to_base = euler_matrix(roll, pitch, yaw)
             T_lidar_to_base[:3, 3] = [x, y, z]
         else:
-            print(
-                f"No TF path from '{lidar_frame}' to '{args.base_frame}' in {bag_path} "
-                "and no --lidar_extrinsic given; using identity."
+            LOG.warning(
+                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; "
+                "using identity",
+                bag_path.name,
+                lidar_frame,
+                args.base_frame,
             )
             T_lidar_to_base = np.eye(4)
 
@@ -312,9 +588,11 @@ def process_scene(reader, bag_path, scene_dir, args):
         T_base_in_child = np.linalg.inv(T_child_to_base)
         odom_data = [(t, T @ T_base_in_child) for t, T in odom_data]
     elif odom_child_frame and T_child_to_base is None:
-        print(
-            f"No TF path from odom child '{odom_child_frame}' to '{args.base_frame}'; "
-            "storing raw odometry poses."
+        LOG.warning(
+            "%s: no TF path from odom child '%s' to '%s'; storing raw odometry poses",
+            bag_path.name,
+            odom_child_frame,
+            args.base_frame,
         )
 
     # Re-express the orientation source at the base frame too, so gravity
@@ -326,9 +604,12 @@ def process_scene(reader, bag_path, scene_dir, args):
         T_base_in_imu = np.linalg.inv(T_imu_to_base)
         imu_data = [(t, R @ T_base_in_imu) for t, R in imu_data]
     elif imu_frame and T_imu_to_base is None:
-        print(
-            f"No TF path from orientation frame '{imu_frame}' to '{args.base_frame}'; "
-            "using raw orientations for gravity alignment."
+        LOG.warning(
+            "%s: no TF path from orientation frame '%s' to '%s'; using raw "
+            "orientations for gravity alignment",
+            bag_path.name,
+            imu_frame,
+            args.base_frame,
         )
 
     # Pass 2: Extract heavy data (Images, Pointclouds)
@@ -382,6 +663,12 @@ def process_scene(reader, bag_path, scene_dir, args):
 
     # Process Odom Transforms (relative to first frame)
     if transforms_dict:
+        missing = [i for i in range(len(valid_cam_ts)) if i not in transforms_dict]
+        if missing:
+            raise RuntimeError(
+                f"odometry pose missing for {len(missing)} of {len(valid_cam_ts)} "
+                "frames (duplicate camera timestamps in the bag?)"
+            )
         # Reconstruct sequential list based on chronological indices
         transforms = [transforms_dict[i] for i in range(len(valid_cam_ts))]
         rel_transforms = [np.eye(4)]
@@ -389,40 +676,57 @@ def process_scene(reader, bag_path, scene_dir, args):
         for i in range(1, len(transforms)):
             rel_transforms.append(first_inv @ transforms[i])
         np.save(scene_dir / "transforms.npy", np.array(rel_transforms))
+    else:
+        LOG.warning(
+            "%s: no odometry messages on '%s'; transforms.npy not written",
+            bag_path.name,
+            args.odom,
+        )
 
     # Process gravity alignment
-    if not imu_data:
-        print(f"No orientation messages on '{args.imu}'; skipping gravity_align.npy")
-        return
-    imu_ts = np.array([x[0] for x in imu_data])
-    imu_rolls = np.empty(len(imu_data))
-    imu_pitches = np.empty(len(imu_data))
-    for i, (_, R) in enumerate(imu_data):
-        imu_rolls[i] = math.atan2(R[2, 1], R[2, 2])
-        imu_pitches[i] = math.asin(np.clip(-R[2, 0], -1.0, 1.0))
+    if imu_data:
+        imu_ts = np.array([x[0] for x in imu_data])
+        imu_rolls = np.empty(len(imu_data))
+        imu_pitches = np.empty(len(imu_data))
+        for i, (_, R) in enumerate(imu_data):
+            imu_rolls[i] = math.atan2(R[2, 1], R[2, 2])
+            imu_pitches[i] = math.asin(np.clip(-R[2, 0], -1.0, 1.0))
 
-    gravity_aligns = []
+        gravity_aligns = []
+        for pcd_t in valid_pcd_ts:
+            # Find the closest IMU message to the Lidar timestamp
+            idx = np.argmin(np.abs(imu_ts - pcd_t))
 
-    for pcd_t in valid_pcd_ts:
-        # Find the closest IMU message to the Lidar timestamp
-        idx = np.argmin(np.abs(imu_ts - pcd_t))
+            roll = imu_rolls[idx]
+            pitch = imu_pitches[idx]
 
-        roll = imu_rolls[idx]
-        pitch = imu_pitches[idx]
+            # Gravity alignment rotation (corrects pitch/roll, ignores yaw)
+            R_align = euler_matrix(roll, pitch, 0.0)[:3, :3]
+            gravity_aligns.append(R_align)
 
-        # Create the gravity alignment rotation matrix (corrects pitch/roll, ignores yaw)
-        R_align = euler_matrix(roll, pitch, 0.0)[:3, :3]
-        gravity_aligns.append(R_align)
+        np.save(scene_dir / "gravity_align.npy", np.array(gravity_aligns))
+    else:
+        LOG.warning(
+            "%s: no orientation messages on '%s'; gravity_align.npy not written",
+            bag_path.name,
+            args.imu,
+        )
 
-    np.save(scene_dir / "gravity_align.npy", np.array(gravity_aligns))
+    # Provenance; written last, so it doubles as the "scene finished" marker.
+    (scene_dir / SENTINEL_FILE).write_text(f"{bag_path.name}\n")
+
+    result.frames = int(len(valid_cam_ts))
+    result.start_time = float((valid_cam_ts[0] + valid_pcd_ts[0]) / 2)
+    return result
 
 
 def get_first_frame(reader, conn):
     for _, _, raw in reader.messages([conn]):
         return reader.deserialize(raw, conn.msgtype).header.frame_id
+    return None
 
 
-def save_intrinsics(reader, conns, cam_topic, scene_dir):
+def save_intrinsics(reader, conns, cam_topic: str, scene_dir: Path) -> bool:
     # e.g. /luxonis/oak/rgb/image_raw/compressed -> /luxonis/oak/rgb/camera_info
     #      /odin1/image/compressed               -> /odin1/camera_info
     candidates = [
@@ -433,20 +737,55 @@ def save_intrinsics(reader, conns, cam_topic, scene_dir):
     candidates = [c for c in candidates if c != cam_topic]
     conn = next((conns[c] for c in candidates if c in conns), None)
     if conn is None:
-        print(f"No camera_info topic found for {cam_topic} (tried {candidates})")
-        return
+        LOG.warning(
+            "no camera_info topic for %s (tried %s); camera_intrinsics.txt not written",
+            cam_topic,
+            ", ".join(candidates),
+        )
+        return False
     for _, _, raw in reader.messages([conn]):
         msg = reader.deserialize(raw, conn.msgtype)
         np.savetxt(scene_dir / "camera_intrinsics.txt", np.array(msg.k).reshape(3, 3))
-        break
+        return True
+    LOG.warning("camera_info topic %s carries no messages", conn.topic)
+    return False
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("input_dir", type=str)
-    parser.add_argument("output_dir", type=str)
-    parser.add_argument("--cam", type=str, default="/odin1/image/compressed")
-    parser.add_argument("--lidar", type=str, default="/odin1/cloud_filtered/cloudini")
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def setup_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Extract HELHEST scenes from ROS 2 bags.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "input_dir", type=str, help="Directory of bags, or a single bag directory"
+    )
+    parser.add_argument("output_dir", type=str, help="Dataset root to write scenes to")
+    parser.add_argument(
+        "--cam",
+        type=str,
+        default="/odin1/image/compressed",
+        help="Compressed image topic (old bags: "
+        "/luxonis/oak/rgb/image_raw/compressed)",
+    )
+    parser.add_argument(
+        "--lidar",
+        type=str,
+        default="/odin1/cloud_filtered/cloudini",
+        help="PointCloud2 or CompressedPointCloud2 topic (old bags: "
+        "/livox/lidar_front)",
+    )
     parser.add_argument(
         "--odom",
         type=str,
@@ -474,24 +813,121 @@ def main():
         help="Manual lidar->base transform, used when TF does not connect the "
         "lidar frame to the base frame (the case for the 2026-08 Odin1 bags)",
     )
-    parser.add_argument("--jobs", type=int, default=4)
-    args = parser.parse_args()
+    parser.add_argument("--jobs", type=int, default=4, help="Worker processes")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Re-extract scenes whose output directory is already complete",
+    )
+    parser.add_argument(
+        "--scenes",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="SEL",
+        help="Only process these scenes: indices (7), ranges (3-9) or bag "
+        "directory names; comma-separated values are accepted too",
+    )
+    parser.add_argument(
+        "--start_index",
+        type=int,
+        default=0,
+        help="Index of the first scene directory (offsets the numbering)",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    setup_logging(args.verbose)
 
     input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
+    try:
+        bags = find_bags(input_dir)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        LOG.error("%s", exc)
+        return 2
+    if not bags:
+        LOG.error(
+            "no rosbag2 directories (with metadata.yaml) found under %s", input_dir
+        )
+        return 2
+
+    jobs = [(args.start_index + i, bag) for i, bag in enumerate(bags)]
+    selected = parse_scene_selection(args.scenes)
+    if selected is not None:
+        jobs = [(idx, bag) for idx, bag in jobs if selected(idx, bag.name)]
+        if not jobs:
+            LOG.error(
+                "--scenes %s selected none of the %d bags found", args.scenes, len(bags)
+            )
+            return 2
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    bag_files = sorted([d for d in input_dir.iterdir() if d.is_dir()])
+    todo = []
+    results: list[SceneResult] = []
+    for idx, bag in jobs:
+        scene_dir = output_dir / f"{idx:04d}"
+        if not args.overwrite and scene_is_complete(scene_dir):
+            LOG.info("scene %04d already complete (%s); skipping", idx, bag.name)
+            results.append(SceneResult(index=idx, bag=bag.name, status=STATUS_SKIPPED))
+            continue
+        todo.append((idx, bag))
 
-    with ProcessPoolExecutor(max_workers=args.jobs) as executor:
-        futures = [
-            executor.submit(_worker, b, output_dir, i, args)
-            for i, b in enumerate(bag_files)
-        ]
-        for _ in tqdm(
-            as_completed(futures), total=len(futures), desc="Processing bags"
-        ):
-            pass
+    LOG.info(
+        "%d bag(s) found, %d to extract, %d skipped -> %s",
+        len(bags),
+        len(todo),
+        len(jobs) - len(todo),
+        output_dir,
+    )
+
+    if todo and args.jobs > 1:
+        with ProcessPoolExecutor(max_workers=args.jobs) as executor:
+            futures = [
+                executor.submit(_worker, bag, output_dir, idx, args)
+                for idx, bag in todo
+            ]
+            for future in tqdm(
+                as_completed(futures), total=len(futures), desc="Processing bags"
+            ):
+                results.append(future.result())
+    else:
+        for idx, bag in tqdm(todo, desc="Processing bags"):
+            results.append(_worker(bag, output_dir, idx, args))
+
+    csv_path = merge_scenes_csv(output_dir)
+
+    failed = [r for r in results if r.status == STATUS_FAILED]
+    empty = [r for r in results if r.status == STATUS_EMPTY]
+    ok = [r for r in results if r.status == STATUS_OK]
+    skipped = [r for r in results if r.status == STATUS_SKIPPED]
+
+    LOG.info(
+        "done: %d extracted (%d frames), %d skipped, %d empty, %d failed; index -> %s",
+        len(ok),
+        sum(r.frames for r in ok),
+        len(skipped),
+        len(empty),
+        len(failed),
+        csv_path,
+    )
+    for result in empty:
+        LOG.warning(
+            "scene %04d (%s) produced no frames: %s",
+            result.index,
+            result.bag,
+            result.message,
+        )
+    for result in failed:
+        LOG.error(
+            "scene %04d (%s) FAILED: %s", result.index, result.bag, result.message
+        )
+
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
