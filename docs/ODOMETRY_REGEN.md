@@ -329,14 +329,62 @@ Other bag facts (0013): `/livox/lidar_both_filtered` exists but is two lidars
 combined — disregard; `/cmd_vel` and `/cmd_vel_nav` are empty, so
 `/joint_states` (measured wheel motion) is the only motion reference.
 
+## Dry-run results (dgx07, 2026-09-01, rate 1.0 unless stated)
+
+Same code, same bags, one machine; numbers agree with the laptop's.
+
+**0013** (10 s windows): reproducibility floor 0.038 m / 0.24°; level-2
+(tuned) vs the level-1 conjugated file 0.343 m / 3.19° — 9× the floor, so
+the re-run changes the answer; v1-replica raw IMU pose vs published
+0.117 m / 0.93° (provenance confirmed), replica + per-point deskew vs
+published 0.366 m / 3.11°. Against `/odom` over 2 s windows the per-point
+deskew halves the rotation disagreement (median 1.60° → 0.62°). 54 s wall,
+~360 MB, 0–1 flags per run.
+
+**0018** (2 s windows vs `/odom`, 6896 frames):
+
+| run | coverage | segments | window error median / p95 / p99 | > 1 m | wheels-stopped drift |
+|---|---|---|---|---|---|
+| v1 published | 12.7 % | 1 | — | — | — |
+| C tuned, no restart | 99.9 % | 1 | 5117 m / 8390 / 9069 | 79.7 % | up to 12 km |
+| D tuned + restart, rate 1.0 | 83.1 % (78.8 % in ≥ 20-pose segs) | 154 | 0.125 m / 1.79 / 5.85 | 7.5 % | ≤ 0.4 m, one 16° |
+| D tuned + restart, rate 0.5 | 81.7 % | 131 | 0.116 m / 2.38 / 4.86 | 9.1 % | one 14 m |
+
+C: 707 s wall, 3.2 GB; D: 709 s (1405 s at 0.5), 0.55 GB. **Rate 1.0 is
+fine** — same medians, same flag counts, half the wall time; the failures
+are in the data, not the timing.
+
+Per minute of the scene (D, rate 1.0): minutes 0–1 and 8–11 are clean — 0 %
+of windows > 1 m, 92–100 % of frames covered — and minutes 2–7 are a
+degenerate stretch: 25–61 % of windows > 1 m, 53–80 % covered, where
+FAST-LIO re-diverges within seconds of every restart (123 of 153 restarts are
+`pose_jump`, median segment length 1 pose). So the corrected pipeline turns
+0018 from 13 % usable into roughly half the scene fully usable plus a
+stretch that no LIO setting will fix.
+
+What follows for the full pass:
+
+1. **Post-filter, not more detector tuning.** The bad windows live inside
+   short post-restart segments the detector cannot judge in time. Run
+   `local_consistency.py` per segment after the fact and drop segments whose
+   2 s windows disagree with `/odom` by > 1 m (or < 20 poses) before
+   writing the final `odometry.txt`; keep the unfiltered file alongside.
+   That removes the tail without touching the clean minutes.
+2. **The degenerate stretches need a wheel-odometry prior** (Kinematic-ICP,
+   lever 3) or stay as gaps. Decide after the full pass shows how much
+   scene time falls in such stretches dataset-wide; on 0018 it is ~45 %.
+3. Sizing: 0.55 GB and ~1 core-equivalent per scene with restarts; 8-wide on
+   dgx07 is conservative. Longest scene 0011 ≈ 47 min at rate 1.0.
+
 ## Per-scene run
 
 For each row of `docs/scene_bags.csv`:
 
 1. fetch the bag from subtdata (`rsync`, one at a time);
 2. `ros2 bag play --rate 0.5 --clock --topics /livox/lidar_front /livox/imu_front /odom`
-   + FAST-LIO (tuned) + recorder with segment restarts inside the sif; keep
-   the divergence-flag stream per scene;
+   + FAST-LIO (tuned) + recorder with segment restarts inside the sif at
+   `--rate 1.0`; keep the divergence-flag stream per scene, then the
+   segment post-filter;
 3. `extract_data.py` for clouds/images/`camera_info.yaml`/`transforms.npy`
    (`--start_index` gives the scene number; `--frame_fix` is NOT needed — the
    new odometry is already `base_link`);
