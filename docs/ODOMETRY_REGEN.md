@@ -251,6 +251,18 @@ scene 47 min → 93 min at rate 0.5 plus a ≤ 70 GB fetch. Array of 43 tasks,
 = array index`, outputs to `/mnt/personal`. Fully parallel → wall ≈ the longest
 scene, but the 21 cpufast nodes are shared and each task re-pays the transfer.
 Use it if dgx07 is saturated by training.
+`slurm/regen_scene.batch` implements this — one scene per array task
+(`sbatch --array=0-42%6 slurm/regen_scene.batch <out_root>`), everything on
+node-local NVMe (`/data`: 1.8 TB on cpu nodes, 7 TB on amd; both partitions
+reach subtdata and have singularity), one rsync of the finished scene to NFS.
+Validated end-to-end on 0016 (job 11455184, ~6 min including fetch). This is
+the template for future recordings too: for new-rig bags drop the odometry
+step and use the extractor's new-stack topic defaults. Design rationale: a
+run staged on /mnt/personal (dgx07, 2026-09-01) saturated that NFS export and
+slowed DRIFT training 3–4× — the dataloader's small random reads lose to bulk
+transfer; on dgx07 stage on /raid (7 TB local NVMe) instead. Cosmetic:
+fastlio_mapping segfaults when killed at teardown, after recording is
+complete — rc is unaffected.
 
 Build on the target host, inside the sif, from a fresh clone (never move the
 laptop's `install/` tree — its `--symlink-install` links already dangle):
