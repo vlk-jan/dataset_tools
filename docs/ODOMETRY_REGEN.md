@@ -227,9 +227,9 @@ that sif into a bind-mounted directory (`~/flio_ws`, shared home).
 **Option A — dgx07 (recommended).** 128 cores / 503 GB, singularity-ce 3.10,
 direct key-based ssh to `subtdata.felk.cvut.cz`, `/mnt/personal` and
 `/mnt/data` mounted, so outputs land where DRIFT reads them
-(`/mnt/personal/vlkjan6/HELHEST_v1_2`; the filesystem has ~54 TB free, the
-per-user quota is unknown but ≥ 300 GB was staged there in August without
-issue — stream-one-delete-one never needs more than ~150 GB). ROS pub/sub inside the sif works
+(`/mnt/personal/vlkjan6/HELHEST_v1_2`; the filesystem has ~54 TB free and the
+per-user quota view is 10 TB with 2.9 TB used — even staging all 913 GB fits;
+stream-one-delete-one never needs more than ~150 GB). ROS pub/sub inside the sif works
 there (`ROS_LOCALHOST_ONLY=1`, verified). It is GPU-bound by training (load
 ~15 of 128), leaving CPU headroom for ~8 concurrent scenes at ~6 cores each
 (bag play + FAST-LIO + recorder; pin with `taskset`). Driver: a small
