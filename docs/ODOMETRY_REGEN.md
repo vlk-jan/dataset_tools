@@ -102,6 +102,14 @@ FAST-LIO fork (`config/mid360.yaml`, `src/laserMapping.cpp`):
   Verify the mount numbers against the bag's `/tf_static`
   (`base_link → livox_front_frame`) with `dataset_tools.extract_data.get_transform`
   rather than trusting the constants.
+  Beware: `/livox/imu_front` messages carry `frame_id = livox_frame`, and the
+  bags publish a *separate* `base_link → livox_frame` static TF at
+  t = (0.11, 0, 0.145) (driver default name, uncalibrated). Do not use it —
+  the IMU sits inside the Mid-360 at the datasheet offset from the lidar
+  origin, and the calibrated mount is `livox_front_frame` at x = 0.17.
+- `gravity_align.npy` needs no change: it is roll/pitch of `/ekf/imu/data`,
+  whose frame `imu` is `base_link` (identity static TF) — i.e. it is already in
+  the frame the regenerated odometry will be in.
 - Recorder (`odom_node.py`): open the file once with truncation (not append per
   message), refuse to start if the output exists, write sorted, and keep the
   header/format byte-compatible:

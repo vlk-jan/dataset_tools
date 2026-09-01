@@ -39,7 +39,7 @@ sensor mast. Sensor suite of this dataset:
 | **Luxonis OAK-D PoE** RGB camera | `/luxonis/oak/rgb/image_raw/compressed`, 1280 × 800, pinhole with fx ≈ fy ≈ 761.6 px, cx = 633.9, cy = 407.0 (identical in all scenes). Mounted on the LiDAR, looking forward: `T_cam_to_lidar.txt` is the same in every scene (yaw 90° optical-frame convention, t = [−0.06, 0, −0.085] m). Horizontal half-FOV ≈ 40°. | `images/*.png`, `camera_intrinsics.txt`, `T_cam_to_lidar.txt` |
 | **IMU** (EKF-filtered attitude, `/ekf/imu/data`) | Roll/pitch used for gravity alignment. | `gravity_align.npy` |
 | **Wheel joint states** (`/joint_states`, 100 Hz) | Position, velocity, effort for the three wheels. | `joint_states.npy` |
-| **LiDAR-inertial odometry** (Point-LIO, computed offline) | 6-DoF pose at 10 Hz in a local frame anchored at the first pose. Not georeferenced — there is no GNSS in this generation. | `odometry.txt` (+ `transforms.npy` per frame) |
+| **LiDAR-inertial odometry** (FAST-LIO, computed offline) | 6-DoF pose at 10 Hz in a local frame anchored at the first pose. Not georeferenced — there is no GNSS in this generation. | `odometry.txt` (+ `transforms.npy` per frame) |
 
 Frames are sampled at the RGB frame rate: **~3 Hz** in the September 2025
 recordings (camera-limited), **~10 Hz** in October 2025 and February 2026.
@@ -56,9 +56,9 @@ HELHEST/
 │   ├── camera_intrinsics.txt     3×3 K
 │   ├── T_cam_to_lidar.txt        4×4 camera→LiDAR extrinsic
 │   ├── gravity_align.npy         (F, 3, 3) rotation removing roll/pitch per frame
-│   ├── transforms.npy            (F, 4, 4) LIVE /odom pose from the bag per frame, relative to frame 0 (NOT Point-LIO)
+│   ├── transforms.npy            (F, 4, 4) LIVE /odom pose from the bag per frame, relative to frame 0 (NOT FAST-LIO)
 │   ├── joint_states.npy          (J, 10): t, pos×3, vel×3, effort×3 (wheel order: left, rear, right)
-│   ├── odometry.txt              [optional] offline Point-LIO trajectory (the ground truth used by DRIFT), see below
+│   ├── odometry.txt              [optional] offline FAST-LIO trajectory (the ground truth used by DRIFT), see below
 │   ├── trajectory.txt            [some scenes] identical copy of odometry.txt
 │   ├── height_maps/00000.npz …   [derived] per-frame BEV height map, key `height_map` (128,128) float64, 0.1 m cells, ±6.4 m
 │   ├── height_masks/00000.npz …  [derived] key `validity` (128,128) uint8 (measured/extrapolated), `height_threshold`
@@ -217,28 +217,50 @@ level in `gravity_align`.
   extracts correctly. Independent check: the no-return cluster (next item)
   sits at (−0.170, 0, +0.145) in every scene of all three sessions, exactly
   the mirror of the mount position.
-- **`odometry.txt` is the LiDAR's pose, mirrored relative to `base_link`
-  (found 2026-08-28).** Point-LIO was run on the raw Livox stream without the
-  mount extrinsic, so `odometry.txt` gives the pose of `livox_front_frame` —
-  which is mounted upside down — in a world frame whose z points *down*.
-  Relative to the base frame of the clouds this negates y and z and inverts
-  the yaw: a left turn in reality is a right turn in `odometry.txt`. Evidence:
-  yaw rate from `odometry.txt` is negatively correlated with the wheel-speed
-  differential (right − left; r = −0.54…−0.81) and with the robot's live
-  `/odom` in `transforms.npy` (r = −0.68…−0.90) in every scene tested, and
-  registering consecutive scans through turns with the mirrored poses
-  improves from ~1–2 m to ~0.2–0.5 m misalignment. Convert to a base-frame
-  pose in a z-up world with `T_base = X @ T @ inv(X)`, where
-  `X = [[1,0,0,0.17],[0,-1,0,0],[0,0,-1,0.145],[0,0,0,1]]` (the
-  `base_link → livox_front_frame` transform, R_x(π) with the +0.34 m x
-  correction already implied). Translation magnitudes and the x/forward
+- **`gravity_align.npy` is in `base_link`.** It is the roll/pitch of
+  `/ekf/imu/data` (frame `imu`, an identity static TF from `base_link`), so it
+  is consistent with the clouds and with a corrected `base_link` odometry — and
+  *inconsistent* with the mirrored `odometry.txt` as published.
+- **`odometry.txt` is the pose of the Livox front IMU, mirrored relative to
+  `base_link` (found 2026-08-28; provenance confirmed 2026-09-01).** The
+  trajectory comes from FAST-LIO (`vlk-jan/FAST_LIO_ROS2`, config
+  `mid360.yaml`) run offline on the body-cropped front Livox stream with the
+  Livox internal IMU (`/livox/imu_front`) and online extrinsic estimation.
+  FAST-LIO publishes its *IMU state* but hard-codes `child_frame_id =
+  "base_link"`, and the recorder took the label at face value. The Livox is
+  mounted upside down, so relative to the base frame of the clouds the file
+  negates y and z and inverts the yaw: a left turn in reality is a right turn
+  in `odometry.txt`. Evidence: yaw rate from `odometry.txt` is negatively
+  correlated with the wheel-speed differential (right − left; r = −0.54…−0.81)
+  and with the robot's live `/odom` in `transforms.npy` (r = −0.68…−0.90) in
+  every scene tested; a kinematic simulator driven by the wheel speeds turns
+  the opposite way on 51/51 strong turns. Convert to a base-frame pose in a
+  z-up world anchored at the first pose with
+
+      X  = [[1,0,0,0.17],[0,-1,0,0],[0,0,-1,0.145],[0,0,0,1]]   # base_link → livox_front_frame
+      L  = translation (+0.011, +0.02329, −0.04412)              # IMU origin in the lidar frame (Mid-360 datasheet)
+      X' = X @ L
+      T' = T @ inv(X');  T_base = inv(T'[0]) @ T'
+
+  (equivalently `X' @ T @ inv(X')` since the file starts at the identity). The
+  rotation of `X'` equals that of `X`; the IMU offset only moves the lever arm
+  by ~5 cm, and the online extrinsic estimation leaves a further few-cm,
+  per-run residual that only a re-run of FAST-LIO with fixed extrinsics
+  removes (`ODOMETRY_REGEN.md`). Translation magnitudes and the x/forward
   component are unaffected; consumers that only use forward speed are fine.
-- **~10 k of the ~20 k points per frame are invalid.** Livox reports
-  non-returns as (0, 0, 0); after the base transform they all sit at one
-  point near the origin (x ≈ −0.17, z ≈ 0.145 in the published data). Filter by
-  range (> 0.5 m) before use — a frame has ~4–7 k real returns. The current
-  extractor drops them.
-- **Odometry gaps are intentional.** Point-LIO was run offline after the
+  Timestamps are lidar scan-end times; 7 scenes (0017, 0020, 0029, 0030,
+  0031, 0040, 0041) contain 1–7 out-of-order rows — sort before use.
+- **53–70 % of the points in every `clouds/*.npy` are invalid.** Livox reports
+  non-returns as (0, 0, 0); after the base transform they all collapse onto one
+  point, exactly the sensor origin mapped through the (backwards) static TF
+  (x = −0.170, y = 0, z = 0.145 in the published data, identical in all 43
+  scenes). A frame has ~4–7 k real returns. Height maps never saw them
+  (`prep_dataset.py` drops r < 0.5 m) and DRIFT's FOV/voxel path removes them
+  too, so trained DRIFT models were not affected; anything that reads the
+  `.npy` files directly (point budgets, range statistics, pretraining
+  pipelines) must filter by range (> 0.5 m) first. The current extractor
+  drops them.
+- **Odometry gaps are intentional.** FAST-LIO was run offline after the
   recordings and stopped whenever it started to drift, so 11 scenes have no
   `odometry.txt` (0001, 0007, 0014, 0015, 0019, 0021, 0026, 0027, 0033, 0034,
   0037) and others are truncated (0002 and 0011 lose the last 21 and 27 min).
@@ -306,7 +328,7 @@ Bag contents (old generation, all standard ROS 2 message types — no custom
 packages needed for the topics used here): `/livox/lidar_front`,
 `/livox/lidar_both_filtered` (+ `/livox/lidar_rear` in Sep 2025),
 `/livox/imu_*`, `/luxonis/oak/rgb/image_raw/compressed`, OAK left/right/stereo
-streams, `/odom` (Point-LIO), `/ekf/imu/data`, `/joint_states`, `/tf`,
+streams, `/odom` (FAST-LIO), `/ekf/imu/data`, `/joint_states`, `/tf`,
 `/tf_static`, GNSS/nav auxiliaries (~125 topics per bag).
 
 **Reading with `rosbags`.** Each mcap contains one schema with encoding
