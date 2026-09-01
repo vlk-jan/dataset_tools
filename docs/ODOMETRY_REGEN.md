@@ -278,6 +278,57 @@ per scene `odometry.txt`, `odometry_imu_raw.txt`, `odometry_flags.txt`,
 `odometry_segments.txt`, plus the extractor outputs. Keep the per-scene logs;
 they are the provenance the v1 run never had.
 
+## Dry-run results (laptop, 2026-09-01)
+
+**Coverage cannot rank runs.** Scene 0018: v1 published 12.7 % of frames;
+tuned FAST-LIO without restarts 99.9 %; with restarts 79.1 % in 102 segments.
+The 99.9 % is garbage — checked against intervals where all wheels are still
+for ≥ 0.5 s, the no-restart run drifts by kilometres (10/12 intervals show
+motion, up to 56 km / 155°), and 2 s windows against `/odom` are off by a
+median 2.9 km (79.5 % > 1 m). With restarts: 5/12 intervals show ≤ 0.19 m,
+window error median 0.11 m, p95 0.98 m, 4.9 % > 1 m. Local consistency is
+the only property DRIFT consumes, so **segment restarts are mandatory**, and
+the ranking must come from `scripts/motion_audit.py` (stationary-interval
+drift) and `scripts/local_consistency.py` (windowed error vs `/odom`), never
+from pose counts. The detector still misses some divergences (p99 3.7 m) —
+tightening it is the open task.
+
+**Scene 0013** (did not diverge in v1), 10 s windows, rate 0.5:
+reproducibility floor 0.030 m / 0.18°; level-2 vs level-1 conjugated file
+0.306 m / 2.34° (10× the floor — the re-run changes the answer);
+v1-replica with the yaw-synthesised deskew vs published 0.137 m / 0.77°,
+with per-point deskew 0.317 m / 2.72°. Closer to the published file is
+provenance, not quality: the old deskew produced 13 divergence flags on this
+scene, the per-point one 0.
+
+**Correction:** v1 did not run *without* deskew; with `lidar_type: 1` it
+would have received nothing (CustomMsg path). It ran the MID360 handler,
+whose offset times are synthesised from yaw with a spinning-scanner model —
+*wrong* deskew for a rosette scanner. The replica config reproduces that via
+`preprocess.use_point_timestamps: false`; its twin differs by that one line.
+
+**Rate:** on 0018, `--rate 1.0` gave more poses and fewer flags than 0.5
+(6137 vs 6045; 705 s vs 1400 s). The dropped-scan hypothesis came from runs
+contaminated by the process leak below; re-test on dgx07, don't inherit 0.5.
+
+**Cost:** 0013 (39 s) 89 s wall; 0018 (691 s) 705 s at rate 1.0. Peak RSS
+0.4 GB on 0013, 2.9 GB on 0018 without restarts, 0.6 GB with (restarts
+reset the map). Size the fan-out on the longest scene (0011, 47 min).
+
+**Bugs fixed on the laptop branches:** (1) `ros2 launch` orphaned
+`fastlio_mapping` on kill — six estimators fed one recorder; run the binary
+directly with `--params-file`, and give every concurrent run its own
+`ROS_DOMAIN_ID`; (2) detector compared the unconjugated pose (z-down IMU
+frame, yaw reversed); (3) `/odom` `twist.angular.z` is identically zero in
+these bags — yaw rate now from the differentiated pose; (4) `pose_jump`
+ignored dt — dropped scans looked like discontinuities (4362 false flags);
+now measures displacement `/odom` cannot explain; (5) `colcon build` of
+dataset_tools failed on `requires-python` (see below).
+
+Other bag facts (0013): `/livox/lidar_both_filtered` exists but is two lidars
+combined — disregard; `/cmd_vel` and `/cmd_vel_nav` are empty, so
+`/joint_states` (measured wheel motion) is the only motion reference.
+
 ## Per-scene run
 
 For each row of `docs/scene_bags.csv`:

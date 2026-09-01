@@ -7,7 +7,6 @@ name = "dataset_tools"
 version = "1.0.1"
 description = "Tools for extracting the HELHEST robot dataset from ROS 2 bags."
 readme = "README.md"
-requires-python = ">=3.10"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
 maintainers = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
