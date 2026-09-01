@@ -150,9 +150,16 @@ degeneracy — a ground plane constrains z/roll/pitch only — and the mount
 maximises it: the Mid-360's −7°…+52° vertical FOV, upside-down at 0.145 m,
 sees the ground out to the horizon plus 7° above it, with the rear blocked by
 the body. Open ground with no vertical structure near the horizon gives
-nothing to register against; trees, ruts and vegetation do. Two process
-factors made it worse: real-time replay (dropped scans during turns) and the
-single-run-per-scene policy.
+nothing to register against; trees, ruts and vegetation do. Three process
+factors made it worse, in this order: **v1 ran with no motion compensation at
+all** (the fork's PointCloud2 switch has no AVIA case, so `lidar_type: 1` fell
+through to a handler that sets every point's offset time to zero — deskew
+error is largest on turns and unabsorbable on flat ground; fixed on the laptop
+branch, which now reads the per-point `timestamp` field), real-time replay
+(dropped scans), and the single-run-per-scene policy. The Livox `timestamp`
+field is absolute nanoseconds (min = header stamp, 0.098 s spread per scan;
+zero-returns interleaved through the sweep), so `timestamp_unit` = ns and the
+handler rebases on the scan minimum.
 
 Levers, in order of payoff per effort:
 
@@ -168,8 +175,8 @@ Levers, in order of payoff per effort:
    consecutive scans, or FAST-LIO's own state covariance / ESKF iteration
    count blows up. Record the flag stream; do not silently drop.
 2. **Replay slowly, tune for a sparse downward lidar.** `--rate 0.5 --clock`,
-   `point_filter_num: 1` (only 4–7 k real returns per scan; the default 3
-   leaves ~1.5 k), `filter_size_surf: 0.3`, `filter_size_map: 0.5`,
+   `point_filter_num: 1` (only 4–7 k real returns per scan; note the old
+   handlers ignored this parameter entirely), `filter_size_surf: 0.3`, `filter_size_map: 0.5`,
    `blind: 0.5` (also removes the zero-return blob), `max_iteration: 5`,
    `extrinsic_est_en: false`. Verify the deskew path on the Livox
    `PointCloud2` (`timestamp` field: absolute ns vs per-scan offset,
@@ -208,6 +215,45 @@ the pipeline), then 0018.
 6. Report: coverage for 0018 under C and D, the failure signature, the
    0013 reproducibility floor and the level-1-vs-level-2 relative-pose error;
    then a recommendation on whether Kinematic-ICP (lever 3) is needed.
+
+## Where to run the full pass (checked 2026-09-01)
+
+The dry run stays on the laptop. For the 43-scene pass, two options were
+verified; both need the **laptop's sif** (`helhest-jazzy-2026-02-18.sif`) —
+the copy on RCI (`/mnt/data/vras/data/helhest-jazzy.sif`, 2025-11) has no
+PCL and cannot build FAST-LIO — and one `colcon build` of `flio_ws` inside
+that sif into a bind-mounted directory (`~/flio_ws`, shared home).
+
+**Option A — dgx07 (recommended).** 128 cores / 503 GB, singularity-ce 3.10,
+direct key-based ssh to `subtdata.felk.cvut.cz`, `/mnt/personal` and
+`/mnt/data` mounted, so outputs land where DRIFT reads them
+(`/mnt/personal/vlkjan6/HELHEST_v1_2`). ROS pub/sub inside the sif works
+there (`ROS_LOCALHOST_ONLY=1`, verified). It is GPU-bound by training (load
+~15 of 128), leaving CPU headroom for ~8 concurrent scenes at ~6 cores each
+(bag play + FAST-LIO + recorder; pin with `taskset`). Driver: a small
+per-scene script — `rsync` one bag from subtdata → `run_scene.sh` →
+`extract_data.py` (clouds, images, `camera_info.yaml`, `transforms.npy`) →
+`validate_scene.py` → delete the bag — run 8-wide with GNU parallel, one
+`ROS_DOMAIN_ID` per slot. Wall: ~15 h of replay at rate 0.5 / 8 ≈ 2 h, plus
+913 GB of transfer pipelined (~2.5–8 h depending on link rate; the transfer
+is the bottleneck, so start it first and let scenes run as bags land).
+Because dropped scans were a laptop artefact, test `--rate 1.0` vs `0.5` on
+0018 here before committing to 0.5 — it halves the wall time if equal.
+
+**Option B — RCI slurm array.** Compute nodes reach subtdata with the same key
+(verified on n04) and have apptainer 1.1.6. `cpufast` (4 h) suffices: longest
+scene 47 min → 93 min at rate 0.5 plus a ≤ 70 GB fetch. Array of 43 tasks,
+`--cpus-per-task 8 --mem 32G`, bag staged to node-local scratch, `ROS_DOMAIN_ID
+= array index`, outputs to `/mnt/personal`. Fully parallel → wall ≈ the longest
+scene, but the 21 cpufast nodes are shared and each task re-pays the transfer.
+Use it if dgx07 is saturated by training.
+
+Either way the artefacts are the same: sif, built `flio_ws` (fast_lio branch
+`v1-odometry-regen`, `livox_ros_driver2` for the message types), dataset_tools
+branch `odometry-regen-recorder`, `docs/scene_bags.csv` as the work list, and
+per scene `odometry.txt`, `odometry_imu_raw.txt`, `odometry_flags.txt`,
+`odometry_segments.txt`, plus the extractor outputs. Keep the per-scene logs;
+they are the provenance the v1 run never had.
 
 ## Per-scene run
 
