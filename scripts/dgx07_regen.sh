@@ -14,7 +14,7 @@
 #   SIF        singularity image with ROS Jazzy + PCL  (the 2026-02-18 laptop image)
 #   FLIO_WS    colcon workspace with fast_lio built inside $SIF
 #   REPO       this dataset_tools checkout (branch odometry-regen-recorder)
-#   CONFIG     fast_lio params file (default config/mid360_v2.yaml in the fast_lio source)
+#   CONFIG     fast_lio params file name in share/fast_lio/config (default mid360_v2.yaml)
 #   SUBTDATA   ssh host holding the bags
 #   STAGE      local staging dir for bags (needs ~70 GB per concurrent job)
 set -uo pipefail
@@ -25,7 +25,7 @@ ONLY=("$@")
 SIF=${SIF:-/mnt/personal/vlkjan6/sif/helhest-jazzy-2026-02-18.sif}
 FLIO_WS=${FLIO_WS:-$HOME/flio_ws}
 REPO=${REPO:-$(cd "$(dirname "$0")/.." && pwd)}
-CONFIG=${CONFIG:-$FLIO_WS/src/fast_lio/config/mid360_v2.yaml}
+CONFIG=${CONFIG:-mid360_v2.yaml}   # a file NAME under the installed share/fast_lio/config
 SUBTDATA=${SUBTDATA:-vlkjan6@subtdata.felk.cvut.cz}
 STAGE=${STAGE:-/mnt/personal/vlkjan6/regen_stage}
 BINDS="--bind /mnt/personal --bind /mnt/data --bind /tmp"
