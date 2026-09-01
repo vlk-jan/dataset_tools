@@ -237,8 +237,10 @@ per-scene script — `rsync` one bag from subtdata → `run_scene.sh` →
 `ROS_DOMAIN_ID` per slot. Wall: ~15 h of replay at rate 0.5 / 8 ≈ 2 h, plus
 913 GB of transfer pipelined (~2.5–8 h depending on link rate; the transfer
 is the bottleneck, so start it first and let scenes run as bags land).
-Because dropped scans were a laptop artefact, test `--rate 1.0` vs `0.5` on
-0018 here before committing to 0.5 — it halves the wall time if equal.
+Test `--rate 1.0` vs `0.5` on 0018 before committing to 0.5: what transfers
+between hosts is whether the divergence *flags land at the same bag
+timestamps* at both rates (data-driven failure) or move (timing-driven), not
+the wall-clock ratio.
 
 **Option B — RCI slurm array.** Compute nodes reach subtdata with the same key
 (verified on n04) and have apptainer 1.1.6. `cpufast` (4 h) suffices: longest
@@ -248,8 +250,27 @@ scene 47 min → 93 min at rate 0.5 plus a ≤ 70 GB fetch. Array of 43 tasks,
 scene, but the 21 cpufast nodes are shared and each task re-pays the transfer.
 Use it if dgx07 is saturated by training.
 
-Either way the artefacts are the same: sif, built `flio_ws` (fast_lio branch
-`v1-odometry-regen`, `livox_ros_driver2` for the message types), dataset_tools
+Build on the target host, inside the sif, from a fresh clone (never move the
+laptop's `install/` tree — its `--symlink-install` links already dangle):
+
+    source /opt/ros/jazzy/setup.bash
+    colcon build --packages-select fast_lio dataset_tools \
+        --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPython3_EXECUTABLE=/usr/bin/python3
+
+`livox_ros_driver2` / Livox-SDK2 are **not needed**: `fast_lio` only defines
+`USE_LIVOX` when the driver is found, and the PointCloud2 subscriber and the
+new stamped handler live outside that guard (compile-verified on the laptop).
+If it is ever wanted, pin `Ericsii/livox_ros_driver2` at `378d1c7` (branch
+`feature/use-standard-unit`) — the helhest-singularity repos file pins a
+*different* branch (`feature/merge-ros`) that may change the point format.
+`run_scene.sh <bag> <out> [config] [rate] [--restart]` is the per-scene
+contract: exit 0 = ≥ 1 pose, 1 = usage, 2 = not a rosbag2, 3 = launch failure
+(ours), 4 = zero poses (the scene's); last stdout line
+`RESULT scene= poses= segments= flags= wall_s= peak_rss_mb= rc=`, duplicated in
+`<out>/run_stats.txt`; ROS output in `<out>/run.log`.
+
+Either way the artefacts are the same: sif (laptop → `scp rci:` works by
+key), built `flio_ws` (fast_lio branch `v1-odometry-regen`), dataset_tools
 branch `odometry-regen-recorder`, `docs/scene_bags.csv` as the work list, and
 per scene `odometry.txt`, `odometry_imu_raw.txt`, `odometry_flags.txt`,
 `odometry_segments.txt`, plus the extractor outputs. Keep the per-scene logs;
