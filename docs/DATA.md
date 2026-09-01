@@ -260,13 +260,16 @@ level in `gravity_align`.
   `.npy` files directly (point budgets, range statistics, pretraining
   pipelines) must filter by range (> 0.5 m) first. The current extractor
   drops them.
-- **Odometry gaps are intentional.** FAST-LIO was run offline after the
-  recordings and stopped whenever it started to drift, so 11 scenes have no
-  `odometry.txt` (0001, 0007, 0014, 0015, 0019, 0021, 0026, 0027, 0033, 0034,
-  0037) and others are truncated (0002 and 0011 lose the last 21 and 27 min).
-  Where present, the odometry is drift-free enough for local trajectory use
-  but has no absolute reference; 0009 shows 15.7 m of vertical "relief" over a
-  137 m path on flat ground — treat its z as drift.
+- **Odometry is incomplete in 26 of 43 scenes.** FAST-LIO was run offline
+  after the fact and killed whenever it diverged, so `odometry.txt` is absent
+  in 11 scenes (0001, 0007, 0014, 0015, 0019, 0021, 0026, 0027, 0033, 0034,
+  0037) and ends before the scene does in 15 more — fraction of frames
+  covered: 0018 13 %, 0023 19 %, 0004 22 %, 0006 28 %, 0011 42 %, 0009 45 %,
+  0005 45 %, 0002 49 %, 0000 57 %, 0030 64 %, 0017 70 %, 0028 70 % (starts
+  47 s late), 0035 87 % (starts 207 s late), 0036 94 %, 0031 96 %. Within a
+  file there are further gaps of up to ~4 s. **Check the time range before
+  interpolating**: a nearest-neighbour lookup outside it silently returns the
+  first/last pose instead of failing. Regeneration plan: `ODOMETRY_REGEN.md`.
 - **Tip-overs are real and terminal.** 0022: the robot climbs a bank, tumbles
   and lies fully inverted (~170°) for the last 58 % of the scene (camera
   looking into the canopy). 0025: rolls onto its side (~84°) for the last

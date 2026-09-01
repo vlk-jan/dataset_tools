@@ -17,10 +17,16 @@ offset online in every run. Level 2 re-runs the odometry from the raw bags and
 is the only way to get:
 
 1. an exact `base_link` trajectory (fixed extrinsics, no per-run drift);
-2. ground truth for the **11 scenes that have none** — 0001, 0007, 0014, 0015,
-   0019, 0021, 0026, 0027, 0033, 0034, 0037 (FAST-LIO was killed on drift
-   during the original runs; 0033/0034/0037 are mostly stationary, 0021 has a
-   tip-over — some may be unrecoverable and should then be marked as such);
+2. ground truth for the scenes that lack it. **Only ~17 of 43 scenes are fully
+   covered.** 11 have no `odometry.txt` (0001, 0007, 0014, 0015, 0019, 0021,
+   0026, 0027, 0033, 0034, 0037 — 0001's is a bookkeeping loss: its file was
+   moved to 0002 by hand), and in 15 more FAST-LIO was killed on drift before
+   the scene ended, so the file covers only part of it (fraction of frames):
+   0018 13 %, 0023 19 %, 0004 22 %, 0006 28 %, 0011 42 %, 0009 45 %, 0005 45 %,
+   0002 49 %, 0000 57 %, 0030 64 %, 0017 70 %, 0028 70 % (starts 47 s late),
+   0035 87 % (starts 207 s late), 0036 94 %, 0031 96 %. 0033/0034/0037 are
+   mostly stationary and 0021 has a tip-over — some may be unrecoverable and
+   should then be marked as such;
 3. the camera distortion coefficients (v1 kept only `K`; `extract_data.py` now
    writes `camera_info.yaml` with `D`, `R`, `P` as well);
 4. a recorded, reproducible pipeline instead of a USB-drive working copy.
@@ -43,53 +49,61 @@ deleted after extraction) — do not rely on it.
 
 Tooling, all on the laptop:
 
-- `~/Documents/setprop/flio_ws/src/fast_lio` — `vlk-jan/FAST_LIO_ROS2` at
-  `e6cbec2`, config `config/mid360.yaml` (`lid_topic: /livox/lidar_both_filtered`,
-  `imu_topic: /livox/imu_front`, `extrinsic_est_en: true`,
-  `extrinsic_T: [-0.011, -0.02329, 0.04412]`, `extrinsic_R: I`).
+- `~/Documents/setprop/flio_ws/src/fast_lio` — `vlk-jan/FAST_LIO_ROS2`. **The
+  config in force during v1** (`git show e6cbec2^:config/mid360.yaml`, with the
+  topic names edited locally at the time): `lid_topic: /livox/lidar_front`,
+  `imu_topic: /livox/imu_front`, `lidar_type: 1` (Livox native),
+  `extrinsic_est_en: true`, `extrinsic_T: [-0.011, -0.02329, 0.04412]`,
+  `extrinsic_R: I`. The bags were replayed with
+  `ros2 bag play … --topics /livox/lidar_front /livox/imu_front` — FAST-LIO
+  consumed the raw front topics directly; there was **no body filter and no
+  merge step** in the v1 loop. HEAD (`e6cbec2`, 2026-04-21, a month after the
+  dataset) changed this to `/livox/lidar_both_filtered` and `lidar_type: 4`;
+  that config never produced any v1 file and must not be used for the re-run.
 - `flio_ws/src/dataset_tools` — second working copy with the uncommitted
   `--index 30` scene-offset patch; `launch/body_filter.launch.py` (two
   `pcl_ros::CropBox` nodes on `/livox/lidar_front` → `/livox/lidar_front_filtered`),
   `launch/odom_recorder.launch.py` + `dataset_tools/odom_node.py`
   (`OdomRecorder`: `/Odometry` → `trajectory.txt`, append mode, respawn).
+  `launch/body_filter.launch.py` was an experiment; nothing consumed its output.
 - `~/Work/helhest-singularity/helhest-jazzy.sif` (2026-02-18) — ROS Jazzy, the
   only image that can deserialize every v1 topic (`compass_interfaces`
   source under `/opt/helhest/src`). **Copy it aside before any rebuild**: the
   merged upstream def deletes that source dir and writes the same filename.
 
-## Unknowns to resolve first (laptop)
+## Environment (laptop, checked 2026-09-01)
 
-1. **What produced `/livox/lidar_both_filtered`?** The committed launch emits
-   `_front_filtered`; the config consumes `_both_filtered`. Look in the
-   flio_ws working copy (launch files, `git diff`, `git stash list`), shell
-   history, and the USB drive. Hypothesis: a merge of front + rear CropBox
-   outputs in the front-lidar frame (the rear Livox returned zero points in
-   every v1 bag, so the merge would be a no-op). Test: run FAST-LIO on
-   `_front_filtered` for scene 0013 and compare with the published
-   `odometry.txt` — relative-pose agreement at the noise level (< 2 cm, < 0.5°
-   over 10 s windows) means the merge step can be dropped.
-2. **Timestamp source**: `/Odometry` header = lidar scan-end time; keep it, it is
-   what `data_ts.txt` was matched against.
-3. **Where to run**: laptop natively (needs `subtdata` reachable and ~50 GB free
-   per bag, streamed one bag at a time) or RCI cpufast (needs `fast_lio` +
-   `livox_ros_driver2` built inside the sif; `flio_ws/install` is a native
-   build and will not run in the container as-is). Report disk/network
-   reality; the laptop-native route is the one that already worked.
-4. **Determinism**: rosbag2 replay is timing-dependent. Fix `--rate` (0.5 or
-   lower), `--clock`, and log dropped-message counts; run scene 0013 twice and
-   report the relative-pose difference between the two runs as the
-   reproducibility floor.
+- **No merge step to reconstruct** (see Tooling); the fallback test is moot.
+- `/Odometry` header = lidar scan-end time; keep it, it is what `data_ts.txt`
+  was matched against.
+- **Run inside the sif** (`~/Work/helhest-singularity/helhest-jazzy.sif`;
+  backup `helhest-jazzy-2026-02-18.sif` is byte-identical). The host has no
+  ROS. `flio_ws` was built in the container, but its `install/` symlinks dangle
+  after the `src/FAST_LIO → src/fast_lio` rename — a `colcon build` inside the
+  sif is required before any run.
+- subtdata: use the FQDN `subtdata.felk.cvut.cz` (bare `subtdata` does not
+  resolve from the laptop); key-based ssh works; 1.1 TB free there. Laptop has
+  ~390 GB free → fetch one bag, process, delete, next.
+- Wall time: 7.5 h of scene time at `--rate 1.0`, 15 h at `0.5`, plus fetch.
+  Longest scenes 0011 (47 min), 0002 (41), 0019 (34), 0035 (26).
+- **Determinism**: rosbag2 replay is timing-dependent. Fix `--rate` (0.5
+  recommended), `--clock`, and log dropped-message counts; run scene 0013
+  twice and report the relative-pose difference as the reproducibility floor.
+- **Bag names are local time (CEST), `data_ts.txt` is UTC** — 2 h apart. Match
+  by `docs/scene_bags.csv`, not by eye.
 
 ## Changes to make before running
 
-FAST-LIO fork (`config/mid360.yaml`, `src/laserMapping.cpp`):
+FAST-LIO fork (`config/mid360.yaml`, `src/laserMapping.cpp`) — done on the
+laptop branch `v1-odometry-regen` (0dcaceb), not pushed:
 
 - `extrinsic_est_en: false`; keep `extrinsic_T/R` at the Mid-360 datasheet
   values above.
-- Publish an honest frame: either (a) leave `/Odometry` as the IMU pose but set
-  `child_frame_id = "livox_front_imu"` and let the recorder do the transform,
-  or (b) compose in the node. Option (a) is preferred — one formula, in
-  Python, unit-testable, identical to level 1:
+- Publish an honest frame: leave `/Odometry` as the IMU pose but label it
+  `livox_front_imu` (all three hard-coded `base_link` labels in
+  `laserMapping.cpp`: body cloud, odometry child, TF broadcast) and let the
+  recorder do the transform — one formula, in Python, unit-testable,
+  identical to level 1:
 
   ```
   X  = T^base_lidar : R = diag(1,-1,-1), t = (0.17, 0, 0.145)
@@ -110,7 +124,8 @@ FAST-LIO fork (`config/mid360.yaml`, `src/laserMapping.cpp`):
 - `gravity_align.npy` needs no change: it is roll/pitch of `/ekf/imu/data`,
   whose frame `imu` is `base_link` (identity static TF) — i.e. it is already in
   the frame the regenerated odometry will be in.
-- Recorder (`odom_node.py`): open the file once with truncation (not append per
+- Recorder (`odom_node.py`) — done on dataset_tools branch
+  `odometry-regen-recorder` (2480429), not pushed: open the file once with truncation (not append per
   message), refuse to start if the output exists, write sorted, and keep the
   header/format byte-compatible:
   `# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1`,
