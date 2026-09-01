@@ -746,9 +746,36 @@ def save_intrinsics(reader, conns, cam_topic: str, scene_dir: Path) -> bool:
     for _, _, raw in reader.messages([conn]):
         msg = reader.deserialize(raw, conn.msgtype)
         np.savetxt(scene_dir / "camera_intrinsics.txt", np.array(msg.k).reshape(3, 3))
+        # The full CameraInfo: v1 scenes kept only K and lost the distortion
+        # coefficients, so anything that needs undistortion has to go back to the
+        # bags. Write everything, in ROS camera_info_manager YAML layout.
+        write_camera_info_yaml(msg, scene_dir / "camera_info.yaml")
         return True
     LOG.warning("camera_info topic %s carries no messages", conn.topic)
     return False
+
+
+def write_camera_info_yaml(msg, path: Path) -> None:
+    """Dump a sensor_msgs/CameraInfo as camera_info_manager-style YAML (no yaml dep)."""
+
+    def mat(name, rows, cols, data):
+        vals = ", ".join(f"{float(v):.10g}" for v in data)
+        return f"{name}:\n  rows: {rows}\n  cols: {cols}\n  data: [{vals}]\n"
+
+    d = list(msg.d)
+    text = (
+        f"image_width: {int(msg.width)}\n"
+        f"image_height: {int(msg.height)}\n"
+        f"frame_id: {msg.header.frame_id}\n"
+        f"camera_name: {msg.header.frame_id}\n"
+        f"distortion_model: {msg.distortion_model}\n"
+        + mat("camera_matrix", 3, 3, msg.k)
+        + mat("distortion_coefficients", 1, len(d), d)
+        + mat("rectification_matrix", 3, 3, msg.r)
+        + mat("projection_matrix", 3, 4, msg.p)
+        + f"binning_x: {int(msg.binning_x)}\nbinning_y: {int(msg.binning_y)}\n"
+    )
+    path.write_text(text)
 
 
 # ---------------------------------------------------------------------------
