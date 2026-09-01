@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from dataset_tools.extract_data import PC2_DTYPES, cloud_to_xyzi, fields_to_dtype
+from dataset_tools.extract_data import (
+    PC2_DTYPES,
+    cloud_to_xyzi,
+    drop_invalid_returns,
+    fields_to_dtype,
+)
 
 FLOAT32 = 7
 UINT16 = 4
@@ -125,3 +130,57 @@ def test_cloud_to_xyzi_organized_cloud_uses_width_times_height():
     msg = make_msg(points)
     msg.width, msg.height = 4, 3
     assert cloud_to_xyzi(msg).shape == (12, 4)
+
+
+# ---------------------------------------------------------------------------
+# drop_invalid_returns: the guard that keeps the HELHEST v1 origin-delta bug
+# from being reproduced on the Odin1 rig. See the function's docstring.
+# ---------------------------------------------------------------------------
+def test_drop_invalid_returns_drops_nan_rows():
+    pts = np.array(
+        [[1.0, 2.0, 3.0, 9.0], [np.nan, 2.0, 3.0, 9.0], [4.0, 5.0, 6.0, 9.0]],
+        dtype=np.float32,
+    )
+    kept = drop_invalid_returns(pts)
+    assert kept.shape == (2, 4)
+    assert np.array_equal(kept[:, 0], [1.0, 4.0])
+
+
+def test_drop_invalid_returns_drops_exact_origin():
+    pts = np.array(
+        [[1.0, 2.0, 3.0, 9.0], [0.0, 0.0, 0.0, 0.0], [4.0, 5.0, 6.0, 9.0]],
+        dtype=np.float32,
+    )
+    kept = drop_invalid_returns(pts)
+    assert kept.shape == (2, 4)
+    assert not np.any(np.all(kept[:, :3] == 0, axis=1))
+
+
+def test_drop_invalid_returns_ignores_intensity_when_deciding():
+    """A dropped shot carrying a non-zero intensity is still a dropped shot."""
+    pts = np.array([[0.0, 0.0, 0.0, 42.0], [1.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+    kept = drop_invalid_returns(pts)
+    assert kept.shape == (1, 4)
+    assert kept[0, 0] == 1.0
+
+
+def test_drop_invalid_returns_keeps_points_near_but_not_at_origin():
+    """Exact zeros only -- range gating belongs to the consumer, not here."""
+    pts = np.array([[0.0, 0.0, 1e-6, 1.0], [0.0, 1e-7, 0.0, 1.0]], dtype=np.float32)
+    assert drop_invalid_returns(pts).shape == (2, 4)
+
+
+def test_drop_invalid_returns_preserves_order_and_columns():
+    pts = np.array(
+        [[3.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 2.0]],
+        dtype=np.float32,
+    )
+    kept = drop_invalid_returns(pts)
+    assert np.array_equal(kept[:, 0], [3.0, 1.0])
+    assert np.array_equal(kept[:, 3], [1.0, 2.0])
+
+
+def test_drop_invalid_returns_on_an_all_invalid_sweep():
+    pts = np.array([[0.0, 0.0, 0.0, 0.0], [np.nan, np.nan, np.nan, 0.0]], dtype=np.float32)
+    kept = drop_invalid_returns(pts)
+    assert kept.shape == (0, 4)

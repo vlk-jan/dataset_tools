@@ -141,6 +141,31 @@ def cloud_to_xyzi(msg) -> np.ndarray:
     )
 
 
+def drop_invalid_returns(xyzi: np.ndarray) -> np.ndarray:
+    """Drop the two things a sensor emits for a shot that returned nothing.
+
+    An organised cloud ships every element every sweep (Odin1: 256x192 = 49152,
+    constant), so a missed shot has to be encoded rather than omitted. Both
+    encodings occur in the same bag: NaN, and exactly (0, 0, 0).
+
+    This MUST run before the cloud is transformed into base_link. Afterwards
+    the zeros are no longer at the origin -- they land on the mount
+    translation, where they stop looking like a sentinel and start looking
+    like a dense real object a few centimetres from the sensor. That is what
+    happened to HELHEST v1: 54-70% of every published cloud is one coordinate
+    repeated ten to fourteen thousand times, at (-0.170, 0, 0.145).
+
+    Measured on the 2026-08-21 Odin1 bags, per sweep: 49152 elements, 11.2%
+    NaN, then 47.1% of the remainder dropped shots, leaving ~23k real returns.
+
+    Exact zeros only. A point at (0, 0, 1e-6) is a real return from something
+    against the sensor and is kept -- range gating is the consumer's decision,
+    not this function's.
+    """
+    xyzi = xyzi[~np.isnan(xyzi).any(axis=1)]
+    return xyzi[np.any(xyzi[:, :3] != 0, axis=1)]
+
+
 # ---------------------------------------------------------------------------
 # TF helpers
 # ---------------------------------------------------------------------------
@@ -649,10 +674,8 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
         elif conn.topic == lidar_topic and t in pcd_set:
             pcd_idx = pcd_ts_to_idx[t]  # Get correct chronological index
-            xyzi = cloud_to_xyzi(msg)
-            xyzi = xyzi[~np.isnan(xyzi).any(axis=1)]
-            # Drop all-zero points (unreturned rays in organized clouds)
-            xyzi = xyzi[np.any(xyzi[:, :3] != 0, axis=1)]
+            # Before T_lidar_to_base, never after -- see drop_invalid_returns.
+            xyzi = drop_invalid_returns(cloud_to_xyzi(msg))
             pcd = np.hstack((xyzi[:, :3], np.ones((len(xyzi), 1), dtype=np.float32)))
             pcd = (pcd @ T_lidar_to_base.T.astype(np.float32))[:, :3]
             np.save(
