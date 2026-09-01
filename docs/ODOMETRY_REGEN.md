@@ -140,14 +140,83 @@ Extraction (`dataset_tools`, already done on `main`):
   `camera_info.yaml`, `odometry.txt` from one pass). Zero-returns: filter
   `range == 0` points at extraction (they are 53–70 % of each frame).
 
+## Why FAST-LIO diverged, and how to keep more of each scene
+
+The v1 runs were killed at the first divergence, so one bad stretch cost the
+whole remaining scene (0011 lost 27 min). Coverage correlates *positively*
+with terrain roughness (r ≈ +0.57 over the 15 truncated scenes): FAST-LIO
+failed on flat, featureless ground, not on hard ground. That is geometric
+degeneracy — a ground plane constrains z/roll/pitch only — and the mount
+maximises it: the Mid-360's −7°…+52° vertical FOV, upside-down at 0.145 m,
+sees the ground out to the horizon plus 7° above it, with the rear blocked by
+the body. Open ground with no vertical structure near the horizon gives
+nothing to register against; trees, ruts and vegetation do. Two process
+factors made it worse: real-time replay (dropped scans during turns) and the
+single-run-per-scene policy.
+
+Levers, in order of payoff per effort:
+
+1. **Segment-wise restarts.** DRIFT needs relative motion over 1–2 s windows,
+   not a globally consistent trajectory. Detect divergence (see below),
+   re-initialise FAST-LIO at that time, and write `odometry.txt` as healthy
+   segments with gaps. Coverage becomes "all but the degenerate seconds"
+   instead of "everything before the first failure". The recorder tolerates
+   gaps and the DRIFT loader already skips uncovered windows.
+   Divergence detector (in the recorder, all from the bag): flag when the
+   FAST-LIO speed differs from the live `/odom` speed by > 0.5 m/s for > 1 s,
+   or yaw rate differs by > 0.5 rad/s, or the pose jumps > 0.5 m between
+   consecutive scans, or FAST-LIO's own state covariance / ESKF iteration
+   count blows up. Record the flag stream; do not silently drop.
+2. **Replay slowly, tune for a sparse downward lidar.** `--rate 0.5 --clock`,
+   `point_filter_num: 1` (only 4–7 k real returns per scan; the default 3
+   leaves ~1.5 k), `filter_size_surf: 0.3`, `filter_size_map: 0.5`,
+   `blind: 0.5` (also removes the zero-return blob), `max_iteration: 5`,
+   `extrinsic_est_en: false`. Verify the deskew path on the Livox
+   `PointCloud2` (`timestamp` field: absolute ns vs per-scan offset,
+   `timestamp_unit`) — wrong deskew shows up as divergence on turns.
+3. **Wheel-odometry prior for flat ground: Kinematic-ICP** (KISS-ICP group;
+   ICP with a wheel-odometry motion model and a ground-robot constraint).
+   Targets exactly the flat-open-ground failure; `/odom` and `/joint_states`
+   are in every bag. Evaluate on the three worst scenes (0018, 0004, 0011) if
+   levers 1–2 do not recover them.
+4. **Fallback for residual gaps:** the live `/odom` (already in
+   `transforms.npy`), written flagged as such and never used as ground truth
+   for slip/traction — wheel odometry as GT is circular there.
+5. Not levers: Point-LIO (helps aggressive motion such as the 0021 tip-over,
+   not degeneracy); reverse-time replay. Stationary scenes (0033, 0034, 0037)
+   need no LIO — a near-identity trajectory is the correct GT.
+
+## Dry run (revised)
+
+Scenes: **0018** (worst truncated, 13 % covered; 12 min) and **0013** (fully
+covered, 0.7 min; the regression reference). Order: 0013 first (fast, proves
+the pipeline), then 0018.
+
+1. `colcon build` in the sif; fetch the two bags from
+   `subtdata.felk.cvut.cz` (`docs/scene_bags.csv`, bag names are CEST).
+2. Run A — v1 recipe on 0013 (`extrinsic_est_en: true`, default filters,
+   `--rate 1.0`): confirm the regenerated raw IMU pose matches the published
+   `odometry.txt` (relative-pose error over 10 s windows) — that pins the
+   frame provenance beyond doubt.
+3. Run B — tuned recipe (lever 2) on 0013, twice: reproducibility floor.
+4. Run C — tuned recipe on 0018 with the divergence detector logging but NOT
+   restarting: where and how does it fail (timestamp of first flag, which
+   test fired, what the terrain looks like in the image at that time)?
+5. Run D — tuned recipe + segment restarts on 0018: coverage achieved
+   (fraction of `data_ts.txt` frames inside some segment) vs the 13 % of v1;
+   per-segment length histogram.
+6. Report: coverage for 0018 under C and D, the failure signature, the
+   0013 reproducibility floor and the level-1-vs-level-2 relative-pose error;
+   then a recommendation on whether Kinematic-ICP (lever 3) is needed.
+
 ## Per-scene run
 
 For each row of `docs/scene_bags.csv`:
 
 1. fetch the bag from subtdata (`rsync`, one at a time);
-2. `ros2 bag play --rate R --clock` + body filter + FAST-LIO + recorder inside
-   the sif; watch for the divergence that killed the original runs, and log
-   where it starts if it happens;
+2. `ros2 bag play --rate 0.5 --clock --topics /livox/lidar_front /livox/imu_front /odom`
+   + FAST-LIO (tuned) + recorder with segment restarts inside the sif; keep
+   the divergence-flag stream per scene;
 3. `extract_data.py` for clouds/images/`camera_info.yaml`/`transforms.npy`
    (`--start_index` gives the scene number; `--frame_fix` is NOT needed — the
    new odometry is already `base_link`);
