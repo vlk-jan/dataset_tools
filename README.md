@@ -24,7 +24,7 @@ topics. Everything else about the extraction is identical.
 | --- | --- | --- |
 | Lidar | Livox front lidar, `/livox/lidar_front` (`sensor_msgs/PointCloud2`) | Odin1, `/odin1/cloud_filtered/cloudini` (`point_cloud_interfaces/CompressedPointCloud2`) |
 | Camera | Luxonis OAK-D PoE, `/luxonis/oak/rgb/image_raw/compressed` | Odin1 camera, `/odin1/image/compressed` |
-| Odometry | `/odom` (Point-LIO) | `/fixposition/odometry_enu` (Fixposition GNSS/INS) |
+| Odometry | `/odom` (live robot odometry; the published GT was FAST-LIO run offline) | `/fixposition/odometry_enu` (Fixposition GNSS/INS) |
 | Orientation (gravity) | `/ekf/imu/data` | `/fixposition/odometry_enu` |
 | Proprioception | `/joint_states`, `/cmd_vel` | `/joint_states`, `/joint_setpoints`, `/cmd_vel` |
 
