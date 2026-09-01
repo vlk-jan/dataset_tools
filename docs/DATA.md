@@ -270,6 +270,14 @@ level in `gravity_align`.
   file there are further gaps of up to ~4 s. **Check the time range before
   interpolating**: a nearest-neighbour lookup outside it silently returns the
   first/last pose instead of failing. Regeneration plan: `ODOMETRY_REGEN.md`.
+  Sampling consequence: any result that needs ground truth is dominated by the
+  well-covered scenes (e.g. 0020 yields ~20× the 2 s windows of 0018), and
+  coverage correlates *positively* with terrain roughness (r ≈ +0.57 over the
+  15 partially covered scenes, p ≈ 0.03; median height-map row-to-row step
+  0.0027 m fully covered vs 0.0023 m partial) — LiDAR-inertial odometry fails
+  in featureless open ground, not on rough ground. Treat as suggestive; it
+  means flat, low-signal terrain is under-represented wherever `odometry.txt`
+  gates the sample.
 - **Tip-overs are real and terminal.** 0022: the robot climbs a bank, tumbles
   and lies fully inverted (~170°) for the last 58 % of the scene (camera
   looking into the canopy). 0025: rolls onto its side (~84°) for the last
