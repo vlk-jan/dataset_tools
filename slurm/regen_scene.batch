@@ -85,7 +85,99 @@ singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene
 
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene"
 mkdir -p "$OUT"
+#!/bin/bash
+#SBATCH --job-name=helhest_regen
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=8:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/regen_%A_%a.out
+#
+# HELHEST v1 odometry regeneration + re-extraction, ONE SCENE PER ARRAY TASK,
+# staged entirely on node-local NVMe so the shared NFS is touched only for the
+# sif, the workspace, and one final rsync of the finished scene. Rationale: a
+# run staged on /mnt/personal (dgx07, 2026-09-01) saturated that NFS export
+# and starved DRIFT's dataloader (many small random reads lose to bulk
+# transfer) - training slowed 3-4x. This is the cluster twin of
+# scripts/dgx07_regen.sh (same steps, same outputs) and the template for
+# extracting future recordings (new rig: skip the odometry part, swap the
+# extract_data topics).
+#
+#   sbatch --array=0-42%6 slurm/regen_scene.batch [out_root]
+#
+# Array index = row number in docs/scene_bags.csv (0-based). %6 limits
+# concurrent fetches - subtdata sustains ~50 MB/s aggregate; more jobs starve
+# each other. A scene whose <out_root>/<scene>/done exists exits immediately,
+# so re-submitting resumes. Works on cpu* (Xeon, 1.8-7 TB NVMe at /data) and
+# amd*/amdfast (EPYC, 7 TB NVMe at /data); both reach subtdata by key.
+set -uo pipefail
+
+OUT=${1:-/mnt/personal/vlkjan6/HELHEST_v1_2}
+CSV=/home/vlkjan6/projects/dataset_tools/docs/scene_bags.csv
+SIF=/mnt/personal/vlkjan6/sif/helhest-jazzy-2026-02-18.sif
+EXTRACT_SIF=/mnt/data/vras/data/helhest-jazzy.sif
+FLIO_WS=/home/vlkjan6/flio_ws
+REGEN_REPO=$FLIO_WS/src/dataset_tools_regen
+REPO=/home/vlkjan6/projects/dataset_tools
+CONFIG=mid360_v2.yaml
+RATE=1.0
+SUBTDATA=vlkjan6@subtdata.felk.cvut.cz
+PY="$REPO/.venv/bin/python"
+
+row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
+scene=${row%%,*}
+bagdir=$(echo "$row" | cut -d, -f2)
+[ -n "$scene" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+[ -e "$OUT/$scene/source_bag.txt" ] && [ -e "$OUT/$scene/regen/run_stats.txt" ] && { echo "$scene already complete"; exit 0; }
+
+# Node-local scratch: /data (NVMe) preferred, /tmp fallback.
+SCRATCH=""
+for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
+    mkdir -p "$c/regen_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/regen_${SLURM_JOB_ID}" && break
+done
+[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
+trap 'rm -rf "$SCRATCH"' EXIT
+stage="$SCRATCH/stage"; local_out="$SCRATCH/out"; regen="$local_out/$scene/regen"
+mkdir -p "$stage" "$regen"
+bag="$stage/$(basename "$bagdir")"
+BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
+
+echo "[$(date '+%F %T')] $scene fetch $bagdir -> $SCRATCH"
+rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$scene: fetch failed"; exit 10; }
+
+echo "[$(date '+%F %T')] $scene odometry"
+ROS_DOMAIN_ID=$((100 + 10#$scene)) ROS_LOCALHOST_ONLY=1 \
+singularity exec --pwd "$regen" $BINDS "$SIF" bash -c "
+    source /opt/ros/jazzy/setup.bash && source '$FLIO_WS/install/setup.bash' &&
+    '$REGEN_REPO/scripts/run_scene.sh' '$bag' '$regen' '$CONFIG' '$RATE' --restart"
+rc=$?
+echo "[$(date '+%F %T')] $scene run_scene rc=$rc"
+
+singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REGEN_REPO/scripts/extract_odom_ref.py" "$bag" "$regen/odom_ref.txt" || echo "$scene: odom_ref failed"
+singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REGEN_REPO/scripts/extract_wheels.py" "$bag" "$regen/wheels.txt" || echo "$scene: wheels failed"
+
+if [ $rc -eq 0 ] && [ -s "$regen/odometry.txt" ] && [ -s "$regen/odom_ref.txt" ]; then
+    singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/scripts/filter_segments.py" "$regen" "$regen/odom_ref.txt" "$local_out/$scene" || echo "$scene: filter failed"
+fi
+
+echo "[$(date '+%F %T')] $scene extract"
+singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/extract_data.py" "$stage" "$local_out" \
+    --start_index "$((10#$scene))" --jobs "$SLURM_CPUS_PER_TASK" --overwrite \
+    --cam /luxonis/oak/rgb/image_raw/compressed --lidar /livox/lidar_front --odom /odom --imu /ekf/imu/data \
+    || echo "$scene: extraction failed"
+singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene.py" "$local_out/$scene" --csv "$regen/validation.csv" \
+    || echo "$scene: validation reported problems"
+
+echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene"
+mkdir -p "$OUT"
 mv "$regen/odometry.txt" "$regen/odometry_prefilter.txt" 2>/dev/null
+mv "$regen/odometry_segments.txt" "$regen/odometry_segments_prefilter.txt" 2>/dev/null
+rsync -a "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 11; }
+echo "[$(date '+%F %T')] $scene finished rc=$rc"
+exit $rc
+
 rsync -a "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 11; }
 echo "[$(date '+%F %T')] $scene finished rc=$rc"
 exit $rc

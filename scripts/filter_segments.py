@@ -83,7 +83,10 @@ def main():
     if not src.exists():
         src = regen / "odometry.txt"
     t, T = load_traj(src)
-    segs = load_segments(regen / "odometry_segments.txt") if (regen / "odometry_segments.txt").exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
+    segp = regen / "odometry_segments.txt"
+    if not segp.exists():
+        segp = regen / "odometry_segments_prefilter.txt"
+    segs = load_segments(segp) if segp.exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
     rt, rT = load_traj(a.odom_ref)
 
     kept_rows, kept_segs = [], []

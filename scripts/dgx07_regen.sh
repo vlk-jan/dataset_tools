@@ -90,6 +90,7 @@ run_one() {
         || echo "$scene: validation reported problems"
 
     mv "$regen/odometry.txt" "$regen/odometry_prefilter.txt" 2>/dev/null
+    mv "$regen/odometry_segments.txt" "$regen/odometry_segments_prefilter.txt" 2>/dev/null
     rm -rf "$stage"
     echo "[$(date '+%F %T')] $scene finished rc=$rc"
     echo "$(date '+%F %T') $scene rc=$rc" >> "$OUT/logs/joblog.txt"

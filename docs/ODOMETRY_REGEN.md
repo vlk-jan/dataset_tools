@@ -392,9 +392,15 @@ continuous files pay no such exclusion. The sensitivity check scores v1 on
 exactly v1.2's scorable footprint (pooled windows): v1 everywhere
 0.068 / 0.304 m (median / p95, 0.60 % > 1 m); v1 on the common footprint
 0.064 / 0.286 m (0.31 %); v1 inside the excluded zones only 0.083 / 0.430 m
-(2.0 %); v1.2 pooled 0.051 / 0.209 m (0.00 %). So the exclusion is real and
-flatters v1.2 slightly, but on identical ground v1.2 still improves the
-median by ~20 % and p95 by ~27 %, and the coverage gains are unaffected.
+(2.0 %); v1.2 pooled 0.051 / 0.209 m (0.00 %). The strictest test scores
+both roots on the SAME 88,893 windows (identical start and end times):
+v1 0.064 / 0.280 m (0.23 % > 1 m) vs v1.2 0.055 / 0.215 m (0.00 %) —
+median −14 %, p95 −23 %; per-scene paired, v1.2 is better in 28 of 32
+scenes with the four exceptions within 3 mm. So the seam-tail exclusion is
+real, is stated, and does not carry the improvement; the coverage gains are
+unaffected. (`regen/odometry_segments_prefilter.txt` was renamed from
+`odometry_segments.txt` so only the scene-level, post-filter segment table
+carries that basename.)
 
 Honest residual: nine scenes are less covered than v1 because segment
 restarts + the /odom filter discard stretches a single uninterrupted v1 run
