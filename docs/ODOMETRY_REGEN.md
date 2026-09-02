@@ -470,7 +470,7 @@ Where both roots tracked, v1.2 wins (paired: 28/32 scenes, exceptions
 the v1.1 trajectory passed through the identical post-hoc gate (2 s windows
 vs `/odom`, > 1 m dropped, >= 20-pose runs, re-anchored). Result, baked into
 the v1.2 root with per-segment provenance (`reason = v11_fill`):
-+24.6 min of GT in 245 fill segments across 26 scenes at v1.2-grade quality
++24.6 min of GT in 211 fill segments across 26 scenes at v1.2-grade quality
 (fill windows: median 0.078 m, p95 0.255, all <= 1 m by the gate).
 **Merged frame-weighted coverage 0.877** (v1 0.586, v1.2 alone 0.802);
 35 scenes above 80 %. The nine regression scenes recover (0038 0.42 -> 0.99,
