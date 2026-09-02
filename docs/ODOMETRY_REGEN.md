@@ -398,7 +398,11 @@ v1 0.064 / 0.280 m (0.23 % > 1 m) vs v1.2 0.055 / 0.215 m (0.00 %) —
 median −14 %, p95 −23 %; per-scene paired, v1.2 is better in 28 of 32
 scenes with the four exceptions within 3 mm. So the seam-tail exclusion is
 real, is stated, and does not carry the improvement; the coverage gains are
-unaffected. (`regen/odometry_segments_prefilter.txt` was renamed from
+unaffected. Read the paired row together with the coverage rows: pairing
+conditions on both roots having tracked, so it measures "where both tracked,
+v1.2 is better by ~14 %" — the stretches only v1.2 tracked (and the winter
+stretches neither kept) live in the coverage numbers, not here. Either row
+alone understates. (`regen/odometry_segments_prefilter.txt` was renamed from
 `odometry_segments.txt` so only the scene-level, post-filter segment table
 carries that basename.)
 
