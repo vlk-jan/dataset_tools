@@ -13,6 +13,7 @@ optional `odom_recorder` node needs `rclpy`.
 | `dataset_tools/extract_data.py` | `helhest-extract` | bags -> scene directories |
 | `dataset_tools/validate_scene.py` | `helhest-validate` | check extracted scenes |
 | `dataset_tools/sort_bag.py` | `helhest-sort-bag` | rewrite a bag sorted by header stamp |
+| `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
 | `dataset_tools/odom_node.py` | `ros2 run dataset_tools odom_recorder` | record odometry to a text trajectory |
 
 ## The two HELHEST sensor generations
@@ -208,6 +209,26 @@ The older dataset layout is supported: `odometry.txt`, `trajectory.txt`,
 `T_cam_to_lidar.txt`, `height_maps/`, `height_masks/` and `<scene>_full.npz`
 are reported as optional extras, and `float64` clouds are accepted.
 
+## Viewer
+
+```bash
+pip install "dataset_tools[viewer]"     # needs Python 3.12+ (a SimView requirement)
+helhest-viewer /path/to/dataset         # then open http://127.0.0.1:8080/
+```
+
+A web view of an extracted dataset root: an index of every scene and what each
+one actually contains, a per-scene inventory, and a 3D view of each odometry
+segment -- terrain from the height maps, the aggregated cloud, the robot's
+pose, the camera frame and the proprioception plots alongside.
+
+It is driven by the file structure rather than by a sensor generation, so a
+scene missing any optional file still opens, with the absent files marked
+rather than hidden. A view never spans an `odometry_segments.txt` boundary,
+because segments are each re-anchored to their own first pose. The dataset root
+is only read; built scenes are cached elsewhere.
+
+See [docs/VIEWER.md](docs/VIEWER.md).
+
 ## Slurm
 
 `slurm_extract.batch` is a working example (16 CPUs, 8 workers). The essential
@@ -234,8 +255,15 @@ No bags are needed; everything runs on synthetic data.
 
 Covered: nearest-neighbour synchronisation against a brute-force reference,
 `PointCloud2` field parsing, static-TF graph composition, rotation helper
-round-trips, bag discovery / scene selection / `scenes.csv` merging, and the
-scene validator.
+round-trips, bag discovery / scene selection / `scenes.csv` merging, the scene
+validator, and the viewer (probing, window enumeration, pose interpolation,
+rendering and every route, against synthetic scene directories).
+
+The viewer's tests need its extra; run them from the viewer's virtualenv:
+
+```bash
+.venv-viewer/bin/python -m pytest tests
+```
 
 ## Known caveats
 
