@@ -22,7 +22,7 @@ dataset file               how it appears
 ``joint_setpoints.npy``    commanded-wheel-velocity scalars
 ``cmd_vel.npy``            commanded twist scalars
 ``camera_intrinsics.txt``  scene metadata
-``T_cam_to_base.txt``      a small camera body at the real extrinsic
+``T_cam_to_base.txt``      camera-to-base extrinsic (scene metadata only)
 ``images/``                the side panel (served per frame, not in the scene)
 =========================  ==============================================
 """
@@ -39,23 +39,89 @@ import numpy as np
 from . import loaders as L
 from .probe import DatasetRoot, SceneProbe
 from .render import unit_colors
-from .windows import Window, windows_for_scene
+from .windows import (
+    Window,
+    parse_frame_window_key,
+    segment_of_frame,
+    single_frame_window,
+    windows_for_scene,
+)
 
 logger = logging.getLogger("dataset_tools.viewer.build")
 
-# Rough HELHEST proportions (a ~1 m, three-wheeled skid-steer). Exact numbers
-# are cosmetic -- they only set how the robot marker looks against the terrain.
-CHASSIS = dict(hx=0.36, hy=0.22, hz=0.11)
-CHASSIS_Z = 0.22
-WHEEL_RADIUS = 0.17
-WHEEL_WIDTH = 0.10
-#: name -> (x, y, z) wheel hub in the base frame, and the joint_states column.
+# HELHEST geometry from DRIFT's kinematic model (models/simulator.py,
+# RobotModelConfig): three wheels of radius 0.3685 m, centres at z=0 in the
+# base frame (base_link sits at axle height), front axles at x=+0.4,
+# y=+-0.52, rear centre wheel at x=-0.5.
+# and the chassis/wheel visuals match DRIFT's own SimView rendering
+# (simulator/utils.py add_helhest_visual_wheels + utils/plots.py): the chassis
+# box is centred ON base_link, wheel cylinders are turned +-90 deg about x
+# with the sign mirrored per side.
+CHASSIS = dict(hx=0.5, hy=0.3, hz=0.15)
+CHASSIS_Z = 0.0
+WHEEL_RADIUS = 0.3685
+WHEEL_WIDTH = 0.142
+#: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
 WHEELS = {
-    "wheel_left": (0.24, 0.29, WHEEL_RADIUS, 0),
-    "wheel_rear": (-0.42, 0.0, WHEEL_RADIUS, 1),
-    "wheel_right": (0.24, -0.29, WHEEL_RADIUS, 2),
+    "wheel_left": (0.4, 0.52, 0.0, 0, -1.0),
+    "wheel_rear": (-0.5, 0.0, 0.0, 1, -1.0),
+    "wheel_right": (0.4, -0.52, 0.0, 2, 1.0),
 }
 WHEEL_LABELS = ("left", "rear", "right")
+
+#: Bumped whenever :func:`build_scene`'s ``meta`` payload gains or changes a
+#: field the overlay reads.
+#:
+#: A built window is cached on disk under ``<scene>/<window>/<options>`` --
+#: keyed by what was *asked for*, which does not change when the code that
+#: answers changes. Without a version in the file itself, a viewer upgrade
+#: would go on serving yesterday's ``meta.json`` for every window anyone had
+#: already opened, and the new field would silently never appear.
+META_VERSION = 3
+
+#: What each terrain colour mode means, in the viewer's own terms.
+#:
+#: SimView turns every named terrain property into a "Color Mode" entry with no
+#: description anywhere -- the names are ours (see ``_finish_terrain`` and
+#: ``aggregate_clouds``), so the explanations have to be ours too. They travel
+#: in the scene metadata and are rendered by the overlay panel; a layer not
+#: listed here still gets a legend row, just without prose.
+TERRAIN_COLOR_MODE_HELP = {
+    "height": "Surface height in metres -- the terrain's own z. SimView's built-in mode.",
+    "coverage": (
+        "How many height-map cells were splatted into this terrain cell. "
+        "0 means nothing was ever observed here, so the surface is extended "
+        "from the trend around it rather than measured."
+    ),
+    "validity": (
+        "Best height-map validity that landed in the cell: 0 extrapolated, "
+        "1 interpolated (inside the hull, no return), 2 measured (a lidar "
+        "return). The same three states as the Validity tile."
+    ),
+    "cloud_points": (
+        "Number of aggregated raw lidar points that fell in the cell. Near "
+        "zero in the sensor's blind wedge and far off the driven path."
+    ),
+    "cloud_intensity": "Mean lidar return intensity of those points.",
+    "cloud_spread": (
+        "Vertical spread (max minus min z) of the lidar points in the cell: "
+        "near zero on flat ground, large on vegetation, trunks and walls."
+    ),
+}
+
+
+def terrain_color_modes(layer_names) -> list[dict]:
+    """The colour modes this window's terrain actually offers, described.
+
+    ``height`` always exists (it is SimView's built-in mode); every property we
+    attach becomes a mode of the same name. Ordered exactly as SimView's own
+    "Color Mode" dropdown lists them, so the overlay legend can be read
+    alongside it.
+    """
+    return [
+        {"name": name, "description": TERRAIN_COLOR_MODE_HELP.get(name, "")}
+        for name in ["height", *layer_names]
+    ]
 
 
 @dataclass
@@ -110,6 +176,15 @@ class SceneAccess:
         if key not in self._cache:
             self._cache[key] = fn()
         return self._cache[key]
+
+    def cached(self, key: str, fn):
+        """Memoise a derived value on this scene handle.
+
+        For summaries assembled from several of this scene's files (the scene
+        page's cards): they cost small reads on network storage, and paging
+        between the tabs of one scene must not pay for them twice.
+        """
+        return self._get(key, fn)
 
     def _optional(self, key: str, artefact: str, fn):
         """Load an optional artefact, returning None without complaining when
@@ -219,7 +294,15 @@ class SceneAccess:
         for w in self.windows(max_frames):
             if w.key == key:
                 return w
+        # One-frame windows are addressable but not enumerated (see
+        # ``single_frame_window``): a 20k-frame scene has 20k of them.
+        index = parse_frame_window_key(key)
+        if index is not None:
+            return single_frame_window(self.frame_ts, self.segments, self.probe.n_frames, index)
         return None
+
+    def segment_of_frame(self, index: int):
+        return segment_of_frame(self.frame_ts, self.segments, index)
 
 
 # --------------------------------------------------------------------------
@@ -252,6 +335,20 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
     and the drift accumulates visibly from there.
     """
     n = len(times)
+    if window.kind == "frame":
+        # A single frame is a static inspection with no motion, so its absolute
+        # position inside the (identity-anchored) segment carries no visual
+        # meaning -- and using it would place the robot, its terrain and its
+        # cloud wherever in the segment the frame happens to fall, often tens of
+        # metres from the origin and off the initial camera entirely (the black
+        # single-frame view). Anchor the robot at the origin, upright on its own
+        # gravity-aligned height map, so every single-frame view is centred on
+        # the robot. ``pose_source`` still records whether ground truth exists.
+        quats = np.zeros((n, 4))
+        quats[:, 0] = 1.0
+        valid = np.ones(n, dtype=bool) if window.pose_source == "odometry" else np.zeros(n, dtype=bool)
+        return PoseTrack(np.zeros((n, 3)), quats, valid, window.pose_source, "single frame, robot-centric")
+
     if window.pose_source == "odometry":
         odom = access.odometry
         if odom is None:
@@ -656,14 +753,21 @@ def build_scalars(
     dt = np.where(dt > 1e-6, dt, 1e-6)
 
     if gt.source != "none":
-        vel = np.gradient(gt.positions, axis=0) / dt[:, None]
-        scalars["speed"] = np.linalg.norm(vel[:, :2], axis=1)
+        # A one-frame window has no motion to differentiate: the derived
+        # channels are zero by construction rather than missing.
+        if len(times) > 1:
+            vel = np.gradient(gt.positions, axis=0) / dt[:, None]
+            scalars["speed"] = np.linalg.norm(vel[:, :2], axis=1)
+        else:
+            scalars["speed"] = np.zeros(len(times))
         scalars["pose_z"] = gt.positions[:, 2]
         yaw = np.arctan2(
             2 * (gt.quats[:, 0] * gt.quats[:, 3] + gt.quats[:, 1] * gt.quats[:, 2]),
             1 - 2 * (gt.quats[:, 2] ** 2 + gt.quats[:, 3] ** 2),
         )
-        scalars["yaw_rate"] = np.gradient(np.unwrap(yaw)) / dt
+        scalars["yaw_rate"] = (
+            np.gradient(np.unwrap(yaw)) / dt if len(times) > 1 else np.zeros(len(times))
+        )
         if not gt.valid.all():
             # Outside the pose source's own time span: mark rather than invent.
             for key in ("speed", "pose_z", "yaw_rate"):
@@ -791,6 +895,7 @@ def build_scene(
         "terrain_source": terrain_source,
         "terrain_resolution_m": grid.res,
         "terrain_cells": [grid.ny, grid.nx],
+        "terrain_color_modes": terrain_color_modes(layers.keys()),
         "height_maps": hm_stats,
         "clouds": cloud_stats,
         "frames": [int(frames[0]), int(frames[-1])],
@@ -820,22 +925,14 @@ def build_scene(
     scene.create_body("robot", BodyShapeType.BOX, **CHASSIS)
     # Cylinders point along +z locally (the viewer rotates the geometry), so a
     # wheel needs a -90 deg turn about x to put its axis along the body's y.
-    q_align = np.array([math.cos(-math.pi / 4), math.sin(-math.pi / 4), 0.0, 0.0])
     for name in WHEELS:
         scene.create_body(
             name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot"
         )
-    if access.T_cam is not None:
-        t_cam = np.asarray(access.T_cam)
-        scene.create_body(
-            "camera",
-            BodyShapeType.BOX,
-            hx=0.03, hy=0.05, hz=0.03,
-            parent="robot",
-            local_transform=[*t_cam[:3, 3].tolist(), *L.mat_to_quat(t_cam[:3, :3][None])[0].tolist()],
-        )
     if ghost is not None:
-        scene.create_body("wheel_odom_ghost", BodyShapeType.BOX, hx=0.36, hy=0.22, hz=0.11)
+        # A deliberately small, flat marker: it shows where wheel odometry thinks
+        # the robot is, without reading as a second robot.
+        scene.create_body("wheel_odom_ghost", BodyShapeType.BOX, hx=0.2, hy=0.12, hz=0.03)
     if cloud is not None and len(cloud):
         values = cloud[:, 2] if opts.cloud_color == "height" else cloud[:, 3]
         colors = unit_colors(values, cmap="turbo")
@@ -852,8 +949,10 @@ def build_scene(
     trajectories = [BodyTrajectory("robot", positions=chassis_pos, orientations=gt.quats)]
 
     angles = wheel_angles(access, abs_times)
-    for name, (wx, wy, wz, col) in WHEELS.items():
+    for name, (wx, wy, wz, col, sign) in WHEELS.items():
         offset = np.tile(np.array([wx, wy, wz - CHASSIS_Z], dtype=np.float64), (T, 1))
+        # +-90 deg about x (sign mirrored per side, as in DRIFT's helper).
+        q_align = np.array([math.cos(sign * math.pi / 4), math.sin(sign * math.pi / 4), 0.0, 0.0])
         if angles is not None:
             theta = np.nan_to_num(angles[:, col], nan=0.0)
             spin = np.stack(
@@ -870,10 +969,11 @@ def build_scene(
         trajectories.append(
             BodyTrajectory("wheel_odom_ghost", positions=ghost_pos, orientations=ghost.quats)
         )
-    if cloud is not None and len(cloud):
-        ident = np.zeros((T, 4))
-        ident[:, 0] = 1.0
-        trajectories.append(BodyTrajectory("lidar_cloud", positions=np.zeros((T, 3)), orientations=ident))
+    # `lidar_cloud` deliberately gets *no* trajectory. It is the window's clouds
+    # already accumulated in the world frame, so its transform is the identity
+    # at every frame -- a per-frame pose that says nothing, costs a blob, and
+    # (in SimView >= 4.3) is exactly what keeps a point-cloud body in the "Body
+    # states" list, which is not a list it belongs in.
 
     scene.add_trajectory(
         times=times,
@@ -883,6 +983,7 @@ def build_scene(
     scene.mark_episode(label=f"{window.label} ({gt.source})", start_index=0)
 
     meta = {
+        "meta_version": META_VERSION,
         "scene": scene_id,
         "window": window.to_json(),
         "frames": frames.tolist(),

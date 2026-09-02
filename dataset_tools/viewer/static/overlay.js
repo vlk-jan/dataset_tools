@@ -12,13 +12,21 @@
  *   1. `window.__simviewStaticBase` (set by the server-rendered page) points
  *      SimView's fetches at our own bundle endpoints.
  *   2. `window.__debugSimView` is the running SimView instance, whose
- *      `animationController.currentTime` is the playhead. We poll it; we never
- *      write to it.
+ *      `animationController.currentTime` is the playhead. We poll it, and write
+ *      to it exactly once: when the page was opened from a frame's own page
+ *      (`?frame=N`), so the window opens on that frame instead of at its start.
  *
  * SimView's entry module is withheld by the server until the window's bundle
  * has been built (see `_defer_main_script`), so this file loads it once the
  * data it will immediately fetch is actually there.
+ *
+ * Corrections to SimView's own UI -- the ones that need to reach into its
+ * objects rather than just its CSS -- live in `simview_patch.js`, which this
+ * module installs once SimView is up. See that file for what each one does
+ * and which of them are stopgaps for upstream bugs.
  */
+
+import { installSimviewPatches, waitForSimView } from "./simview_patch.js";
 
 const cfg = window.__dtViewer || {};
 
@@ -26,12 +34,17 @@ const els = {
   build: document.getElementById("dt-build"),
   buildMsg: document.querySelector("#dt-build .dt-build-msg"),
   panel: document.getElementById("dt-panel"),
-  collapse: document.getElementById("dt-collapse"),
-  expand: document.getElementById("dt-expand"),
+  edge: document.getElementById("dt-edge"),
+  view: document.getElementById("dt-view"),
+  cloudRow: document.getElementById("dt-cloud-row"),
+  cloud: document.getElementById("dt-cloud"),
+  ghostRow: document.getElementById("dt-ghost-row"),
+  ghost: document.getElementById("dt-ghost"),
+  legend: document.getElementById("dt-legend"),
+  legendList: document.getElementById("dt-legend-list"),
+  legendNow: document.getElementById("dt-legend-now"),
   frame: document.getElementById("dt-frame"),
-  time: document.getElementById("dt-time"),
   stamp: document.getElementById("dt-stamp"),
-  pose: document.getElementById("dt-pose"),
   buildInfo: document.getElementById("dt-buildinfo"),
   tiles: Array.from(document.querySelectorAll(".dt-tile")),
 };
@@ -40,6 +53,11 @@ let meta = null;
 let available = {};
 let lastFrame = -1;
 let lastUpdate = 0;
+/** The handles returned by installSimviewPatches, once SimView is up. */
+let patches = null;
+/** Legend rows by colour-mode name, for highlighting the active one. */
+const legendRows = new Map();
+let lastColorMode = null;
 
 /** Minimum ms between panel updates: playback runs far faster than the images
  *  can be fetched, and every frame is a separate HTTP request. */
@@ -97,27 +115,72 @@ function frameIndexForTime(t) {
   return t - times[lo] <= times[hi] - t ? lo : hi;
 }
 
-function setTile(tile, frame) {
-  const kind = tile.dataset.kind;
-  const wrap = tile.querySelector(".dt-imgwrap");
-  const img = tile.querySelector("img");
-  const list = available[kind];
+// Bandwidth-adaptive per-frame tiles. Each frame wants four images (camera,
+// height map, validity, cloud), one HTTP request each, server-rendered off
+// contended storage. Firing them on every frame floods a slow link: the browser
+// queues dozens of now-stale requests and the panel visibly lags playback,
+// only catching up when it pauses and the queue drains -- the "it jumps to the
+// current frame when I pause" report. Instead we keep at most ONE batch in
+// flight and, when it finishes, jump straight to the latest wanted frame:
+// intermediate frames are skipped, so the panel stays near-live on a fast link,
+// converges to the current frame on a slow one, and always lands exactly on the
+// frame you pause on. Frame numbers/timestamps still update every tick (below),
+// so the readout is live even while the images are a step behind.
+let tileWantFrame = null;
+let tileShownFrame = null;
+let tileInFlight = false;
 
-  // `available` comes from the build and lists, per kind, exactly which frames
-  // have a file. A kind missing from it entirely (this scene has no height
-  // maps at all) has no list; a kind that has one may still be missing this
-  // particular frame, because those directories are built in flight. Either
-  // way there is nothing to request -- asking anyway would 404 per frame.
-  if (!list || !list.has(frame)) {
-    wrap.classList.add("absent");
-    img.classList.add("hidden");
-    img.removeAttribute("src");
+function applyTiles(frame) {
+  const pending = [];
+  for (const tile of els.tiles) {
+    const kind = tile.dataset.kind;
+    const wrap = tile.querySelector(".dt-imgwrap");
+    const img = tile.querySelector("img");
+    const list = available[kind];
+    // `available` lists, per kind, exactly which frames have a file: a kind
+    // missing entirely (no height maps in this scene) has no list; one that has
+    // a list may still lack this frame (directories built in flight). Either
+    // way there is nothing to fetch -- a request would 404 per frame.
+    if (!list || !list.has(frame)) {
+      wrap.classList.add("absent");
+      img.classList.add("hidden");
+      img.removeAttribute("src");
+      continue;
+    }
+    img.classList.remove("hidden");
+    wrap.classList.remove("absent");
+    pending.push({ img, url: `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}` });
+  }
+  if (pending.length === 0) {
+    tileShownFrame = frame;
+    tileInFlight = false;
+    pumpTiles();
     return;
   }
-  const url = `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}`;
-  img.classList.remove("hidden");
-  wrap.classList.remove("absent");
-  img.src = url;
+  let remaining = pending.length;
+  const done = () => {
+    remaining -= 1;
+    if (remaining > 0) return;
+    tileShownFrame = frame;
+    tileInFlight = false;
+    pumpTiles(); // a newer frame may have been wanted while this batch loaded
+  };
+  for (const { img, url } of pending) {
+    img.onload = () => { img.onload = img.onerror = null; done(); };
+    img.onerror = () => { img.onload = img.onerror = null; done(); };
+    img.src = url;
+  }
+}
+
+function pumpTiles() {
+  if (tileInFlight || tileWantFrame === null || tileWantFrame === tileShownFrame) return;
+  tileInFlight = true;
+  applyTiles(tileWantFrame);
+}
+
+function requestTiles(frame) {
+  tileWantFrame = frame;
+  pumpTiles();
 }
 
 function update(force) {
@@ -134,57 +197,146 @@ function update(force) {
 
   const frame = meta.frames[index];
   els.frame.textContent = frame;
-  els.time.textContent = `${(meta.times[index] || 0).toFixed(2)} s`;
   els.stamp.textContent = meta.abs_times ? meta.abs_times[index].toFixed(3) : "—";
-  const valid = meta.pose_valid ? meta.pose_valid[index] : true;
-  els.pose.textContent = meta.pose_source === "none"
-    ? "none"
-    : (valid ? meta.pose_source : `${meta.pose_source} (extrapolated)`);
-  els.pose.style.color = valid ? "" : "#d8a640";
 
-  for (const tile of els.tiles) setTile(tile, frame);
+  requestTiles(frame);
 }
 
-/* Switch between the solid-robot view and the point-cloud view.
+/* Wire the 3D-view toggles to SimView, once it exists.
  *
- * SimView keeps a single global "body visualization mode": every body is drawn
- * either as a mesh or as points, never a mix, and the mode is auto-selected
- * from the first body in the model (a box here, so "mesh"). A point-cloud body
- * is therefore invisible until the mode is "points". Both switches below go
- * through SimView's own GUI controllers, so its UI stays in sync and nothing
- * in SimView needs changing. */
-function setView(view) {
-  const app = window.__debugSimView;
-  const controls = app && app.uiControls;
-  if (!controls || !controls.findController) return;
-  const mode = controls.findController("bodyVisualizationMode");
-  const surface = controls.findController("showSurface");
-  if (mode) mode.setValue(view === "points" ? "points" : "mesh");
-  // The terrain surface and the cloud describe the same ground, so the surface
-  // hides the points; drop it for the cloud view and bring it back after.
-  if (surface) surface.setValue(view !== "points");
-  for (const button of document.querySelectorAll("#dt-view .dt-seg button")) {
-    button.classList.toggle("active", button.dataset.view === view);
+ * Both of these used to be a single either/or switch that pushed SimView's
+ * global "body visualization mode" to "points" -- which is what made the robot
+ * vanish whenever the cloud was asked for, since a box body has no point
+ * representation to fall back on. The cloud and the ghost are now shown and
+ * hidden on their own, independently of that mode and of each other; see
+ * simview_patch.js.
+ */
+function setupViewToggles() {
+  if (!patches) return;
+  const view = els.view;
+  let any = false;
+
+  // `hasCloud` is false on a SimView new enough to own this control itself --
+  // it shows point clouds through its own "Show Point Clouds" checkbox, and a
+  // second one here could only contradict it.
+  if (patches.hasCloud) {
+    any = true;
+    els.cloudRow.hidden = false;
+    els.cloud.addEventListener("change", () => {
+      patches.setCloudVisible(els.cloud.checked);
+      // The terrain surface and the aggregated cloud describe the same ground,
+      // and the surface is drawn over the points.
+      patches.setSurfaceVisible(!els.cloud.checked);
+    });
   }
+  if (patches.hasGhost) {
+    any = true;
+    els.ghostRow.hidden = false;
+    els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
+  }
+  view.hidden = !any;
+}
+
+/* Render the terrain colour-mode legend from the build metadata.
+ *
+ * SimView's "Color Mode" dropdown lists whatever properties the scene attached
+ * by bare name and explains none of them. The names are ours (build.py), so
+ * the descriptions ship with them in meta.json and are shown here next to the
+ * viewer rather than left to be guessed at.
+ */
+function setupLegend() {
+  const modes = (meta.build && meta.build.terrain_color_modes) || [];
+  if (modes.length === 0) return;
+  const frag = document.createDocumentFragment();
+  for (const mode of modes) {
+    const dt = document.createElement("dt");
+    dt.textContent = mode.name;
+    const dd = document.createElement("dd");
+    dd.textContent = mode.description || "no description for this layer";
+    const group = document.createElement("div");
+    group.appendChild(dt);
+    group.appendChild(dd);
+    frag.appendChild(group);
+    legendRows.set(mode.name, group);
+  }
+  els.legendList.appendChild(frag);
+  els.legend.hidden = false;
+}
+
+/** Highlight whichever colour mode SimView is currently drawing. */
+function syncLegendHighlight() {
+  if (!patches || legendRows.size === 0) return;
+  const mode = patches.terrainColorMode();
+  if (mode === lastColorMode) return;
+  lastColorMode = mode;
+  els.legendNow.textContent = mode || "";
+  for (const [name, row] of legendRows) row.classList.toggle("active", name === mode);
+}
+
+/**
+ * Open the playhead on the frame this page was reached from.
+ *
+ * SimView has no URL parameter for a start time, so we wait for its animation
+ * controller to exist and set `currentTime` once. Anything that goes wrong here
+ * (no such frame in this window, SimView slow to come up) leaves playback at the
+ * start, which is the normal behaviour -- never an error.
+ */
+function seekToInitialFrame() {
+  const target = cfg.initialFrame;
+  if (target === null || target === undefined || !meta || !meta.frames) return;
+  const local = meta.frames.indexOf(target);
+  if (local < 0 || !meta.times || local >= meta.times.length) return;
+
+  const deadline = performance.now() + 60000;
+  const attempt = () => {
+    const app = window.__debugSimView;
+    if (app && app.animationController && app.store && app.store.length > 0) {
+      app.animationController.currentTime = meta.times[local];
+      update(true);
+      return;
+    }
+    if (performance.now() < deadline) requestAnimationFrame(attempt);
+  };
+  requestAnimationFrame(attempt);
 }
 
 function tick() {
-  update(false);
+  // Every branch below is wrapped so that a transient throw -- SimView briefly
+  // mid-rebuild when patches.enforce() pokes it, an unexpected store shape --
+  // cannot kill the rAF chain. Before this guard, a single exception anywhere
+  // in the loop left `requestAnimationFrame(tick)` unreached and the panel
+  // frozen on whatever frame it last showed until a full reload (the "side
+  // panel went static" report, 2026-09-02). The loop must outlive one bad frame.
+  try {
+    update(false);
+  } catch (error) {
+    if (!tick._warned) { console.warn("panel update skipped a frame:", error); tick._warned = true; }
+  }
+  if (patches) {
+    try {
+      // SimView recomputes body visibility from its global mode whenever the
+      // visible batch set or that mode changes, so our per-body wishes have to
+      // be re-asserted rather than set once. Writes nothing when already right.
+      patches.enforce();
+      syncLegendHighlight();
+    } catch (error) {
+      if (!tick._patchWarned) { console.warn("SimView patch enforce skipped a frame:", error); tick._patchWarned = true; }
+    }
+  }
   requestAnimationFrame(tick);
 }
 
 function setupPanel() {
-  els.collapse.addEventListener("click", () => {
-    els.panel.classList.add("collapsed");
-    els.expand.classList.add("show");
+  // A single tab on the panel's own edge, so it slides out with the panel and
+  // is always reachable at the middle of the window edge -- the old pair of
+  // buttons put the "show again" one under SimView's control panel.
+  els.edge.addEventListener("click", () => {
+    const collapsed = els.panel.classList.toggle("collapsed");
+    els.edge.setAttribute("aria-expanded", String(!collapsed));
+    els.edge.title = collapsed ? "Show this panel" : "Hide this panel";
     // Lets SimView's own control panel reclaim the full width (see overlay.css).
-    document.body.classList.add("dt-collapsed");
-  });
-  els.expand.addEventListener("click", () => {
-    els.panel.classList.remove("collapsed");
-    els.expand.classList.remove("show");
-    document.body.classList.remove("dt-collapsed");
-    update(true);
+    document.body.classList.toggle("dt-collapsed", collapsed);
+    if (!collapsed) update(true);
   });
   // Broken/absent per-frame artefacts must read as "absent", not as a broken
   // image icon: a scene legitimately has gaps in any per-frame directory.
@@ -236,19 +388,24 @@ async function main() {
   if (build.seconds) parts.push(`built in ${build.seconds}s`);
   els.buildInfo.textContent = parts.join(" · ");
 
-  // Only offer the cloud view when this window actually aggregated a cloud.
-  if (build.clouds && build.clouds.used > 0) {
-    const view = document.getElementById("dt-view");
-    view.hidden = false;
-    for (const button of view.querySelectorAll(".dt-seg button")) {
-      button.addEventListener("click", () => setView(button.dataset.view));
-    }
-  }
+  setupLegend();
 
   els.build.classList.add("done");
   startSimView();
+  seekToInitialFrame();
   update(true);
   requestAnimationFrame(tick);
+
+  // Corrections to SimView's own UI can only be applied once it has built it.
+  // A failure here must never take the panel down with it: the per-frame data
+  // is the point of this page, the patches are a better 3D view on top of it.
+  try {
+    patches = installSimviewPatches(await waitForSimView(), cfg.simviewVersion);
+    setupViewToggles();
+    syncLegendHighlight();
+  } catch (error) {
+    console.warn("SimView patches were not applied:", error);
+  }
 }
 
 main();

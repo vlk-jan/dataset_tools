@@ -11,38 +11,48 @@
 </div>
 
 <div id="dt-panel" class="dt-panel">
+  <button id="dt-edge" class="dt-edge" title="Hide this panel"
+          aria-label="Hide this panel" aria-expanded="true"><span>&rsaquo;</span></button>
   <div class="dt-panel-head">
     <div>
       <div class="dt-title">Scene {{ scene_id }} &middot; {{ window.label }}</div>
       <div class="dt-sub">
-        <span class="dt-badge dt-{{ window.pose_source }}">{{ window.pose_source }}</span>
         <span>{{ window.n_frames }} frames</span>
         <a href="{{ scene_url }}">scene</a>
         <a href="/">index</a>
       </div>
     </div>
-    <button id="dt-collapse" title="Collapse panel">&rsaquo;</button>
   </div>
 
   <div class="dt-readout">
     <div><span class="dt-k">frame</span><span class="dt-v" id="dt-frame">&mdash;</span></div>
-    <div><span class="dt-k">t</span><span class="dt-v" id="dt-time">&mdash;</span></div>
     <div><span class="dt-k">stamp</span><span class="dt-v" id="dt-stamp">&mdash;</span></div>
-    <div><span class="dt-k">pose</span><span class="dt-v" id="dt-pose">&mdash;</span></div>
   </div>
 
   <div class="dt-view" id="dt-view" hidden>
-    <span class="dt-k">3D view</span>
-    <div class="dt-seg">
-      <button data-view="mesh" class="active">robot + surface</button>
-      <button data-view="points">lidar cloud</button>
-    </div>
-    <div class="dt-hint">
-      SimView draws one body style at a time, so the aggregated cloud and the solid
-      robot cannot both be shown. "lidar cloud" also hides the terrain surface,
-      which would otherwise cover the points.
+    <div class="dt-toggles">
+      <label class="dt-toggle" id="dt-cloud-row" hidden
+             title="Every lidar cloud in this window, aggregated in the world frame. The terrain surface covers it, so the surface is hidden while the cloud is shown.">
+        <input type="checkbox" id="dt-cloud">
+        <span class="dt-toggle-sw"></span>
+        <span class="dt-toggle-name">lidar cloud</span>
+      </label>
+      <label class="dt-toggle" id="dt-ghost-row" hidden
+             title="Amber marker at the pose wheel odometry alone would give. Its gap from the robot is the drift (plotted as wheel_odom_drift) and grows without bound.">
+        <input type="checkbox" id="dt-ghost">
+        <span class="dt-toggle-sw"></span>
+        <span class="dt-toggle-name">wheel-odometry ghost <i class="dt-sw dt-sw-g"></i></span>
+      </label>
     </div>
   </div>
+
+  <details class="dt-legend" id="dt-legend" hidden>
+    <summary><span class="dt-k">terrain colour modes</span>
+      <span class="dt-legend-now" id="dt-legend-now"></span></summary>
+    <dl id="dt-legend-list"></dl>
+    <div class="dt-hint">Pick one under Controls &rsaquo; Terrain Options &rsaquo;
+      Color Mode. The highlighted row is the one showing now.</div>
+  </details>
 
   <div class="dt-tiles" id="dt-tiles">
     <section class="dt-tile" data-kind="images" data-endpoint="image.jpg">
@@ -68,12 +78,5 @@
 
   <div class="dt-foot">
     <div id="dt-buildinfo" class="dt-sub"></div>
-    {% if probe.missing %}
-    <div class="dt-missing">
-      <span class="dt-k">absent from this scene:</span>
-      {% for key in probe.missing %}<span class="dt-badge dt-none">{{ key }}</span>{% endfor %}
-    </div>
-    {% endif %}
   </div>
 </div>
-<button id="dt-expand" class="dt-expand" title="Show data panel">&lsaquo;</button>

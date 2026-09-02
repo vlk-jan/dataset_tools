@@ -18,6 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .loaders import HM_RES
+
 logger = logging.getLogger("dataset_tools.viewer.render")
 
 # Anchor colours (0-255) for a few perceptually reasonable ramps.
@@ -48,6 +50,18 @@ VALIDITY_COLORS = np.array(
     ],
     dtype=np.uint8,
 )
+
+
+#: HELHEST's footprint in its own frame (metres), forward = +x, left = +y.
+#:
+#: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
+#: than imported: ``build`` imports *this* module, so importing back would be a
+#: cycle. ``tests/test_viewer.py`` asserts the two stay in agreement.
+ROBOT_CHASSIS_HALF = (0.5, 0.3)          # half length (x), half width (y)
+ROBOT_WHEEL_RADIUS = 0.3685
+ROBOT_WHEEL_WIDTH = 0.142
+#: (x, y) of each wheel hub -- two front wheels and one rear centre wheel.
+ROBOT_WHEEL_HUBS = ((0.4, 0.52), (0.4, -0.52), (-0.5, 0.0))
 
 
 def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
@@ -131,30 +145,80 @@ def _bev_to_display(grid: np.ndarray) -> np.ndarray:
     return grid[::-1, ::-1]
 
 
+def _bev_png(rgb: np.ndarray, size: int, res_m: float = HM_RES) -> bytes:
+    """Encode a robot-centred BEV grid, upscaled, with the robot drawn on top.
+
+    The silhouette is drawn *after* the nearest-neighbour upscale so it is
+    smooth at display resolution while the data cells stay honestly chunky.
+    """
+    from PIL import Image
+
+    img = Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+    scale = max(1, size // max(img.width, img.height))
+    if scale > 1:
+        img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
+    draw_robot_silhouette(img, px_per_m=scale / res_m)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=False, compress_level=3)
+    return buf.getvalue()
+
+
 def render_height_map(hm: np.ndarray, size: int = 384) -> bytes:
     """Colour-mapped BEV height map, robot centred, forward up."""
     disp = _bev_to_display(np.asarray(hm, dtype=np.float64))
-    rgb = colorize(disp, cmap="turbo")
-    rgb = _draw_robot_marker(rgb)
-    return _to_png(rgb, upscale_to=size)
+    return _bev_png(colorize(disp, cmap="turbo"), size)
 
 
 def render_validity(mask: np.ndarray, size: int = 384) -> bytes:
     """Three-state validity mask in fixed colours (see VALIDITY_COLORS)."""
     disp = _bev_to_display(np.asarray(mask))
     idx = np.clip(disp.astype(np.int32), 0, len(VALIDITY_COLORS) - 1)
-    rgb = VALIDITY_COLORS[idx]
-    rgb = _draw_robot_marker(rgb.copy())
-    return _to_png(rgb, upscale_to=size)
+    return _bev_png(VALIDITY_COLORS[idx], size)
 
 
-def _draw_robot_marker(rgb: np.ndarray) -> np.ndarray:
-    """Mark the grid centre (the robot) and a short heading tick."""
-    h, w = rgb.shape[:2]
-    cy, cx = h // 2, w // 2
-    rgb[max(0, cy - 1) : cy + 2, max(0, cx - 1) : cx + 2] = [255, 255, 255]
-    rgb[max(0, cy - 6) : cy, cx : cx + 1] = [255, 255, 255]  # forward = up
-    return rgb
+def draw_robot_silhouette(img, px_per_m: float):
+    """Draw HELHEST top-down at the centre of a robot-centred, forward-up tile.
+
+    A single white pixel says "the robot is here" but not how big it is or
+    which way it faces, which is exactly what a BEV tile is read for. This
+    draws the real footprint to scale instead -- the 1.0 x 0.6 m chassis, the
+    two front wheels and the single rear wheel -- so the map's features can be
+    sized against the robot by eye.
+
+    ``px_per_m`` is the tile's own scale *after* any upscaling, so the drawing
+    is done at display resolution (smooth edges) rather than in the grid's
+    chunky cells. Drawn translucent over the data with a thin opaque outline:
+    the silhouette must stay readable on both a dark and a bright colour map
+    without hiding the cells underneath it.
+    """
+    from PIL import ImageDraw
+
+    draw = ImageDraw.Draw(img, "RGBA")
+    cx, cy = img.width / 2.0, img.height / 2.0
+
+    def pt(x: float, y: float) -> tuple[float, float]:
+        # Screen: +x (forward) is up, +y (left) is left.
+        return (cx - y * px_per_m, cy - x * px_per_m)
+
+    def box(x0: float, x1: float, y0: float, y1: float, fill, outline, width=1):
+        draw.polygon([pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1)], fill=fill)
+        draw.line(
+            [pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1), pt(x0, y0)],
+            fill=outline, width=width,
+        )
+
+    r, half_w = ROBOT_WHEEL_RADIUS, ROBOT_WHEEL_WIDTH / 2.0
+    for wx, wy in ROBOT_WHEEL_HUBS:
+        box(wx - r, wx + r, wy - half_w, wy + half_w, (0, 0, 0, 150), (255, 255, 255, 210))
+
+    hx, hy = ROBOT_CHASSIS_HALF
+    box(-hx, hx, -hy, hy, (255, 255, 255, 70), (255, 255, 255, 235))
+
+    # Heading wedge just ahead of the chassis: which end is the front is not
+    # inferable from a symmetric-looking box.
+    nose = [pt(hx + 0.30, 0.0), pt(hx + 0.02, 0.16), pt(hx + 0.02, -0.16)]
+    draw.polygon(nose, fill=(255, 255, 255, 235))
+    return img
 
 
 def render_cloud_bev(
@@ -209,7 +273,13 @@ def render_cloud_bev(
     for radius in range(5, int(extent) + 1, 5):
         ring = np.abs(dist - radius) < (extent / n)
         rgb[ring] = np.maximum(rgb[ring], [70, 70, 70])
-    return _to_png(_draw_robot_marker(rgb))
+    from PIL import Image
+
+    img = Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+    draw_robot_silhouette(img, px_per_m=n / (2 * extent))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=False, compress_level=3)
+    return buf.getvalue()
 
 
 def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:

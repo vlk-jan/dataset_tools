@@ -4,7 +4,7 @@
    SimView sizes its renderer from the window, so taking width away from the
    document would fight its resize handling. */
 
-#dt-panel, #dt-expand, .dt-build {
+#dt-panel, .dt-build {
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   color: #e6e8ec;
   box-sizing: border-box;
@@ -36,15 +36,30 @@
 .dt-transforms { color: #d8a640; border-color: #6b5a2f; }
 .dt-none, .dt-none.dt-badge { color: #8a6060; border-color: #5a3a3a; }
 
-#dt-collapse, .dt-expand {
-  background: #23272f; color: #e6e8ec; border: 1px solid #333844;
-  border-radius: 5px; cursor: pointer; font-size: 15px; line-height: 1;
-  padding: 4px 8px;
+/* One toggle for both directions, riding the panel's own left edge at its
+   vertical middle.
+
+   It used to be a button in the panel header plus a second one pinned to the
+   top-right corner -- which is exactly where SimView's lil-gui control panel
+   sits once the data panel is out of the way, so the two overlapped and the
+   collapsed panel could not be reopened without moving the mouse through the
+   controls. Anchoring the tab to the panel (`position: absolute` inside it,
+   at `top: 50%`) rather than to the viewport means it slides out with the
+   panel and stays exactly one tab-width on-screen when collapsed, always at
+   the vertical middle of the window edge, where nothing else is. */
+.dt-edge {
+  position: absolute; left: -24px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 66px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(24, 27, 33, 0.94); color: #939aa8;
+  border: 1px solid #333844; border-right: none;
+  border-radius: 6px 0 0 6px;
+  cursor: pointer; font-size: 15px; line-height: 1;
+  transition: color 0.15s ease, background 0.15s ease;
 }
-.dt-expand {
-  position: fixed; top: 10px; right: 10px; z-index: 41; display: none;
-}
-.dt-expand.show { display: block; }
+.dt-edge:hover { color: #e6e8ec; background: #23272f; }
+.dt-edge span { display: block; transition: transform 0.18s ease; }
+.dt-panel.collapsed .dt-edge span { transform: rotate(180deg); }
 
 .dt-readout {
   display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
@@ -54,17 +69,67 @@
 .dt-k { color: #939aa8; margin-right: 6px; }
 .dt-v { font-weight: 500; }
 
-.dt-view { padding: 8px 12px; border-bottom: 1px solid #333844; }
-.dt-view[hidden] { display: none; }
-.dt-seg { display: flex; gap: 0; margin: 4px 0 6px; }
-.dt-seg button {
-  flex: 1; padding: 4px 8px; font-size: 11.5px; cursor: pointer;
-  background: #1d2026; color: #939aa8; border: 1px solid #333844;
-}
-.dt-seg button:first-child { border-radius: 5px 0 0 5px; }
-.dt-seg button:last-child { border-radius: 0 5px 5px 0; border-left: none; }
-.dt-seg button.active { background: #1f4a6b; border-color: #2b6d9c; color: #e6e8ec; }
+.dt-view, .dt-legend { padding: 8px 12px; border-bottom: 1px solid #333844; }
+.dt-view[hidden], .dt-legend[hidden], .dt-toggle[hidden] { display: none; }
 .dt-hint { color: #6f7683; font-size: 10.5px; line-height: 1.35; }
+.dt-hint code { font-size: 10px; color: #8a919f; }
+
+/* 3D-view options: compact switches. The full explanation is a hover tooltip
+   (title=) on each row rather than always-on prose -- these toggle things (an
+   aggregated cloud, a drift ghost) most viewers leave alone. */
+.dt-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.dt-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.dt-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.dt-toggle-sw {
+  flex: none; width: 26px; height: 15px; border-radius: 8px;
+  background: #333844; border: 1px solid #454b58; position: relative;
+  transition: background .12s, border-color .12s;
+}
+.dt-toggle-sw::after {
+  content: ""; position: absolute; top: 1px; left: 1px;
+  width: 11px; height: 11px; border-radius: 50%; background: #939aa8;
+  transition: transform .12s, background .12s;
+}
+.dt-toggle input:checked + .dt-toggle-sw { background: #1f4a6b; border-color: #2b6d9c; }
+.dt-toggle input:checked + .dt-toggle-sw::after { transform: translateX(11px); background: #cfe4f5; }
+.dt-toggle input:focus-visible + .dt-toggle-sw { outline: 2px solid #5aa9e6; outline-offset: 1px; }
+.dt-toggle-name { font-size: 11.5px; color: #c9cedb; }
+.dt-toggle input:checked ~ .dt-toggle-name { color: #e6e8ec; }
+.dt-sw-g { background: #ffb347; vertical-align: middle; }
+
+/* Terrain colour modes. SimView lists them by bare name in its Color Mode
+   dropdown with no explanation anywhere; the names are ours, so the prose is
+   too (build.py's TERRAIN_COLOR_MODE_HELP, carried in meta.json). */
+/* Collapsed by default: six layers' worth of prose is a reference, not
+   something to keep on screen over the per-frame tiles. The summary line
+   still names the mode currently being drawn, which is the part you want at
+   a glance. */
+.dt-legend summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: baseline; gap: 6px;
+}
+.dt-legend summary::-webkit-details-marker { display: none; }
+.dt-legend summary::before {
+  content: "\203A"; color: #6f7683; display: inline-block;
+  transition: transform 0.15s ease;
+}
+.dt-legend[open] summary::before { transform: rotate(90deg); }
+.dt-legend-now {
+  color: #7ec2f0; font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dt-legend dl { margin: 5px 0 6px; }
+.dt-legend dt {
+  font-size: 11px; color: #c9cedb; font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dt-legend dd {
+  margin: 0 0 6px; padding-left: 8px;
+  border-left: 2px solid #2a2f39;
+  color: #6f7683; font-size: 10.5px; line-height: 1.35;
+}
+.dt-legend .active dt { color: #7ec2f0; }
+.dt-legend .active dd { border-left-color: #2b6d9c; color: #939aa8; }
 
 .dt-tiles { overflow-y: auto; flex: 1; padding: 8px 12px; }
 .dt-tile { margin-bottom: 12px; }
@@ -89,7 +154,6 @@
 .dt-tile.unavailable { opacity: 0.45; }
 
 .dt-foot { padding: 8px 12px; border-top: 1px solid #333844; }
-.dt-missing { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
 
 /* Build progress, shown until the window's bundle exists. */
 .dt-build {
@@ -121,3 +185,36 @@ body:not(.dt-collapsed) .lil-gui.root.autoPlace,
 body:not(.dt-collapsed) .lil-gui.autoPlace {
   right: 356px !important;
 }
+
+/* SimView's Analysis panel: one scalar tab per name, `flex: 1` across a fixed
+   40%-wide bar. With a dozen scalars every label truncates to three characters
+   ("wh...", "wh...", "wh..."), which is no label at all. The bar already wraps,
+   so letting the tabs take their content's width makes them readable at the
+   cost of a second row. Beats lil-gui-era specificity by matching the same
+   class with `!important`; SimView injects its own <style> at runtime, after
+   this file, so source order alone would lose. */
+.analysis-container .scalar-tab {
+  flex: 0 1 auto !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  font-size: 0.85em !important;
+  padding: 4px 7px !important;
+}
+
+/* ...and the panel it sits in is 40% of the viewport centred on it, which
+   runs straight under SimView's own control panel -- more so here, because
+   this overlay pushes that panel left by its own width. The right-hand tabs
+   ("wheel_odom_drift" among them) end up unclickable: lil-gui is on top and
+   swallows the pointer.
+
+   Pinned between the two panels instead of centred, so both edges are
+   accounted for: the "Body states" window on the left, the controls (at
+   whichever of its two positions) on the right. */
+.analysis-container {
+  left: 380px !important;
+  right: 620px !important;
+  width: auto !important;
+  min-width: 300px;
+  transform: none !important;
+}
+body.dt-collapsed .analysis-container { right: 264px !important; }
