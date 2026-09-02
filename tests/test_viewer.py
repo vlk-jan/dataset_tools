@@ -42,6 +42,7 @@ def make_root(
     with_transforms: bool = True,
     with_gravity: bool = True,
     with_joints: bool = True,
+    with_camera_info: bool = True,
     segments: bool = True,
 ) -> Path:
     """A synthetic dataset root with a controllable set of optional files."""
@@ -112,7 +113,28 @@ def make_root(
                 np.savez_compressed(d / "height_masks" / f"{i:05d}.npz", validity=validity)
         np.savetxt(d / "camera_intrinsics.txt", np.eye(3) * 700.0)
         np.savetxt(d / "T_cam_to_base.txt", np.eye(4))
+        if with_camera_info:
+            (d / "camera_info.yaml").write_text(CAMERA_INFO)
     return root
+
+
+#: A ROS camera_info as the extractor writes it: flat scalars, then blocks whose
+#: only interesting line is ``data:``.
+CAMERA_INFO = """image_width: 640
+image_height: 400
+frame_id: test_camera_optical_frame
+camera_name: test_camera
+distortion_model: plumb_bob
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [700.0, 0, 320.0, 0, 700.0, 200.0, 0, 0, 1]
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.1, -0.2, 0.001, 0.002, 0.0]
+binning_x: 0
+"""
 
 
 # --------------------------------------------------------------------------
@@ -414,14 +436,14 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
     from simview.scene import SimulationScene
 
     opts = "40-160000-80-500000-0.1-height"
-    meta = client.get(f"/api/data/0000/seg000/{opts}/meta.json")
+    meta = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
     assert meta.status_code == 200, meta.text
     body = meta.json()
     assert body["pose_source"] == "odometry"
     assert body["build"]["terrain_source"] in ("height_maps", "clouds")
 
-    model = client.get(f"/api/data/0000/seg000/{opts}/model.json").json()
-    states = client.get(f"/api/data/0000/seg000/{opts}/states.json").json()
+    model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
+    states = client.get(f"/api/data/0000/seg000/{opts}/x/states.json").json()
     assert [b["name"] for b in model["bodies"]][0] == "robot"
 
     # Re-inline the blobs and hand the document to SimView's own loader.
@@ -435,7 +457,7 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
                 if isinstance(v, str) and v.startswith("/blob/"):
                     n = v.rsplit("/", 1)[-1]
                     if n not in blobs:
-                        raw = client.get(f"/api/data/0000/seg000/{opts}/blob/{n}").content
+                        raw = client.get(f"/api/data/0000/seg000/{opts}/x/blob/{n}").content
                         blobs[n] = "__b64__" + base64.b64encode(raw).decode()
                     node[k] = blobs[n]
                 else:
@@ -445,7 +467,7 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
                 if isinstance(v, str) and v.startswith("/blob/"):
                     n = v.rsplit("/", 1)[-1]
                     if n not in blobs:
-                        raw = client.get(f"/api/data/0000/seg000/{opts}/blob/{n}").content
+                        raw = client.get(f"/api/data/0000/seg000/{opts}/x/blob/{n}").content
                         blobs[n] = "__b64__" + base64.b64encode(raw).decode()
                     node[i] = blobs[n]
                 else:
@@ -461,8 +483,8 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
 
 def test_blob_endpoint_supports_byte_ranges(client):
     opts = "40-160000-80-500000-0.1-height"
-    client.get(f"/api/data/0000/seg000/{opts}/meta.json")
-    r = client.get(f"/api/data/0000/seg000/{opts}/blob/0", headers={"Range": "bytes=0-15"})
+    client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
+    r = client.get(f"/api/data/0000/seg000/{opts}/x/blob/0", headers={"Range": "bytes=0-15"})
     assert r.status_code == 206
     assert len(r.content) == 16
 
@@ -506,10 +528,767 @@ def test_a_scene_without_optional_files_still_builds(tmp_path):
     )
     client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
     opts = "40-160000-80-500000-0.1-height"
-    meta = client.get(f"/api/data/0000/seg000/{opts}/meta.json")
+    meta = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
     assert meta.status_code == 200, meta.text
     body = meta.json()
     assert body["build"]["terrain_source"] == "clouds"
     # Only pose-derived scalars survive when there is no proprioception.
     assert set(body["scalar_names"]) <= {"speed", "pose_z", "yaw_rate"}
     assert "height_maps" not in body["available"]
+
+
+# --------------------------------------------------------------------------
+# curated atlas metadata (optional, root-level)
+# --------------------------------------------------------------------------
+
+
+def write_atlas(root_path: Path, scenes=("0000",), *, with_thumbs: bool = True) -> Path:
+    """The optional ``atlas/`` half of a root: descriptions, groups, thumbnails."""
+    atlas_dir = root_path / "atlas"
+    (atlas_dir / "thumbs").mkdir(parents=True, exist_ok=True)
+    slots = ["a", "b", "c"]
+    entries = {}
+    for scene in scenes:
+        if with_thumbs:
+            for slot in slots:
+                _write_png(atlas_dir / "thumbs" / f"{scene}{slot}.jpg", size=(64, 40))
+        entries[scene] = {
+            "description": f"A synthetic place for scene {scene}, written by hand.",
+            "date": "2025-09-12 15:13",
+            "dur_s": 653.6,
+            "frames": 1962,
+            "images": 1962,
+            "clouds": 1962,
+            "pts_mean": 6090,
+            "poses": 4580,
+            "poses_unf": 4776,
+            "segments": 9,
+            "seg_lens": [314.3, 93.9, 67.0],
+            "seg_med_s": 18.7,
+            "gt_span_s": 565.0,
+            "cov": 0.867,
+            "old_cov": 0.5667,
+            "path_m": 439.5,
+            "moving_frac": 0.763,
+            "win_med": 0.1207,
+            "win_p95": 0.2537,
+            "flags": 24,
+            "bag_gb": 25.1,
+            "session": "synthetic_session",
+            "thumbs": slots if with_thumbs else [],
+        }
+    (atlas_dir / "atlas.json").write_text(json.dumps({
+        "schema": "dataset_tools.viewer/atlas@1",
+        "generated": "2026-09-02",
+        "title": "Synthetic Atlas",
+        "kicker": "test fixture",
+        "intro": "One paragraph of curated introduction.",
+        "root_note": "A curated note about the root.",
+        "footer": "A curated footer.",
+        "totals": [{"label": "scenes", "value": str(len(scenes)), "sub": None}],
+        "thumbs": {"dir": "thumbs", "slots": slots, "pattern": "{scene}{slot}.jpg"},
+        "groups": [{"title": "An outing", "range": "all of it", "blurb": "What happened here.",
+                    "scenes": list(scenes)}],
+        "scenes": entries,
+    }))
+    return atlas_dir
+
+
+def test_a_root_without_an_atlas_directory_reports_no_curated_metadata(tmp_path):
+    root = probe.DatasetRoot(make_root(tmp_path), cache_dir=tmp_path / "cache")
+    assert root.atlas() is None
+    assert root.atlas_scene("0000") == {}
+    assert root.atlas_thumb("0000", "a") is None
+
+
+def test_atlas_thumbnails_are_looked_up_through_the_manifest_not_the_path(tmp_path):
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert root.atlas_thumb("0000", "a") is not None
+    # A slot the atlas does not list is not a path to try -- it is simply absent.
+    assert root.atlas_thumb("0000", "../../../etc/passwd") is None
+    assert root.atlas_thumb("0000", "z") is None
+
+
+def test_a_malformed_atlas_file_degrades_to_no_atlas(tmp_path):
+    root_path = make_root(tmp_path)
+    (root_path / "atlas").mkdir()
+    (root_path / "atlas" / "atlas.json").write_text("{not json")
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert root.atlas() is None
+
+
+def test_probe_records_segment_spans_as_fractions_and_marks_filled_ones(tmp_path):
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write("# id start_ts end_ts n_poses reason\n")
+        fh.write(f"0 {ts[0]:.6f} {ts[3]:.6f} 4 filtered:pose_jump\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[9]:.6f} 4 v11_fill\n")
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    p = root.probe("0000", refresh=True)
+    assert len(p.segment_spans) == 2
+    assert p.fill_spans == [p.segment_spans[1]]
+    lo, hi = p.segment_spans[0]
+    assert lo == pytest.approx(0.0, abs=1e-6)
+    assert hi == pytest.approx(3 / 11, abs=1e-3)  # frames 0..3 of 0..11
+    assert all(0.0 <= v <= 1.0 for span in p.segment_spans for v in span)
+
+
+def test_a_stale_probe_cache_from_an_older_format_is_discarded(tmp_path):
+    root_path = make_root(tmp_path)
+    cache = tmp_path / "cache"
+    root = probe.DatasetRoot(root_path, cache_dir=cache)
+    root.probe("0000")
+    stale = json.loads((cache / "probe_cache.json").read_text())
+    stale["format"] = 0
+    for entry in stale["scenes"].values():
+        entry["segment_spans"] = []
+    (cache / "probe_cache.json").write_text(json.dumps(stale))
+    again = probe.DatasetRoot(root_path, cache_dir=cache)
+    assert again.probe("0000").segment_spans, "an old cache must be re-probed, not trusted"
+
+
+def test_index_rows_use_curated_content_when_it_exists(tmp_path):
+    from dataset_tools.viewer import index_page
+
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    assert [g["title"] for g in page["groups"]] == ["An outing"]
+    row = page["rows"][0]
+    assert row["description"].startswith("A synthetic place")
+    labels = [s["label"] for s in row["stats"]]
+    assert "path in GT" in labels and "time with GT" in labels
+    # Regeneration diagnostics stay off the index (they live on the scene page).
+    assert "2 s err med / p95" not in labels and "v1 coverage" not in labels
+    assert [t["url"] for t in row["thumbs"]] == [
+        f"/api/scene/0000/thumb/{s}.jpg" for s in ("a", "b", "c")
+    ]
+    assert page["totals"][0]["label"] == "scenes"
+
+
+def test_index_rows_fall_back_to_probed_content_without_an_atlas(tmp_path):
+    from dataset_tools.viewer import index_page
+
+    root = probe.DatasetRoot(make_root(tmp_path), cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    row = page["rows"][0]
+    assert row["description"] is None
+    labels = [s["label"] for s in row["stats"]]
+    assert "duration" in labels and "frames" in labels
+    # Nothing curated may leak into the fallback.
+    assert "2 s err med / p95" not in labels
+    # The timeline still exists: it comes from the segment file, not the atlas.
+    assert row["spans"]
+    # Thumbnails point at the same endpoint; it will render live frames.
+    assert row["thumbs"][0]["url"] == "/api/scene/0000/thumb/a.jpg"
+    assert page["groups"][0]["title"] == "Scenes"
+
+
+def test_a_scene_missing_from_the_atlas_is_still_listed(tmp_path):
+    from dataset_tools.viewer import index_page
+
+    root_path = make_root(tmp_path, scenes=("0000", "0001"))
+    write_atlas(root_path, scenes=("0000",))
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    listed = {r["probe"].scene_id for g in page["groups"] for r in g["rows"]}
+    assert listed == {"0000", "0001"}
+    assert page["groups"][-1]["title"] == "Not in the atlas"
+
+
+def test_duration_formatting_matches_the_atlas_phrasing():
+    from dataset_tools.viewer.index_page import coverage_class, fmt_duration
+
+    assert fmt_duration(39.4) == "39 s"
+    assert fmt_duration(653.6) == "10 min 53 s"
+    assert fmt_duration(3780) == "1 h 3 min"
+    assert fmt_duration(None) == "—"
+    assert coverage_class(0.9) == "hi"
+    assert coverage_class(0.6) == "mid"
+    assert coverage_class(0.42) == "lo"
+    assert coverage_class(None) == "none"
+
+
+# --------------------------------------------------------------------------
+# single-frame windows
+# --------------------------------------------------------------------------
+
+
+def test_a_frame_window_key_round_trips():
+    assert windows.parse_frame_window_key(windows.frame_window_key(42)) == 42
+    assert windows.parse_frame_window_key("seg001") is None
+    assert windows.parse_frame_window_key("framex") is None
+
+
+def test_a_single_frame_window_takes_its_pose_from_the_segment_it_is_in():
+    ts = np.arange(20, dtype=np.float64)
+    segs = [loaders.Segment(0, 0.0, 5.0, 6, "a")]
+    inside = windows.single_frame_window(ts, segs, 20, 3)
+    assert inside.pose_source == "odometry" and inside.segment_index == 0
+    assert inside.frame_start == 3 and inside.n_frames == 1
+    outside = windows.single_frame_window(ts, segs, 20, 12)
+    assert outside.pose_source == "none" and outside.segment_index is None
+    assert "robot-centric" in outside.reason
+    assert windows.single_frame_window(ts, segs, 20, 99) is None
+
+
+# --------------------------------------------------------------------------
+# index, scene tabs and frame pages over HTTP
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def atlas_client(tmp_path):
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=12)
+    write_atlas(root_path, scenes=("0000", "0001"))
+    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+
+
+def test_the_index_shows_curated_descriptions_and_serves_stored_thumbnails(atlas_client):
+    r = atlas_client.get("/")
+    assert r.status_code == 200
+    assert "Synthetic Atlas" in r.text
+    assert "A synthetic place for scene 0000" in r.text
+    assert "An outing" in r.text and "What happened here." in r.text
+    assert 'loading="lazy"' in r.text
+    thumb = atlas_client.get("/api/scene/0000/thumb/a.jpg")
+    assert thumb.status_code == 200
+    assert "immutable" in thumb.headers["cache-control"]
+
+
+def test_the_index_renders_without_any_curated_metadata(client):
+    """The rig-agnostic contract: no atlas/, same page, fewer facts."""
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "0000" in r.text and "0001" in r.text
+    assert 'class="env"' not in r.text  # no curated description to show
+    assert "/api/scene/0000/thumb/a.jpg" in r.text
+    # And that thumbnail endpoint renders a live frame instead of a stored file.
+    thumb = client.get("/api/scene/0000/thumb/b.jpg")
+    assert thumb.status_code == 200
+    assert thumb.headers["content-type"] == "image/jpeg"
+
+
+def test_the_frames_tab_pages_through_frames_and_jumps(client):
+    r = client.get("/scene/0000?tab=frames")
+    assert r.status_code == 200
+    assert "/scene/0000/frame/0" in r.text
+    assert r.text.count("image.jpg?w=192") == 12  # the whole scene fits one page
+    assert 'loading="lazy"' in r.text
+    # A page past the end clamps rather than 404s.
+    assert client.get("/scene/0000?tab=frames&page=99").status_code == 200
+    jump = client.get("/scene/0000/jump?index=7", follow_redirects=False)
+    assert jump.headers["location"] == "/scene/0000/frame/7"
+    assert client.get("/scene/0000/jump?index=999", follow_redirects=False).headers[
+        "location"
+    ] == "/scene/0000/frame/11"
+
+
+def test_the_frame_page_states_what_the_frame_has(client):
+    r = client.get("/scene/0000/frame/3")
+    assert r.status_code == 200
+    assert "Camera stamp" in r.text and "Lidar stamp" in r.text
+    assert "Segment</dt>" in r.text
+    assert "/view/0000/frame00003" in r.text  # the static single-frame view
+    assert "?frame=3" in r.text  # and the motion context around it
+    assert client.get("/scene/0000/frame/9999").status_code == 404
+
+
+def test_a_frame_with_no_ground_truth_pose_still_has_a_page(tmp_path):
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, segments=False, with_height_maps=False)
+    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    r = client.get("/scene/0000/frame/4")
+    assert r.status_code == 200
+    assert "No ground-truth pose" in r.text
+    assert "robot-centric" in r.text
+    assert "/view/0000/frame00004" in r.text
+
+
+def test_a_single_frame_bundle_builds_and_simview_can_read_it_back(client):
+    """One frame, one state: a static scene, still a valid SimView document."""
+    from simview.scene import SimulationScene
+
+    opts = "40-160000-80-500000-0.1-height"
+    meta = client.get(f"/api/data/0000/frame00003/{opts}/x/meta.json")
+    assert meta.status_code == 200, meta.text
+    body = meta.json()
+    assert body["frames"] == [3]
+    assert body["pose_source"] == "odometry"
+    assert body["window"]["kind"] == "frame"
+
+    model = client.get(f"/api/data/0000/frame00003/{opts}/x/model.json").json()
+    states = client.get(f"/api/data/0000/frame00003/{opts}/x/states.json").json()
+    import base64
+
+    def resolve(node):
+        items = node.items() if isinstance(node, dict) else enumerate(node)
+        for key, value in list(items):
+            if isinstance(value, str) and value.startswith("/blob/"):
+                n = value.rsplit("/", 1)[-1]
+                raw = client.get(f"/api/data/0000/frame00003/{opts}/x/blob/{n}").content
+                node[key] = "__b64__" + base64.b64encode(raw).decode()
+            elif isinstance(value, (dict, list)):
+                resolve(value)
+
+    resolve(model)
+    resolve(states)
+    scene = SimulationScene.from_dict({"model": model, "states": states})
+    assert len(scene.states) == 1
+    assert "robot" in scene.model.bodies
+    assert scene.model.terrain is not None
+
+
+def test_a_single_frame_view_page_opens(client):
+    r = client.get("/view/0000/frame00003")
+    assert r.status_code == 200
+    assert "__simviewStaticBase" in r.text
+    r = client.get("/view/0000/seg000?frame=4")
+    assert r.status_code == 200
+    assert '"initialFrame": 4' in r.text
+
+
+# --------------------------------------------------------------------------
+# the scene page: four cards assembled from probe + atlas + a few small files
+# --------------------------------------------------------------------------
+
+
+def scene_page(tmp_path, root_path, scene: str = "0000"):
+    from dataset_tools.viewer.build import SceneAccess
+    from dataset_tools.viewer.scene_page import build_scene_page
+
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    return build_scene_page(root, SceneAccess(root, scene))
+
+
+def card_of(page, title: str) -> dict | None:
+    return next((c for c in page["cards"] if c["title"] == title), None)
+
+
+def value_of(card, label: str):
+    return next((s["value"] for s in card["stats"] if s["label"] == label), None)
+
+
+def sub_of(card, label: str):
+    return next((s["sub"] for s in card["stats"] if s["label"] == label), None)
+
+
+def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
+    from dataset_tools.viewer.scene_page import read_camera_info
+
+    path = tmp_path / "camera_info.yaml"
+    path.write_text(CAMERA_INFO)
+    info = read_camera_info(path)
+    assert info["image_width"] == 640 and info["image_height"] == 400
+    assert info["distortion_model"] == "plumb_bob"
+    assert info["frame_id"] == "test_camera_optical_frame"
+    # A nested block collapses to its data list plus its declared shape.
+    assert len(info["distortion_coefficients"]) == 5
+    assert info["camera_matrix_rows"] == 3
+    assert info["camera_matrix"][0] == 700.0
+
+
+def test_camera_info_of_a_missing_or_malformed_file_is_simply_absent(tmp_path):
+    from dataset_tools.viewer.scene_page import read_camera_info
+
+    assert read_camera_info(tmp_path / "nope.yaml") is None
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("!!! not: [a, yaml\nfile at all\n")
+    read_camera_info(bad)  # must not raise; whatever it salvages is fine
+
+
+def test_a_series_reports_the_files_own_rate_not_the_sampled_one(tmp_path):
+    from dataset_tools.viewer.scene_page import read_series
+
+    arr = np.zeros((10_000, 4))
+    arr[:, 0] = 1_700_000_000.0 + 0.01 * np.arange(10_000)  # 100 Hz
+    arr[:, 1] = 2.0
+    path = tmp_path / "series.npy"
+    np.save(path, arr)
+
+    series = read_series(path, max_rows=50)
+    assert series.n == 10_000  # the header count, not the sampled one
+    assert len(series.rows) <= 51
+    assert series.rate == pytest.approx(100.0, rel=0.01)
+    assert series.mean_abs(1) == pytest.approx(2.0)
+
+
+def test_the_four_cards_state_what_the_scene_has(tmp_path):
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)
+    page = scene_page(tmp_path, root_path)
+    assert [c["title"] for c in page["cards"]] == [
+        "Recording", "Ground truth", "Calibration", "Proprioception",
+    ]
+    # No card is a single entry: that was the point of reworking them.
+    assert all(len(c["stats"]) >= 2 for c in page["cards"])
+
+    recording = card_of(page, "Recording")
+    assert value_of(recording, "synced pairs") == "12"
+    assert value_of(recording, "frame rate") == "10.00 Hz"
+    assert value_of(recording, "image size") == "640 × 400"
+    assert "25.1 GB" in recording["note"] and "synthetic_session" in recording["note"]
+
+    calib = card_of(page, "Calibration")
+    assert value_of(calib, "focal length") == "700.0 · 700.0"
+    assert value_of(calib, "camera → base") == "0.000, 0.000, 0.000"
+    assert "plumb_bob" in sub_of(calib, "image")
+    assert [m["label"] for m in calib["matrices"]] == [
+        "camera_intrinsics.txt (K)", "T_cam_to_base.txt (4×4)",
+    ]
+
+
+def test_wheel_speeds_keep_the_units_the_file_carries(tmp_path):
+    """No rig constant: a wheel radius belongs to one robot, rad/s to all of them."""
+    page = scene_page(tmp_path, make_root(tmp_path))
+    proprio = card_of(page, "Proprioception")
+    assert value_of(proprio, "wheel speed") == "1.50 rad/s"  # the fixture's velocity
+    assert value_of(proprio, "wheels turning") == "100%"
+    assert value_of(proprio, "commanded speed") == "0.40 m/s"
+    assert value_of(proprio, "roll · pitch") == "0.0° · 0.0°"  # identity gravity align
+
+
+def test_a_card_with_nothing_to_say_is_dropped_rather_than_shown_empty(tmp_path):
+    root_path = make_root(
+        tmp_path, with_joints=False, with_cmd_vel=False, with_gravity=False
+    )
+    titles = [c["title"] for c in scene_page(tmp_path, root_path)["cards"]]
+    assert "Proprioception" not in titles
+    assert "Recording" in titles and "Ground truth" in titles
+
+
+def test_the_ground_truth_card_reads_the_segment_file_over_the_atlas(tmp_path):
+    """The file is the truth: a scene may have been re-filtered since curation."""
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)  # claims nine segments
+    card = card_of(scene_page(tmp_path, root_path), "Ground truth")
+    assert value_of(card, "segments") == 2  # what the file actually holds
+    assert card["badge"].endswith("GT")
+    assert card["timeline"]["spans"]
+    # Curated numbers that cannot be recomputed are still shown.
+    assert value_of(card, "2 s err med / p95") == "0.12 / 0.25 m"
+    assert value_of(card, "divergence flags") == 24
+
+
+def test_a_filled_segment_is_marked_on_the_scene_timeline(tmp_path):
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[5]:.6f} 6 filtered:pose_jump\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[-1]:.6f} 6 v11_fill\n")
+    card = card_of(scene_page(tmp_path, root_path), "Ground truth")
+    assert len(card["timeline"]["fill"]) == 1
+    assert len(card["timeline"]["spans"]) == 1
+    assert "filled from v1.1" in card["note"]
+
+
+def test_the_card_never_claims_more_raw_poses_than_the_scene_has(tmp_path):
+    """A filled scene has more poses than this root's own run produced."""
+    root_path = make_root(tmp_path)
+    atlas = write_atlas(root_path) / "atlas.json"
+    data = json.loads(atlas.read_text())
+    data["scenes"]["0000"]["poses_unf"] = 3  # fewer than the segments carry
+    atlas.write_text(json.dumps(data))
+    card = card_of(scene_page(tmp_path, root_path), "Ground truth")
+    assert value_of(card, "poses") == "12"
+    assert sub_of(card, "poses") is None
+
+
+def test_path_length_is_derived_from_odometry_when_no_atlas_supplies_it(tmp_path):
+    """Rig-agnostic fallback: distance inside segments, never across them."""
+    page = scene_page(tmp_path, make_root(tmp_path))  # no atlas/
+    card = card_of(page, "Ground truth")
+    # Two segments of six poses, each step 0.3 m forward and 0.02 m sideways.
+    assert value_of(card, "path in GT") == "3 m"
+    assert sub_of(card, "path in GT") == "from odometry.txt"
+    assert value_of(card, "moving") == "100%"
+
+
+def test_the_hero_thumbnails_are_the_index_slots_and_link_to_their_frames(tmp_path):
+    page = scene_page(tmp_path, make_root(tmp_path))
+    assert [t["label"] for t in page["hero"]] == ["10%", "50%", "90%"]
+    assert [t["url"] for t in page["hero"]] == [
+        f"/api/scene/0000/thumb/{slot}.jpg" for slot in ("a", "b", "c")
+    ]
+    assert [t["href"] for t in page["hero"]] == [
+        "/scene/0000/frame/1", "/scene/0000/frame/6", "/scene/0000/frame/10",
+    ]
+
+
+def test_the_scene_page_leads_with_its_thumbnails_and_the_four_cards(atlas_client):
+    r = atlas_client.get("/scene/0000")
+    assert r.status_code == 200
+    body = r.text
+    for slot in ("a", "b", "c"):
+        assert f"/api/scene/0000/thumb/{slot}.jpg" in body
+    for title in ("Recording", "Ground truth", "Calibration", "Proprioception"):
+        assert f"<h2>{title}</h2>" in body
+    # The thumbnails come before the cards, which come before the tabs.
+    assert body.index('class="hero"') < body.index('class="grid cards"') < body.index('class="tabs"')
+    # And the absent-artefact chips survived the rework.
+    assert 'class="chip no"' in body and "joint_setpoints.npy" in body
+
+
+def test_a_scene_page_on_a_root_with_almost_nothing_still_renders(tmp_path):
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(
+        tmp_path,
+        with_height_maps=False,
+        with_cmd_vel=False,
+        with_transforms=False,
+        with_gravity=False,
+        with_joints=False,
+        with_camera_info=False,
+    )
+    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    body = client.get("/scene/0000").text
+    assert "<h2>Recording</h2>" in body and "<h2>Ground truth</h2>" in body
+    assert "<h2>Proprioception</h2>" not in body  # nothing to fill it
+    assert "field of view" not in body  # no camera_info, so no image size to use
+    assert 'class="chip no"' in body
+
+
+def test_the_index_and_the_scene_page_share_one_palette():
+    """The index may restyle its *type*; its colours are the viewer's colours."""
+    from dataset_tools.viewer import app as viewer_app
+
+    css = (Path(viewer_app.__file__).parent / "static" / "style.css").read_text()
+    index_scope = css[css.index("body.atlas {"):].split("}", 1)[0]
+    for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line"):
+        assert token not in index_scope, f"{token} is redefined for the index"
+    assert "--sans" in index_scope  # only the type stacks are the index's own
+    root_scope = css[css.index(":root {"):].split("}", 1)[0]
+    for token in ("--track", "--ok-soft", "--shade", "--mono"):
+        assert token in root_scope
+
+
+# --------------------------------------------------------------------------
+# the 3D view: what the wrapper adds on top of SimView
+# --------------------------------------------------------------------------
+
+
+def test_the_tile_robot_is_helhest_drawn_to_scale():
+    """The BEV tiles carry a top-down robot, not an anonymous dot.
+
+    Checked geometrically rather than by eye: the drawn footprint has to be
+    the real one, so it can be used as a ruler for the map around it.
+    """
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    # A flat map: everything that differs from the background is the robot.
+    png = render.render_height_map(np.zeros((128, 128)), size=384)
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    assert img.size == (384, 384)
+    px_per_m = (img.width / 128) / loaders.HM_RES
+
+    arr = np.asarray(img).astype(int)
+    background = arr[0, 0]
+    marked = np.abs(arr - background).sum(axis=2) > 12
+    rows, cols = np.nonzero(marked)
+    assert marked.any(), "nothing was drawn on the tile"
+
+    # Extent: chassis is 1.0 m long, but the wheels reach further in both
+    # axes (front hubs at y=+-0.52 with a 0.142 m tread, rear wheel back to
+    # x=-0.8685) and the heading wedge sticks 0.3 m past the nose.
+    height_m = (rows.max() - rows.min() + 1) / px_per_m
+    width_m = (cols.max() - cols.min() + 1) / px_per_m
+    assert 1.6 < height_m < 1.9, height_m          # -0.8685 .. +0.8 forward
+    assert 1.0 < width_m < 1.3, width_m            # +-0.591 across the wheels
+
+    # Centred on the robot, and pointing forward: the wedge puts more ink
+    # above the middle row than the rear wheel puts below it.
+    assert abs((rows.min() + rows.max()) / 2 - img.height / 2) < 0.12 * px_per_m
+    assert abs((cols.min() + cols.max()) / 2 - img.width / 2) < 0.12 * px_per_m
+    assert marked[: img.height // 2].sum() > marked[img.height // 2 :].sum()
+
+    # Subtle: a marker that covered the map would defeat the point of the map.
+    assert marked.mean() < 0.03, marked.mean()
+
+
+def test_every_bev_tile_carries_the_same_robot():
+    """Height map, validity and cloud are all the same robot-centred frame, so
+    the robot has to be drawn the same real size on each of them."""
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    # The silhouette's outline is the only near-white ink on any of these
+    # tiles (turbo's low end, the validity green, and the cloud's black
+    # background with its grey range rings are all far from white).
+    tiles = {
+        128 * loaders.HM_RES: render.render_height_map(np.zeros((128, 128))),
+        128 * loaders.HM_RES + 1e-9: render.render_validity(np.full((128, 128), 2)),
+        24.0: render.render_cloud_bev(np.zeros((32, 4))),
+    }
+    sizes = set()
+    for span_m, png in tiles.items():
+        img = Image.open(io.BytesIO(png)).convert("RGB")
+        white = np.asarray(img).min(axis=2) >= 190
+        assert white.any(), span_m
+        rows, cols = np.nonzero(white)
+        px_per_m = img.width / span_m
+        sizes.add(round((cols.max() - cols.min() + 1) / px_per_m, 1))
+        # Centred on the robot, whatever the tile's scale.
+        assert abs((cols.min() + cols.max()) / 2 - img.width / 2) < 0.15 * px_per_m
+    assert len(sizes) == 1, sizes
+
+
+def test_the_tile_robot_matches_the_3d_robot():
+    """render.py duplicates build.py's geometry (it cannot import it: build
+    imports render). The two must not be allowed to drift apart."""
+    pytest.importorskip("torch")
+    from dataset_tools.viewer import build
+
+    assert render.ROBOT_CHASSIS_HALF == (build.CHASSIS["hx"], build.CHASSIS["hy"])
+    assert render.ROBOT_WHEEL_RADIUS == build.WHEEL_RADIUS
+    assert render.ROBOT_WHEEL_WIDTH == build.WHEEL_WIDTH
+    assert sorted(render.ROBOT_WHEEL_HUBS) == sorted(
+        (x, y) for x, y, _z, _col, _sign in build.WHEELS.values()
+    )
+
+
+def test_every_terrain_colour_mode_is_explained():
+    """SimView offers a "Color Mode" per attached property and explains none
+    of them, so the descriptions travel with the layer names."""
+    pytest.importorskip("torch")
+    from dataset_tools.viewer import build
+
+    modes = build.terrain_color_modes(["coverage", "validity", "cloud_points"])
+    assert [m["name"] for m in modes] == [
+        "height", "coverage", "validity", "cloud_points",
+    ]
+    assert all(m["description"] for m in modes)
+    # Every layer the builder can attach has prose written for it.
+    produced = {"coverage", "validity", "cloud_points", "cloud_intensity", "cloud_spread"}
+    assert produced <= set(build.TERRAIN_COLOR_MODE_HELP)
+
+
+def test_meta_json_carries_the_colour_mode_legend(client):
+    opts = "40-160000-80-500000-0.1-height"
+    meta = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json").json()
+    modes = meta["build"]["terrain_color_modes"]
+    assert modes[0]["name"] == "height"
+    assert all(m["description"] for m in modes)
+    # The legend has to describe exactly the modes SimView will offer, which
+    # is "height" plus whatever properties the terrain actually carries.
+    model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
+    attached = list((model["terrain"].get("properties") or {}).keys())
+    assert [m["name"] for m in modes] == ["height", *attached]
+
+
+def test_a_bundle_from_an_older_viewer_is_rebuilt_not_served(client, tmp_path):
+    """The cache is keyed by what was asked for, not by the code that answers,
+    so a stale bundle would otherwise outlive a viewer upgrade forever."""
+    from dataset_tools.viewer import app as app_module
+
+    opts = "40-160000-80-500000-0.1-height"
+    first = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json").json()
+    assert first["meta_version"] == app_module.META_VERSION
+
+    bundles = list(tmp_path.rglob("seg000/*/meta.json"))
+    assert bundles, "the built bundle was not found on disk"
+    stale = json.loads(bundles[0].read_text())
+    stale["meta_version"] = 0
+    stale["build"].pop("terrain_color_modes", None)
+    bundles[0].write_text(json.dumps(stale))
+
+    again = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json").json()
+    assert again["meta_version"] == app_module.META_VERSION
+    assert again["build"]["terrain_color_modes"]
+
+
+def test_the_overlay_offers_the_cloud_and_the_ghost_as_separate_toggles(client):
+    """The old control was one either/or switch that put SimView in "points"
+    mode, which hid the robot. They are independent checkboxes now."""
+    page = client.get("/view/0000/seg000").text
+    assert 'id="dt-cloud"' in page and 'id="dt-ghost"' in page
+    assert "dt-seg" not in page  # the either/or switch is gone
+    # Each toggle says what it is; the ghost is the one nobody recognises.
+    assert "wheel-odometry ghost" in page
+    assert "wheel_odom_drift" in page
+    # And the panel's own toggle is a single edge tab, not the old pair.
+    assert 'id="dt-edge"' in page
+    assert 'id="dt-expand"' not in page and 'id="dt-collapse"' not in page
+
+
+def test_the_viewer_page_installs_the_simview_patches(client):
+    page = client.get("/view/0000/seg000").text
+    assert "/viewer-static/overlay.js" in page
+    patch = client.get("/viewer-static/simview_patch.js")
+    assert patch.status_code == 200
+    body = patch.text
+    # The stopgaps have to stay findable and deletable as whole blocks.
+    for marker in (
+        "STOPGAP for simview <= 4.2: origin-anchored frustum culling",
+        'STOPGAP for simview <= 4.2: the "points" body-visualization mode',
+        "STOPGAP for simview <= 4.2.0: ScalarPlotter plots never draw (3 causes)",
+    ):
+        at = body.find(marker)
+        assert at >= 0, marker
+        # Each one has to announce, right there, that it is deletable.
+        assert "Delete this block on upgrade" in body[at : at + 400], marker
+    # And the permanent parts name the bodies they are about.
+    assert "lidar_cloud" in body and "wheel_odom_ghost" in body
+
+
+def test_the_stopgaps_switch_themselves_off_when_simview_is_upgraded(client):
+    """A workaround left running over a fixed SimView would override the real
+    fix, so each one is gated on the version the page reports."""
+    from dataset_tools.viewer.app import _simview_version
+
+    page = client.get("/view/0000/seg000").text
+    assert f'"simviewVersion": "{_simview_version()}"' in page
+
+    body = client.get("/viewer-static/simview_patch.js").text
+    assert 'LAST_SIMVIEW_NEEDING_STOPGAPS = "4.2.0"' in body
+    # The two SimView has fixed are behind the gate...
+    gated = body[body.index("const stopgaps = versionAtMost") :]
+    assert "stopgapOriginCulling(app);" in gated.split("hideHousekeepingBodies")[0]
+    assert "stopgapDropPointsMode(app);" in gated.split("hideHousekeepingBodies")[0]
+    # ...and the scalar-plot one is now gated with them (simview 4.2.1 fixes it),
+    # so on a newer package none of the three run and simview handles them.
+    assert "if (stopgaps) stopgapScalarXScale(app);" in body
+    # It still adopts each chart once and only pins a still-null x scale.
+    assert "if (_dtScalarFixed.has(chart)) continue;" in body
+
+
+def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
+    """It is already in the world frame, so a per-frame identity transform is
+    a blob that says nothing -- and is what would keep it in the Body states
+    list once SimView starts filtering that list by trajectory."""
+    opts = "40-160000-80-500000-0.1-height"
+    client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
+    model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
+    states = client.get(f"/api/data/0000/seg000/{opts}/x/states.json").json()
+    names = [b["name"] for b in model["bodies"]]
+    if "lidar_cloud" not in names:
+        pytest.skip("this synthetic window aggregated no cloud")
+    posed = {b["name"] for b in states["bodies"]}
+    assert "robot" in posed
+    assert "lidar_cloud" not in posed

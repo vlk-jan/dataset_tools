@@ -37,14 +37,58 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
 from . import render
-from .build import BuildOptions, SceneAccess, build_scene
+from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
+from .index_page import THUMB_FRACTIONS, build_index
 from .probe import ARTEFACTS, DatasetRoot
+from .scene_page import build_scene_page
+from .windows import describe_reason, frame_window_key
 from .wire import render_viewer_page, scene_document, write_static_bundle
+
+
+class _RevalidatingStatic(StaticFiles):
+    """StaticFiles that forces the browser to revalidate every asset.
+
+    SimView's own front-end is versioned, but only its entry point carries a
+    cache-bust (``main.js?v=<ver>``); the ES modules it imports (SimView.js,
+    ui/ScalarPlotter.js, ...) do not. Served with no ``Cache-Control`` header,
+    a browser applies heuristic freshness and keeps the OLD modules after the
+    package is upgraded -- so the server reports the new version (and our
+    version-gated workarounds stand down) while the tab still runs the buggy
+    old JS, e.g. blank Analysis plots after the 4.2.1 upgrade. ``no-cache``
+    keeps the file cached but forces a conditional request every load, so an
+    unchanged file is a cheap 304 and an upgraded one is picked up at once.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+class _ImmutableStatic(StaticFiles):
+    """StaticFiles for URLs that already carry a version in their path.
+
+    When the URL is unique per version (``/simview-static/<ver>/...``) the file
+    at it never changes, so it is safe -- and best -- to let the browser cache
+    it forever. An upgrade changes the version segment, so the new build is a
+    new URL the browser has never seen; there is no way to serve a stale module
+    the way an unversioned path invites. This is the belt to the no-cache
+    braces: it is what actually guarantees the JS the browser runs matches the
+    version the server reports.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 logger = logging.getLogger("dataset_tools.viewer.app")
 
 HERE = Path(__file__).parent
 IMMUTABLE = {"Cache-Control": "public, max-age=86400"}
+#: Stored atlas thumbnails are curated files that only change when someone
+#: regenerates them by hand, and the index asks for 129 of them at once.
+CURATED = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 def _simview_static_dir() -> Path:
@@ -105,46 +149,78 @@ def create_app(
     app.state.viewer = state
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
-    app.mount("/viewer-static", StaticFiles(directory=str(HERE / "static")), name="viewer_static")
+    templates.env.globals["reason_text"] = describe_reason
+    app.mount("/viewer-static", _RevalidatingStatic(directory=str(HERE / "static")), name="viewer_static")
 
     simview_static = _simview_static_dir()
     simview_ok = simview_static.is_dir()
+    simview_ver = _simview_version()
     if simview_ok:
-        app.mount("/simview-static", StaticFiles(directory=str(simview_static)), name="simview_static")
-        # Also at /static, where SimView's own document-relative asset paths
-        # (config.js: "static/textures/points/ball1.png") expect to find them.
-        app.mount("/static", StaticFiles(directory=str(simview_static)), name="simview_static_root")
+        # Version-stamped path first (most specific): the entry point and every
+        # ES module it imports resolve under it, so a package upgrade changes
+        # every module's URL at once and the browser cannot serve a stale mix
+        # of old and new modules. This is what render_viewer_page points at.
+        app.mount(
+            f"/simview-static/{simview_ver}",
+            _ImmutableStatic(directory=str(simview_static)),
+            name="simview_static_versioned",
+        )
+        # Unversioned fallback (revalidating), still needed for SimView's own
+        # document-relative asset paths (config.js: "static/textures/...").
+        app.mount("/simview-static", _RevalidatingStatic(directory=str(simview_static)), name="simview_static")
+        app.mount("/static", _RevalidatingStatic(directory=str(simview_static)), name="simview_static_root")
     else:  # pragma: no cover - only when simview is missing/broken
         logger.error("simview static assets not found at %s; the 3D view will not work", simview_static)
 
     # ------------------------------------------------------------------ pages
 
+    # Cache-immunity stamp, folded into every /api/data URL: bundle content
+    # can change under an unchanged URL when the viewer code changes, and a
+    # browser that cached the old response (with any freshness lifetime) would
+    # mix stale trajectory blobs with fresh model.json. A new stamp on every
+    # code change makes previously cached entries unaddressable.
+    import hashlib
+
+    _h = hashlib.sha1()
+    for _f in ("build.py", "wire.py", "app.py"):
+        _h.update(str((Path(__file__).parent / _f).stat().st_mtime_ns).encode())
+    stamp = _h.hexdigest()[:8]
+
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        probes = await run_in_threadpool(root.probe_all)
-        rows = []
-        csv_rows = root.csv_rows()
-        for probe in probes:
-            row = csv_rows.get(probe.scene_id, {})
-            rows.append({"probe": probe, "csv": row})
+        def work():
+            return build_index(root, root.probe_all())
+
+        page = await run_in_threadpool(work)
         return templates.TemplateResponse(
             request=request,
             name="index.html",
             context={
                 "root": root,
-                "rows": rows,
                 "artefacts": ARTEFACTS,
                 "manifest": root.manifest(),
                 "simview_version": _simview_version(),
                 "simview_ok": simview_ok,
+                **page,
             },
         )
 
     @app.get("/scene/{scene_id}", response_class=HTMLResponse)
-    async def scene_page(request: Request, scene_id: str):
+    async def scene_page(
+        request: Request,
+        scene_id: str,
+        tab: str = Query("windows", pattern="^(windows|frames)$"),
+        page: int = Query(0, ge=0),
+    ):
         access = _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames)
         details = await run_in_threadpool(_scene_details, access)
+        # The thumbnails and the four cards. Cached on the scene handle, so
+        # switching tabs does not re-read this scene's small arrays.
+        card_page = await run_in_threadpool(build_scene_page, root, access)
+        # The frame strip is only assembled when it is the tab being shown: it
+        # is the one part of this page that may list a directory.
+        frames = await run_in_threadpool(_frame_page, access, page) if tab == "frames" else None
         return templates.TemplateResponse(
             request=request,
             name="scene.html",
@@ -156,6 +232,40 @@ def create_app(
                 "artefacts": ARTEFACTS,
                 "details": details,
                 "csv": root.csv_rows().get(scene_id, {}),
+                "tab": tab,
+                "frames": frames,
+                "page": card_page,
+                "atlas": root.atlas_scene(scene_id),
+            },
+        )
+
+    @app.get("/scene/{scene_id}/jump")
+    async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
+        """The frames tab's jump box: clamp to the scene and go to that frame."""
+        from fastapi.responses import RedirectResponse
+
+        access = _access_or_404(state, scene_id)
+        last = max(0, access.probe.n_frames - 1)
+        return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
+
+    @app.get("/scene/{scene_id}/frame/{index}", response_class=HTMLResponse)
+    async def frame_page(request: Request, scene_id: str, index: int):
+        access = _access_or_404(state, scene_id)
+        n_frames = access.probe.n_frames
+        if index < 0 or (n_frames and index >= n_frames):
+            raise HTTPException(404, f"scene {scene_id} has no frame {index}")
+        details = await run_in_threadpool(_frame_details, access, index, state.max_frames)
+        return templates.TemplateResponse(
+            request=request,
+            name="frame.html",
+            context={
+                "root": root,
+                "scene_id": scene_id,
+                "index": index,
+                "probe": access.probe,
+                "details": details,
+                "simview_ok": simview_ok,
+                "frame_window": frame_window_key(index),
             },
         )
 
@@ -170,13 +280,19 @@ def create_app(
 
         opts = _options_from_query(request.query_params)
         bundle_key = _bundle_key(scene_id, window_key, opts)
+        # ?frame=N -- arrived here from that frame's page, so open the playhead
+        # on it instead of at the start of the window.
+        try:
+            initial_frame = int(request.query_params["frame"])
+        except (KeyError, TypeError, ValueError):
+            initial_frame = None
         overlay = templates.get_template("overlay.html").render(
             scene_id=scene_id,
             window=window,
             probe=access.probe,
-            data_base=f"/api/data/{bundle_key}",
-            meta_url=f"/api/data/{bundle_key}/meta.json",
-            status_url=f"/api/data/{bundle_key}/status",
+            data_base=f"/api/data/{bundle_key}/{stamp}",
+            meta_url=f"/api/data/{bundle_key}/{stamp}/meta.json",
+            status_url=f"/api/data/{bundle_key}/{stamp}/status",
             frame_base=f"/api/scene/{scene_id}/frame",
             scene_url=f"/scene/{scene_id}",
         )
@@ -184,10 +300,17 @@ def create_app(
             {
                 "sceneId": scene_id,
                 "windowKey": window_key,
-                "dataBase": f"/api/data/{bundle_key}",
+                "dataBase": f"/api/data/{bundle_key}/{stamp}",
                 "frameBase": f"/api/scene/{scene_id}/frame",
-                "statusUrl": f"/api/data/{bundle_key}/status",
-                "metaUrl": f"/api/data/{bundle_key}/meta.json",
+                "statusUrl": f"/api/data/{bundle_key}/{stamp}/status",
+                "metaUrl": f"/api/data/{bundle_key}/{stamp}/meta.json",
+                "initialFrame": initial_frame,
+                "sceneUrl": f"/scene/{scene_id}",
+                # Which SimView the page is running against. The overlay gates
+                # its workarounds on this so that upgrading the package turns
+                # them off by itself -- a stopgap left running over a fixed
+                # SimView would override the real fix (see simview_patch.js).
+                "simviewVersion": _simview_version(),
             }
         )
         head = (
@@ -197,8 +320,8 @@ def create_app(
         body = overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
         page = await run_in_threadpool(
             render_viewer_page,
-            "/simview-static",
-            f"/api/data/{bundle_key}",
+            f"/simview-static/{_simview_version()}",
+            f"/api/data/{bundle_key}/{stamp}",
             _simview_version(),
             body,
             head,
@@ -246,6 +369,44 @@ def create_app(
             raise HTTPException(404, f"no image for frame {index}")
         return Response(data, media_type="image/jpeg", headers=IMMUTABLE)
 
+    @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
+    async def api_scene_thumb(scene_id: str, slot: str):
+        """One index thumbnail: the curated file if the root has one, else a live frame.
+
+        The two cases are deliberately the same URL. A root with an ``atlas/``
+        serves a stored, immutable JPEG (43 scenes x 3 of them land in one page
+        load, so they must be cacheable forever and never re-encoded); a root
+        without one renders the frame at the same fraction of the scene. The
+        index does not have to know which kind of root it is showing.
+        """
+        access = _access_or_404(state, scene_id)
+        stored = root.atlas_thumb(scene_id, slot)
+        if stored is not None:
+            return FileResponse(stored, media_type="image/jpeg", headers=CURATED)
+
+        fraction = THUMB_FRACTIONS.get(slot)
+        if fraction is None:
+            raise HTTPException(404, f"no thumbnail slot {slot!r}")
+        n_frames = access.probe.n_frames
+        if not n_frames or not access.probe.has("images"):
+            raise HTTPException(404, f"scene {scene_id} has no images to thumbnail")
+
+        def work():
+            index = min(n_frames - 1, max(0, round(fraction * (n_frames - 1))))
+            path = access.frame_path("images", index)
+            if not path.is_file():
+                # Sparse images/: fall back to the nearest index that exists.
+                available = sorted(access.available_frames("images"))
+                if not available:
+                    return None
+                path = access.frame_path("images", min(available, key=lambda i: abs(i - index)))
+            return _safe_render(render.render_camera_image, path, 384)
+
+        data = await run_in_threadpool(work)
+        if data is None:
+            raise HTTPException(404, f"no image to thumbnail for scene {scene_id}")
+        return Response(data, media_type="image/jpeg", headers=IMMUTABLE)
+
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int):
         access = _access_or_404(state, scene_id)
@@ -274,28 +435,28 @@ def create_app(
 
     # ------------------------------------------------------------ scene data
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/status")
-    async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
+    async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
         path = state.bundle_dir / scene_id / window_key / opts_key
         return {"ready": (path / "model.json").is_file(), "path": str(path)}
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/meta.json")
-    async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
+    async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "meta.json", media_type="application/json")
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/model.json")
-    async def api_model(scene_id: str, window_key: str, opts_key: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/model.json")
+    async def api_model(scene_id: str, window_key: str, opts_key: str, stamp: str):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "model.json", media_type="application/json")
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/states.json")
-    async def api_states(scene_id: str, window_key: str, opts_key: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/states.json")
+    async def api_states(scene_id: str, window_key: str, opts_key: str, stamp: str):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "states.json", media_type="application/json")
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/blob/{blob_id}")
-    async def api_blob(scene_id: str, window_key: str, opts_key: str, blob_id: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/blob/{blob_id}")
+    async def api_blob(scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str):
         if not blob_id.isdigit():
             raise HTTPException(404, "bad blob id")
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
@@ -304,10 +465,14 @@ def create_app(
             raise HTTPException(404, f"no blob {blob_id}")
         # FileResponse handles Range itself, which is what lets the SimView
         # front-end window a long trajectory instead of loading it whole.
+        # no-cache (NOT max-age): the bundle URL stays the same when a code
+        # change rebuilds its content, so the browser must revalidate against
+        # the ETag/Last-Modified rather than serve a stale blob for a day --
+        # a stale blob mixed with a fresh model.json mangles the robot.
         return FileResponse(
             path,
             media_type="application/octet-stream",
-            headers={"Cache-Control": "public, max-age=86400", "Accept-Ranges": "bytes"},
+            headers={"Cache-Control": "no-cache", "Accept-Ranges": "bytes"},
         )
 
     @app.get("/healthz")
@@ -386,6 +551,25 @@ def _options_from_key(opts_key: str) -> BuildOptions:
         return BuildOptions()
 
 
+def _bundle_is_current(dest: Path) -> bool:
+    """Is this cached bundle complete *and* built by today's code?
+
+    The cache is keyed by what was asked for (scene, window, build options),
+    none of which changes when the builder does -- so a bundle written before a
+    viewer upgrade would keep being served, with whatever fields its
+    ``meta.json`` happened to have at the time. The payload carries its own
+    version (``build.META_VERSION``); anything older is rebuilt rather than
+    served. Rebuilding a window costs a couple of seconds, once.
+    """
+    if not ((dest / "model.json").is_file() and (dest / "meta.json").is_file()):
+        return False
+    try:
+        meta = json.loads((dest / "meta.json").read_text())
+    except (OSError, ValueError):
+        return False
+    return meta.get("meta_version") == META_VERSION
+
+
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
     """Return the on-disk bundle for a window, building it if necessary.
 
@@ -394,11 +578,11 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
     kick off their own build of the same thing.
     """
     dest = state.bundle_dir / scene_id / window_key / opts_key
-    if (dest / "model.json").is_file() and (dest / "meta.json").is_file():
+    if _bundle_is_current(dest):
         return dest
 
     async with state.lock(f"{scene_id}/{window_key}/{opts_key}"):
-        if (dest / "model.json").is_file() and (dest / "meta.json").is_file():
+        if _bundle_is_current(dest):
             return dest
         opts = _options_from_key(opts_key)
 
@@ -486,6 +670,137 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
             if arr.ndim == 2 and arr.shape[0] > 1:
                 span = float(arr[-1, 0] - arr[0, 0])
                 details[f"{key}_rate_hz"] = round(arr.shape[0] / span, 1) if span > 0 else None
+    return details
+
+
+#: Thumbnails per page of the frame browser. One HTTP request each, lazily,
+#: so this is a bound on concurrent image renders rather than on bytes read.
+FRAMES_PER_PAGE = 100
+
+
+def _frame_indices(access: SceneAccess) -> list[int]:
+    """Every frame index this scene can show, in order.
+
+    Normally just ``range(n_frames)``. Only when the per-frame directory is
+    known to be incomplete is it listed, so the common case costs nothing.
+    """
+    probe = access.probe
+    for kind in ("images", "clouds"):
+        if probe.has(kind):
+            count = probe.counts.get(kind, 0)
+            if count and count != probe.n_frames:
+                return sorted(access.available_frames(kind))
+            break
+    return list(range(probe.n_frames))
+
+
+def _frame_page(access: SceneAccess, page: int) -> dict[str, Any]:
+    """One page of the frame browser."""
+    indices = _frame_indices(access)
+    n_pages = max(1, -(-len(indices) // FRAMES_PER_PAGE))
+    page = min(max(page, 0), n_pages - 1)
+    start = page * FRAMES_PER_PAGE
+    shown = indices[start : start + FRAMES_PER_PAGE]
+    ts = access.frame_ts
+    t0 = float(ts[0]) if ts is not None and len(ts) else None
+    return {
+        "page": page,
+        "n_pages": n_pages,
+        "per_page": FRAMES_PER_PAGE,
+        "total": len(indices),
+        "first": shown[0] if shown else None,
+        "last": shown[-1] if shown else None,
+        "entries": [
+            {
+                "index": i,
+                "t": round(float(ts[i]) - t0, 2) if ts is not None and t0 is not None and i < len(ts) else None,
+            }
+            for i in shown
+        ],
+        # A window of pages around the current one, so a 200-page scene does
+        # not render 200 links.
+        "page_links": sorted({0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}),
+    }
+
+
+def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str, Any]:
+    """Everything the per-frame page states about one frame.
+
+    Cheap by construction: two timestamp lookups in arrays already in memory,
+    one ``.npy`` header read for the cloud's point count, and ``is_file`` for
+    the per-frame artefacts. No cloud, image or height map is decoded here --
+    those are separate requests the browser makes for itself.
+    """
+    import numpy as np
+
+    from .probe import _npy_shape
+
+    probe = access.probe
+    details: dict[str, Any] = {"index": index, "n_frames": probe.n_frames}
+
+    ts = access.frame_ts
+    if ts is not None and 0 <= index < len(ts):
+        details["timestamp"] = float(ts[index])
+        details["t_since_start"] = float(ts[index] - ts[0])
+    pcd = access.pcd_ts
+    if pcd is not None and 0 <= index < len(pcd):
+        details["lidar_timestamp"] = float(pcd[index])
+        if "timestamp" in details:
+            details["camera_lidar_offset_ms"] = round(
+                (details["timestamp"] - float(pcd[index])) * 1000, 2
+            )
+
+    present: dict[str, bool] = {}
+    for kind in ("images", "clouds", "height_maps", "height_masks"):
+        present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
+    details["present"] = present
+
+    if present["clouds"]:
+        shape = _npy_shape(access.frame_path("clouds", index))
+        if shape:
+            details["cloud_points"] = int(shape[0])
+            details["cloud_columns"] = int(shape[1]) if len(shape) > 1 else 1
+
+    ga = access.gravity_align
+    if ga is not None and 0 <= index < len(ga):
+        from .loaders import roll_pitch_from_gravity_align
+
+        roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
+        details["roll_deg"] = round(float(np.degrees(roll[0])), 2)
+        details["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)
+
+    seg = access.segment_of_frame(index)
+    if seg is not None:
+        details["segment"] = {
+            "index": seg.index,
+            "reason": seg.reason,
+            "duration": round(seg.duration, 2),
+            "n_poses": seg.n_poses,
+            "t_into_segment": round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
+        }
+    else:
+        details["segment"] = None
+
+    # The enumerated window this frame sits in: a ground-truth one if there is
+    # one, otherwise the whole-scene fallback. This is the "show me the motion
+    # around this frame" link, as opposed to the static single-frame view.
+    containing = [
+        w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end
+    ]
+    best = next((w for w in containing if w.kind == "segment"), None) or (
+        containing[0] if containing else None
+    )
+    if best is not None:
+        details["window"] = {
+            "key": best.key,
+            "label": best.label,
+            "kind": best.kind,
+            "pose_source": best.pose_source,
+            "offset": index - best.frame_start,
+            "n_frames": best.n_frames,
+        }
+    else:
+        details["window"] = None
     return details
 
 

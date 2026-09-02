@@ -95,14 +95,42 @@ the scene is.
 The terrain offers several colour modes: `height`, plus `coverage` (how many
 height maps actually observed each cell — cells nothing observed are filled from
 a trend surface and show as zero coverage), `validity`, and `cloud_points` /
-`cloud_intensity` / `cloud_spread` from the aggregated cloud.
+`cloud_intensity` / `cloud_spread` from the aggregated cloud. What each one
+means travels with the window (`build.TERRAIN_COLOR_MODE_HELP` → `meta.json` →
+the panel's **terrain colour modes** legend), so the names in SimView's own
+"Color Mode" dropdown are explained next to it rather than left to be guessed.
 
-### Robot view vs cloud view
+### The 3D view toggles
 
-SimView draws every body in one style at a time, so the solid robot and the
-point cloud cannot both be on screen. The panel's **3D view** toggle switches
-between them (and hides the terrain surface for the cloud view, which would
-otherwise cover the points).
+Two things in the scene are diagnostics rather than the robot, and both are off
+until asked for, each with its explanation beside it in the panel:
+
+- **show lidar cloud** — every cloud in the window, aggregated in the world
+  frame. Turning it on also drops the terrain surface, which is drawn over the
+  points and describes the same ground.
+- **show wheel-odometry ghost** — an amber, translucent marker at the pose
+  wheel odometry alone would give. The gap between it and the robot is the
+  drift plotted as `wheel_odom_drift`; it grows without bound and routinely
+  ends up a hundred metres off the path, which is why it is not shown unasked.
+
+The robot stays a solid mesh throughout: the cloud is drawn independently of
+SimView's global body-visualization mode rather than by switching the whole
+scene into "points" (which has no robot to show).
+
+### Working around SimView
+
+`dataset_tools/viewer/static/simview_patch.js` holds the corrections that need
+to reach into SimView's own objects rather than just its CSS. Each block says
+whether it is permanent (something only this dataset can know: which bodies are
+bookkeeping, what the ghost is) or a **stopgap** for an upstream bug. Every
+stopgap is gated on the installed SimView version and stops firing by itself on
+upgrade — a workaround left running over a fixed release would override the
+real fix with a cruder one and hide whether it landed.
+
+The `lidar_cloud` body deliberately carries no per-frame trajectory: it is
+already accumulated in the window's frame, so a per-frame identity transform
+would be a blob that says nothing. A stateless body is the supported way to
+express a static prop.
 
 ## How it uses SimView
 
@@ -181,6 +209,19 @@ digits*, so a root whose scenes are named `scene_01/` reads as empty.
 waits for the build and loads the scene when it is ready. Builds are cached per
 (scene, window, options), so reopening is immediate. On slow storage, lower
 `cloud_frames` and `hm_frames`.
+
+**Every window rebuilds once after an upgrade.** The bundle cache is keyed by
+what was *asked for*, which does not change when the builder does, so
+`meta.json` carries `build.META_VERSION` and anything older is rebuilt rather
+than served. Without that, a window anyone had already opened would go on
+serving the old metadata forever.
+
+**The robot is missing from the 3D view.** In SimView <= 4.2 an instanced
+mesh's bounding sphere is computed once and cached, so a body is culled as soon
+as its *starting* pose leaves the view frustum -- which reads as the robot
+blinking out somewhere down a long traverse. The viewer turns culling off for
+those bodies (`simview_patch.js`), gated on the SimView version; on a newer
+package SimView handles it and the workaround does not run.
 
 **The terrain looks flat, or blockier than 0.1 m.** Check the panel's build
 line. Without `height_maps/` the terrain is accumulated from the clouds, and

@@ -11,13 +11,23 @@
   --ok: #4caf7d;
   --warn: #d8a640;
   --bad: #d1615d;
+  /* Component tokens: the groove a timeline is drawn in, the wash behind a
+     badge, the backdrop an image or a matrix sits on. */
+  --track: #2a2f39;
+  --ok-soft: #1c3a2b;
+  --shade: #0d0f13;
+  /* Type stacks. The index overrides these with web fonts; everything sizes
+     off the same stacks either way. */
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", monospace;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -30,18 +40,18 @@ header {
   gap: 16px;
   flex-wrap: wrap;
 }
-header h1 { font-size: 20px; margin: 0; font-weight: 600; }
-header .path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 13px; }
-main { padding: 20px 24px 60px; max-width: 1500px; }
-h2 { font-size: 16px; margin: 26px 0 10px; font-weight: 600; }
-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+header h1 { font-size: 22px; margin: 0; font-weight: 600; }
+header .path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 14px; }
+main { padding: 20px 24px 60px; width: 100%; }
+h2 { font-size: 17px; margin: 26px 0 10px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chip {
   display: inline-block; padding: 1px 7px; border-radius: 10px;
-  font-size: 12px; border: 1px solid var(--line); color: var(--muted);
+  font-size: 13px; border: 1px solid var(--line); color: var(--muted);
 }
 .chip.yes { color: var(--ok); border-color: #2f6b4f; }
 .chip.no { color: #8a6060; border-color: #5a3a3a; text-decoration: line-through; }
@@ -50,11 +60,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
 }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 15px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
-code, pre { font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; }
+code, pre { font-family: ui-monospace, "SF Mono", monospace; font-size: 14px; }
 pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
@@ -64,5 +74,243 @@ pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: a
 }
 .btn:hover { border-color: var(--accent); text-decoration: none; }
 .btn.primary { background: #1f4a6b; border-color: #2b6d9c; }
-.bar { height: 6px; background: #2a2f39; border-radius: 3px; overflow: hidden; }
-.bar > span { display: block; height: 100%; background: var(--ok); }
+
+/* --------------------------------------------------------- card furniture
+   The index and the scene page share one anatomy: a strip of sampled frames,
+   a stat grid of mono uppercase labels, artefact chips, a ground-truth
+   timeline. It came from the hand-made HELHEST atlas page; it is the viewer's
+   own component set now, painted in the palette above, so the two pages read
+   as one document whether or not the root has an atlas/ next to the data.
+   Only the *typography* is still the index's own (body.atlas, at the end). */
+
+.masthead { padding: 4px 0 12px; border-bottom: 2px solid var(--fg); margin-bottom: 8px; }
+.kicker {
+  font: 500 12px/1 var(--mono); letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent);
+}
+.masthead-title {
+  font-size: clamp(26px, 3.4vw, 38px); font-weight: 700;
+  letter-spacing: -.01em; margin: 8px 0 10px;
+}
+.lede { max-width: 78ch; color: var(--muted); margin: 0 0 18px; }
+.totals {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 8px;
+}
+.totals > div { background: var(--panel); padding: 10px 12px; }
+.totals dt {
+  font: 500 11px/1.3 var(--mono); letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted);
+}
+.totals dd {
+  margin: 2px 0 0; font: 600 20px/1.2 var(--display); font-variant-numeric: tabular-nums;
+}
+.totals dd small { font: 400 12px/1 var(--sans); color: var(--muted); }
+.note { font-size: 14px; color: var(--muted); max-width: 100ch; margin: 0; }
+.note code { font: 13px var(--mono); }
+
+section { margin-top: 34px; }
+.shead {
+  display: flex; align-items: baseline; gap: 14px;
+  border-bottom: 1px solid var(--line); padding-bottom: 6px;
+}
+.shead h2 { font-size: 21px; font-weight: 600; margin: 0; }
+.scount { font: 500 12px var(--mono); color: var(--muted); }
+.sblurb { color: var(--muted); font-size: 14.5px; max-width: 78ch; margin: 8px 0 18px; }
+
+/* One card per scene, two or more cards per row when the window allows it. */
+.scenes {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 16px;
+}
+.scene {
+  display: grid; grid-template-columns: 224px 1fr;
+  background: var(--panel); border: 1px solid var(--line); min-width: 0;
+}
+.strip { display: flex; flex-direction: column; background: var(--shade); }
+/* The three frames divide the card's height between them, so the strip ends
+   flush with the stats rather than leaving a gap under the last one. */
+.strip a { display: block; line-height: 0; flex: 1 1 0; min-height: 96px; }
+.strip img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.strip.empty {
+  align-items: center; justify-content: center; font-size: 13px; min-height: 120px;
+}
+.scene > .body { padding: 12px 16px 14px; min-width: 0; }
+.scene .body > header, .card > header {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 0; border: 0; background: none;
+}
+.scene h3 { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
+.scene h3 a { color: var(--fg); }
+.date { font: 400 13px var(--mono); color: var(--muted); }
+.cov {
+  margin-left: auto; font: 500 12px var(--mono); padding: 2px 8px; border-radius: 2px;
+}
+.cov.hi { background: var(--ok-soft); color: var(--ok); }
+.cov.mid { background: var(--track); color: var(--muted); }
+.cov.lo { background: var(--track); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
+.env { font-size: 14.5px; margin: 6px 0 12px; max-width: 74ch; }
+
+/* The GT timeline: blocks scaled over the scene's own time span. */
+.bar .track { position: relative; height: 14px; background: var(--track); overflow: hidden; }
+.bar i { position: absolute; top: 0; bottom: 0; background: var(--ok); }
+.bar i.fill { background: var(--warn); }
+.barcap {
+  display: flex; justify-content: space-between;
+  font: 400 11px var(--mono); color: var(--muted); margin-top: 2px;
+}
+
+dl.stats {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px 16px; margin: 14px 0 0;
+}
+dl.stats > div { border-top: 1px solid var(--line); padding-top: 4px; min-width: 0; }
+dl.stats dt {
+  font: 500 10.5px/1.4 var(--mono); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+dl.stats dd {
+  margin: 1px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px;
+}
+dl.stats dd small {
+  display: block; font-weight: 400; font-size: 11.5px; color: var(--muted);
+}
+
+.chips { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font: 400 11.5px var(--mono); border-radius: 2px; padding: 1px 6px; }
+.bagline {
+  margin: 8px 0 0; font: 400 11.5px var(--mono); color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.small { font-size: 12.5px; }
+.atlas-footer {
+  margin-top: 40px; border-top: 1px solid var(--line); padding-top: 12px;
+  font-size: 13px; color: var(--muted); max-width: 110ch;
+}
+
+@media (max-width: 700px) {
+  .scene { grid-template-columns: 1fr; }
+  .strip { flex-direction: row; }
+  .strip a { flex: 1 1 0; min-height: 0; }
+  .strip img { aspect-ratio: 8 / 5; height: auto; }
+}
+
+/* ------------------------------------------------------------ scene header
+   The three frames the index card shows, at the top of the scene they belong
+   to; each links to the frame it was cut from. */
+.hero {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px; margin: 4px 0 18px;
+}
+.hero figure {
+  margin: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; overflow: hidden; min-width: 0;
+}
+.hero a { display: block; color: inherit; }
+.hero a:hover { text-decoration: none; }
+.hero a:hover figure { border-color: var(--accent); }
+.hero img {
+  width: 100%; display: block; aspect-ratio: 8 / 5;
+  object-fit: cover; background: var(--shade);
+}
+.hero figcaption {
+  display: flex; justify-content: space-between; gap: 10px; padding: 5px 9px;
+  font: 400 12px var(--mono); color: var(--muted);
+}
+.hero figcaption b { color: var(--fg); font-weight: 500; }
+@media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
+
+/* The four info cards. Each is a stat grid with a rule under its title; a
+   card with nothing to say is not rendered at all, so they stay balanced. */
+.cards { align-items: start; }
+.cards .card { padding: 12px 16px 16px; }
+.card > header { padding-bottom: 7px; border-bottom: 1px solid var(--line); }
+.card > header h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.card > header .cov { font-size: 11.5px; }
+.card dl.stats { margin-top: 10px; }
+.card .bar { margin-top: 12px; }
+.card .cardnote {
+  margin: 12px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere;
+}
+.card .cardnote.warn { color: var(--warn); }
+details.matrix { margin-top: 10px; }
+details.matrix summary {
+  font: 500 11.5px var(--mono); color: var(--muted); cursor: pointer;
+}
+details.matrix summary:hover { color: var(--fg); }
+details.matrix pre { margin: 6px 0 0; background: var(--shade); }
+.files .chips { margin-top: 0; }
+
+/* ------------------------------------------------- scene tabs & frame pages */
+.tabs { display: flex; gap: 2px; margin: 26px 0 0; border-bottom: 1px solid var(--line); }
+.tab {
+  padding: 7px 14px; border: 1px solid var(--line); border-bottom: 0;
+  border-radius: 6px 6px 0 0; background: var(--panel); color: var(--muted);
+  margin-bottom: -1px; font-size: 15px;
+}
+.tab:hover { text-decoration: none; color: var(--fg); }
+.tab.active { background: var(--panel-2); color: var(--fg); border-bottom: 1px solid var(--panel-2); }
+
+.framebar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.framebar form { display: flex; align-items: center; gap: 8px; margin: 0; }
+.framebar label { color: var(--muted); font-size: 14px; }
+.framebar input {
+  width: 8em; padding: 4px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--line); color: var(--fg); font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.framegrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px; margin-top: 12px;
+}
+.frametile {
+  display: block; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; overflow: hidden; color: var(--fg);
+}
+.frametile:hover { border-color: var(--accent); text-decoration: none; }
+.frametile img { width: 100%; display: block; aspect-ratio: 8 / 5; object-fit: cover; background: #0d0f13; }
+.framelabel {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: 3px 7px; font: 13px ui-monospace, monospace; font-variant-numeric: tabular-nums;
+}
+.framelabel small { color: var(--muted); font-size: 11.5px; }
+
+.pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
+.btn.disabled { color: var(--muted); border-style: dashed; }
+
+.framenav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
+@media (max-width: 1000px) { .framepage { grid-template-columns: 1fr; } }
+.bigframe {
+  width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: #0d0f13;
+}
+.framemain .tiles {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px; margin-top: 12px;
+}
+.framemain .tile {
+  margin: 0; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px; min-width: 0;
+}
+.framemain .tile figcaption { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.framemain .tile img {
+  width: 100%; display: block; border-radius: 4px; background: #0d0f13;
+  image-rendering: pixelated;
+}
+.framemain .tile .absent {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--line); border-radius: 4px; font-size: 13px; text-align: center;
+}
+.frameside .card h2 { font-size: 16px; }
+
+/* -------------------------------------------------------- index typography
+   The scene index reads as a document rather than a control panel, so it
+   swaps in the atlas page's type. Loaded non-blocking: without the web fonts
+   it falls back to the same system stacks every other page uses. */
+body.atlas {
+  --sans: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  font-family: var(--sans);
+}
+body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-wrap: balance; }
