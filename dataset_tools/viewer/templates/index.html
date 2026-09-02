@@ -79,7 +79,7 @@
             <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
           {% endfor %}
         </td>
-        <td class="muted" style="font-size:12px">{{ p.bag or "&mdash;"|safe }}</td>
+        <td class="muted" style="font-size:13px">{{ p.bag or "&mdash;"|safe }}</td>
       </tr>
     {% endfor %}
     </tbody>

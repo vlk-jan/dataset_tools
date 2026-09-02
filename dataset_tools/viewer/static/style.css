@@ -17,7 +17,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -30,18 +30,18 @@ header {
   gap: 16px;
   flex-wrap: wrap;
 }
-header h1 { font-size: 18px; margin: 0; font-weight: 600; }
-header .path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 12px; }
+header h1 { font-size: 20px; margin: 0; font-weight: 600; }
+header .path { color: var(--muted); font-family: ui-monospace, monospace; font-size: 13px; }
 main { padding: 20px 24px 60px; max-width: 1500px; }
-h2 { font-size: 15px; margin: 26px 0 10px; font-weight: 600; }
-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+h2 { font-size: 16px; margin: 26px 0 10px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .chip {
   display: inline-block; padding: 1px 7px; border-radius: 10px;
-  font-size: 11px; border: 1px solid var(--line); color: var(--muted);
+  font-size: 12px; border: 1px solid var(--line); color: var(--muted);
 }
 .chip.yes { color: var(--ok); border-color: #2f6b4f; }
 .chip.no { color: #8a6060; border-color: #5a3a3a; text-decoration: line-through; }
@@ -51,10 +51,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 13px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 14px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
-code, pre { font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }
+code, pre { font-family: ui-monospace, "SF Mono", monospace; font-size: 13px; }
 pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
