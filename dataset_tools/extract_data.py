@@ -688,6 +688,12 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             pcd_set.remove(t)
 
     # Process Odom Transforms (relative to first frame)
+    if gt_enabled(args) and odom_data:
+        if write_ground_truth(odom_data, scene_dir):
+            LOG.info("%s: ground truth written (odometry.txt + segments)", bag_path.name)
+        else:
+            LOG.warning("%s: too few odometry samples for ground truth", bag_path.name)
+
     if transforms_dict:
         missing = [i for i in range(len(valid_cam_ts)) if i not in transforms_dict]
         if missing:
@@ -823,6 +829,65 @@ def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> b
     return True
 
 
+GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
+
+
+def gt_enabled(args) -> bool:
+    """--gt auto: the odometry is its own ground truth only on rigs where the
+    source is absolute (Fixposition GNSS/INS); wheel-IMU /odom drifts and the
+    old rig's ground truth comes from the offline FAST-LIO regeneration."""
+    if args.gt == "on":
+        return True
+    if args.gt == "off":
+        return False
+    return "fixposition" in args.odom
+
+
+def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0,
+                       min_poses=20) -> bool:
+    """Write odometry.txt + odometry_segments.txt in the HELHEST v1.2 contract.
+
+    For rigs whose odometry source is trustworthy on its own (Fixposition
+    GNSS/INS), the recorded poses ARE the ground truth -- but consumers expect
+    the v1.2 shape: pose rows at full rate, split into segments that are each
+    re-anchored to the identity, with a segment table that must never be
+    bridged. Segments break at time gaps > ``max_gap`` and at teleports
+    (displacement implying > ``max_speed`` m/s, e.g. GNSS out-and-back spikes);
+    spike samples end up in tiny segments that ``min_poses`` discards.
+    """
+    if len(odom_data) < min_poses:
+        return False
+    data = sorted(odom_data, key=lambda x: x[0])
+    ts = np.array([x[0] for x in data])
+    Ts = np.array([x[1] for x in data])
+    dt = np.diff(ts)
+    step = np.linalg.norm(np.diff(Ts[:, :3, 3], axis=0), axis=1)
+    breaks = np.where((dt > max_gap) | (step > max_speed * np.maximum(dt, 1e-3)))[0] + 1
+    reasons = ["gap" if dt[b - 1] > max_gap else "teleport" for b in breaks]
+    starts = [0, *breaks]
+    ends = [*breaks, len(ts)]
+    seg_id = 0
+    with open(scene_dir / "odometry.txt", "w") as f_out, open(
+        scene_dir / "odometry_segments.txt", "w"
+    ) as f_seg:
+        f_out.write(GT_HEADER + "\n")
+        f_seg.write("# segment start_ts end_ts n_poses reason\n")
+        for k, (a, b) in enumerate(zip(starts, ends)):
+            if b - a < min_poses:
+                continue
+            anchored = np.einsum("ij,njk->nik", np.linalg.inv(Ts[a]), Ts[a:b])
+            for t, T in zip(ts[a:b], anchored):
+                f_out.write(
+                    " ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n"
+                )
+            reason = reasons[k - 1] if k > 0 else "start"
+            f_seg.write(
+                f"{seg_id} {ts[a]:.6f} {ts[b-1]:.6f} {b-a} {reason}\n"
+            )
+            seg_id += 1
+    return seg_id > 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -890,6 +955,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--overwrite",
         action="store_true",
         help="Re-extract scenes whose output directory is already complete",
+    )
+    parser.add_argument(
+        "--gt",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help="Write odometry.txt + odometry_segments.txt (v1.2 ground-truth "
+        "contract) from the odometry stream, segmented at gaps and GNSS "
+        "teleports. 'auto' enables it when --odom is a Fixposition topic.",
     )
     parser.add_argument(
         "--scenes",

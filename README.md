@@ -100,6 +100,14 @@ which is equivalent to spelling out the defaults:
 --odom /fixposition/odometry_enu --imu /fixposition/odometry_enu
 ```
 
+When `--odom` is a Fixposition topic, the extractor also writes the
+ground-truth files (`--gt auto`): `odometry.txt` (base_link pose at full
+rate, split into segments each re-anchored to the identity) and
+`odometry_segments.txt` (never interpolate across segment boundaries).
+Segments break at >1 s gaps and at GNSS teleports; one-sample spikes are
+discarded. This matches the HELHEST v1.2 contract, so segment-aware
+consumers need no changes.
+
 The Odin1 mount extrinsic is not in the bags' TF tree; pass it once known:
 
 ```bash
