@@ -13,8 +13,12 @@ identity) and appends the survivors as extra segments tagged
 Before the first merge of a scene, the pure-v1.2 files are preserved as
 ``regen/odometry_v12only.txt`` and ``regen/odometry_segments_v12only.txt``.
 A scene whose segment table already contains ``v11_fill`` is skipped, so the
-script is idempotent.
+script is idempotent. Every processed scene gets a ``regen/merge_v11_fill.txt``
+outcome record, so "has a v12only backup" means exactly "the live files were
+rewritten" while processed-but-unfilled scenes remain distinguishable from
+never-processed ones.
 """
+import datetime
 import shutil
 import sys
 from pathlib import Path
@@ -64,6 +68,12 @@ def fill_segments(t1, T1, segs12, rt, rT):
     return out
 
 
+def record(d12, outcome, params="window=2.0 max_err=1.0 min_poses=20"):
+    with open(d12 / "regen" / "merge_v11_fill.txt", "w") as f:
+        f.write(f"processed={datetime.datetime.now().isoformat(timespec='seconds')}\n")
+        f.write(f"params={params}\noutcome={outcome}\n")
+
+
 def merge_scene(v11, v12, scene):
     d12 = Path(v12) / scene
     seg_path = d12 / "odometry_segments.txt"
@@ -71,6 +81,7 @@ def merge_scene(v11, v12, scene):
     p11 = Path(v11) / scene / "odometry.txt"
     ref_path = d12 / "regen" / "odom_ref.txt"
     if not p11.exists():
+        record(d12, "no_v11_odometry")
         return f"{scene}: no v1.1 odometry, nothing to fill"
     if "v11_fill" in seg_path.read_text():
         return f"{scene}: already merged, skipping"
@@ -79,6 +90,7 @@ def merge_scene(v11, v12, scene):
     rt, rT = load_traj(ref_path)
     fills = fill_segments(t1, T1, segs12, rt, rT)
     if not fills:
+        record(d12, "no_fill_survives_gate")
         return f"{scene}: no fill survives the gate"
     # preserve the pure-v1.2 files once
     for src, dst in ((odo_path, "odometry_v12only.txt"), (seg_path, "odometry_segments_v12only.txt")):
@@ -102,6 +114,7 @@ def merge_scene(v11, v12, scene):
                 fo.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
             fsg.write(f"{k} {tt[0]:.6f} {tt[-1]:.6f} {len(tt)} {reason}\n")
     span = sum(p[0][-1] - p[0][0] for p in pieces if p[2] == "v11_fill")
+    record(d12, f"filled:{len(fills)}_segments_{span:.1f}s")
     return (f"{scene}: MERGED +{len(fills)} fill segments, +{span:.1f} s "
             f"({sum(len(p[0]) for p in pieces if p[2]=='v11_fill')} poses)")
 
