@@ -14,12 +14,11 @@ re-anchors each run at its first pose.
 Reads  <regen_dir>/odometry.txt and odometry_segments.txt (run_scene.sh output)
 Writes <out_dir>/odometry.txt            filtered runs, each anchored at identity
        <out_dir>/odometry_segments.txt   "segment start_ts end_ts n_poses reason"
-       <out_dir>/odometry_unfiltered.txt copy of the input trajectory
-       <out_dir>/odometry_filter.txt     key=value summary
+       <regen_dir>/filter_stats.txt      key=value summary (the pre-filter
+                                         trajectory already lives in regen_dir)
 Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span_out
 """
 import argparse
-import shutil
 from pathlib import Path
 
 import numpy as np
@@ -80,7 +79,10 @@ def main():
 
     regen, out = Path(a.regen_dir), Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    t, T = load_traj(regen / "odometry.txt")
+    src = regen / "odometry_prefilter.txt"
+    if not src.exists():
+        src = regen / "odometry.txt"
+    t, T = load_traj(src)
     segs = load_segments(regen / "odometry_segments.txt") if (regen / "odometry_segments.txt").exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
     rt, rT = load_traj(a.odom_ref)
 
@@ -106,7 +108,6 @@ def main():
             kept_segs.append((run_t[0], run_t[-1], len(run_t), f"filtered:{reason}"))
             span_out += run_t[-1] - run_t[0]
 
-    shutil.copy(regen / "odometry.txt", out / "odometry_unfiltered.txt")
     with open(out / "odometry.txt", "w") as f:
         f.write(HEADER + "\n")
         for row in kept_rows:
@@ -118,7 +119,7 @@ def main():
     summary = dict(poses_in=len(t), poses_out=len(kept_rows), segments_in=len(segs),
                    segments_out=len(kept_segs), span_in_s=round(span_in, 1), span_out_s=round(span_out, 1),
                    window=a.window, max_err=a.max_err, min_poses=a.min_poses)
-    with open(out / "odometry_filter.txt", "w") as f:
+    with open(regen / "filter_stats.txt", "w") as f:
         for k, v in summary.items():
             f.write(f"{k}={v}\n")
     print("FILTER " + " ".join(f"{k}={v}" for k, v in summary.items()))

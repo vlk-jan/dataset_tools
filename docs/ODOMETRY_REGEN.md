@@ -347,7 +347,10 @@ Root: `/mnt/personal/vlkjan6/HELHEST_v1_2` (316 GB) — 43/43 scenes, every one
 with `base_link` `odometry.txt` (filtered segments + `odometry_unfiltered.txt`,
 per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
 `/odom` and wheel references, run stats and logs), re-extracted clouds
-(zero-returns gone, correct TF), `camera_info.yaml`, `validation.csv` clean, and a root-level `manifest.json`
+(zero-returns gone, correct TF), `camera_info.yaml`, validation clean, a root-level `README.md` describing
+every file (consumer files at the scene top level; provenance —
+`odometry_prefilter.txt`, raw IMU pose, flags, segments, filter stats,
+references, logs, validation — under `<scene>/regen/`), and a `manifest.json`
 (corrections `odometry_base_link_direct`, `cloud_tf_correct`,
 `zero_return_strip`; `frame_fix_required: false`; clouds on the corrected
 `X` side like xfix/v1.1; generator commits; height-map parameters for the

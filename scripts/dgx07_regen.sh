@@ -5,6 +5,8 @@
 #   scripts/dgx07_regen.sh <scene_bags.csv> <out_root> [jobs] [rate] [scenes...]
 #
 # Per scene, in its own staging dir and ROS domain (100 + scene number):
+#   Scene layout: consumer files at the scene top level, provenance in
+#   <scene>/regen/ (see the dataset root README.md).
 #   1. rsync the bag from subtdata
 #   2. run_scene.sh          FAST-LIO + recorder with segment restarts  -> <scene>/regen/
 #   3. extract_odom_ref.py   /odom reference,  extract_wheels.py wheel speeds -> <scene>/regen/
@@ -54,7 +56,7 @@ run_one() {
     local scene=$1 bagdir=$2
     local out="$OUT/$scene" regen="$OUT/$scene/regen" stage="$STAGE/$scene"
     local bag="$stage/$(basename "$bagdir")" log="$OUT/logs/$scene.log"
-    if [ -e "$out/done" ]; then echo "$scene: done, skipping"; return 0; fi
+    if [ -e "$out/source_bag.txt" ] && [ -e "$out/regen/run_stats.txt" ]; then echo "$scene: complete, skipping"; return 0; fi
     mkdir -p "$out" "$regen" "$stage"
     {
     echo "[$(date '+%F %T')] $scene fetch $bagdir"
@@ -84,11 +86,11 @@ run_one() {
         --start_index "$((10#$scene))" --jobs 1 --overwrite \
         --cam /luxonis/oak/rgb/image_raw/compressed --lidar /livox/lidar_front --odom /odom --imu /ekf/imu/data \
         || echo "$scene: extraction failed"
-    singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene.py" "$out" --csv "$out/validation.csv" \
+    singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene.py" "$out" --csv "$regen/validation.csv" \
         || echo "$scene: validation reported problems"
 
+    mv "$regen/odometry.txt" "$regen/odometry_prefilter.txt" 2>/dev/null
     rm -rf "$stage"
-    [ -e "$out/source_bag.txt" ] && touch "$out/done"
     echo "[$(date '+%F %T')] $scene finished rc=$rc"
     echo "$(date '+%F %T') $scene rc=$rc" >> "$OUT/logs/joblog.txt"
     return $rc

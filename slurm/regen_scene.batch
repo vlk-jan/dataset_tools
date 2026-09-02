@@ -43,7 +43,7 @@ row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
 scene=${row%%,*}
 bagdir=$(echo "$row" | cut -d, -f2)
 [ -n "$scene" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
-[ -e "$OUT/$scene/done" ] && { echo "$scene already done"; exit 0; }
+[ -e "$OUT/$scene/source_bag.txt" ] && [ -e "$OUT/$scene/regen/run_stats.txt" ] && { echo "$scene already complete"; exit 0; }
 
 # Node-local scratch: /data (NVMe) preferred, /tmp fallback.
 SCRATCH=""
@@ -80,12 +80,12 @@ singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/extract_data.p
     --start_index "$((10#$scene))" --jobs "$SLURM_CPUS_PER_TASK" --overwrite \
     --cam /luxonis/oak/rgb/image_raw/compressed --lidar /livox/lidar_front --odom /odom --imu /ekf/imu/data \
     || echo "$scene: extraction failed"
-singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene.py" "$local_out/$scene" --csv "$local_out/$scene/validation.csv" \
+singularity exec $BINDS "$EXTRACT_SIF" "$PY" "$REPO/dataset_tools/validate_scene.py" "$local_out/$scene" --csv "$regen/validation.csv" \
     || echo "$scene: validation reported problems"
 
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene"
 mkdir -p "$OUT"
+mv "$regen/odometry.txt" "$regen/odometry_prefilter.txt" 2>/dev/null
 rsync -a "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 11; }
-[ -e "$OUT/$scene/source_bag.txt" ] && touch "$OUT/$scene/done"
 echo "[$(date '+%F %T')] $scene finished rc=$rc"
 exit $rc
