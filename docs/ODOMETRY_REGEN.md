@@ -349,8 +349,9 @@ per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
 `/odom` and wheel references, run stats and logs), re-extracted clouds
 (zero-returns gone, correct TF), `camera_info.yaml`, validation clean, a root-level `README.md` describing
 every file (consumer files at the scene top level; provenance —
-`odometry_prefilter.txt`, raw IMU pose, flags, segments, filter stats,
-references, logs, validation — under `<scene>/regen/`), and a `manifest.json`
+raw IMU pose, flags, pre-filter segments, filter stats, `/odom` reference,
+run stats, validation — under `<scene>/regen/`; wheels/run.log/prefilter
+were trimmed as derivable), and a `manifest.json`
 (corrections `odometry_base_link_direct`, `cloud_tf_correct`,
 `zero_return_strip`; `frame_fix_required: false`; clouds on the corrected
 `X` side like xfix/v1.1; generator commits; height-map parameters for the
@@ -383,6 +384,17 @@ v1 vs v1.2, from `regen_comparison.csv` (2 s windows against the live
 
 Recovered scenes (v1 had zero GT): 0037 and 0034 fully covered, 0019 and
 0033 at 98 %, 0007 94 %, 0027 86 %, plus 0001/0014/0015/0021/0026 partially.
+
+Scoring caveat (measured 2026-09-02): error percentiles cannot see the
+final 2 s of any v1.2 segment — an endpoint metric has no same-anchor
+endpoint there — and those zones are the approach to divergence, while v1's
+continuous files pay no such exclusion. The sensitivity check scores v1 on
+exactly v1.2's scorable footprint (pooled windows): v1 everywhere
+0.068 / 0.304 m (median / p95, 0.60 % > 1 m); v1 on the common footprint
+0.064 / 0.286 m (0.31 %); v1 inside the excluded zones only 0.083 / 0.430 m
+(2.0 %); v1.2 pooled 0.051 / 0.209 m (0.00 %). So the exclusion is real and
+flatters v1.2 slightly, but on identical ground v1.2 still improves the
+median by ~20 % and p95 by ~27 %, and the coverage gains are unaffected.
 
 Honest residual: nine scenes are less covered than v1 because segment
 restarts + the /odom filter discard stretches a single uninterrupted v1 run
