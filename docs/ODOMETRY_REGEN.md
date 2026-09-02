@@ -347,7 +347,11 @@ Root: `/mnt/personal/vlkjan6/HELHEST_v1_2` (316 GB) — 43/43 scenes, every one
 with `base_link` `odometry.txt` (filtered segments + `odometry_unfiltered.txt`,
 per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
 `/odom` and wheel references, run stats and logs), re-extracted clouds
-(zero-returns gone, correct TF), `camera_info.yaml`, `validation.csv` clean.
+(zero-returns gone, correct TF), `camera_info.yaml`, `validation.csv` clean, and a root-level `manifest.json`
+(corrections `odometry_base_link_direct`, `cloud_tf_correct`,
+`zero_return_strip`; `frame_fix_required: false`; clouds on the corrected
+`X` side like xfix/v1.1; generator commits; height-map parameters for the
+pending build).
 Post-hoc filter kept 96.2 % of poses: **178,927 poses, 359 min of ground
 truth in 469 segments**. One systematic bug was found and fixed mid-pass: a
 relaunched FAST-LIO could come up and never receive scans again (silent
