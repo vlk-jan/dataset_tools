@@ -213,12 +213,16 @@ published root for anything that consumes odometry or raw clouds.
   valid-cell IoU against an exact-X' reference is 1.000 (plain X: 0.740; no
   conjugation: 0.344 — the historical 0.36). Inherits v1's odometry gaps.
 - **v1.2 — regenerated from the raw bags** (`/mnt/personal/vlkjan6/HELHEST_v1_2`,
-  build in progress): FAST-LIO re-run per scene with fixed extrinsics and
+  complete 2026-09-02, 316 GB): FAST-LIO re-run per scene with fixed extrinsics and
   working per-point deskew, divergence-segmented, post-filtered against the
   live `/odom`, `base_link` odometry written directly (no `frame_fix`
   needed), clouds/images re-extracted with the corrected TF and the full
   `camera_info.yaml`. Recovers ground truth for scenes v1 lost to FAST-LIO
-  divergence. See `ODOMETRY_REGEN.md` for the method and per-scene numbers.
+  divergence: frame-weighted GT coverage 0.586 → 0.802, all 43 scenes have
+  odometry, 2 s window error vs `/odom` median 0.071 m with no window over
+  1 m. Nine scenes are less covered than v1 (segmenting discards what a
+  single drifting run kept) — details and the per-scene table in
+  `ODOMETRY_REGEN.md` / `regen_comparison.csv`.
 
 ## 5. Known issues and caveats
 

@@ -341,6 +341,47 @@ Other bag facts (0013): `/livox/lidar_both_filtered` exists but is two lidars
 combined — disregard; `/cmd_vel` and `/cmd_vel_nav` are empty, so
 `/joint_states` (measured wheel motion) is the only motion reference.
 
+## Full-pass results (dgx07, finished 2026-09-02 04:44)
+
+Root: `/mnt/personal/vlkjan6/HELHEST_v1_2` (316 GB) — 43/43 scenes, every one
+with `base_link` `odometry.txt` (filtered segments + `odometry_unfiltered.txt`,
+per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
+`/odom` and wheel references, run stats and logs), re-extracted clouds
+(zero-returns gone, correct TF), `camera_info.yaml`, `validation.csv` clean.
+Post-hoc filter kept 96.2 % of poses: **178,927 poses, 359 min of ground
+truth in 469 segments**. One systematic bug was found and fixed mid-pass: a
+relaunched FAST-LIO could come up and never receive scans again (silent
+stall; 12 scenes lost their tails), fixed by a per-pose heartbeat flush in
+the recorder plus a watchdog in the runner; the 12 scenes were re-run.
+
+v1 vs v1.2, from `regen_comparison.csv` (2 s windows against the live
+`/odom`; the v1 column uses the published file conjugated by X'):
+
+| | v1 (conjugated) | v1.2 |
+|---|---|---|
+| frame-weighted GT coverage | 0.586 | **0.802** |
+| scenes with any GT | 32/43 | **43/43** |
+| scenes > 80 % covered | 20 | 27 |
+| 2 s window error, median (scene mean) | 0.103 m | 0.071 m |
+| 2 s window error, p95 (scene mean) | 0.402 m | 0.237 m |
+| windows > 1 m | 1.3 % | **0.0 %** |
+| stationary-wheel drift (per-scene max, mean) | 0.215 m | 0.101 m |
+| clouds, points/frame | 19,950 (60 % blob) | 7,948 (0 % blob) |
+| yaw-rate vs wheel-differential corr | +0.29 (raw published: −0.29) | +0.29 |
+
+Recovered scenes (v1 had zero GT): 0037 and 0034 fully covered, 0019 and
+0033 at 98 %, 0007 94 %, 0027 86 %, plus 0001/0014/0015/0021/0026 partially.
+
+Honest residual: nine scenes are less covered than v1 because segment
+restarts + the /odom filter discard stretches a single uninterrupted v1 run
+kept — mildest cases lose ~15 pts (0012, 0016, 0022, 0031, 0042); the
+milicovsky-haj winter scenes lose more (0038 → 0.42, 0041 → 0.45,
+0039 → 0.68, 0032 → 0.72; restart storms on degenerate ground). On every one
+of them the v1.2 windows that remain are as good or better (e.g. 0041
+0.06 → 0.03 m median). Consumers wanting maximum coverage on those nine can
+fall back to v1.1's conjugated odometry there; a wheel-odometry-prior
+estimator (Kinematic-ICP) is the open lever if those stretches ever matter.
+
 ## Dry-run results (dgx07, 2026-09-01, rate 1.0 unless stated)
 
 Same code, same bags, one machine; numbers agree with the laptop's.
