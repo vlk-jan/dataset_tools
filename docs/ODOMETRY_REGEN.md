@@ -463,6 +463,22 @@ What follows for the full pass:
 3. Sizing: 0.55 GB and ~1 core-equivalent per scene with restarts; 8-wide on
    dgx07 is conservative. Longest scene 0011 ≈ 47 min at rate 1.0.
 
+## v1.1 gap-fill merge (2026-09-02, `scripts/merge_v11_fill.py`)
+
+Where both roots tracked, v1.2 wins (paired: 28/32 scenes, exceptions
+<= 3 mm), so the merge keeps every v1.2 segment and fills v1.2's gaps with
+the v1.1 trajectory passed through the identical post-hoc gate (2 s windows
+vs `/odom`, > 1 m dropped, >= 20-pose runs, re-anchored). Result, baked into
+the v1.2 root with per-segment provenance (`reason = v11_fill`):
++24.6 min of GT in 245 fill segments across 26 scenes at v1.2-grade quality
+(fill windows: median 0.078 m, p95 0.255, all <= 1 m by the gate).
+**Merged frame-weighted coverage 0.877** (v1 0.586, v1.2 alone 0.802);
+35 scenes above 80 %. The nine regression scenes recover (0038 0.42 -> 0.99,
+0041 0.45 -> 1.00); 0022/0025/0036 stay below v1's nominal coverage because
+their v1 windows fail the gate — that coverage was never trustworthy.
+Pure-v1.2 files preserved per scene as `regen/*_v12only.txt`; the script is
+idempotent (skips scenes whose table already carries `v11_fill`).
+
 ## Per-scene run
 
 For each row of `docs/scene_bags.csv`:
