@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-*/
 *.so
 cloudini_shim/build/
 cloudini_shim/cloudini/

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scene {{ scene_id }} &mdash; dataset viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/viewer-static/style.css">
+</head>
+<body>
+<header>
+  <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}</h1>
+  <span class="path">{{ root.path }}/{{ scene_id }}</span>
+</header>
+<main>
+
+  <div class="grid">
+    <div class="card">
+      <h2 style="margin-top:0">Recording</h2>
+      <dl class="kv">
+        <dt>Frames</dt><dd>{{ probe.n_frames }}</dd>
+        {% if details.duration_s %}<dt>Duration</dt><dd>{{ details.duration_s }} s</dd>{% endif %}
+        {% if details.frame_rate_hz %}<dt>Frame rate</dt><dd>{{ details.frame_rate_hz }} Hz</dd>{% endif %}
+        {% if probe.start_ts %}<dt>Start</dt><dd>{{ "%.3f"|format(probe.start_ts) }}</dd>{% endif %}
+        {% if probe.bag %}<dt>Bag</dt><dd style="word-break:break-all">{{ probe.bag }}</dd>{% endif %}
+        {% if probe.segment_coverage is not none %}
+        <dt>GT coverage</dt><dd>{{ "%.1f%%"|format(probe.segment_coverage * 100) }} of frames</dd>
+        {% endif %}
+      </dl>
+      {% if probe.warnings %}
+      <p class="warn">{{ probe.warnings | join("; ") }}</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Files present</h2>
+      <div>
+      {% for a in artefacts %}
+        {% set count = probe.counts.get(a.key) %}
+        <span class="chip {{ 'yes' if probe.present.get(a.key) else 'no' }}"
+              title="{{ a.relpath }} &mdash; {{ a.description }}">
+          {{ a.relpath }}{% if count %} ({{ count }}){% endif %}
+        </span>
+      {% endfor %}
+      </div>
+      <p class="muted" style="margin-bottom:0">
+        Struck-through entries are absent from this scene; the viewer simply omits
+        whatever they would have contributed.
+      </p>
+    </div>
+
+    {% if details.camera_intrinsics or details.T_cam_to_base %}
+    <div class="card">
+      <h2 style="margin-top:0">Calibration</h2>
+      {% if details.camera_intrinsics %}
+        <div class="muted">camera_intrinsics.txt (K)</div>
+        <pre>{% for r in details.camera_intrinsics %}{{ "%10.3f %10.3f %10.3f"|format(r[0], r[1], r[2]) }}
+{% endfor %}</pre>
+      {% endif %}
+      {% if details.T_cam_to_base %}
+        <div class="muted">camera &rarr; base extrinsic</div>
+        <pre>{% for r in details.T_cam_to_base %}{{ "%8.4f %8.4f %8.4f %8.4f"|format(r[0], r[1], r[2], r[3]) }}
+{% endfor %}</pre>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if details.joint_states_shape or details.cmd_vel_shape %}
+    <div class="card">
+      <h2 style="margin-top:0">Proprioception</h2>
+      <dl class="kv">
+      {% for key in ("joint_states", "joint_setpoints", "cmd_vel") %}
+        {% if details.get(key ~ "_shape") %}
+          <dt>{{ key }}</dt>
+          <dd>{{ details[key ~ "_shape"] | join(" x ") }}
+            {% if details.get(key ~ "_rate_hz") %}<span class="muted">@ {{ details[key ~ "_rate_hz"] }} Hz</span>{% endif %}
+          </dd>
+        {% endif %}
+      {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
+  </div>
+
+  <h2>Windows &mdash; {{ windows|length }}</h2>
+  <p class="muted" style="margin-top:-4px">
+    Ground-truth segments are re-anchored to identity individually, so each one is its own
+    world: a trajectory, terrain or cloud is only ever built inside a single segment.
+    Long ranges are split into parts so a build stays bounded.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Window</th><th>Frames</th><th class="num">Count</th>
+        <th class="num">Duration</th><th>Pose source</th><th>Note</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for w in windows %}
+      <tr>
+        <td><strong>{{ w.label }}</strong></td>
+        <td class="muted">{{ w.frame_start }} &ndash; {{ w.frame_end - 1 }}</td>
+        <td class="num">{{ w.n_frames }}</td>
+        <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
+        <td>
+          <span class="chip {{ 'yes' if w.pose_source == 'odometry' else ('partial' if w.pose_source == 'transforms' else 'no') }}">
+            {{ w.pose_source }}
+          </span>
+        </td>
+        <td class="muted">{{ w.reason }}</td>
+        <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
+               href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if details.segments %}
+  <h2>Odometry segments</h2>
+  <table>
+    <thead><tr><th class="num">#</th><th class="num">Duration</th><th class="num">Poses</th><th>Reason it ends</th></tr></thead>
+    <tbody>
+    {% for s in details.segments %}
+      <tr>
+        <td class="num">{{ s.index }}</td>
+        <td class="num">{{ "%.1f s"|format(s.duration) }}</td>
+        <td class="num">{{ s.n_poses }}</td>
+        <td class="muted">{{ s.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+</main>
+</body>
+</html>

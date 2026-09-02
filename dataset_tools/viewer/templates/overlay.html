@@ -1,0 +1,79 @@
+<div id="dt-build" class="dt-build">
+  <div class="dt-build-box">
+    <h2>Preparing window</h2>
+    <p class="dt-build-msg">Reading {{ window.n_frames }} frames of scene {{ scene_id }}&hellip;</p>
+    <div class="dt-build-bar"><span></span></div>
+    <p class="dt-build-sub">
+      Height maps and clouds for this window are being aggregated. This runs once
+      per window and is cached afterwards.
+    </p>
+  </div>
+</div>
+
+<div id="dt-panel" class="dt-panel">
+  <div class="dt-panel-head">
+    <div>
+      <div class="dt-title">Scene {{ scene_id }} &middot; {{ window.label }}</div>
+      <div class="dt-sub">
+        <span class="dt-badge dt-{{ window.pose_source }}">{{ window.pose_source }}</span>
+        <span>{{ window.n_frames }} frames</span>
+        <a href="{{ scene_url }}">scene</a>
+        <a href="/">index</a>
+      </div>
+    </div>
+    <button id="dt-collapse" title="Collapse panel">&rsaquo;</button>
+  </div>
+
+  <div class="dt-readout">
+    <div><span class="dt-k">frame</span><span class="dt-v" id="dt-frame">&mdash;</span></div>
+    <div><span class="dt-k">t</span><span class="dt-v" id="dt-time">&mdash;</span></div>
+    <div><span class="dt-k">stamp</span><span class="dt-v" id="dt-stamp">&mdash;</span></div>
+    <div><span class="dt-k">pose</span><span class="dt-v" id="dt-pose">&mdash;</span></div>
+  </div>
+
+  <div class="dt-view" id="dt-view" hidden>
+    <span class="dt-k">3D view</span>
+    <div class="dt-seg">
+      <button data-view="mesh" class="active">robot + surface</button>
+      <button data-view="points">lidar cloud</button>
+    </div>
+    <div class="dt-hint">
+      SimView draws one body style at a time, so the aggregated cloud and the solid
+      robot cannot both be shown. "lidar cloud" also hides the terrain surface,
+      which would otherwise cover the points.
+    </div>
+  </div>
+
+  <div class="dt-tiles" id="dt-tiles">
+    <section class="dt-tile" data-kind="images" data-endpoint="image.jpg">
+      <h3>Camera <span class="dt-note"></span></h3>
+      <div class="dt-imgwrap"><img alt="camera frame"><div class="dt-absent">no image for this frame</div></div>
+    </section>
+    <section class="dt-tile" data-kind="height_maps" data-endpoint="heightmap.png">
+      <h3>Height map <span class="dt-note">BEV, forward up</span></h3>
+      <div class="dt-imgwrap"><img alt="height map"><div class="dt-absent">no height map for this frame</div></div>
+    </section>
+    <section class="dt-tile" data-kind="height_masks" data-endpoint="validity.png">
+      <h3>Validity <span class="dt-note">
+        <i class="dt-sw dt-sw-m"></i>measured
+        <i class="dt-sw dt-sw-i"></i>interpolated
+        <i class="dt-sw dt-sw-e"></i>extrapolated</span></h3>
+      <div class="dt-imgwrap"><img alt="height map validity"><div class="dt-absent">no validity mask for this frame</div></div>
+    </section>
+    <section class="dt-tile" data-kind="clouds" data-endpoint="cloud.png">
+      <h3>Raw cloud <span class="dt-note">top-down, 5 m rings</span></h3>
+      <div class="dt-imgwrap"><img alt="lidar cloud top-down"><div class="dt-absent">no cloud for this frame</div></div>
+    </section>
+  </div>
+
+  <div class="dt-foot">
+    <div id="dt-buildinfo" class="dt-sub"></div>
+    {% if probe.missing %}
+    <div class="dt-missing">
+      <span class="dt-k">absent from this scene:</span>
+      {% for key in probe.missing %}<span class="dt-badge dt-none">{{ key }}</span>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+<button id="dt-expand" class="dt-expand" title="Show data panel">&lsaquo;</button>

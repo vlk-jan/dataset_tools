@@ -1,0 +1,901 @@
+"""Building one SimView scene for one window of one dataset scene.
+
+Everything here is *on demand and bounded*: a build touches only the frames of
+the requested window, reads at most a few dozen clouds and height maps out of
+it, and never scans the rest of the dataset. That is what makes a 20k-frame
+scene on network storage browsable.
+
+What a built scene shows
+------------------------
+
+=========================  ==============================================
+dataset file               how it appears
+=========================  ==============================================
+``odometry.txt``           the robot body's animated pose (ground truth)
+``odometry_segments.txt``  which window exists at all; episode markers
+``transforms.npy``         a "wheel odom" ghost body, and the drift scalar
+``gravity_align.npy``      roll/pitch scalars; height-map placement
+``height_maps/``           the terrain surface
+``height_masks/``          the terrain's ``validity`` colour layer
+``clouds/``                an aggregated point-cloud body + terrain layers
+``joint_states.npy``       wheel spin animation + velocity/effort scalars
+``joint_setpoints.npy``    commanded-wheel-velocity scalars
+``cmd_vel.npy``            commanded twist scalars
+``camera_intrinsics.txt``  scene metadata
+``T_cam_to_base.txt``      a small camera body at the real extrinsic
+``images/``                the side panel (served per frame, not in the scene)
+=========================  ==============================================
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+from . import loaders as L
+from .probe import DatasetRoot, SceneProbe
+from .render import unit_colors
+from .windows import Window, windows_for_scene
+
+logger = logging.getLogger("dataset_tools.viewer.build")
+
+# Rough HELHEST proportions (a ~1 m, three-wheeled skid-steer). Exact numbers
+# are cosmetic -- they only set how the robot marker looks against the terrain.
+CHASSIS = dict(hx=0.36, hy=0.22, hz=0.11)
+CHASSIS_Z = 0.22
+WHEEL_RADIUS = 0.17
+WHEEL_WIDTH = 0.10
+#: name -> (x, y, z) wheel hub in the base frame, and the joint_states column.
+WHEELS = {
+    "wheel_left": (0.24, 0.29, WHEEL_RADIUS, 0),
+    "wheel_rear": (-0.42, 0.0, WHEEL_RADIUS, 1),
+    "wheel_right": (0.24, -0.29, WHEEL_RADIUS, 2),
+}
+WHEEL_LABELS = ("left", "rear", "right")
+
+
+@dataclass
+class BuildOptions:
+    """Everything that trades visual richness against bytes read and shipped."""
+
+    max_cloud_frames: int = 40
+    max_cloud_points: int = 160_000
+    max_hm_frames: int = 80
+    max_terrain_cells: int = 500_000
+    terrain_res: float = 0.1
+    cloud_color: str = "height"  # "height" | "intensity"
+    terrain_margin: float = 7.0
+
+    def sanitized(self) -> "BuildOptions":
+        return BuildOptions(
+            max_cloud_frames=int(np.clip(self.max_cloud_frames, 0, 200)),
+            max_cloud_points=int(np.clip(self.max_cloud_points, 0, 1_500_000)),
+            max_hm_frames=int(np.clip(self.max_hm_frames, 0, 400)),
+            max_terrain_cells=int(np.clip(self.max_terrain_cells, 1000, 2_000_000)),
+            terrain_res=float(np.clip(self.terrain_res, 0.02, 2.0)),
+            cloud_color=self.cloud_color if self.cloud_color in ("height", "intensity") else "height",
+            terrain_margin=float(np.clip(self.terrain_margin, 0.5, 30.0)),
+        )
+
+    def cache_key(self) -> str:
+        s = self.sanitized()
+        return "-".join(
+            str(v) for v in (
+                s.max_cloud_frames, s.max_cloud_points, s.max_hm_frames,
+                s.max_terrain_cells, s.terrain_res, s.cloud_color,
+            )
+        )
+
+
+class SceneAccess:
+    """Lazily-loaded, cached handle on one scene's *small* per-scene files.
+
+    "Small" means anything whose whole-scene size is bounded by the frame count
+    (poses, timestamps, proprioception) -- never clouds, images or height maps,
+    which are read per frame by the caller.
+    """
+
+    def __init__(self, root: DatasetRoot, scene_id: str) -> None:
+        self.root = root
+        self.scene_id = scene_id
+        self.dir = root.scene_dir(scene_id)
+        self.probe: SceneProbe = root.probe(scene_id)
+        self._cache: dict[str, object] = {}
+
+    def _get(self, key: str, fn):
+        if key not in self._cache:
+            self._cache[key] = fn()
+        return self._cache[key]
+
+    def _optional(self, key: str, artefact: str, fn):
+        """Load an optional artefact, returning None without complaining when
+        the probe already says the scene does not have it."""
+        if not self.probe.has(artefact):
+            return None
+        return self._get(key, fn)
+
+    # -- timestamps --------------------------------------------------------
+
+    @property
+    def frame_ts(self) -> np.ndarray | None:
+        def load():
+            ts = L.read_timestamps(self.dir / "data_ts.txt")
+            if ts is None:
+                ts = L.read_timestamps(self.dir / "pcd_ts.txt")
+            if ts is None and self.probe.n_frames:
+                # No timestamp file at all: synthesise a uniform 10 Hz clock so
+                # the frames still have an ordering to play back.
+                ts = np.arange(self.probe.n_frames, dtype=np.float64) * 0.1
+            return ts
+
+        return self._get("frame_ts", load)  # type: ignore[return-value]
+
+    @property
+    def pcd_ts(self) -> np.ndarray | None:
+        return self._get("pcd_ts", lambda: L.read_timestamps(self.dir / "pcd_ts.txt"))  # type: ignore[return-value]
+
+    # -- poses -------------------------------------------------------------
+
+    @property
+    def odometry(self):
+        return self._optional("odometry", "odometry", lambda: L.read_odometry(self.dir / "odometry.txt"))
+
+    @property
+    def segments(self) -> list[L.Segment]:
+        return self._optional("segments", "odometry_segments", lambda: L.read_segments(self.dir / "odometry_segments.txt")) or []  # type: ignore[return-value]
+
+    @property
+    def transforms(self) -> np.ndarray | None:
+        return self._optional("transforms", "transforms", lambda: L.load_npy(self.dir / "transforms.npy"))  # type: ignore[return-value]
+
+    @property
+    def gravity_align(self) -> np.ndarray | None:
+        return self._optional("gravity_align", "gravity_align", lambda: L.load_npy(self.dir / "gravity_align.npy"))  # type: ignore[return-value]
+
+    # -- proprioception ----------------------------------------------------
+
+    @property
+    def joint_states(self) -> np.ndarray | None:
+        return self._optional("joint_states", "joint_states", lambda: L.load_npy(self.dir / "joint_states.npy"))  # type: ignore[return-value]
+
+    @property
+    def joint_setpoints(self) -> np.ndarray | None:
+        return self._optional("joint_setpoints", "joint_setpoints", lambda: L.load_npy(self.dir / "joint_setpoints.npy"))  # type: ignore[return-value]
+
+    @property
+    def cmd_vel(self) -> np.ndarray | None:
+        return self._optional("cmd_vel", "cmd_vel", lambda: L.load_npy(self.dir / "cmd_vel.npy"))  # type: ignore[return-value]
+
+    # -- calibration -------------------------------------------------------
+
+    @property
+    def K(self) -> np.ndarray | None:
+        return self._optional("K", "camera_intrinsics", lambda: L.read_matrix(self.dir / "camera_intrinsics.txt", (3, 3)))  # type: ignore[return-value]
+
+    @property
+    def T_cam(self) -> np.ndarray | None:
+        def load():
+            for name in ("T_cam_to_base.txt", "T_cam_to_lidar.txt"):
+                if (self.dir / name).is_file():
+                    return L.read_matrix(self.dir / name, (4, 4))
+            return None
+
+        return self._get("T_cam", load)  # type: ignore[return-value]
+
+    # -- per-frame directories --------------------------------------------
+
+    def available_frames(self, kind: str) -> set[int]:
+        """Frame indices that actually have a file in ``kind``/ (cached).
+
+        Directories are built in flight, so a scene routinely has height maps
+        for only a prefix (or a subsample) of its frames.
+        """
+        suffix = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}[kind]
+        return self._get(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
+
+    def frame_path(self, kind: str, index: int) -> Path:
+        suffix = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}[kind]
+        return self.dir / kind / f"{index:05d}{suffix}"
+
+    # -- windows -----------------------------------------------------------
+
+    def windows(self, max_frames: int) -> list[Window]:
+        return self._get(
+            f"windows_{max_frames}",
+            lambda: windows_for_scene(
+                self.frame_ts,
+                self.segments,
+                self.probe.n_frames,
+                self.probe.has("transforms"),
+                max_frames=max_frames,
+            ),
+        )  # type: ignore[return-value]
+
+    def window(self, key: str, max_frames: int) -> Window | None:
+        for w in self.windows(max_frames):
+            if w.key == key:
+                return w
+        return None
+
+
+# --------------------------------------------------------------------------
+# pose resolution
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class PoseTrack:
+    positions: np.ndarray  # (T, 3)
+    quats: np.ndarray  # (T, 4) [w,x,y,z]
+    valid: np.ndarray  # (T,) bool
+    source: str
+    note: str = ""
+
+
+def _identity_track(n: int, source: str, note: str) -> PoseTrack:
+    quats = np.zeros((n, 4))
+    quats[:, 0] = 1.0
+    return PoseTrack(np.zeros((n, 3)), quats, np.zeros(n, dtype=bool), source, note)
+
+
+def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> PoseTrack:
+    """The window's robot pose, in the window's own reference frame.
+
+    For a ``segment`` window this is ground truth interpolated inside that one
+    segment -- never across its boundary, since each segment is anchored to its
+    own identity. For a ``raw`` window it is the wheel-odometry pose
+    re-anchored to the window's first frame, so the view starts at the origin
+    and the drift accumulates visibly from there.
+    """
+    n = len(times)
+    if window.pose_source == "odometry":
+        odom = access.odometry
+        if odom is None:
+            return _identity_track(n, "none", "odometry.txt could not be read")
+        ts, poses = odom
+        seg = next((s for s in access.segments if s.index == window.segment_index), None)
+        if seg is not None:
+            lo = np.searchsorted(ts, seg.start_ts, side="left")
+            hi = np.searchsorted(ts, seg.end_ts, side="right")
+            ts, poses = ts[lo:hi], poses[lo:hi]
+        if len(ts) < 2:
+            return _identity_track(n, "none", "segment has fewer than two poses")
+        pos, quat, valid = L.interpolate_poses(ts, poses, times)
+        return PoseTrack(pos, quat, valid, "odometry", f"ground truth, segment {window.segment_index}")
+
+    if window.pose_source == "transforms":
+        tf = access.transforms
+        if tf is None:
+            return _identity_track(n, "none", "transforms.npy could not be read")
+        idx = np.arange(window.frame_start, window.frame_end)
+        idx = idx[idx < len(tf)]
+        if len(idx) < 2:
+            return _identity_track(n, "none", "transforms.npy too short")
+        rel = np.linalg.inv(tf[idx[0]]) @ tf[idx]
+        pos = rel[:, :3, 3]
+        quat = L.mat_to_quat(rel[:, :3, :3])
+        valid = np.ones(len(idx), dtype=bool)
+        if len(idx) < n:  # ragged array vs frame count: pad by holding the last pose
+            pad = n - len(idx)
+            pos = np.vstack([pos, np.repeat(pos[-1:], pad, axis=0)])
+            quat = np.vstack([quat, np.repeat(quat[-1:], pad, axis=0)])
+            valid = np.concatenate([valid, np.zeros(pad, dtype=bool)])
+        return PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
+
+    return _identity_track(n, "none", "no pose data; robot held at the origin")
+
+
+def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrack | None:
+    """Wheel odometry expressed in the ground-truth window frame.
+
+    Aligned to ground truth at the window's first valid frame, so the two
+    bodies start coincident and separate by exactly the accumulated drift.
+    """
+    tf = access.transforms
+    if tf is None or gt.source != "odometry" or not gt.valid.any():
+        return None
+    idx = np.arange(window.frame_start, min(window.frame_end, len(tf)))
+    if len(idx) < 2:
+        return None
+    anchor = int(np.flatnonzero(gt.valid)[0])
+    if anchor >= len(idx):
+        return None
+    gt_anchor = L.poses_from_quat(gt.positions[anchor : anchor + 1], gt.quats[anchor : anchor + 1])[0]
+    rel = np.linalg.inv(tf[idx[anchor]]) @ tf[idx]
+    world = gt_anchor @ rel
+    pos, quat = world[:, :3, 3], L.mat_to_quat(world[:, :3, :3])
+    n = len(gt.positions)
+    if len(pos) < n:
+        pad = n - len(pos)
+        pos = np.vstack([pos, np.repeat(pos[-1:], pad, axis=0)])
+        quat = np.vstack([quat, np.repeat(quat[-1:], pad, axis=0)])
+    return PoseTrack(pos[:n], quat[:n], np.ones(n, dtype=bool), "transforms", "wheel odometry")
+
+
+# --------------------------------------------------------------------------
+# terrain
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class TerrainGrid:
+    """A world-frame raster the window's terrain is accumulated into."""
+
+    x0: float
+    y0: float
+    res: float
+    nx: int
+    ny: int
+    sum_z: np.ndarray = field(init=False)
+    count: np.ndarray = field(init=False)
+    validity: np.ndarray = field(init=False)
+    layers: dict[str, np.ndarray] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.sum_z = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.count = np.zeros((self.ny, self.nx), dtype=np.int32)
+        self.validity = np.zeros((self.ny, self.nx), dtype=np.uint8)
+
+    @property
+    def x_lim(self) -> tuple[float, float]:
+        return (self.x0, self.x0 + self.nx * self.res)
+
+    @property
+    def y_lim(self) -> tuple[float, float]:
+        return (self.y0, self.y0 + self.ny * self.res)
+
+    def cell_of(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """World (x, y) -> (row, col, inside) in SimView's [row=y, col=x] layout."""
+        col = np.floor((x - self.x0) / self.res).astype(np.int64)
+        row = np.floor((y - self.y0) / self.res).astype(np.int64)
+        inside = (col >= 0) & (col < self.nx) & (row >= 0) & (row < self.ny)
+        return row, col, inside
+
+
+def _make_grid(positions: np.ndarray, opts: BuildOptions) -> TerrainGrid:
+    """A grid covering the window's path plus a margin, at a resolution that
+    keeps the cell count under the budget (coarsening rather than clipping, so
+    a long traverse is still shown whole)."""
+    if len(positions) == 0:
+        positions = np.zeros((1, 3))
+    x_min, y_min = positions[:, 0].min() - opts.terrain_margin, positions[:, 1].min() - opts.terrain_margin
+    x_max, y_max = positions[:, 0].max() + opts.terrain_margin, positions[:, 1].max() + opts.terrain_margin
+    res = opts.terrain_res
+    while True:
+        nx = max(2, int(math.ceil((x_max - x_min) / res)))
+        ny = max(2, int(math.ceil((y_max - y_min) / res)))
+        if nx * ny <= opts.max_terrain_cells or res >= 2.0:
+            break
+        res *= 2.0
+    return TerrainGrid(x0=float(x_min), y0=float(y_min), res=res, nx=nx, ny=ny)
+
+
+def _pick(indices: np.ndarray, budget: int) -> np.ndarray:
+    """Evenly-spaced subset of ``indices`` of at most ``budget`` entries."""
+    if budget <= 0 or len(indices) == 0:
+        return indices[:0]
+    if len(indices) <= budget:
+        return indices
+    sel = np.linspace(0, len(indices) - 1, budget).round().astype(int)
+    return indices[np.unique(sel)]
+
+
+def splat_height_maps(
+    access: SceneAccess,
+    grid: TerrainGrid,
+    frames: np.ndarray,
+    poses: np.ndarray,
+    opts: BuildOptions,
+) -> dict:
+    """Accumulate per-frame BEV height maps into the world grid.
+
+    Each map is robot-centred and *gravity-aligned*, so putting it in the world
+    needs both the robot pose and the inverse of that frame's gravity rotation:
+    ``p_world = R_pose @ R_ga.T @ p_map + t_pose``. Skipping the ``R_ga.T``
+    would tilt every map by the robot's roll/pitch.
+    """
+    have = access.available_frames("height_maps")
+    have_mask = access.available_frames("height_masks")
+    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
+    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0, "with_masks": 0}
+    if len(usable) == 0:
+        return stats
+    chosen = _pick(usable, opts.max_hm_frames)
+    ga = access.gravity_align
+
+    for i in chosen:
+        frame = int(frames[i])
+        hm = L.load_npz_key(access.frame_path("height_maps", frame), "height_map")
+        if hm is None or hm.ndim != 2:
+            continue
+        xs, ys = L.height_map_cell_centers(hm.shape)
+        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        local = np.stack([X.ravel(), Y.ravel(), np.asarray(hm, dtype=np.float64).ravel()], axis=1)
+
+        R = poses[i][:3, :3]
+        t = poses[i][:3, 3]
+        if ga is not None and frame < len(ga):
+            R = R @ np.asarray(ga[frame], dtype=np.float64).T
+        world = local @ R.T + t
+
+        row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
+        if not inside.any():
+            continue
+        np.add.at(grid.sum_z, (row[inside], col[inside]), world[inside, 2])
+        np.add.at(grid.count, (row[inside], col[inside]), 1)
+        stats["used"] += 1
+
+        if frame in have_mask:
+            mask = L.load_npz_key(access.frame_path("height_masks", frame), "validity")
+            if mask is not None and mask.shape == hm.shape:
+                flat = np.asarray(mask, dtype=np.uint8).ravel()[inside]
+                np.maximum.at(grid.validity, (row[inside], col[inside]), flat)
+                stats["with_masks"] += 1
+    return stats
+
+
+def aggregate_clouds(
+    access: SceneAccess,
+    grid: TerrainGrid | None,
+    frames: np.ndarray,
+    poses: np.ndarray,
+    opts: BuildOptions,
+) -> tuple[np.ndarray | None, dict]:
+    """Read a bounded subset of the window's clouds into one world-frame cloud.
+
+    Returns the stacked ``(N, 4)`` array (x, y, z, intensity) and read stats.
+    Also fills the grid's cloud-derived layers (point count, mean intensity,
+    vertical spread) when a grid is given, since the points are in hand anyway.
+    """
+    have = access.available_frames("clouds")
+    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
+    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0, "points": 0}
+    if len(usable) == 0:
+        return None, stats
+    chosen = _pick(usable, opts.max_cloud_frames)
+    if len(chosen) == 0:
+        return None, stats
+    per_frame = max(200, opts.max_cloud_points // max(1, len(chosen)))
+    rng = np.random.default_rng(12345)
+
+    if grid is not None:
+        sum_i = np.zeros((grid.ny, grid.nx), dtype=np.float64)
+        cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int32)
+        max_z = np.full((grid.ny, grid.nx), -np.inf)
+        min_z = np.full((grid.ny, grid.nx), np.inf)
+
+    parts: list[np.ndarray] = []
+    for i in chosen:
+        frame = int(frames[i])
+        cloud = L.load_cloud(access.frame_path("clouds", frame))
+        if cloud is None or len(cloud) == 0:
+            continue
+        R, t = poses[i][:3, :3], poses[i][:3, 3]
+        world_xyz = cloud[:, :3].astype(np.float64) @ R.T + t
+        intensity = cloud[:, 3].astype(np.float64) if cloud.shape[1] > 3 else np.zeros(len(cloud))
+
+        if grid is not None:
+            row, col, inside = grid.cell_of(world_xyz[:, 0], world_xyz[:, 1])
+            if inside.any():
+                r, c = row[inside], col[inside]
+                np.add.at(sum_i, (r, c), intensity[inside])
+                np.add.at(cnt_i, (r, c), 1)
+                np.maximum.at(max_z, (r, c), world_xyz[inside, 2])
+                np.minimum.at(min_z, (r, c), world_xyz[inside, 2])
+
+        if len(cloud) > per_frame:
+            keep = rng.choice(len(cloud), per_frame, replace=False)
+            world_xyz, intensity = world_xyz[keep], intensity[keep]
+        parts.append(np.column_stack([world_xyz, intensity]))
+        stats["used"] += 1
+
+    if grid is not None:
+        covered = cnt_i > 0
+        pts = np.zeros((grid.ny, grid.nx))
+        pts[covered] = cnt_i[covered]
+        grid.layers["cloud_points"] = pts
+        inten = np.zeros((grid.ny, grid.nx))
+        inten[covered] = sum_i[covered] / cnt_i[covered]
+        grid.layers["cloud_intensity"] = inten
+        spread = np.zeros((grid.ny, grid.nx))
+        spread[covered] = max_z[covered] - min_z[covered]
+        grid.layers["cloud_spread"] = spread
+
+    if not parts:
+        return None, stats
+    cloud = np.vstack(parts)
+    stats["points"] = int(len(cloud))
+    return cloud, stats
+
+
+def _fill_coarse_nans(coarse: np.ndarray, max_passes: int = 400) -> np.ndarray:
+    """Flood unobserved coarse cells outward from the observed ones.
+
+    Each pass averages the not-yet-filled cells over whichever of their four
+    neighbours already have a value, so the surface grows out of the observed
+    corridor instead of jumping to a constant.
+    """
+    out = coarse.copy()
+    for _ in range(max_passes):
+        holes = np.isnan(out)
+        if not holes.any():
+            break
+        total = np.zeros_like(out)
+        count = np.zeros(out.shape, dtype=np.int32)
+        for shift, axis in ((1, 0), (-1, 0), (1, 1), (-1, 1)):
+            neighbour = np.roll(out, shift, axis=axis)
+            # A rolled edge wraps around; blank that row/column out.
+            if axis == 0:
+                if shift == 1:
+                    neighbour[0, :] = np.nan
+                else:
+                    neighbour[-1, :] = np.nan
+            else:
+                if shift == 1:
+                    neighbour[:, 0] = np.nan
+                else:
+                    neighbour[:, -1] = np.nan
+            valid = ~np.isnan(neighbour)
+            total[valid] += neighbour[valid]
+            count[valid] += 1
+        fillable = holes & (count > 0)
+        if not fillable.any():
+            break
+        out[fillable] = total[fillable] / count[fillable]
+    if np.isnan(out).any():  # nothing observed at all
+        out[np.isnan(out)] = 0.0
+    return out
+
+
+def _upsample_bilinear(coarse: np.ndarray, ny: int, nx: int, by: int, bx: int) -> np.ndarray:
+    """Bilinearly expand a block-reduced grid back to full resolution."""
+    cy, cx = coarse.shape
+    y = (np.arange(ny) + 0.5) / by - 0.5
+    x = (np.arange(nx) + 0.5) / bx - 0.5
+    y0 = np.clip(np.floor(y), 0, cy - 1).astype(int)
+    x0 = np.clip(np.floor(x), 0, cx - 1).astype(int)
+    y1 = np.clip(y0 + 1, 0, cy - 1)
+    x1 = np.clip(x0 + 1, 0, cx - 1)
+    wy = np.clip(y - y0, 0.0, 1.0)[:, None]
+    wx = np.clip(x - x0, 0.0, 1.0)[None, :]
+    top = coarse[np.ix_(y0, x0)] * (1 - wx) + coarse[np.ix_(y0, x1)] * wx
+    bottom = coarse[np.ix_(y1, x0)] * (1 - wx) + coarse[np.ix_(y1, x1)] * wx
+    return top * (1 - wy) + bottom * wy
+
+
+def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 56) -> np.ndarray:
+    """A smooth trend surface through the observed cells.
+
+    Unobserved cells have to be given *some* height -- the viewer's heightfield
+    has no notion of a hole. Filling them with one global constant produces a
+    huge flat plane cutting through a scene that climbs or descends, which
+    reads as terrain that is not there. Extending the observed trend instead
+    keeps the surroundings plausible, and the ``coverage`` colour layer still
+    marks exactly which cells were actually observed.
+    """
+    ny, nx = height.shape
+    by = max(1, int(math.ceil(ny / blocks)))
+    bx = max(1, int(math.ceil(nx / blocks)))
+    pad_y, pad_x = (-ny) % by, (-nx) % bx
+    h = np.pad(height, ((0, pad_y), (0, pad_x)))
+    c = np.pad(covered, ((0, pad_y), (0, pad_x)))
+    gy, gx = h.shape[0] // by, h.shape[1] // bx
+    blocks_h = h.reshape(gy, by, gx, bx)
+    blocks_c = c.reshape(gy, by, gx, bx).astype(np.float64)
+    total = (blocks_h * blocks_c).sum(axis=(1, 3))
+    count = blocks_c.sum(axis=(1, 3))
+    coarse = np.where(count > 0, total / np.maximum(count, 1.0), np.nan)
+    coarse = _fill_coarse_nans(coarse)
+    return _upsample_bilinear(coarse, ny, nx, by, bx)
+
+
+def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.ndarray, dict, dict]:
+    """Turn the accumulated grid into a height field plus its colour layers.
+
+    Cells nothing was observed in are filled with the median observed height
+    and reported through the ``coverage`` layer, so invented ground is visible
+    in the viewer instead of being indistinguishable from measured ground.
+    """
+    covered = grid.count > 0
+    height = np.zeros((grid.ny, grid.nx), dtype=np.float64)
+    if covered.any():
+        height[covered] = grid.sum_z[covered] / grid.count[covered]
+        background = _background_surface(height, covered)
+        height[~covered] = background[~covered]
+    else:
+        fill = float(np.median(cloud[:, 2])) if cloud is not None and len(cloud) else 0.0
+        height[:] = fill
+
+    layers = {
+        "coverage": covered.astype(np.float64) * grid.count,
+        "validity": grid.validity.astype(np.float64),
+    }
+    layers.update(grid.layers)
+    bounds = {"validity": (0.0, 2.0)}
+    # Drop layers that carry no information (all-zero) so the viewer's colour
+    # mode list only offers modes that show something.
+    layers = {k: v for k, v in layers.items() if np.any(v != v.flat[0])}
+    bounds = {k: v for k, v in bounds.items() if k in layers}
+    return height, layers, bounds
+
+
+def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
+    """Fill the grid's height from the aggregated cloud (median z per cell).
+
+    Used when a scene has no height maps at all -- the terrain is then the
+    lidar's own ground estimate rather than the pipeline's BEV product.
+    """
+    row, col, inside = grid.cell_of(cloud[:, 0], cloud[:, 1])
+    if not inside.any():
+        return
+    r, c, z = row[inside], col[inside], cloud[inside, 2]
+    np.add.at(grid.sum_z, (r, c), z)
+    np.add.at(grid.count, (r, c), 1)
+
+
+# --------------------------------------------------------------------------
+# scalars
+# --------------------------------------------------------------------------
+
+
+def build_scalars(
+    access: SceneAccess, window: Window, times: np.ndarray, gt: PoseTrack, ghost: PoseTrack | None
+) -> tuple[dict[str, np.ndarray], list[str]]:
+    """Every time series the scene can offer, resampled onto the frame clock.
+
+    Channels whose source file is absent are simply not created -- the viewer's
+    plot list is therefore itself a readout of what the scene contains.
+    """
+    scalars: dict[str, np.ndarray] = {}
+    notes: list[str] = []
+    dt = np.gradient(times) if len(times) > 1 else np.array([1.0])
+    dt = np.where(dt > 1e-6, dt, 1e-6)
+
+    if gt.source != "none":
+        vel = np.gradient(gt.positions, axis=0) / dt[:, None]
+        scalars["speed"] = np.linalg.norm(vel[:, :2], axis=1)
+        scalars["pose_z"] = gt.positions[:, 2]
+        yaw = np.arctan2(
+            2 * (gt.quats[:, 0] * gt.quats[:, 3] + gt.quats[:, 1] * gt.quats[:, 2]),
+            1 - 2 * (gt.quats[:, 2] ** 2 + gt.quats[:, 3] ** 2),
+        )
+        scalars["yaw_rate"] = np.gradient(np.unwrap(yaw)) / dt
+        if not gt.valid.all():
+            # Outside the pose source's own time span: mark rather than invent.
+            for key in ("speed", "pose_z", "yaw_rate"):
+                scalars[key] = np.where(gt.valid, scalars[key], np.nan)
+            notes.append(f"{int((~gt.valid).sum())} frames lie outside the pose track")
+
+    if ghost is not None:
+        scalars["wheel_odom_drift"] = np.linalg.norm(ghost.positions - gt.positions, axis=1)
+
+    ga = access.gravity_align
+    if ga is not None:
+        idx = np.clip(np.arange(window.frame_start, window.frame_end), 0, len(ga) - 1)
+        roll, pitch = L.roll_pitch_from_gravity_align(np.asarray(ga)[idx])
+        scalars["roll_deg"] = np.degrees(roll)[: len(times)]
+        scalars["pitch_deg"] = np.degrees(pitch)[: len(times)]
+
+    js = access.joint_states
+    if js is not None and js.ndim == 2 and js.shape[1] >= 10:
+        res = L.resample_series(js[:, 0], js[:, 1:10], times)
+        for k, label in enumerate(WHEEL_LABELS):
+            scalars[f"wheel_vel_{label}"] = res[:, 3 + k]
+            scalars[f"wheel_effort_{label}"] = res[:, 6 + k]
+    elif js is not None:
+        notes.append(f"joint_states.npy has unexpected shape {js.shape}; skipped")
+
+    sp = access.joint_setpoints
+    if sp is not None and sp.ndim == 2 and sp.shape[1] >= 10:
+        res = L.resample_series(sp[:, 0], sp[:, 1:10], times)
+        for k, label in enumerate(WHEEL_LABELS):
+            scalars[f"wheel_setpoint_{label}"] = res[:, 3 + k]
+
+    cv = access.cmd_vel
+    if cv is not None and cv.ndim == 2 and cv.shape[1] >= 7:
+        res = L.resample_series(cv[:, 0], cv[:, [1, 6]], times)
+        scalars["cmd_linear_x"] = res[:, 0]
+        scalars["cmd_angular_z"] = res[:, 1]
+    elif cv is not None:
+        notes.append(f"cmd_vel.npy has unexpected shape {cv.shape}; skipped")
+
+    return scalars, notes
+
+
+def wheel_angles(access: SceneAccess, times: np.ndarray) -> np.ndarray | None:
+    """Per-frame wheel rotation angle (rad) for the three wheels, or None."""
+    js = access.joint_states
+    if js is None or js.ndim != 2 or js.shape[1] < 4:
+        return None
+    return L.resample_series(js[:, 0], js[:, 1:4], times)
+
+
+# --------------------------------------------------------------------------
+# the build
+# --------------------------------------------------------------------------
+
+
+def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Hamilton product of [w,x,y,z] quaternions, batched over the last axis."""
+    aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
+    bw, bx, by, bz = b[..., 0], b[..., 1], b[..., 2], b[..., 3]
+    return np.stack(
+        [
+            aw * bw - ax * bx - ay * by - az * bz,
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+        ],
+        axis=-1,
+    )
+
+
+def build_scene(
+    root: DatasetRoot,
+    scene_id: str,
+    window_key: str,
+    opts: BuildOptions | None = None,
+    max_frames: int = 1500,
+):
+    """Build (but do not save) the SimView scene for one window.
+
+    Returns ``(scene, meta)``; ``meta`` is the per-frame index the side panel
+    needs plus a human-readable record of what went into the build.
+    """
+    from simview.scene import BodyShapeType, SimulationScene  # local: heavy import
+    from simview.state import BodyTrajectory
+
+    opts = (opts or BuildOptions()).sanitized()
+    access = SceneAccess(root, scene_id)
+    window = access.window(window_key, max_frames)
+    if window is None:
+        raise KeyError(f"scene {scene_id} has no window {window_key!r}")
+
+    frames = np.arange(window.frame_start, window.frame_end)
+    frame_ts = access.frame_ts
+    if frame_ts is None or len(frame_ts) == 0:
+        raise ValueError(f"scene {scene_id} has no frame timestamps")
+    frames = frames[frames < len(frame_ts)]
+    abs_times = frame_ts[frames]
+    times = abs_times - abs_times[0]
+
+    gt = resolve_poses(access, window, abs_times)
+    ghost = _ghost_track(access, window, gt)
+    poses = L.poses_from_quat(gt.positions, gt.quats)
+
+    # ---- terrain -------------------------------------------------------
+    grid = _make_grid(gt.positions, opts)
+    hm_stats = splat_height_maps(access, grid, frames, poses, opts)
+    cloud, cloud_stats = aggregate_clouds(access, grid, frames, poses, opts)
+    terrain_source = "height_maps"
+    if hm_stats["used"] == 0:
+        terrain_source = "clouds" if cloud is not None else "flat"
+        if cloud is not None:
+            _terrain_from_cloud(grid, cloud)
+    height, layers, bounds = _finish_terrain(grid, cloud)
+
+    scalars, notes = build_scalars(access, window, abs_times, gt, ghost)
+    scalar_names = sorted(scalars)
+
+    dt = float(np.median(np.diff(times))) if len(times) > 1 else 0.1
+    metadata = {
+        "dataset_root": str(root.path),
+        "scene": scene_id,
+        "window": window.to_json(),
+        "pose_source": gt.source,
+        "pose_note": gt.note,
+        "terrain_source": terrain_source,
+        "terrain_resolution_m": grid.res,
+        "terrain_cells": [grid.ny, grid.nx],
+        "height_maps": hm_stats,
+        "clouds": cloud_stats,
+        "frames": [int(frames[0]), int(frames[-1])],
+        "notes": notes,
+        "missing_files": access.probe.missing,
+    }
+    if access.K is not None:
+        metadata["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()
+
+    scene = SimulationScene(batch_size=1, scalar_names=scalar_names, dt=max(dt, 1e-3), metadata=metadata)
+
+    import torch
+
+    scene.create_terrain(
+        heightmap=torch.from_numpy(np.ascontiguousarray(height, dtype=np.float32)),
+        x_lim=grid.x_lim,
+        y_lim=grid.y_lim,
+        grid_res=grid.res,
+        properties={
+            k: torch.from_numpy(np.ascontiguousarray(v, dtype=np.float32)) for k, v in layers.items()
+        }
+        or None,
+        property_bounds=bounds or None,
+    )
+
+    # ---- bodies --------------------------------------------------------
+    scene.create_body("robot", BodyShapeType.BOX, **CHASSIS)
+    # Cylinders point along +z locally (the viewer rotates the geometry), so a
+    # wheel needs a -90 deg turn about x to put its axis along the body's y.
+    q_align = np.array([math.cos(-math.pi / 4), math.sin(-math.pi / 4), 0.0, 0.0])
+    for name in WHEELS:
+        scene.create_body(
+            name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot"
+        )
+    if access.T_cam is not None:
+        t_cam = np.asarray(access.T_cam)
+        scene.create_body(
+            "camera",
+            BodyShapeType.BOX,
+            hx=0.03, hy=0.05, hz=0.03,
+            parent="robot",
+            local_transform=[*t_cam[:3, 3].tolist(), *L.mat_to_quat(t_cam[:3, :3][None])[0].tolist()],
+        )
+    if ghost is not None:
+        scene.create_body("wheel_odom_ghost", BodyShapeType.BOX, hx=0.36, hy=0.22, hz=0.11)
+    if cloud is not None and len(cloud):
+        values = cloud[:, 2] if opts.cloud_color == "height" else cloud[:, 3]
+        colors = unit_colors(values, cmap="turbo")
+        scene.create_pointcloud(
+            "lidar_cloud",
+            points=torch.from_numpy(np.ascontiguousarray(cloud[:, :3], dtype=np.float32)),
+            color=torch.from_numpy(np.ascontiguousarray(colors, dtype=np.float32)),
+        )
+
+    # ---- trajectories --------------------------------------------------
+    T = len(times)
+    chassis_pos = gt.positions.copy()
+    chassis_pos[:, 2] += CHASSIS_Z
+    trajectories = [BodyTrajectory("robot", positions=chassis_pos, orientations=gt.quats)]
+
+    angles = wheel_angles(access, abs_times)
+    for name, (wx, wy, wz, col) in WHEELS.items():
+        offset = np.tile(np.array([wx, wy, wz - CHASSIS_Z], dtype=np.float64), (T, 1))
+        if angles is not None:
+            theta = np.nan_to_num(angles[:, col], nan=0.0)
+            spin = np.stack(
+                [np.cos(theta / 2), np.zeros(T), np.sin(theta / 2), np.zeros(T)], axis=1
+            )
+            quat = _quat_mul(spin, np.tile(q_align, (T, 1)))
+        else:
+            quat = np.tile(q_align, (T, 1))
+        trajectories.append(BodyTrajectory(name, positions=offset, orientations=quat))
+
+    if ghost is not None:
+        ghost_pos = ghost.positions.copy()
+        ghost_pos[:, 2] += CHASSIS_Z
+        trajectories.append(
+            BodyTrajectory("wheel_odom_ghost", positions=ghost_pos, orientations=ghost.quats)
+        )
+    if cloud is not None and len(cloud):
+        ident = np.zeros((T, 4))
+        ident[:, 0] = 1.0
+        trajectories.append(BodyTrajectory("lidar_cloud", positions=np.zeros((T, 3)), orientations=ident))
+
+    scene.add_trajectory(
+        times=times,
+        trajectories=trajectories,
+        scalar_values={k: v.astype(np.float32) for k, v in scalars.items()} or None,
+    )
+    scene.mark_episode(label=f"{window.label} ({gt.source})", start_index=0)
+
+    meta = {
+        "scene": scene_id,
+        "window": window.to_json(),
+        "frames": frames.tolist(),
+        "times": times.tolist(),
+        "abs_times": abs_times.tolist(),
+        "pose_source": gt.source,
+        "pose_valid": gt.valid.tolist(),
+        "scalar_names": scalar_names,
+        "build": metadata,
+        "available": {
+            kind: sorted(int(f) for f in access.available_frames(kind) & set(frames.tolist()))
+            for kind in ("images", "clouds", "height_maps", "height_masks")
+            if access.probe.has(kind)
+        },
+    }
+    return scene, meta

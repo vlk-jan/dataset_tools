@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dataset viewer &mdash; {{ root.path.name }}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/viewer-static/style.css">
+</head>
+<body>
+<header>
+  <h1>Dataset viewer</h1>
+  <span class="path">{{ root.path }}</span>
+  <span class="muted">{{ rows|length }} scenes</span>
+  {% if not simview_ok %}
+  <span class="warn">simview assets missing &mdash; 3D views unavailable</span>
+  {% else %}
+  <span class="muted">simview {{ simview_version }}</span>
+  {% endif %}
+</header>
+<main>
+
+  {% if manifest %}
+  <div class="card">
+    <div class="kv">
+      {% for key in ("dataset_version", "rig", "generated") %}
+        {% if manifest.get(key) %}<dt>{{ key }}</dt><dd>{{ manifest[key] }}</dd>{% endif %}
+      {% endfor %}
+    </div>
+    <p class="muted" style="margin:8px 0 0">
+      Every file below is probed per scene: the viewer shows what a scene actually has
+      and says so when something is absent. Nothing here is specific to one sensor rig.
+    </p>
+  </div>
+  {% endif %}
+
+  <h2>Scenes</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Scene</th>
+        <th class="num">Frames</th>
+        <th class="num">Duration</th>
+        <th class="num">Segments</th>
+        <th>GT coverage</th>
+        <th>Per-frame data</th>
+        <th>Proprioception</th>
+        <th>Bag</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+      {% set p = row.probe %}
+      <tr>
+        <td><a href="/scene/{{ p.scene_id }}"><strong>{{ p.scene_id }}</strong></a></td>
+        <td class="num">{{ p.n_frames }}</td>
+        <td class="num">{% if p.duration %}{{ "%.0f s"|format(p.duration) }}{% else %}&mdash;{% endif %}</td>
+        <td class="num">{{ p.n_segments or "&mdash;"|safe }}</td>
+        <td>
+          {% if p.segment_coverage is not none %}
+            <div class="bar" title="{{ '%.0f%%'|format(p.segment_coverage * 100) }} of frames inside a ground-truth segment">
+              <span style="width: {{ (p.segment_coverage * 100)|round(0) }}%"></span>
+            </div>
+          {% else %}<span class="muted">&mdash;</span>{% endif %}
+        </td>
+        <td>
+          {% for key in ("images", "clouds", "height_maps", "height_masks") %}
+            {% set count = p.counts.get(key, 0) %}
+            {% if not p.present.get(key) %}
+              <span class="chip no">{{ key }}</span>
+            {% elif p.n_frames and count < p.n_frames %}
+              <span class="chip partial" title="{{ count }} of {{ p.n_frames }} frames">{{ key }} {{ count }}/{{ p.n_frames }}</span>
+            {% else %}
+              <span class="chip yes">{{ key }}</span>
+            {% endif %}
+          {% endfor %}
+        </td>
+        <td>
+          {% for key in ("joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
+            <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
+          {% endfor %}
+        </td>
+        <td class="muted" style="font-size:12px">{{ p.bag or "&mdash;"|safe }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if rows and rows[0].probe.warnings %}{% endif %}
+  {% set warned = rows | selectattr("probe.warnings") | list %}
+  {% if warned %}
+  <h2>Warnings</h2>
+  <div class="card">
+    {% for row in warned %}
+      <div><strong>{{ row.probe.scene_id }}</strong>: <span class="warn">{{ row.probe.warnings | join("; ") }}</span></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</main>
+</body>
+</html>

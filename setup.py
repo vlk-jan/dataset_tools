@@ -14,6 +14,7 @@ setup(
     name=package_name,
     version="1.0.1",
     packages=find_packages(exclude=["test", "tests"]),
+    package_data={"dataset_tools.viewer": ["static/*", "templates/*"]},
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         (os.path.join("share", package_name), ["package.xml"]),
@@ -32,6 +33,7 @@ setup(
             "helhest-extract = dataset_tools.extract_data:main",
             "helhest-validate = dataset_tools.validate_scene:main",
             "helhest-sort-bag = dataset_tools.sort_bag:main",
+            "helhest-viewer = dataset_tools.viewer.__main__:main",
         ],
     },
 )

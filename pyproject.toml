@@ -28,6 +28,17 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
+# The dataset viewer (dataset_tools.viewer). SimView provides the 3D front-end
+# and the scene format; its "authoring" extra (torch + einops) is what the
+# scene-building API needs, and it is the reason the viewer requires Python
+# 3.12+ even though the extraction tools do not.
+viewer = [
+    "simview[authoring]>=4.1",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "jinja2>=3.1",
+    "pillow>=10.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/vlk-jan/dataset_tools"
@@ -39,13 +50,15 @@ Source = "https://github.com/vlk-jan/dataset_tools"
 helhest-extract = "dataset_tools.extract_data:main"
 helhest-validate = "dataset_tools.validate_scene:main"
 helhest-sort-bag = "dataset_tools.sort_bag:main"
+helhest-viewer = "dataset_tools.viewer.__main__:main"
 odom_recorder = "dataset_tools.odom_node:main"
 
 [tool.setuptools]
-packages = ["dataset_tools"]
+packages = ["dataset_tools", "dataset_tools.viewer"]
 
 [tool.setuptools.package-data]
 dataset_tools = ["libcloudini_shim.so"]
+"dataset_tools.viewer" = ["static/*", "templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
