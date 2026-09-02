@@ -353,8 +353,10 @@ per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
 `X` side like xfix/v1.1; generator commits; height-map parameters for the
 pending build). Every scene also carries `T_cam_to_base.txt`
 (camera-optical → cloud frame, from the bags' static TF; the manifest notes a
-4.5 cm x discrepancy against v1's hand-entered `T_cam_to_lidar.txt`, to be
-settled by a near-range projection check).
+4.5 cm x discrepancy against v1's hand-entered `T_cam_to_lidar.txt`; a
+photometric discrimination attempt failed its own invariance gate, so the TF
+value stands on provenance until a calibration target is recorded on the
+next outing — see the manifest's `discrepancy_note`).
 Post-hoc filter kept 96.2 % of poses: **178,927 poses, 359 min of ground
 truth in 469 segments**. One systematic bug was found and fixed mid-pass: a
 relaunched FAST-LIO could come up and never receive scans again (silent
