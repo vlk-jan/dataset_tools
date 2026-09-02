@@ -2,15 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Dataset viewer &mdash; {{ root.path.name }}</title>
+<title>{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer &mdash; {{ root.path.name }}{% endif %}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/viewer-static/style.css">
+{# Non-blocking: the page is fully readable in the system stack, and upgrades
+   if the machine viewing it can reach Google Fonts. #}
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
 </head>
-<body>
+<body class="atlas">
 <header>
   <h1>Dataset viewer</h1>
   <span class="path">{{ root.path }}</span>
-  <span class="muted">{{ rows|length }} scenes</span>
+  <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
   {% if not simview_ok %}
   <span class="warn">simview assets missing &mdash; 3D views unavailable</span>
   {% else %}
@@ -19,81 +23,130 @@
 </header>
 <main>
 
-  {% if manifest %}
-  <div class="card">
-    <div class="kv">
-      {% for key in ("dataset_version", "rig", "generated") %}
-        {% if manifest.get(key) %}<dt>{{ key }}</dt><dd>{{ manifest[key] }}</dd>{% endif %}
-      {% endfor %}
+  <div class="masthead">
+    <div class="kicker">
+      {%- if atlas and atlas.kicker %}{{ atlas.kicker }}
+      {%- else %}{{ manifest.rig if manifest and manifest.rig else "dataset" }}
+        {%- if manifest and manifest.generated %} &middot; {{ manifest.generated }}{% endif %}
+      {%- endif %}
     </div>
-    <p class="muted" style="margin:8px 0 0">
-      Every file below is probed per scene: the viewer shows what a scene actually has
-      and says so when something is absent. Nothing here is specific to one sensor rig.
+    <h2 class="masthead-title">
+      {%- if atlas and atlas.title %}{{ atlas.title }}
+      {%- else %}{{ root.path.name }}{% endif -%}
+    </h2>
+    <p class="lede">
+      {%- if atlas and atlas.intro %}{{ atlas.intro }}
+      {%- else %}Every scene below is probed from the files on disk: the viewer shows what a
+      scene actually has and says so when something is absent. Nothing here is specific to
+      one sensor rig.{% endif -%}
+    </p>
+
+    <dl class="totals">
+      {% for total in totals %}
+      <div>
+        <dt>{{ total.label }}</dt>
+        <dd>{{ total.value }}{% if total.sub %} <small>{{ total.sub }}</small>{% endif %}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+
+    {# The curated note already names the root and says what matters about it;
+       only when there is none do we assemble one from the manifest. #}
+    <p class="note">
+      {%- if atlas and atlas.root_note %}{{ atlas.root_note }}
+      {%- else %}Root <code>{{ root.path }}</code>
+        {%- if manifest %}{% for key in ("dataset_version", "rig", "generated") %}
+          {%- if manifest.get(key) %} &middot; {{ key }} <code>{{ manifest[key] }}</code>{% endif %}
+        {%- endfor %}{% endif %}
+      {%- endif -%}
     </p>
   </div>
-  {% endif %}
 
-  <h2>Scenes</h2>
-  <table>
-    <thead>
-      <tr>
-        <th>Scene</th>
-        <th class="num">Frames</th>
-        <th class="num">Duration</th>
-        <th class="num">Segments</th>
-        <th>GT coverage</th>
-        <th>Per-frame data</th>
-        <th>Proprioception</th>
-        <th>Bag</th>
-      </tr>
-    </thead>
-    <tbody>
-    {% for row in rows %}
+  {% for group in groups %}
+  <section>
+    <div class="shead">
+      <h2>{{ group.title }}</h2>
+      {% if group.range %}<span class="scount">{{ group.range }}</span>{% endif %}
+    </div>
+    {% if group.blurb %}<p class="sblurb">{{ group.blurb }}</p>{% endif %}
+
+    <div class="scenes">
+    {% for row in group.rows %}
       {% set p = row.probe %}
-      <tr>
-        <td><a href="/scene/{{ p.scene_id }}"><strong>{{ p.scene_id }}</strong></a></td>
-        <td class="num">{{ p.n_frames }}</td>
-        <td class="num">{% if p.duration %}{{ "%.0f s"|format(p.duration) }}{% else %}&mdash;{% endif %}</td>
-        <td class="num">{{ p.n_segments or "&mdash;"|safe }}</td>
-        <td>
-          {% if p.segment_coverage is not none %}
-            <div class="bar" title="{{ '%.0f%%'|format(p.segment_coverage * 100) }} of frames inside a ground-truth segment">
-              <span style="width: {{ (p.segment_coverage * 100)|round(0) }}%"></span>
-            </div>
-          {% else %}<span class="muted">&mdash;</span>{% endif %}
-        </td>
-        <td>
-          {% for key in ("images", "clouds", "height_maps", "height_masks") %}
-            {% set count = p.counts.get(key, 0) %}
-            {% if not p.present.get(key) %}
-              <span class="chip no">{{ key }}</span>
-            {% elif p.n_frames and count < p.n_frames %}
-              <span class="chip partial" title="{{ count }} of {{ p.n_frames }} frames">{{ key }} {{ count }}/{{ p.n_frames }}</span>
-            {% else %}
-              <span class="chip yes">{{ key }}</span>
-            {% endif %}
+      <article class="scene" id="s{{ p.scene_id }}">
+        {% if row.thumbs %}
+        <div class="strip">
+          {% for thumb in row.thumbs %}
+          <a href="/scene/{{ p.scene_id }}"><img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async"></a>
           {% endfor %}
-        </td>
-        <td>
-          {% for key in ("joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
-            <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
-          {% endfor %}
-        </td>
-        <td class="muted" style="font-size:13px">{{ p.bag or "&mdash;"|safe }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
+        </div>
+        {% else %}
+        <div class="strip empty"><span class="muted">no images</span></div>
+        {% endif %}
 
-  {% if rows and rows[0].probe.warnings %}{% endif %}
-  {% set warned = rows | selectattr("probe.warnings") | list %}
-  {% if warned %}
-  <h2>Warnings</h2>
-  <div class="card">
-    {% for row in warned %}
-      <div><strong>{{ row.probe.scene_id }}</strong>: <span class="warn">{{ row.probe.warnings | join("; ") }}</span></div>
+        <div class="body">
+          <header>
+            <h3><a href="/scene/{{ p.scene_id }}">{{ p.scene_id }}</a></h3>
+            {% if row.date %}<span class="date">{{ row.date }} UTC</span>{% endif %}
+            {% if row.coverage is not none %}
+            <span class="cov {{ row.coverage_class }}" title="fraction of the scene inside a ground-truth segment">
+              {{ "%.0f%%"|format(row.coverage * 100) }} GT
+            </span>
+            {% endif %}
+          </header>
+
+          {% if row.description %}<p class="env">{{ row.description }}</p>{% endif %}
+
+          {% if row.spans or row.fill_spans %}
+          <div class="bar">
+            <div class="track" title="where ground truth exists inside the scene">
+              {% for span in row.spans %}
+              <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+              {% endfor %}
+              {% for span in row.fill_spans %}
+              <i class="fill" title="segment borrowed from an earlier root" style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+              {% endfor %}
+            </div>
+            <div class="barcap"><span>0</span><span>{{ row.span_label }}</span></div>
+          </div>
+          {% endif %}
+
+          <dl class="stats">
+            {% for stat in row.stats %}
+            <div>
+              <dt>{{ stat.label }}</dt>
+              <dd>{{ stat.value }}{% if stat.sub %}<small>{{ stat.sub }}</small>{% endif %}</dd>
+            </div>
+            {% endfor %}
+          </dl>
+
+          <div class="chips">
+            {% for key in ("images", "clouds", "height_maps", "height_masks") %}
+              {% set count = p.counts.get(key, 0) %}
+              {% if not p.present.get(key) %}
+                <span class="chip no">{{ key }}</span>
+              {% elif p.n_frames and count < p.n_frames %}
+                <span class="chip partial" title="{{ count }} of {{ p.n_frames }} frames">{{ key }} {{ count }}/{{ p.n_frames }}</span>
+              {% else %}
+                <span class="chip yes">{{ key }}</span>
+              {% endif %}
+            {% endfor %}
+            {% for key in ("odometry", "joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
+              <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
+            {% endfor %}
+          </div>
+
+          {% if p.bag %}<p class="bagline">{{ p.bag }}</p>{% endif %}
+          {% if p.warnings %}<p class="warn small">{{ p.warnings | join("; ") }}</p>{% endif %}
+        </div>
+      </article>
     {% endfor %}
-  </div>
+    </div>
+  </section>
+  {% endfor %}
+
+  {% if atlas and atlas.footer %}
+  <footer class="atlas-footer">{{ atlas.footer }}</footer>
   {% endif %}
 
 </main>

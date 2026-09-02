@@ -26,7 +26,14 @@ from .loaders import count_lines, frame_indices_dir, read_segments, read_text
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
+#: "not looked at yet", distinct from "looked, and there is none".
+_UNSET = object()
+
 SCENE_NAME_LEN = 4
+
+#: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
+#: by an older viewer is discarded rather than read back with holes in it.
+PROBE_CACHE_FORMAT = 2
 
 
 @dataclass(frozen=True)
@@ -81,6 +88,13 @@ class SceneProbe:
     n_segments: int = 0
     segment_reasons: dict[str, int] = field(default_factory=dict)
     segment_coverage: float | None = None
+    #: Each segment as a ``[start, end]`` pair of fractions of the scene's own
+    #: time span -- enough to draw a timeline without re-reading the file.
+    segment_spans: list[list[float]] = field(default_factory=list)
+    #: The subset of those spans whose segment reason marks *borrowed* ground
+    #: truth (any reason containing "fill"). Drawn differently, because such a
+    #: stretch did not come out of this root's own odometry run.
+    fill_spans: list[list[float]] = field(default_factory=list)
     bag: str | None = None
     warnings: list[str] = field(default_factory=list)
     mtime: float = 0.0
@@ -175,6 +189,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         detail = ", ".join(f"{k}={v}" for k, v in sorted(frame_like.items()))
         probe.warnings.append(f"per-frame counts disagree ({detail})")
 
+    segments = []
     if probe.present.get("odometry_segments"):
         segments = read_segments(scene_dir / "odometry_segments.txt")
         probe.n_segments = len(segments)
@@ -191,8 +206,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         if first_last:
             probe.start_ts, probe.end_ts = first_last
             probe.duration = first_last[1] - first_last[0]
-            if probe.n_segments and probe.duration and probe.duration > 0:
-                segments = read_segments(scene_dir / "odometry_segments.txt")
+            if segments and probe.duration and probe.duration > 0:
                 covered = sum(
                     max(0.0, min(s.end_ts, first_last[1]) - max(s.start_ts, first_last[0]))
                     for s in segments
@@ -200,6 +214,18 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
                 probe.segment_coverage = min(1.0, covered / probe.duration)
     if probe.duration is None and probe.start_ts is not None and probe.end_ts is not None:
         probe.duration = probe.end_ts - probe.start_ts
+
+    if segments and probe.start_ts is not None and probe.duration and probe.duration > 0:
+        base, span = probe.start_ts, probe.duration
+        for seg in segments:
+            lo = min(1.0, max(0.0, (seg.start_ts - base) / span))
+            hi = min(1.0, max(0.0, (seg.end_ts - base) / span))
+            if hi <= lo:
+                continue
+            pair = [round(lo, 5), round(hi, 5)]
+            probe.segment_spans.append(pair)
+            if "fill" in (seg.reason or "").lower():
+                probe.fill_spans.append(pair)
 
     if probe.present.get("source_bag"):
         text = read_text(scene_dir / "source_bag.txt", 4096)
@@ -238,6 +264,7 @@ class DatasetRoot:
         self._probe_cache: dict[str, SceneProbe] = {}
         self._scene_ids: list[str] | None = None
         self._csv_rows: dict[str, dict] | None = None
+        self._atlas: dict | None | object = _UNSET
         self._load_probe_cache()
 
     # -- scene discovery ---------------------------------------------------
@@ -276,6 +303,51 @@ class DatasetRoot:
 
     def readme(self) -> str | None:
         return read_text(self.path / "README.md", 40_000)
+
+    @property
+    def atlas_dir(self) -> Path:
+        return self.path / "atlas"
+
+    def atlas(self) -> dict | None:
+        """``atlas/atlas.json``: curated per-scene content, or ``None``.
+
+        Everything in it is editorial -- prose descriptions, groupings, numbers
+        that took a full pass over the bags to produce -- so it is *stored* next
+        to the data rather than derived. It is entirely optional: a root without
+        an ``atlas/`` directory (a fresh extraction from a different rig, say)
+        still renders, just without the curated half. Read once per process; the
+        file is small and only changes when someone regenerates it by hand.
+        """
+        if self._atlas is _UNSET:
+            text = read_text(self.atlas_dir / "atlas.json", 4_000_000)
+            try:
+                data = json.loads(text) if text else None
+            except json.JSONDecodeError as exc:
+                logger.warning("cannot parse atlas/atlas.json: %s", exc)
+                data = None
+            self._atlas = data if isinstance(data, dict) else None
+        return self._atlas
+
+    def atlas_scene(self, scene_id: str) -> dict:
+        atlas = self.atlas() or {}
+        entry = (atlas.get("scenes") or {}).get(scene_id)
+        return entry if isinstance(entry, dict) else {}
+
+    def atlas_thumb(self, scene_id: str, slot: str) -> Path | None:
+        """Path of a stored thumbnail, or ``None`` if this root has no such file.
+
+        ``slot`` is one short token (``a``/``b``/``c``); it is checked against
+        the manifest in ``atlas.json`` rather than pasted into a path, so a
+        request cannot walk out of the atlas directory.
+        """
+        entry = self.atlas_scene(scene_id)
+        if slot not in (entry.get("thumbs") or []):
+            return None
+        spec = (self.atlas() or {}).get("thumbs") or {}
+        pattern = spec.get("pattern") or "{scene}{slot}.jpg"
+        subdir = spec.get("dir") or "thumbs"
+        path = self.atlas_dir / subdir / pattern.format(scene=scene_id, slot=slot)
+        return path if path.is_file() else None
 
     def csv_rows(self) -> dict[str, dict]:
         """``scenes.csv`` indexed by scene id ({} when the file is absent)."""
@@ -327,7 +399,9 @@ class DatasetRoot:
             data = json.loads(self._probe_cache_path.read_text())
         except (OSError, json.JSONDecodeError):
             return
-        if data.get("root") != str(self.path):
+        if data.get("root") != str(self.path) or data.get("format") != PROBE_CACHE_FORMAT:
+            # A cache written before a field existed would load with that field
+            # silently defaulted; re-probe instead of showing a blank timeline.
             return
         for sid, raw in (data.get("scenes") or {}).items():
             raw.pop("missing", None)
@@ -339,6 +413,7 @@ class DatasetRoot:
     def _save_probe_cache(self) -> None:
         payload = {
             "root": str(self.path),
+            "format": PROBE_CACHE_FORMAT,
             "saved": time.time(),
             "scenes": {sid: p.to_json() for sid, p in self._probe_cache.items()},
         }
