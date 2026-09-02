@@ -663,6 +663,9 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             # Extract Intrinsics once
             if not intrinsics_saved:
                 save_intrinsics(reader, conns, camera_topic, scene_dir)
+                save_camera_extrinsic(
+                    tf_graph, msg.header.frame_id, args.base_frame, scene_dir
+                )
                 intrinsics_saved = True
 
             # Match Odom and save via dict instead of list append
@@ -799,6 +802,25 @@ def write_camera_info_yaml(msg, path: Path) -> None:
         + f"binning_x: {int(msg.binning_x)}\nbinning_y: {int(msg.binning_y)}\n"
     )
     path.write_text(text)
+
+
+def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> bool:
+    """Write T_cam_to_base.txt: p_base = T @ p_cam_optical, from the static TF.
+
+    v1 scenes instead carry a hand-entered ``T_cam_to_lidar.txt`` expressed in
+    the RAW lidar frame; the two conventions differ by the lidar mount X and
+    (empirically) 4.5 cm of x, so the file is named by its target frame.
+    """
+    if not cam_frame:
+        return False
+    T = get_transform(tf_graph, cam_frame, base_frame)
+    if T is None:
+        LOG.warning(
+            "no TF path %s -> %s; T_cam_to_base.txt not written", cam_frame, base_frame
+        )
+        return False
+    np.savetxt(scene_dir / "T_cam_to_base.txt", T)
+    return True
 
 
 # ---------------------------------------------------------------------------
