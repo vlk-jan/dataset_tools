@@ -10,77 +10,161 @@
 <header>
   <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}</h1>
   <span class="path">{{ root.path }}/{{ scene_id }}</span>
+  {% if atlas and atlas.description %}<span class="muted">{{ atlas.description }}</span>{% endif %}
 </header>
 <main>
 
-  <div class="grid">
-    <div class="card">
-      <h2 style="margin-top:0">Recording</h2>
-      <dl class="kv">
-        <dt>Frames</dt><dd>{{ probe.n_frames }}</dd>
-        {% if details.duration_s %}<dt>Duration</dt><dd>{{ details.duration_s }} s</dd>{% endif %}
-        {% if details.frame_rate_hz %}<dt>Frame rate</dt><dd>{{ details.frame_rate_hz }} Hz</dd>{% endif %}
-        {% if probe.start_ts %}<dt>Start</dt><dd>{{ "%.3f"|format(probe.start_ts) }}</dd>{% endif %}
-        {% if probe.bag %}<dt>Bag</dt><dd style="word-break:break-all">{{ probe.bag }}</dd>{% endif %}
-        {% if probe.segment_coverage is not none %}
-        <dt>GT coverage</dt><dd>{{ "%.1f%%"|format(probe.segment_coverage * 100) }} of frames</dd>
-        {% endif %}
-      </dl>
-      {% if probe.warnings %}
-      <p class="warn">{{ probe.warnings | join("; ") }}</p>
-      {% endif %}
-    </div>
+  {# The same three frames the index card shows, sampled at 10 / 50 / 90 % of
+     the scene -- stored thumbnails on a curated root, live renders otherwise;
+     here each one also opens the frame it was cut from. #}
+  {% if page.hero %}
+  <div class="hero">
+    {% for thumb in page.hero %}
+    <a href="{{ thumb.href or '/scene/' ~ scene_id }}">
+      <figure>
+        <img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async">
+        <figcaption><b>{{ thumb.label }}</b><span>{{ thumb.sub }}</span></figcaption>
+      </figure>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
 
+  {# Four cards, each dropped rather than shown empty when the scene has
+     nothing to fill it: what was recorded, what ground truth exists inside it,
+     how the camera was calibrated, what the robot reported about itself. #}
+  <div class="grid cards">
+    {% for card in page.cards %}
     <div class="card">
-      <h2 style="margin-top:0">Files present</h2>
-      <div>
-      {% for a in artefacts %}
-        {% set count = probe.counts.get(a.key) %}
-        <span class="chip {{ 'yes' if probe.present.get(a.key) else 'no' }}"
-              title="{{ a.relpath }} &mdash; {{ a.description }}">
-          {{ a.relpath }}{% if count %} ({{ count }}){% endif %}
-        </span>
-      {% endfor %}
+      <header>
+        <h2>{{ card.title }}</h2>
+        {% if card.badge %}
+        <span class="cov {{ card.badge_class }}" title="{{ card.badge_title }}">{{ card.badge }}</span>
+        {% endif %}
+      </header>
+
+      {% if card.timeline %}
+      <div class="bar">
+        <div class="track" title="where ground truth exists inside the scene">
+          {% for span in card.timeline.spans %}
+          <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+          {% endfor %}
+          {% for span in card.timeline.fill %}
+          <i class="fill" title="segment borrowed from an earlier root"
+             style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+          {% endfor %}
+        </div>
+        <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>
       </div>
-      <p class="muted" style="margin-bottom:0">
-        Struck-through entries are absent from this scene; the viewer simply omits
-        whatever they would have contributed.
-      </p>
-    </div>
-
-    {% if details.camera_intrinsics or details.T_cam_to_base %}
-    <div class="card">
-      <h2 style="margin-top:0">Calibration</h2>
-      {% if details.camera_intrinsics %}
-        <div class="muted">camera_intrinsics.txt (K)</div>
-        <pre>{% for r in details.camera_intrinsics %}{{ "%10.3f %10.3f %10.3f"|format(r[0], r[1], r[2]) }}
-{% endfor %}</pre>
       {% endif %}
-      {% if details.T_cam_to_base %}
-        <div class="muted">camera &rarr; base extrinsic</div>
-        <pre>{% for r in details.T_cam_to_base %}{{ "%8.4f %8.4f %8.4f %8.4f"|format(r[0], r[1], r[2], r[3]) }}
-{% endfor %}</pre>
-      {% endif %}
-    </div>
-    {% endif %}
 
-    {% if details.joint_states_shape or details.cmd_vel_shape %}
-    <div class="card">
-      <h2 style="margin-top:0">Proprioception</h2>
-      <dl class="kv">
-      {% for key in ("joint_states", "joint_setpoints", "cmd_vel") %}
-        {% if details.get(key ~ "_shape") %}
-          <dt>{{ key }}</dt>
-          <dd>{{ details[key ~ "_shape"] | join(" x ") }}
-            {% if details.get(key ~ "_rate_hz") %}<span class="muted">@ {{ details[key ~ "_rate_hz"] }} Hz</span>{% endif %}
-          </dd>
-        {% endif %}
-      {% endfor %}
+      {% if card.stats %}
+      <dl class="stats">
+        {% for s in card.stats %}
+        <div>
+          <dt>{{ s.label }}</dt>
+          <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
+        </div>
+        {% endfor %}
       </dl>
+      {% endif %}
+
+      {% for m in card.matrices or [] %}
+      <details class="matrix">
+        <summary>{{ m.label }}</summary>
+        <pre>{% for row in m.rows %}{% for v in row %}{{ m.fmt|format(v) }}{% endfor %}
+{% endfor %}</pre>
+      </details>
+      {% endfor %}
+
+      {% if card.note %}<p class="cardnote">{{ card.note }}</p>{% endif %}
+      {% if card.warn %}<p class="cardnote warn">{{ card.warn }}</p>{% endif %}
     </div>
-    {% endif %}
+    {% endfor %}
   </div>
 
+  <div class="card files">
+    <header>
+      <h2>Files present</h2>
+      <span class="scount">{{ probe.present.values() | select | list | length }} of {{ artefacts | length }}</span>
+    </header>
+    <div class="chips">
+    {% for a in artefacts %}
+      {% set count = probe.counts.get(a.key) %}
+      <span class="chip {{ 'yes' if probe.present.get(a.key) else 'no' }}"
+            title="{{ a.relpath }} &mdash; {{ a.description }}">
+        {{ a.relpath }}{% if count %} ({{ count }}){% endif %}
+      </span>
+    {% endfor %}
+    </div>
+    <p class="cardnote">
+      Struck-through entries are absent from this scene; the viewer simply omits
+      whatever they would have contributed.
+    </p>
+  </div>
+
+  <nav class="tabs">
+    <a class="tab {{ 'active' if tab == 'windows' else '' }}" href="/scene/{{ scene_id }}?tab=windows">
+      Segments &amp; windows <span class="muted">{{ windows|length }}</span>
+    </a>
+    <a class="tab {{ 'active' if tab == 'frames' else '' }}" href="/scene/{{ scene_id }}?tab=frames">
+      Frames <span class="muted">{{ probe.n_frames }}</span>
+    </a>
+  </nav>
+
+  {% if tab == 'frames' %}
+  <h2>Frames{% if frames %} &mdash; {{ frames.total }}{% endif %}</h2>
+  <p class="muted" style="margin-top:-4px">
+    Every synced frame in the scene, {{ frames.per_page if frames else 100 }} at a time.
+    Each thumbnail is one request, made only when it scrolls into view; the server never
+    reads a page of images in bulk. Click a frame to inspect it on its own.
+  </p>
+
+  {% if frames and frames.entries %}
+  <div class="card framebar">
+    <form action="/scene/{{ scene_id }}/jump" method="get">
+      <label for="jump">Jump to frame</label>
+      <input id="jump" name="index" type="number" min="0" max="{{ probe.n_frames - 1 }}"
+             value="{{ frames.first }}" inputmode="numeric">
+      <button class="btn" type="submit">Go</button>
+    </form>
+    <span class="muted">showing {{ frames.first }}&ndash;{{ frames.last }}
+      &middot; page {{ frames.page + 1 }} of {{ frames.n_pages }}</span>
+  </div>
+
+  <div class="framegrid">
+    {% for item in frames.entries %}
+    <a class="frametile" href="/scene/{{ scene_id }}/frame/{{ item.index }}">
+      <img src="/api/scene/{{ scene_id }}/frame/{{ item.index }}/image.jpg?w=192"
+           alt="frame {{ item.index }}" loading="lazy" decoding="async">
+      <span class="framelabel">{{ item.index }}{% if item.t is not none %}
+        <small>{{ "%.1f s"|format(item.t) }}</small>{% endif %}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if frames.n_pages > 1 %}
+  <div class="pager">
+    {% if frames.page > 0 %}
+    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ frames.page - 1 }}">&larr; previous</a>
+    {% endif %}
+    {% for n in frames.page_links %}
+      {% if n == frames.page %}
+        <span class="btn primary">{{ n + 1 }}</span>
+      {% else %}
+        <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ n }}">{{ n + 1 }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if frames.page + 1 < frames.n_pages %}
+    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ frames.page + 1 }}">next &rarr;</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="card"><span class="muted">This scene has no per-frame data to browse.</span></div>
+  {% endif %}
+
+  {% else %}
   <h2>Windows &mdash; {{ windows|length }}</h2>
   <p class="muted" style="margin-top:-4px">
     Ground-truth segments are re-anchored to identity individually, so each one is its own
@@ -106,7 +190,7 @@
             {{ w.pose_source }}
           </span>
         </td>
-        <td class="muted">{{ w.reason }}</td>
+        <td class="muted">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
                href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
       </tr>
@@ -114,21 +198,6 @@
     </tbody>
   </table>
 
-  {% if details.segments %}
-  <h2>Odometry segments</h2>
-  <table>
-    <thead><tr><th class="num">#</th><th class="num">Duration</th><th class="num">Poses</th><th>Reason it ends</th></tr></thead>
-    <tbody>
-    {% for s in details.segments %}
-      <tr>
-        <td class="num">{{ s.index }}</td>
-        <td class="num">{{ "%.1f s"|format(s.duration) }}</td>
-        <td class="num">{{ s.n_poses }}</td>
-        <td class="muted">{{ s.reason }}</td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
   {% endif %}
 
 </main>

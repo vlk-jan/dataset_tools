@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scene {{ scene_id }} frame {{ index }} &mdash; dataset viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/viewer-static/style.css">
+</head>
+<body>
+<header>
+  <h1><a href="/">Dataset viewer</a> /
+      <a href="/scene/{{ scene_id }}">scene {{ scene_id }}</a> /
+      frame {{ index }}</h1>
+  <span class="path">{{ root.path }}/{{ scene_id }}</span>
+  <span class="muted">{{ index + 1 }} of {{ probe.n_frames }}</span>
+</header>
+<main>
+
+  <div class="framenav">
+    {% if index > 0 %}
+    <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index - 1 }}">&larr; frame {{ index - 1 }}</a>
+    {% else %}<span class="btn disabled">&larr; first frame</span>{% endif %}
+    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ index // 100 }}">back to the frame strip</a>
+    {% if index + 1 < probe.n_frames %}
+    <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index + 1 }}">frame {{ index + 1 }} &rarr;</a>
+    {% else %}<span class="btn disabled">last frame &rarr;</span>{% endif %}
+  </div>
+
+  <div class="framepage">
+    <div class="framemain">
+      {% if details.present.images %}
+      <img class="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
+           alt="scene {{ scene_id }} frame {{ index }}">
+      {% else %}
+      <div class="card"><span class="muted">This frame has no camera image on disk.</span></div>
+      {% endif %}
+
+      <div class="tiles">
+        {% for kind, endpoint, label in (
+             ("height_maps", "heightmap.png", "Height map"),
+             ("height_masks", "validity.png", "Validity mask"),
+             ("clouds", "cloud.png", "Cloud, top-down")) %}
+        <figure class="tile">
+          <figcaption>{{ label }}</figcaption>
+          {% if details.present.get(kind) %}
+          <img src="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}"
+               alt="{{ label }} for frame {{ index }}" loading="lazy" decoding="async">
+          {% else %}
+          <div class="absent"><span class="muted">absent for this frame</span></div>
+          {% endif %}
+        </figure>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="frameside">
+      <div class="card">
+        <h2 style="margin-top:0">This frame</h2>
+        <dl class="kv">
+          <dt>Index</dt><dd>{{ index }}</dd>
+          {% if details.timestamp %}
+          <dt>Camera stamp</dt><dd>{{ "%.6f"|format(details.timestamp) }}</dd>
+          {% endif %}
+          {% if details.lidar_timestamp %}
+          <dt>Lidar stamp</dt><dd>{{ "%.6f"|format(details.lidar_timestamp) }}</dd>
+          {% endif %}
+          {% if details.camera_lidar_offset_ms is not none and details.camera_lidar_offset_ms is defined %}
+          <dt>Camera &minus; lidar</dt><dd>{{ details.camera_lidar_offset_ms }} ms</dd>
+          {% endif %}
+          {% if details.t_since_start is defined %}
+          <dt>Into the scene</dt><dd>{{ "%.2f s"|format(details.t_since_start) }}</dd>
+          {% endif %}
+          {% if details.cloud_points %}
+          <dt>Cloud</dt><dd>{{ "{:,}".format(details.cloud_points) }} points
+            {%- if details.cloud_columns %} &times; {{ details.cloud_columns }} cols{% endif %}</dd>
+          {% endif %}
+          {% if details.roll_deg is defined %}
+          <dt>Roll / pitch</dt><dd>{{ details.roll_deg }}&deg; / {{ details.pitch_deg }}&deg;
+            <span class="muted">gravity_align</span></dd>
+          {% endif %}
+        </dl>
+        <div style="margin-top:10px">
+          {% for kind in ("images", "clouds", "height_maps", "height_masks") %}
+          <span class="chip {{ 'yes' if details.present.get(kind) else 'no' }}">{{ kind }}</span>
+          {% endfor %}
+          <span class="chip {{ 'yes' if probe.present.get('gravity_align') else 'no' }}">gravity align</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">Ground truth</h2>
+        {% if details.segment %}
+        <dl class="kv">
+          <dt>Segment</dt><dd>{{ details.segment.index }}</dd>
+          <dt>Into segment</dt><dd>{{ details.segment.t_into_segment }} s
+            <span class="muted">of {{ details.segment.duration }} s</span></dd>
+          <dt>Poses</dt><dd>{{ details.segment.n_poses }}</dd>
+          <dt>Ends because</dt><dd class="muted">{{ details.segment.reason }}</dd>
+        </dl>
+        <p class="muted" style="margin-bottom:0">
+          The segment is anchored at its own first pose, so this frame's pose is meaningful
+          only relative to the rest of this segment.
+        </p>
+        {% else %}
+        <p class="warn" style="margin-top:0">No ground-truth pose for this frame.</p>
+        <p class="muted" style="margin-bottom:0">
+          It falls between ground-truth segments &mdash; where the odometry run diverged or was
+          filtered out. The single-frame view below is robot-centric instead: the robot at the
+          origin, with this frame's own cloud and height map around it.
+        </p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">Look at it</h2>
+        {% if simview_ok %}
+        <p>
+          <a class="btn primary" href="/view/{{ scene_id }}/{{ frame_window }}">Visualise this frame</a>
+        </p>
+        <p class="muted" style="margin-top:-6px">
+          A static 3D scene of this frame alone: the robot at
+          {% if details.segment %}its ground-truth pose{% else %}the origin{% endif %},
+          this frame's height map as terrain (its cloud when there is no map) and its cloud as points.
+          Nothing moves &mdash; there is one state to look at.
+        </p>
+        {% if details.window %}
+        <p>
+          <a class="btn" href="/view/{{ scene_id }}/{{ details.window.key }}?frame={{ index }}">
+            View in {{ details.window.label|lower }}</a>
+        </p>
+        <p class="muted" style="margin-top:-6px">
+          The motion around this frame: {{ details.window.n_frames }} frames from
+          <span class="chip {{ 'yes' if details.window.pose_source == 'odometry' else ('partial' if details.window.pose_source == 'transforms' else 'no') }}">{{ details.window.pose_source }}</span>,
+          opening at frame {{ index }} (offset {{ details.window.offset }} inside the window).
+        </p>
+        {% endif %}
+        {% else %}
+        <p class="warn" style="margin:0">simview's assets are not installed, so no 3D view is available.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</main>
+</body>
+</html>

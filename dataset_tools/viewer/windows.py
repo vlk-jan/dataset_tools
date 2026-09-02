@@ -56,6 +56,16 @@ class Window:
     def duration(self) -> float:
         return max(0.0, self.t_end - self.t_start)
 
+    @property
+    def note(self) -> str:
+        """Concrete, plain-language description shown in the windows table."""
+        if self.kind == "segment":
+            d = describe_reason(self.reason)
+            if d and not d.startswith("filled"):
+                return f"ends because {d}"
+            return d
+        return self.reason
+
     def to_json(self) -> dict:
         d = asdict(self)
         d["n_frames"] = self.n_frames
@@ -121,10 +131,12 @@ def windows_for_scene(
                     )
                 )
 
-    # Whole-scene fallback: continuous across the entire recording, but drifty.
-    # Always offered when it exists -- it is the only view that shows the parts
-    # of a scene no ground-truth segment covers.
-    if n_frames >= MIN_WINDOW_FRAMES:
+    # Whole-scene wheel-odometry fallback: drifty and NOT ground truth. It is
+    # offered only when the scene yields no ground-truth window at all -- there
+    # it is the only motion view that exists. Where ground truth exists, a
+    # whole-scene wheel-odometry reconstruction would simply be wrong, and
+    # showing it invites reading a wrong trajectory (user decision 2026-09-02).
+    if not windows and n_frames >= MIN_WINDOW_FRAMES:
         source = "transforms" if has_transforms else "none"
         chunks = _chunk_ranges(0, n_frames, max_frames)
         for ci, (cs, ce) in enumerate(chunks):
@@ -154,6 +166,105 @@ def windows_for_scene(
                 )
             )
     return windows
+
+
+#: Plain-language text for the machine tags in ``odometry_segments.txt``.
+#: A tag names why the segment ENDED (except ``v11_fill``, which names where
+#: the whole segment came from). Unknown tags pass through verbatim.
+_REASON_TEXT = {
+    "pose_jump": "the GT pose jumped against the robot's live odometry",
+    "speed_mismatch": "the GT speed disagreed with the robot's live odometry",
+    "end_of_run": "the recording ended",
+    "start": "the GT stream started",
+    "gap": "a gap of over 1 s in the GT stream",
+    "teleport": "an implied speed over 4 m/s (GT jump)",
+    "fix_lost": "the GNSS fix was lost",
+}
+
+
+def describe_reason(reason: str) -> str:
+    """A concrete sentence fragment for a segment-reason tag."""
+    if not reason:
+        return ""
+    if reason.startswith("v11_fill"):
+        rest = reason.split(":", 1)[1] if ":" in reason else ""
+        tail = _REASON_TEXT.get(rest.split(":")[-1], "")
+        out = "filled from v1.1 ground truth (same quality gate)"
+        return f"{out}; ends because {tail}" if tail else out
+    key = reason.split(":")[-1]
+    return _REASON_TEXT.get(key, reason)
+
+
+#: Key prefix for the synthetic one-frame window (``frame00042``). These are
+#: never enumerated -- a 20k-frame scene would mean 20k windows -- they are
+#: built on demand from the key, which is why the prefix has to round-trip.
+FRAME_KEY_PREFIX = "frame"
+
+
+def frame_window_key(index: int) -> str:
+    return f"{FRAME_KEY_PREFIX}{index:05d}"
+
+
+def parse_frame_window_key(key: str) -> int | None:
+    """The frame index a ``frame00042``-style key names, or ``None``."""
+    if not key.startswith(FRAME_KEY_PREFIX):
+        return None
+    tail = key[len(FRAME_KEY_PREFIX):]
+    return int(tail) if tail.isdigit() else None
+
+
+def segment_of_frame(
+    frame_ts: np.ndarray | None, segments: list[Segment], index: int
+) -> Segment | None:
+    """The ground-truth segment a frame falls inside, if any.
+
+    Most frames of most scenes are *not* inside one: divergence splits the run,
+    and the gaps between segments have no trustworthy pose at all.
+    """
+    if frame_ts is None or index < 0 or index >= len(frame_ts):
+        return None
+    t = float(frame_ts[index])
+    for seg in segments:
+        if seg.start_ts <= t <= seg.end_ts:
+            return seg
+    return None
+
+
+def single_frame_window(
+    frame_ts: np.ndarray | None,
+    segments: list[Segment],
+    n_frames: int,
+    index: int,
+) -> Window | None:
+    """A window holding exactly one frame, for static inspection of that frame.
+
+    There is no motion to show, so the only thing the pose decides is *where*
+    the robot stands: inside a ground-truth segment it stands at its real pose
+    in that segment's frame, and everywhere else -- most of most scenes -- the
+    view is robot-centric, with the robot at the origin and the frame's own
+    cloud and height map around it. Both are useful; only one is ground truth,
+    and ``pose_source`` says which you are looking at.
+    """
+    if index < 0 or (n_frames and index >= n_frames):
+        return None
+    seg = segment_of_frame(frame_ts, segments, index)
+    t = float(frame_ts[index]) if frame_ts is not None and index < len(frame_ts) else 0.0
+    return Window(
+        key=frame_window_key(index),
+        kind="frame",
+        label=f"Frame {index}",
+        frame_start=index,
+        frame_end=index + 1,
+        pose_source="odometry" if seg is not None else "none",
+        segment_index=seg.index if seg is not None else None,
+        reason=(
+            f"single frame, inside segment {seg.index}"
+            if seg is not None
+            else "single frame, outside every ground-truth segment: robot-centric"
+        ),
+        t_start=t,
+        t_end=t,
+    )
 
 
 def frames_covered_by_segments(frame_ts: np.ndarray, segments: list[Segment]) -> np.ndarray:
