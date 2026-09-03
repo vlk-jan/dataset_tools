@@ -1430,3 +1430,40 @@ def test_a_filled_span_is_drawn_once_not_twice(tmp_path):
     row = build_row(root, p)
     assert len(row["spans"]) == 1 and len(row["fill_spans"]) == 1
     assert row["spans"][0] not in row["fill_spans"]
+
+
+# --------------------------------------------------------------------------
+# how densely a segment is anchored, and saying so
+# --------------------------------------------------------------------------
+
+
+def test_a_window_carries_the_pose_count_of_its_segment(tmp_path):
+    """Two segments of the same length and frame count can rest on 10 Hz poses
+    or on one every two seconds; interpolated onto the frame clock they look
+    identical, so the count has to travel with the window."""
+    ts = np.arange(40, dtype=np.float64) * 0.1
+    segs = [
+        loaders.Segment(0, ts[0], ts[19], n_poses=200, reason="dense"),
+        loaders.Segment(1, ts[20], ts[-1], n_poses=2, reason="sparse"),
+    ]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False)
+    dense, sparse = ws[0], ws[1]
+    assert dense.n_poses == 200 and sparse.n_poses == 2
+    assert dense.pose_rate > 100 and sparse.pose_rate < 2
+
+
+def test_a_split_segment_keeps_its_pose_rate(tmp_path):
+    """Chunking a long segment must not make it look sparser than it is."""
+    ts = np.arange(100, dtype=np.float64) * 0.1
+    segs = [loaders.Segment(0, ts[0], ts[-1], n_poses=100, reason="x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=30)
+    assert len(ws) == 4
+    whole = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False)[0]
+    for w in ws:
+        assert abs(w.pose_rate - whole.pose_rate) < 0.15 * whole.pose_rate
+
+
+def test_the_windows_table_states_the_ground_truth_pose_rate(client):
+    body = client.get("/scene/0000?tab=windows").text
+    assert "GT poses" in body
+    assert "Hz" in body

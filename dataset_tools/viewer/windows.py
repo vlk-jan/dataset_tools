@@ -36,7 +36,7 @@ class Window:
     """One buildable view of a scene: a contiguous frame range plus its pose source."""
 
     key: str
-    kind: str  # "segment" | "raw" | "frames"
+    kind: str  # "segment" | "raw" | "frame"
     label: str
     frame_start: int  # inclusive
     frame_end: int  # exclusive
@@ -47,6 +47,12 @@ class Window:
     reason: str = ""
     t_start: float = 0.0
     t_end: float = 0.0
+    #: Ground-truth poses the underlying segment carries, 0 when there is no
+    #: segment behind this window. A segment's pose rate varies by more than an
+    #: order of magnitude across one root -- some are anchored at ~10 Hz, others
+    #: at well under 1 Hz -- and the two look identical once interpolated onto
+    #: the frame clock, so the count has to travel with the window.
+    n_poses: int = 0
 
     @property
     def n_frames(self) -> int:
@@ -55,6 +61,13 @@ class Window:
     @property
     def duration(self) -> float:
         return max(0.0, self.t_end - self.t_start)
+
+    @property
+    def pose_rate(self) -> float | None:
+        """Ground-truth poses per second, or None when there is no segment."""
+        if not self.n_poses or self.duration <= 0:
+            return None
+        return self.n_poses / self.duration
 
     @property
     def note(self) -> str:
@@ -85,6 +98,16 @@ def _chunk_ranges(start: int, end: int, max_frames: int) -> list[tuple[int, int]
     n = -(-total // max_frames)  # ceil
     edges = np.linspace(start, end, n + 1).round().astype(int)
     return [(int(edges[i]), int(edges[i + 1])) for i in range(n)]
+
+
+def _poses_in_chunk(seg: Segment, n_chunks: int) -> int:
+    """A chunk's share of its segment's ground-truth poses.
+
+    The segment file records poses per segment, not per chunk, and the split is
+    even, so an even share is the honest estimate. It exists to give a rate
+    (poses per second), which the split does not change.
+    """
+    return int(round(seg.n_poses / n_chunks)) if n_chunks else seg.n_poses
 
 
 def _playable_frames(frame_ts: np.ndarray | None, n_frames: int) -> int:
@@ -139,6 +162,7 @@ def windows_for_scene(
                         chunk=ci,
                         n_chunks=len(chunks),
                         reason=seg.reason,
+                        n_poses=_poses_in_chunk(seg, len(chunks)),
                         t_start=float(frame_ts[cs]),
                         t_end=float(frame_ts[ce - 1]),
                     )
@@ -286,6 +310,7 @@ def single_frame_window(
             if seg is not None
             else "single frame, outside every ground-truth segment: robot-centric"
         ),
+        n_poses=seg.n_poses if seg is not None else 0,
         t_start=t,
         t_end=t,
     )

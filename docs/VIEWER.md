@@ -82,6 +82,13 @@ timestamp has no place on the playback clock, so there is nothing to build for
 it. Such a frame still gets its own page (the image and the cloud are there);
 it just does not offer a 3D view.
 
+The window table's **GT poses** column is how many ground-truth poses the
+segment behind a window actually carries, and at what rate. This matters more
+than it looks: poses are interpolated onto the frame clock, so a segment
+anchored at 0.5 Hz plays back exactly like one anchored at 10 Hz, with the
+trajectory between its poses a straight line over a second or more of real
+driving. Below 2 Hz the rate is flagged.
+
 ## What each file turns into
 
 | file | in the viewer |

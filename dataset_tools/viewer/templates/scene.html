@@ -170,12 +170,16 @@
     Ground-truth segments are re-anchored to identity individually, so each one is its own
     world: a trajectory, terrain or cloud is only ever built inside a single segment.
     Long ranges are split into parts so a build stays bounded.
+    &ldquo;GT poses&rdquo; is how many ground-truth poses the segment carries and at what
+    rate: below about 2 Hz the trajectory between them is interpolated over a second or
+    more, so the path shown cuts every corner the robot actually drove.
   </p>
   <table>
     <thead>
       <tr>
         <th>Window</th><th>Frames</th><th class="num">Count</th>
-        <th class="num">Duration</th><th>Pose source</th><th>Note</th><th></th>
+        <th class="num">Duration</th><th>Pose source</th><th class="num">GT poses</th>
+        <th>Note</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -189,6 +193,15 @@
           <span class="chip {{ 'yes' if w.pose_source == 'odometry' else ('partial' if w.pose_source == 'transforms' else 'no') }}">
             {{ w.pose_source }}
           </span>
+        </td>
+        {# How densely the segment behind this window is actually anchored. A
+           segment holding one pose every two seconds is interpolated onto the
+           frame clock exactly like a 10 Hz one and looks no different in the
+           3D view, but the trajectory between its poses is a straight guess. #}
+        <td class="num">
+          {%- if w.pose_rate %}{{ w.n_poses }}
+            <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
+          {%- else %}<span class="muted">&mdash;</span>{% endif %}
         </td>
         <td class="muted">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
