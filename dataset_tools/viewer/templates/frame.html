@@ -20,7 +20,7 @@
     {% if index > 0 %}
     <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index - 1 }}">&larr; frame {{ index - 1 }}</a>
     {% else %}<span class="btn disabled">&larr; first frame</span>{% endif %}
-    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ index // 100 }}">back to the frame strip</a>
+    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ details.strip_page }}">back to the frame strip</a>
     {% if index + 1 < probe.n_frames %}
     <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index + 1 }}">frame {{ index + 1 }} &rarr;</a>
     {% else %}<span class="btn disabled">last frame &rarr;</span>{% endif %}
@@ -95,7 +95,7 @@
           <dt>Into segment</dt><dd>{{ details.segment.t_into_segment }} s
             <span class="muted">of {{ details.segment.duration }} s</span></dd>
           <dt>Poses</dt><dd>{{ details.segment.n_poses }}</dd>
-          <dt>Ends because</dt><dd class="muted">{{ details.segment.reason }}</dd>
+          <dt>Ends because</dt><dd class="muted">{{ reason_text(details.segment.reason) or details.segment.reason }}</dd>
         </dl>
         <p class="muted" style="margin-bottom:0">
           The segment is anchored at its own first pose, so this frame's pose is meaningful

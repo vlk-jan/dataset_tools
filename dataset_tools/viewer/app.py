@@ -687,15 +687,38 @@ def _frame_indices(access: SceneAccess) -> list[int]:
 
     Normally just ``range(n_frames)``. Only when the per-frame directory is
     known to be incomplete is it listed, so the common case costs nothing.
+
+    A present-but-empty directory says nothing about which frames exist, so it
+    is skipped rather than accepted as the answer -- otherwise a scene whose
+    ``images/`` had been created but not yet filled fell back to
+    ``range(n_frames)`` and offered a page of tiles that all 404.
     """
     probe = access.probe
     for kind in ("images", "clouds"):
-        if probe.has(kind):
-            count = probe.counts.get(kind, 0)
-            if count and count != probe.n_frames:
-                return sorted(access.available_frames(kind))
-            break
+        if not probe.has(kind) or not probe.counts.get(kind):
+            continue
+        if probe.counts[kind] != probe.n_frames:
+            return sorted(access.available_frames(kind))
+        break
     return list(range(probe.n_frames))
+
+
+def _page_of_frame(access: SceneAccess, index: int) -> int:
+    """Which page of the frame browser holds ``index``.
+
+    Not ``index // FRAMES_PER_PAGE``: on a scene with a sparse per-frame
+    directory the browser pages through the frames that *exist*, so a frame's
+    page is its position in that list, not its own number.
+    """
+    import bisect
+
+    indices = _frame_indices(access)
+    if not indices:
+        return 0
+    # The list is sorted, so the position is a search -- and for the usual
+    # dense scene (0..n-1) that search lands on `index` itself.
+    position = min(bisect.bisect_left(indices, index), len(indices) - 1)
+    return position // FRAMES_PER_PAGE
 
 
 def _frame_page(access: SceneAccess, page: int) -> dict[str, Any]:
@@ -740,7 +763,14 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     from .probe import _npy_shape
 
     probe = access.probe
-    details: dict[str, Any] = {"index": index, "n_frames": probe.n_frames}
+    details: dict[str, Any] = {
+        "index": index,
+        "n_frames": probe.n_frames,
+        # Which page of the frame browser this frame sits on, so "back to the
+        # frame strip" lands where the frame actually is even on a scene whose
+        # per-frame directory is sparse.
+        "strip_page": _page_of_frame(access, index),
+    }
 
     ts = access.frame_ts
     if ts is not None and 0 <= index < len(ts):

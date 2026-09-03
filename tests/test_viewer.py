@@ -1467,3 +1467,45 @@ def test_the_windows_table_states_the_ground_truth_pose_rate(client):
     body = client.get("/scene/0000?tab=windows").text
     assert "GT poses" in body
     assert "Hz" in body
+
+
+# --------------------------------------------------------------------------
+# smaller corrections
+# --------------------------------------------------------------------------
+
+
+def test_the_frame_page_reads_the_segment_tag_out_in_words(client):
+    """Every other page renders `filtered:pose_jump` through `describe_reason`;
+    the frame page printed the raw tag."""
+    import html
+
+    body = html.unescape(client.get("/scene/0000/frame/2").text)
+    assert "Ends because" in body
+    assert windows.describe_reason("filtered:pose_jump") in body
+    assert "filtered:pose_jump" not in body
+
+
+def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
+    """Not `index // 100`: a scene with a sparse per-frame directory pages
+    through the frames that exist, so a frame's page is its position in that
+    list, not its own number."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import FRAMES_PER_PAGE, create_app
+
+    # A sparse scene: only every 40th frame has an image on disk.
+    root_path = make_root(tmp_path, frames=12, segments=False)
+    scene = root_path / "0000"
+    ts = 1_700_000_000.0 + 0.1 * np.arange(600)
+    np.savetxt(scene / "data_ts.txt", ts, fmt="%.6f")
+    for i in range(0, 600, 40):
+        _write_png(scene / "images" / f"{i:05d}.png")
+    for stale in scene.glob("images/*.png"):
+        if int(stale.stem) % 40:
+            stale.unlink()
+
+    c = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    body = c.get("/scene/0000/frame/560").text
+    assert f"tab=frames&amp;page={560 // FRAMES_PER_PAGE}" not in body
+    assert "tab=frames&amp;page=0" in body  # 15 sparse frames: all on page 0

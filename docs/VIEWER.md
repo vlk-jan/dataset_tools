@@ -52,9 +52,10 @@ Nothing in the viewer is specific to a sensor generation. A scene is any
 - A window builds from whatever it has: no height maps means the terrain comes
   from the aggregated cloud instead, no `joint_states.npy` means no wheel-velocity
   plots and no wheel spin, no `transforms.npy` means no drift comparison.
-- Odometry is parsed from the columns, not from a rig's conventions, and segment
-  `reason` strings are shown verbatim (`filtered:pose_jump`, `v11_fill`,
-  `fixposition:fix_lost`, …).
+- Odometry is parsed from the columns, not from a rig's conventions. Segment
+  `reason` tags (`filtered:pose_jump`, `v11_fill`, `fixposition:fix_lost`, …)
+  are read out in words where they are shown (`windows.describe_reason`); a tag
+  it does not recognise passes through verbatim.
 
 ## Windows, and why a view never spans two segments
 
