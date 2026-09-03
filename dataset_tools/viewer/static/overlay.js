@@ -35,6 +35,12 @@ const els = {
   legendNow: document.getElementById("dt-legend-now"),
   frame: document.getElementById("dt-frame"),
   stamp: document.getElementById("dt-stamp"),
+  attitude: document.getElementById("dt-attitude"),
+  attNow: document.getElementById("dt-att-now"),
+  attRoll: document.getElementById("dt-att-roll"),
+  attPitch: document.getElementById("dt-att-pitch"),
+  attErr: document.getElementById("dt-att-err"),
+  attVerdict: document.getElementById("dt-att-verdict"),
   buildInfo: document.getElementById("dt-buildinfo"),
   tiles: Array.from(document.querySelectorAll(".dt-tile")),
 };
@@ -45,6 +51,8 @@ let lastFrame = -1;
 let lastUpdate = 0;
 /** The handles returned by installSimviewPatches, once SimView is up. */
 let patches = null;
+/** meta.attitude once the window has one: absent without gravity_align.npy. */
+let attitude = null;
 /** Legend rows by colour-mode name, for highlighting the active one. */
 const legendRows = new Map();
 let lastColorMode = null;
@@ -184,8 +192,57 @@ function update(force) {
   const frame = meta.frames[index];
   els.frame.textContent = frame;
   els.stamp.textContent = meta.abs_times ? meta.abs_times[index].toFixed(3) : "—";
+  showAttitude(index);
 
   requestTiles(frame);
+}
+
+/** Class for a tilt gap, on the bands the build shipped with the window. */
+function attitudeClass(deg) {
+  const bands = attitude.bands || { ok: 10, warn: 20 };
+  if (deg < bands.ok) return "dt-att-ok";
+  return deg < bands.warn ? "dt-att-warn" : "dt-att-bad";
+}
+
+function setAttitudeText(el, text, cls) {
+  el.textContent = text;
+  el.classList.remove("dt-att-ok", "dt-att-warn", "dt-att-bad");
+  if (cls) el.classList.add(cls);
+}
+
+/* The window's standing verdict, from the whole window rather than a frame.
+ *
+ * A single frame's gap can be large for an honest reason -- a jolt the IMU
+ * catches and the interpolated ground truth smooths over -- so what says
+ * whether the ground truth is usable is the level it holds across the window.
+ */
+function setupAttitude() {
+  attitude = meta.attitude || null;
+  if (!attitude || !attitude.error || attitude.error.length === 0) return;
+  const median = attitude.median_error;
+  const cls = attitudeClass(median);
+  const verdict = {
+    "dt-att-ok": "The ground truth's own attitude tracks the IMU, so roll and pitch here can be read as real.",
+    "dt-att-warn": "The ground truth's attitude is wandering from the IMU. Read roll and pitch with suspicion.",
+    "dt-att-bad": "The ground truth's attitude has diverged from the IMU. This window's orientation is not trustworthy, whatever the motion looks like.",
+  }[cls];
+  els.attVerdict.textContent =
+    `${verdict} Median gap ${median.toFixed(1)}\u00b0 over the window, 95th percentile ` +
+    `${attitude.p95_error.toFixed(1)}\u00b0. The IMU is independent of the odometry.`;
+  els.attitude.hidden = false;
+  if (cls !== "dt-att-ok") els.attitude.open = true;
+}
+
+/** Per-frame half of the comparison, called from `update`. */
+function showAttitude(index) {
+  if (!attitude || index < 0 || index >= attitude.error.length) return;
+  const gap = attitude.error[index];
+  setAttitudeText(els.attNow, `${gap.toFixed(1)}\u00b0`, attitudeClass(gap));
+  setAttitudeText(els.attErr, `${gap.toFixed(1)}\u00b0`, attitudeClass(gap));
+  els.attRoll.textContent =
+    `${attitude.gt_roll[index].toFixed(1)}\u00b0 GT / ${attitude.imu_roll[index].toFixed(1)}\u00b0 IMU`;
+  els.attPitch.textContent =
+    `${attitude.gt_pitch[index].toFixed(1)}\u00b0 GT / ${attitude.imu_pitch[index].toFixed(1)}\u00b0 IMU`;
 }
 
 /* Wire the 3D-view toggles to SimView, once it exists.
@@ -393,6 +450,7 @@ async function main() {
   els.buildInfo.textContent = parts.join(" · ");
 
   setupLegend();
+  setupAttitude();
 
   els.build.classList.add("done");
   startSimView();

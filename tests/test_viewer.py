@@ -534,6 +534,59 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
     assert under[1] == pytest.approx(1.0, abs=0.1)
 
 
+def _rewrite_odometry(scene: Path, roll_step_deg: float) -> None:
+    """Straight-line odometry whose roll grows by a fixed step per frame."""
+    ts = loaders.read_timestamps(scene / "data_ts.txt")
+    with open(scene / "odometry.txt", "w") as fh:
+        for i, t in enumerate(ts):
+            a = np.radians(roll_step_deg * i)
+            T = np.eye(4)
+            T[:3, :3] = [[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]]
+            T[0, 3] = 0.3 * i
+            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
+
+
+def _attitude_of(root_path: Path, scene: str = "0000") -> dict | None:
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), scene)
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    times = access.frame_ts[frames]
+    gt = build.resolve_poses(access, window, times)
+    scalars, _ = build.build_scalars(access, window, times, gt, None)
+    return build.attitude_vs_imu(scalars)
+
+
+def test_the_attitude_comparison_is_silent_when_the_ground_truth_agrees(tmp_path):
+    """A levelled window puts both attitudes in the same frame, so ground truth
+    that matches the IMU has to score zero -- otherwise the check cries wolf on
+    every sound segment."""
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 20.0)
+    _rewrite_odometry(root_path / "0000", roll_step_deg=0.0)
+    attitude = _attitude_of(root_path)
+    assert attitude["median_error"] == pytest.approx(0.0, abs=0.2)
+    assert attitude["gt_roll"][0] == pytest.approx(attitude["imu_roll"][0], abs=0.2)
+
+
+def test_the_attitude_comparison_catches_ground_truth_that_rolls_away(tmp_path):
+    """The failure this exists for: the odometry's own orientation wandering off
+    while the IMU, which does not depend on it, holds still."""
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 20.0)
+    _rewrite_odometry(root_path / "0000", roll_step_deg=5.0)
+    attitude = _attitude_of(root_path)
+    assert attitude["median_error"] > 5.0
+    assert attitude["error"][-1] > attitude["error"][0]
+    # The IMU is unmoved throughout; only the ground truth walks.
+    assert attitude["imu_roll"][0] == pytest.approx(attitude["imu_roll"][-1], abs=0.2)
+
+
+def test_a_scene_without_gravity_alignment_has_nothing_to_compare_against(tmp_path):
+    assert _attitude_of(make_root(tmp_path, frames=12, with_gravity=False)) is None
+
+
 # --------------------------------------------------------------------------
 # end to end over HTTP
 # --------------------------------------------------------------------------
@@ -584,6 +637,9 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
     body = meta.json()
     assert body["pose_source"] == "odometry"
     assert body["build"]["terrain_source"] in ("height_maps", "clouds")
+    # The panel's GT-against-IMU comparison travels with the window.
+    assert set(body["attitude"]) >= {"gt_roll", "imu_roll", "error", "median_error", "bands"}
+    assert len(body["attitude"]["error"]) == len(body["frames"])
 
     model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
     states = client.get(f"/api/data/0000/seg000/{opts}/x/states.json").json()
@@ -649,6 +705,7 @@ def test_viewer_page_wires_the_static_base_and_defers_simview(client):
     assert "__simviewStaticBase" in r.text
     assert "__dtSimviewEntry" in r.text  # SimView's entry point is deferred
     assert "dt-panel" in r.text
+    assert 'id="dt-attitude"' in r.text  # the GT-against-IMU readout
     assert client.get("/view/0000/nosuchwindow").status_code == 404
 
 

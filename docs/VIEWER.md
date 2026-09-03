@@ -118,7 +118,7 @@ driving. Below 2 Hz the rate is flagged.
 | `odometry.txt` | the robot body's animated pose |
 | `odometry_segments.txt` | the window list; the episode marker on the playback bar |
 | `transforms.npy` | a second "wheel odom" ghost body, plus the `wheel_odom_drift` plot |
-| `gravity_align.npy` | `roll_deg` / `pitch_deg` plots; places each height map level in the world; levels the window (above) |
+| `gravity_align.npy` | the attitude comparison and its plots; places each height map level in the world; levels the window (above) |
 | `height_maps/` | the terrain surface, and a per-frame tile in the side panel |
 | `height_masks/` | the terrain's `validity` colour layer, and its own panel tile |
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
@@ -127,6 +127,24 @@ driving. Below 2 Hz the rate is flagged.
 | `joint_setpoints.npy` | commanded wheel-velocity plots |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
+
+## Ground truth against the IMU
+
+Levelling puts the ground truth's own attitude and the IMU's in the same frame,
+so the two become directly comparable — and the IMU does not depend on the
+odometry, which makes the gap between them a check rather than a restatement.
+The side panel carries it: per frame, roll and pitch from each source and the
+angle between the two up axes (`attitude_error_deg`, free of yaw and of the
+wrap a per-angle difference hits near ±180°); per window, the median and 95th
+percentile, with a verdict. `roll_deg_gt` / `roll_deg_imu` and their pitch
+counterparts plot side by side.
+
+Calibrated across this root: segments whose ground truth is sound sit under 11°
+from the IMU even on sustained steep slopes, and a segment whose ground truth
+has actually failed sits above 40°. The bands (`build.ATTITUDE_BANDS`) travel in
+`meta.json` rather than living in the front-end. A single frame's gap can be
+large honestly — a jolt the IMU catches and the interpolated ground truth smooths
+over — so the verdict is taken from the window, not the frame.
 
 A window splats ~80 height maps 12.8 m across along a path a few tens of metres
 long, so every terrain cell is covered by dozens of them. Their contributions
@@ -259,7 +277,7 @@ weights what it can, but it cannot correct the ground truth. A robot that keeps
 a steady few centimetres of clearance and then lifts off over a stretch is
 showing `odometry.txt` drifting in z: the terrain under it was built from the
 height maps of frames whose poses had drifted differently. Check the `pose_z`
-plot against `pitch_deg` — a climb with no pitch behind it did not happen, and
+plot against `pitch_deg_imu` — a climb with no pitch behind it did not happen, and
 the episode is an odometry failure rather than a viewer artefact.
 
 **Every window rebuilds once after an upgrade.** The bundle cache is keyed by

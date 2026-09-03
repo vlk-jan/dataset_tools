@@ -69,7 +69,9 @@ WHEEL_LABELS = ("left", "rear", "right")
 #:    frame count, so ``raw.0`` can cover fewer frames than it used to.
 #: 5: windows are gravity-levelled and terrain is distance-weighted, so every
 #:    cached bundle holds poses and a height field that no longer match.
-META_VERSION = 5
+#: 6: ``meta`` carries the GT-vs-IMU attitude comparison the panel reads, and
+#:    the attitude scalars are renamed to say which source they came from.
+META_VERSION = 6
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -829,9 +831,24 @@ def build_scalars(
     ga = access.gravity_align
     if ga is not None:
         idx = np.clip(np.arange(window.frame_start, window.frame_end), 0, len(ga) - 1)
-        roll, pitch = L.roll_pitch_from_gravity_align(np.asarray(ga)[idx])
-        scalars["roll_deg"] = np.degrees(roll)[: len(times)]
-        scalars["pitch_deg"] = np.degrees(pitch)[: len(times)]
+        R_imu = np.asarray(ga)[idx][: len(times)]
+        roll, pitch = L.roll_pitch_from_gravity_align(R_imu)
+        scalars["roll_deg_imu"] = np.degrees(roll)
+        scalars["pitch_deg_imu"] = np.degrees(pitch)
+        if gt.source != "none":
+            # The window is levelled, so the ground truth now carries an
+            # absolute attitude too and the two are directly comparable. Row 2
+            # of either rotation is the world's up axis in body coordinates,
+            # which is what makes the same reader work on both.
+            R_gt = L.poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
+            roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
+            scalars["roll_deg_gt"] = np.degrees(roll)
+            scalars["pitch_deg_gt"] = np.degrees(pitch)
+            # Angle between the two up axes: the tilt disagreement itself,
+            # free of yaw and of the wrap a per-angle difference would hit
+            # near +-180 deg (a robot on its back).
+            cos = np.clip(np.sum(R_gt[:, 2, :] * R_imu[:, 2, :], axis=1), -1.0, 1.0)
+            scalars["attitude_error_deg"] = np.degrees(np.arccos(cos))
 
     js = access.joint_states
     if js is not None and js.ndim == 2 and js.shape[1] >= 10:
@@ -857,6 +874,38 @@ def build_scalars(
         notes.append(f"cmd_vel.npy has unexpected shape {cv.shape}; skipped")
 
     return scalars, notes
+
+
+#: Tilt disagreement (degrees) at which the panel stops calling the ground
+#: truth sound. Measured across this root: segments whose GT attitude is
+#: healthy sit under 11 deg from the IMU even on sustained steep slopes, and a
+#: segment whose GT has actually failed sits above 40.
+ATTITUDE_BANDS = {"ok": 10.0, "warn": 20.0}
+
+
+def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
+    """The GT-vs-IMU attitude comparison the side panel reads, or None.
+
+    Once a window is levelled both attitudes are absolute, so the gap between
+    them says how far the ground truth's own orientation has wandered -- the one
+    reading that separates a robot really on a slope from odometry that thinks
+    it is. The IMU is independent of the odometry, which is what makes it a
+    check rather than a restatement.
+    """
+    need = ("roll_deg_gt", "pitch_deg_gt", "roll_deg_imu", "pitch_deg_imu", "attitude_error_deg")
+    if not all(k in scalars for k in need):
+        return None
+    err = np.asarray(scalars["attitude_error_deg"], dtype=np.float64)
+    return {
+        "gt_roll": np.round(scalars["roll_deg_gt"], 2).tolist(),
+        "gt_pitch": np.round(scalars["pitch_deg_gt"], 2).tolist(),
+        "imu_roll": np.round(scalars["roll_deg_imu"], 2).tolist(),
+        "imu_pitch": np.round(scalars["pitch_deg_imu"], 2).tolist(),
+        "error": np.round(err, 2).tolist(),
+        "median_error": round(float(np.median(err)), 2),
+        "p95_error": round(float(np.percentile(err, 95)), 2),
+        "bands": ATTITUDE_BANDS,
+    }
 
 
 def wheel_angles(access: SceneAccess, times: np.ndarray) -> np.ndarray | None:
@@ -1040,6 +1089,7 @@ def build_scene(
         "abs_times": abs_times.tolist(),
         "pose_source": gt.source,
         "pose_valid": gt.valid.tolist(),
+        "attitude": attitude_vs_imu(scalars),
         "scalar_names": scalar_names,
         "build": metadata,
         "available": {
