@@ -90,9 +90,7 @@ def roll_pitch_from_quat(q: Sequence[float]) -> tuple[float, float]:
 
 
 def pose_to_matrix(pose) -> np.ndarray:
-    T = quaternion_matrix(
-        [pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w]
-    )
+    T = quaternion_matrix([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w])
     T[:3, 3] = [pose.position.x, pose.position.y, pose.position.z]
     return T
 
@@ -126,9 +124,7 @@ def cloud_to_xyzi(msg) -> np.ndarray:
     points = np.frombuffer(data, dtype=dtype, count=msg.width * msg.height)
     names = points.dtype.names
     intensity = (
-        points["intensity"].astype(np.float32)
-        if "intensity" in names
-        else np.zeros(len(points), dtype=np.float32)
+        points["intensity"].astype(np.float32) if "intensity" in names else np.zeros(len(points), dtype=np.float32)
     )
     return np.stack(
         [
@@ -454,11 +450,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     lidar_conn = conns.get(lidar_topic)
 
     if not cam_conn or not lidar_conn:
-        missing = [
-            topic
-            for topic, conn in ((camera_topic, cam_conn), (lidar_topic, lidar_conn))
-            if conn is None
-        ]
+        missing = [topic for topic, conn in ((camera_topic, cam_conn), (lidar_topic, lidar_conn)) if conn is None]
         LOG.warning("%s: missing topic(s) %s; scene skipped", bag_path.name, missing)
         result.status = STATUS_EMPTY
         result.message = f"missing topic(s): {', '.join(missing)}"
@@ -547,8 +539,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     if len(valid_cam_ts) == 0:
         LOG.warning(
-            "%s: no synchronised camera/lidar pairs (%d camera, %d lidar messages); "
-            "scene left empty",
+            "%s: no synchronised camera/lidar pairs (%d camera, %d lidar messages); " "scene left empty",
             bag_path.name,
             len(cam_timestamps),
             len(lidar_timestamps),
@@ -574,9 +565,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             arr = np.vstack(rows)
             np.save(scene_dir / f"{name}.npy", arr[np.argsort(arr[:, 0])])
         else:
-            LOG.info(
-                "%s: no messages on /%s; %s.npy not written", bag_path.name, name, name
-            )
+            LOG.info("%s: no messages on /%s; %s.npy not written", bag_path.name, name, name)
 
     # Process TF Static
     tf_graph = build_tf_graph(tf_msgs) if tf_msgs else nx.DiGraph()
@@ -590,8 +579,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             T_lidar_to_base[:3, 3] = [x, y, z]
         else:
             LOG.warning(
-                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; "
-                "using identity",
+                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; " "using identity",
                 bag_path.name,
                 lidar_frame,
                 args.base_frame,
@@ -600,11 +588,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Odom poses track the odometry child frame (e.g. FP_POI for Fixposition);
     # re-express them as poses of the base frame when TF allows it.
-    T_child_to_base = (
-        get_transform(tf_graph, odom_child_frame, args.base_frame)
-        if odom_child_frame
-        else None
-    )
+    T_child_to_base = get_transform(tf_graph, odom_child_frame, args.base_frame) if odom_child_frame else None
     if T_child_to_base is not None and not np.allclose(T_child_to_base, np.eye(4)):
         T_base_in_child = np.linalg.inv(T_child_to_base)
         odom_data = [(t, T @ T_base_in_child) for t, T in odom_data]
@@ -618,16 +602,13 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Re-express the orientation source at the base frame too, so gravity
     # alignment reflects the base tilt rather than the sensor mounting.
-    T_imu_to_base = (
-        get_transform(tf_graph, imu_frame, args.base_frame) if imu_frame else None
-    )
+    T_imu_to_base = get_transform(tf_graph, imu_frame, args.base_frame) if imu_frame else None
     if T_imu_to_base is not None and not np.allclose(T_imu_to_base, np.eye(4)):
         T_base_in_imu = np.linalg.inv(T_imu_to_base)
         imu_data = [(t, R @ T_base_in_imu) for t, R in imu_data]
     elif imu_frame and T_imu_to_base is None:
         LOG.warning(
-            "%s: no TF path from orientation frame '%s' to '%s'; using raw "
-            "orientations for gravity alignment",
+            "%s: no TF path from orientation frame '%s' to '%s'; using raw " "orientations for gravity alignment",
             bag_path.name,
             imu_frame,
             args.base_frame,
@@ -659,9 +640,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             # Extract Intrinsics once
             if not intrinsics_saved:
                 save_intrinsics(reader, conns, camera_topic, scene_dir)
-                save_camera_extrinsic(
-                    tf_graph, msg.header.frame_id, args.base_frame, scene_dir
-                )
+                save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
                 intrinsics_saved = True
 
             # Match Odom and save via dict instead of list append
@@ -817,9 +796,7 @@ def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> b
         return False
     T = get_transform(tf_graph, cam_frame, base_frame)
     if T is None:
-        LOG.warning(
-            "no TF path %s -> %s; T_cam_to_base.txt not written", cam_frame, base_frame
-        )
+        LOG.warning("no TF path %s -> %s; T_cam_to_base.txt not written", cam_frame, base_frame)
         return False
     np.savetxt(scene_dir / "T_cam_to_base.txt", T)
     return True
@@ -839,8 +816,7 @@ def gt_enabled(args) -> bool:
     return "fixposition" in args.odom
 
 
-def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0,
-                       min_poses=20) -> bool:
+def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, min_poses=20) -> bool:
     """Write odometry.txt + odometry_segments.txt in the HELHEST v1.2 contract.
 
     For rigs whose odometry source is trustworthy on its own (Fixposition
@@ -863,9 +839,7 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0,
     starts = [0, *breaks]
     ends = [*breaks, len(ts)]
     seg_id = 0
-    with open(scene_dir / "odometry.txt", "w") as f_out, open(
-        scene_dir / "odometry_segments.txt", "w"
-    ) as f_seg:
+    with open(scene_dir / "odometry.txt", "w") as f_out, open(scene_dir / "odometry_segments.txt", "w") as f_seg:
         f_out.write(GT_HEADER + "\n")
         f_seg.write("# segment start_ts end_ts n_poses reason\n")
         for k, (a, b) in enumerate(zip(starts, ends)):
@@ -873,13 +847,9 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0,
                 continue
             anchored = np.einsum("ij,njk->nik", np.linalg.inv(Ts[a]), Ts[a:b])
             for t, T in zip(ts[a:b], anchored):
-                f_out.write(
-                    " ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n"
-                )
+                f_out.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
             reason = reasons[k - 1] if k > 0 else "start"
-            f_seg.write(
-                f"{seg_id} {ts[a]:.6f} {ts[b-1]:.6f} {b-a} {reason}\n"
-            )
+            f_seg.write(f"{seg_id} {ts[a]:.6f} {ts[b-1]:.6f} {b-a} {reason}\n")
             seg_id += 1
     return seg_id > 0
 
@@ -901,23 +871,19 @@ def build_parser() -> argparse.ArgumentParser:
         description="Extract HELHEST scenes from ROS 2 bags.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "input_dir", type=str, help="Directory of bags, or a single bag directory"
-    )
+    parser.add_argument("input_dir", type=str, help="Directory of bags, or a single bag directory")
     parser.add_argument("output_dir", type=str, help="Dataset root to write scenes to")
     parser.add_argument(
         "--cam",
         type=str,
         default="/odin1/image/compressed",
-        help="Compressed image topic (old bags: "
-        "/luxonis/oak/rgb/image_raw/compressed)",
+        help="Compressed image topic (old bags: " "/luxonis/oak/rgb/image_raw/compressed)",
     )
     parser.add_argument(
         "--lidar",
         type=str,
         default="/odin1/cloud_filtered/cloudini",
-        help="PointCloud2 or CompressedPointCloud2 topic (old bags: "
-        "/livox/lidar_front)",
+        help="PointCloud2 or CompressedPointCloud2 topic (old bags: " "/livox/lidar_front)",
     )
     parser.add_argument(
         "--odom",
@@ -990,9 +956,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         LOG.error("%s", exc)
         return 2
     if not bags:
-        LOG.error(
-            "no rosbag2 directories (with metadata.yaml) found under %s", input_dir
-        )
+        LOG.error("no rosbag2 directories (with metadata.yaml) found under %s", input_dir)
         return 2
 
     jobs = [(args.start_index + i, bag) for i, bag in enumerate(bags)]
@@ -1000,9 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if selected is not None:
         jobs = [(idx, bag) for idx, bag in jobs if selected(idx, bag.name)]
         if not jobs:
-            LOG.error(
-                "--scenes %s selected none of the %d bags found", args.scenes, len(bags)
-            )
+            LOG.error("--scenes %s selected none of the %d bags found", args.scenes, len(bags))
             return 2
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1027,13 +989,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if todo and args.jobs > 1:
         with ProcessPoolExecutor(max_workers=args.jobs) as executor:
-            futures = [
-                executor.submit(_worker, bag, output_dir, idx, args)
-                for idx, bag in todo
-            ]
-            for future in tqdm(
-                as_completed(futures), total=len(futures), desc="Processing bags"
-            ):
+            futures = [executor.submit(_worker, bag, output_dir, idx, args) for idx, bag in todo]
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing bags"):
                 results.append(future.result())
     else:
         for idx, bag in tqdm(todo, desc="Processing bags"):
@@ -1063,9 +1020,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             result.message,
         )
     for result in failed:
-        LOG.error(
-            "scene %04d (%s) FAILED: %s", result.index, result.bag, result.message
-        )
+        LOG.error("scene %04d (%s) FAILED: %s", result.index, result.bag, result.message)
 
     return 1 if failed else 0
 

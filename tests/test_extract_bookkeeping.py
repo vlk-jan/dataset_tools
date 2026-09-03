@@ -139,9 +139,7 @@ def test_merge_scenes_csv_prefers_fresh_worker_rows(tmp_path: Path):
     write_scene(tmp_path / "0000", frames=4)
     ed.write_scene_part(
         tmp_path / ed.SCENES_PARTS_DIR,
-        ed.SceneResult(
-            index=0, bag="fresh_bag", status=ed.STATUS_OK, frames=99, start_time=1.0
-        ),
+        ed.SceneResult(index=0, bag="fresh_bag", status=ed.STATUS_OK, frames=99, start_time=1.0),
     )
     rows = ed.merge_scenes_csv(tmp_path).read_text().splitlines()
     assert rows[1] == "0000,fresh_bag,1.000000,99"
@@ -149,9 +147,7 @@ def test_merge_scenes_csv_prefers_fresh_worker_rows(tmp_path: Path):
 
 def test_write_scene_part_handles_unknown_start_time(tmp_path: Path):
     parts = tmp_path / ed.SCENES_PARTS_DIR
-    ed.write_scene_part(
-        parts, ed.SceneResult(index=7, bag="bag", status=ed.STATUS_EMPTY)
-    )
+    ed.write_scene_part(parts, ed.SceneResult(index=7, bag="bag", status=ed.STATUS_EMPTY))
     assert (parts / "0007.csv").read_text().strip() == "0007,bag,,0"
 
 
@@ -217,9 +213,7 @@ def test_main_reports_failures_with_nonzero_exit(tmp_path: Path, jobs: str):
     out = tmp_path / "out"
     assert ed.main([str(tmp_path / "bags"), str(out), "--jobs", jobs]) == 1
     # ... and the index only lists scenes that actually finished.
-    assert (out / ed.SCENES_CSV).read_text().splitlines() == [
-        "scene,bag,start_time,frames"
-    ]
+    assert (out / ed.SCENES_CSV).read_text().splitlines() == ["scene,bag,start_time,frames"]
 
 
 def test_worker_turns_exceptions_into_failed_results(tmp_path: Path):

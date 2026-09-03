@@ -25,17 +25,30 @@ logger = logging.getLogger("dataset_tools.viewer.render")
 # Anchor colours (0-255) for a few perceptually reasonable ramps.
 _TURBO_ANCHORS = np.array(
     [
-        [48, 18, 59], [70, 107, 227], [37, 180, 248], [70, 227, 161],
-        [166, 249, 76], [231, 214, 46], [253, 141, 39], [220, 47, 12],
+        [48, 18, 59],
+        [70, 107, 227],
+        [37, 180, 248],
+        [70, 227, 161],
+        [166, 249, 76],
+        [231, 214, 46],
+        [253, 141, 39],
+        [220, 47, 12],
         [122, 4, 3],
     ],
     dtype=np.float64,
 )
 _VIRIDIS_ANCHORS = np.array(
     [
-        [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142],
-        [38, 130, 142], [31, 158, 137], [53, 183, 121], [110, 206, 88],
-        [181, 222, 43], [253, 231, 37],
+        [68, 1, 84],
+        [72, 40, 120],
+        [62, 74, 137],
+        [49, 104, 142],
+        [38, 130, 142],
+        [31, 158, 137],
+        [53, 183, 121],
+        [110, 206, 88],
+        [181, 222, 43],
+        [253, 231, 37],
     ],
     dtype=np.float64,
 )
@@ -44,9 +57,9 @@ _GREY_ANCHORS = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.float64)
 #: Fixed, meaningful colours for the three height-map validity states.
 VALIDITY_COLORS = np.array(
     [
-        [200, 60, 60],    # 0 extrapolated -- invented
-        [230, 190, 70],   # 1 interpolated -- inside the hull, no return
-        [60, 170, 90],    # 2 measured -- a lidar return landed here
+        [200, 60, 60],  # 0 extrapolated -- invented
+        [230, 190, 70],  # 1 interpolated -- inside the hull, no return
+        [60, 170, 90],  # 2 measured -- a lidar return landed here
     ],
     dtype=np.uint8,
 )
@@ -57,7 +70,7 @@ VALIDITY_COLORS = np.array(
 #: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
 #: than imported: ``build`` imports *this* module, so importing back would be a
 #: cycle. ``tests/test_viewer.py`` asserts the two stay in agreement.
-ROBOT_CHASSIS_HALF = (0.5, 0.3)          # half length (x), half width (y)
+ROBOT_CHASSIS_HALF = (0.5, 0.3)  # half length (x), half width (y)
 ROBOT_WHEEL_RADIUS = 0.3685
 ROBOT_WHEEL_WIDTH = 0.142
 #: (x, y) of each wheel hub -- two front wheels and one rear centre wheel.
@@ -199,7 +212,8 @@ def draw_robot_silhouette(img, px_per_m: float):
         draw.polygon([pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1)], fill=fill)
         draw.line(
             [pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1), pt(x0, y0)],
-            fill=outline, width=width,
+            fill=outline,
+            width=width,
         )
 
     r, half_w = ROBOT_WHEEL_RADIUS, ROBOT_WHEEL_WIDTH / 2.0

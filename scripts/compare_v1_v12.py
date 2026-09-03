@@ -11,14 +11,18 @@ yaw-rate correlation with the wheel-speed differential, 10 s relative-pose
 error between old-conjugated and new on their overlap, and cloud statistics
 (points per frame, x offset of the zero-return blob / centroid shift).
 """
+
 import csv
 import sys
 from pathlib import Path
 
 import numpy as np
 
-X = np.eye(4); X[:3, :3] = np.diag([1, -1, -1]); X[:3, 3] = [0.17, 0, 0.145]
-L = np.eye(4); L[:3, 3] = [0.011, 0.02329, -0.04412]
+X = np.eye(4)
+X[:3, :3] = np.diag([1, -1, -1])
+X[:3, 3] = [0.17, 0, 0.145]
+L = np.eye(4)
+L[:3, 3] = [0.011, 0.02329, -0.04412]
 XP = X @ L
 WHEEL_EPS = 0.05
 
@@ -45,7 +49,8 @@ def load_segments(p):
     for line in open(p):
         if line.startswith("#") or not line.strip():
             continue
-        f = line.split(); segs.append((float(f[1]), float(f[2])))
+        f = line.split()
+        segs.append((float(f[1]), float(f[2])))
     return segs
 
 
@@ -81,7 +86,8 @@ def stationary_drift(t, T, wheels):
     """Max translation of the estimate over intervals where all wheels are stopped >= 0.5 s."""
     if len(t) == 0 or wheels is None:
         return np.nan, 0
-    wt = wheels[:, 0]; stopped = (np.abs(wheels[:, 1:]) < WHEEL_EPS).all(1)
+    wt = wheels[:, 0]
+    stopped = (np.abs(wheels[:, 1:]) < WHEEL_EPS).all(1)
     edges = np.diff(np.concatenate([[0], stopped.astype(int), [0]]))
     worst, n = 0.0, 0
     for a, b in zip(np.where(edges == 1)[0], np.where(edges == -1)[0] - 1):
@@ -101,7 +107,8 @@ def yaw_corr(t, T, wheels):
         return np.nan
     yaw = np.unwrap(np.arctan2(T[:, 1, 0], T[:, 0, 0]))
     yr = np.gradient(yaw, t)
-    wt = wheels[:, 0]; diff = wheels[:, 2] - wheels[:, 1]  # right - left (signed columns absent -> abs)
+    wt = wheels[:, 0]
+    diff = wheels[:, 2] - wheels[:, 1]  # right - left (signed columns absent -> abs)
     d = np.interp(t, wt, diff)
     m = np.isfinite(yr) & np.isfinite(d)
     if m.sum() < 10 or d[m].std() == 0 or yr[m].std() == 0:
@@ -131,13 +138,17 @@ def main():
         n, o = new / s, old / s
         if not (n / "data_ts.txt").exists():
             continue
-        ts = np.loadtxt(n / "data_ts.txt"); ts = ts if ts.ndim == 1 else ts[:, 0]
+        ts = np.loadtxt(n / "data_ts.txt")
+        ts = ts if ts.ndim == 1 else ts[:, 0]
         r = dict(scene=s, frames=len(ts))
-        ref = load_traj(n / "regen" / "odom_ref.txt") if (n / "regen" / "odom_ref.txt").exists() else (np.zeros(0), None)
+        ref = (
+            load_traj(n / "regen" / "odom_ref.txt") if (n / "regen" / "odom_ref.txt").exists() else (np.zeros(0), None)
+        )
         wheels = np.loadtxt(n / "regen" / "wheels.txt") if (n / "regen" / "wheels.txt").exists() else None
         # old
         if (o / "odometry.txt").exists():
-            ot, oT = load_traj(o / "odometry.txt"); oC = conjugate(oT)
+            ot, oT = load_traj(o / "odometry.txt")
+            oC = conjugate(oT)
             r["old_cov"] = coverage(ts, ot, None)
             e = windows(ot, oC, *ref, None, 2.0) if ref[1] is not None else np.array([])
             r["old_win_med"] = np.median(e) if len(e) else np.nan
@@ -147,10 +158,12 @@ def main():
             r["old_yaw_corr"] = yaw_corr(ot, oC, wheels)
             r["old_yaw_corr_raw"] = yaw_corr(ot, oT, wheels)
         else:
-            ot = np.zeros(0); r["old_cov"] = 0.0
+            ot = np.zeros(0)
+            r["old_cov"] = 0.0
         # new
         if (n / "odometry.txt").exists():
-            nt, nT = load_traj(n / "odometry.txt"); segs = load_segments(n / "odometry_segments.txt")
+            nt, nT = load_traj(n / "odometry.txt")
+            segs = load_segments(n / "odometry_segments.txt")
             r["new_cov"] = coverage(ts, nt, segs)
             r["new_segments"] = len(segs) if segs else 1
             e = windows(nt, nT, *ref, segs, 2.0) if ref[1] is not None else np.array([])
@@ -164,10 +177,13 @@ def main():
                 errs = []
                 for i in range(len(nt)):
                     j = np.searchsorted(nt, nt[i] + 10.0)
-                    if j >= len(nt) or nt[j] - nt[i] > 10.5: continue
-                    if segs and not any(a <= nt[i] and nt[j] <= b for a, b in segs): continue
+                    if j >= len(nt) or nt[j] - nt[i] > 10.5:
+                        continue
+                    if segs and not any(a <= nt[i] and nt[j] <= b for a, b in segs):
+                        continue
                     oi, oj = np.searchsorted(ot, nt[i]), np.searchsorted(ot, nt[j])
-                    if oi >= len(ot) or oj >= len(ot) or abs(ot[oi] - nt[i]) > 0.2 or abs(ot[oj] - nt[j]) > 0.2: continue
+                    if oi >= len(ot) or oj >= len(ot) or abs(ot[oi] - nt[i]) > 0.2 or abs(ot[oj] - nt[j]) > 0.2:
+                        continue
                     errs.append(np.linalg.norm(rel(nT, i, j)[:3, 3] - rel(oC, oi, oj)[:3, 3]))
                 r["old_vs_new_10s_med"] = np.median(errs) if errs else np.nan
         else:
@@ -179,7 +195,9 @@ def main():
         print(" ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in r.items()))
     keys = sorted({k for r in rows for k in r}, key=lambda k: (k != "scene", k))
     with open(out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys); w.writeheader(); w.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=keys)
+        w.writeheader()
+        w.writerows(rows)
 
 
 if __name__ == "__main__":

@@ -101,11 +101,13 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
     ]
     images, clouds = p.counts.get("images"), p.counts.get("clouds")
     if images is not None or clouds is not None:
-        stats.append(stat(
-            "images · clouds",
-            f"{fmt_count(images) if images is not None else '—'}"
-            f" · {fmt_count(clouds) if clouds is not None else '—'}",
-        ))
+        stats.append(
+            stat(
+                "images · clouds",
+                f"{fmt_count(images) if images is not None else '—'}"
+                f" · {fmt_count(clouds) if clouds is not None else '—'}",
+            )
+        )
     if p.n_segments:
         reasons = ", ".join(f"{n}× {r}" for r, n in sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])[:2])
         stats.append(stat("segments", p.n_segments, reasons or None))
@@ -197,11 +199,13 @@ def _derived_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if segments:
         totals.append({"label": "GT segments", "value": fmt_count(segments), "sub": None})
     if covered:
-        totals.append({
-            "label": "GT coverage",
-            "value": f"{sum(covered) / len(covered) * 100:.0f}%",
-            "sub": f"mean over {len(covered)} scenes",
-        })
+        totals.append(
+            {
+                "label": "GT coverage",
+                "value": f"{sum(covered) / len(covered) * 100:.0f}%",
+                "sub": f"mean over {len(covered)} scenes",
+            }
+        )
     return totals
 
 
@@ -218,22 +222,26 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
         if not members:
             continue  # a group whose scenes are not in this root: not our root
         taken.update(r["probe"].scene_id for r in members)
-        groups.append({
-            "title": group.get("title"),
-            "range": group.get("range"),
-            "blurb": group.get("blurb"),
-            "rows": members,
-        })
+        groups.append(
+            {
+                "title": group.get("title"),
+                "range": group.get("range"),
+                "blurb": group.get("blurb"),
+                "rows": members,
+            }
+        )
     # Anything the atlas did not mention still gets shown -- a scene added to a
     # root after the atlas was written must not vanish from the index.
     rest = [r for r in rows if r["probe"].scene_id not in taken]
     if rest:
-        groups.append({
-            "title": "Scenes" if not groups else "Not in the atlas",
-            "range": f"{len(rest)} scene{'s' if len(rest) != 1 else ''}",
-            "blurb": None if not groups else "Present in this root but absent from atlas/atlas.json.",
-            "rows": rest,
-        })
+        groups.append(
+            {
+                "title": "Scenes" if not groups else "Not in the atlas",
+                "range": f"{len(rest)} scene{'s' if len(rest) != 1 else ''}",
+                "blurb": None if not groups else "Present in this root but absent from atlas/atlas.json.",
+                "rows": rest,
+            }
+        )
 
     return {
         "rows": rows,

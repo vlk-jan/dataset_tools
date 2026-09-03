@@ -5,17 +5,22 @@ from dataset_tools.extract_data import get_transform, save_camera_extrinsic
 
 class _TF:
     def __init__(self, parent, child, t, q):
-        class NS: pass
-        self.header = NS(); self.header.frame_id = parent
+        class NS:
+            pass
+
+        self.header = NS()
+        self.header.frame_id = parent
         self.child_frame_id = child
-        self.transform = NS(); self.transform.translation = NS(); self.transform.rotation = NS()
+        self.transform = NS()
+        self.transform.translation = NS()
+        self.transform.rotation = NS()
         self.transform.translation.x, self.transform.translation.y, self.transform.translation.z = t
-        (self.transform.rotation.x, self.transform.rotation.y,
-         self.transform.rotation.z, self.transform.rotation.w) = q
+        self.transform.rotation.x, self.transform.rotation.y, self.transform.rotation.z, self.transform.rotation.w = q
 
 
 def _graph():
     from dataset_tools.extract_data import build_tf_graph
+
     # base -> cam: pure translation
     return build_tf_graph([_TF("base_link", "cam_optical", (0.155, 0.0, 0.23), (0, 0, 0, 1))])
 

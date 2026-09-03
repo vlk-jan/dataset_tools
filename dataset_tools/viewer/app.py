@@ -78,6 +78,7 @@ class _ImmutableStatic(StaticFiles):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
+
 logger = logging.getLogger("dataset_tools.viewer.app")
 
 HERE = Path(__file__).parent
@@ -600,9 +601,7 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(
-                state.root, scene_id, window_key, opts, max_frames=state.max_frames
-            )
+            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames)
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
@@ -610,7 +609,11 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             (dest / "meta.json").write_text(json.dumps(meta))
             logger.info(
                 "built %s/%s in %.1fs (%d blobs, %.1f MB)",
-                scene_id, window_key, time.time() - started, info["blobs"], info["bytes"] / 1e6,
+                scene_id,
+                window_key,
+                time.time() - started,
+                info["blobs"],
+                info["bytes"] / 1e6,
             )
             return dest
 
@@ -788,9 +791,7 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     if pcd is not None and 0 <= index < len(pcd):
         details["lidar_timestamp"] = float(pcd[index])
         if "timestamp" in details:
-            details["camera_lidar_offset_ms"] = round(
-                (details["timestamp"] - float(pcd[index])) * 1000, 2
-            )
+            details["camera_lidar_offset_ms"] = round((details["timestamp"] - float(pcd[index])) * 1000, 2)
 
     present: dict[str, bool] = {}
     for kind in ("images", "clouds", "height_maps", "height_masks"):
@@ -826,12 +827,8 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     # The enumerated window this frame sits in: a ground-truth one if there is
     # one, otherwise the whole-scene fallback. This is the "show me the motion
     # around this frame" link, as opposed to the static single-frame view.
-    containing = [
-        w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end
-    ]
-    best = next((w for w in containing if w.kind == "segment"), None) or (
-        containing[0] if containing else None
-    )
+    containing = [w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end]
+    best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
     if best is not None:
         details["window"] = {
             "key": best.key,

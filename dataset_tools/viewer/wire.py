@@ -171,10 +171,7 @@ def render_viewer_page(
     # already absolute, so nothing else is affected.
     page = page.replace("<head>", '<head>\n    <base href="/">', 1)
 
-    injection = (
-        f'<script>window.__simviewStaticBase = "{data_base.rstrip("/")}";</script>\n'
-        f"{head_html}\n</head>"
-    )
+    injection = f'<script>window.__simviewStaticBase = "{data_base.rstrip("/")}";</script>\n' f"{head_html}\n</head>"
     page = page.replace("</head>", injection, 1)
     page = page.replace("</body>", f"{body_html}\n</body>", 1)
     return page

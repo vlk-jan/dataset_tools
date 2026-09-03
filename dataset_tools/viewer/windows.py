@@ -182,11 +182,7 @@ def windows_for_scene(
         chunks = _chunk_ranges(0, playable, max_frames)
         for ci, (cs, ce) in enumerate(chunks):
             suffix = f".{ci}" if len(chunks) > 1 else ""
-            label = (
-                "Whole scene, wheel odometry"
-                if source == "transforms"
-                else "Whole scene, no pose"
-            )
+            label = "Whole scene, wheel odometry" if source == "transforms" else "Whole scene, no pose"
             if len(chunks) > 1:
                 label += f" (part {ci + 1}/{len(chunks)})"
             windows.append(
@@ -199,9 +195,11 @@ def windows_for_scene(
                     pose_source=source,
                     chunk=ci,
                     n_chunks=len(chunks),
-                    reason="wheel odometry, drifts; not ground truth"
-                    if source == "transforms"
-                    else "no pose data in this scene",
+                    reason=(
+                        "wheel odometry, drifts; not ground truth"
+                        if source == "transforms"
+                        else "no pose data in this scene"
+                    ),
                     t_start=float(frame_ts[cs]) if frame_ts is not None and len(frame_ts) > cs else 0.0,
                     t_end=float(frame_ts[ce - 1]) if frame_ts is not None and len(frame_ts) >= ce else 0.0,
                 )
@@ -250,13 +248,11 @@ def parse_frame_window_key(key: str) -> int | None:
     """The frame index a ``frame00042``-style key names, or ``None``."""
     if not key.startswith(FRAME_KEY_PREFIX):
         return None
-    tail = key[len(FRAME_KEY_PREFIX):]
+    tail = key[len(FRAME_KEY_PREFIX) :]
     return int(tail) if tail.isdigit() else None
 
 
-def segment_of_frame(
-    frame_ts: np.ndarray | None, segments: list[Segment], index: int
-) -> Segment | None:
+def segment_of_frame(frame_ts: np.ndarray | None, segments: list[Segment], index: int) -> Segment | None:
     """The ground-truth segment a frame falls inside, if any.
 
     Most frames of most scenes are *not* inside one: divergence splits the run,

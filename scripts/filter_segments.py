@@ -18,6 +18,7 @@ Writes <out_dir>/odometry.txt            filtered runs, each anchored at identit
                                          trajectory already lives in regen_dir)
 Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span_out
 """
+
 import argparse
 from pathlib import Path
 
@@ -63,7 +64,7 @@ def bad_poses(t, T, rt, rT, window, max_err):
             continue
         err = np.linalg.norm(rel(T, i, j)[:3, 3] - rel(rT, ri, rj)[:3, 3])
         if err > max_err:
-            bad[i:j + 1] = True
+            bad[i : j + 1] = True
     return bad
 
 
@@ -119,9 +120,17 @@ def main():
         f.write("# segment start_ts end_ts n_poses reason\n")
         for k, (s0, s1, n, reason) in enumerate(kept_segs):
             f.write(f"{k} {s0:.6f} {s1:.6f} {n} {reason}\n")
-    summary = dict(poses_in=len(t), poses_out=len(kept_rows), segments_in=len(segs),
-                   segments_out=len(kept_segs), span_in_s=round(span_in, 1), span_out_s=round(span_out, 1),
-                   window=a.window, max_err=a.max_err, min_poses=a.min_poses)
+    summary = dict(
+        poses_in=len(t),
+        poses_out=len(kept_rows),
+        segments_in=len(segs),
+        segments_out=len(kept_segs),
+        span_in_s=round(span_in, 1),
+        span_out_s=round(span_out, 1),
+        window=a.window,
+        max_err=a.max_err,
+        min_poses=a.min_poses,
+    )
     with open(regen / "filter_stats.txt", "w") as f:
         for k, v in summary.items():
             f.write(f"{k}={v}\n")

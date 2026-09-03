@@ -45,6 +45,7 @@ class Artefact:
 
 
 #: Everything the viewer knows how to show. Order is the order shown in the UI.
+# fmt: off
 ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("images", "images", "dir", "Camera images", "RGB frame per sync'd frame", ".png"),
     Artefact("clouds", "clouds", "dir", "Point clouds", "(N, >=3) lidar scan in the robot base frame", ".npy"),
@@ -65,6 +66,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("T_cam_to_lidar", "T_cam_to_lidar.txt", "file", "Camera->lidar extrinsic", "4x4, older roots"),
     Artefact("source_bag", "source_bag.txt", "file", "Source bag", "provenance of the recording"),
 )
+# fmt: on
 
 ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 
@@ -148,9 +150,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         if probe.present.get(key):
             art = ARTEFACTS_BY_KEY[key]
             try:
-                probe.counts[key] = sum(
-                    1 for n in os.listdir(scene_dir / art.relpath) if n.endswith(art.suffix)
-                )
+                probe.counts[key] = sum(1 for n in os.listdir(scene_dir / art.relpath) if n.endswith(art.suffix))
             except OSError:
                 probe.counts[key] = 0
 
@@ -171,9 +171,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
                 probe.counts[key] = int(shape[0])
 
     candidates = [
-        probe.counts.get(k, 0)
-        for k in ("data_ts", "images", "clouds", "pcd_ts", "transforms")
-        if probe.counts.get(k)
+        probe.counts.get(k, 0) for k in ("data_ts", "images", "clouds", "pcd_ts", "transforms") if probe.counts.get(k)
     ]
     probe.n_frames = max(candidates) if candidates else 0
 
@@ -205,10 +203,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
             probe.start_ts, probe.end_ts = first_last
             probe.duration = first_last[1] - first_last[0]
             if segments and probe.duration and probe.duration > 0:
-                covered = sum(
-                    max(0.0, min(s.end_ts, first_last[1]) - max(s.start_ts, first_last[0]))
-                    for s in segments
-                )
+                covered = sum(max(0.0, min(s.end_ts, first_last[1]) - max(s.start_ts, first_last[0])) for s in segments)
                 probe.segment_coverage = min(1.0, covered / probe.duration)
     if probe.duration is None and probe.start_ts is not None and probe.end_ts is not None:
         probe.duration = probe.end_ts - probe.start_ts
@@ -275,11 +270,7 @@ class DatasetRoot:
         is all digits (``0000``); this is what makes the viewer rig-agnostic."""
         if self._scene_ids is None or refresh:
             try:
-                names = [
-                    n
-                    for n in os.listdir(self.path)
-                    if n.isdigit() and (self.path / n).is_dir()
-                ]
+                names = [n for n in os.listdir(self.path) if n.isdigit() and (self.path / n).is_dir()]
             except OSError as exc:
                 logger.error("cannot list dataset root %s: %s", self.path, exc)
                 names = []
@@ -401,10 +392,7 @@ class DatasetRoot:
         times -- quadratic in the number of scenes, for one file that only has
         to be right at the end.
         """
-        probes = [
-            self.probe(sid, refresh=refresh, persist=False)
-            for sid in self.scene_ids(refresh=refresh)
-        ]
+        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=refresh)]
         self.save_probe_cache()
         return probes
 

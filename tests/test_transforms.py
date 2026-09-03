@@ -53,9 +53,7 @@ ANGLES = [
 
 @pytest.mark.parametrize("rpy", ANGLES)
 def test_quaternion_matrix_matches_euler_matrix(rpy):
-    np.testing.assert_allclose(
-        quaternion_matrix(quat_from_euler(*rpy)), euler_matrix(*rpy), atol=1e-12
-    )
+    np.testing.assert_allclose(quaternion_matrix(quat_from_euler(*rpy)), euler_matrix(*rpy), atol=1e-12)
 
 
 @pytest.mark.parametrize("rpy", ANGLES)
@@ -75,24 +73,18 @@ def test_quaternion_matrix_is_orthonormal_and_degenerate_safe():
 
 def test_euler_matrix_composition_order_is_zyx():
     roll, pitch, yaw = 0.3, -0.4, 1.1
-    expected = (
-        euler_matrix(0, 0, yaw) @ euler_matrix(0, pitch, 0) @ euler_matrix(roll, 0, 0)
-    )
+    expected = euler_matrix(0, 0, yaw) @ euler_matrix(0, pitch, 0) @ euler_matrix(roll, 0, 0)
     np.testing.assert_allclose(euler_matrix(roll, pitch, yaw), expected, atol=1e-12)
 
 
 def test_pose_to_matrix():
     pose = SimpleNamespace(
         position=SimpleNamespace(x=1.0, y=2.0, z=3.0),
-        orientation=SimpleNamespace(
-            **dict(zip("xyzw", quat_from_euler(0.0, 0.0, math.pi / 2)))
-        ),
+        orientation=SimpleNamespace(**dict(zip("xyzw", quat_from_euler(0.0, 0.0, math.pi / 2)))),
     )
     T = pose_to_matrix(pose)
     np.testing.assert_allclose(T[:3, 3], [1.0, 2.0, 3.0])
-    np.testing.assert_allclose(
-        T[:3, :3], euler_matrix(0, 0, math.pi / 2)[:3, :3], atol=1e-12
-    )
+    np.testing.assert_allclose(T[:3, :3], euler_matrix(0, 0, math.pi / 2)[:3, :3], atol=1e-12)
 
 
 def test_tf_graph_edges_hold_point_maps_along_their_direction():
@@ -104,9 +96,7 @@ def test_tf_graph_edges_hold_point_maps_along_their_direction():
     M[:3, 3] = [0.1, 0.0, 0.5]
     # child -> parent edge maps lidar points into base_link, parent -> child the inverse
     np.testing.assert_allclose(G["lidar"]["base_link"]["transform"], M, atol=1e-12)
-    np.testing.assert_allclose(
-        G["base_link"]["lidar"]["transform"], np.linalg.inv(M), atol=1e-12
-    )
+    np.testing.assert_allclose(G["base_link"]["lidar"]["transform"], np.linalg.inv(M), atol=1e-12)
 
 
 def test_get_transform_maps_points_from_src_into_dst():
@@ -120,9 +110,7 @@ def test_get_transform_maps_points_from_src_into_dst():
     # ... and a ground return seen 1 m "up" in the flipped lidar frame is at z = 0.
     np.testing.assert_allclose((T_lidar_to_base @ [1.0, 0, 1.0, 1])[:3], [1.2, 0.0, 0.0], atol=1e-12)
     # Same convention as tf2's lookup_transform(base_link, lidar).
-    np.testing.assert_allclose(
-        get_transform(G, "base_link", "lidar"), np.linalg.inv(T_lidar_to_base), atol=1e-12
-    )
+    np.testing.assert_allclose(get_transform(G, "base_link", "lidar"), np.linalg.inv(T_lidar_to_base), atol=1e-12)
 
 
 def test_tf_graph_composes_multi_hop_paths():
@@ -143,9 +131,7 @@ def test_tf_graph_composes_multi_hop_paths():
     lidar_to_base = get_transform(G, "lidar", "base_link")
     np.testing.assert_allclose(lidar_to_base, M_base_mount @ M_mount_lidar, atol=1e-12)
     # Reversing the endpoints inverts the composed transform.
-    np.testing.assert_allclose(
-        get_transform(G, "base_link", "lidar"), np.linalg.inv(lidar_to_base), atol=1e-12
-    )
+    np.testing.assert_allclose(get_transform(G, "base_link", "lidar"), np.linalg.inv(lidar_to_base), atol=1e-12)
 
 
 def test_tf_graph_path_composition_is_associative():
@@ -157,11 +143,7 @@ def test_tf_graph_path_composition_is_associative():
     G = build_tf_graph(tfs)
     direct = get_transform(G, "a", "d")
     # Point maps chain right-to-left: p_d = T_cd @ T_bc @ T_ab @ p_a.
-    stepwise = (
-        get_transform(G, "c", "d")
-        @ get_transform(G, "b", "c")
-        @ get_transform(G, "a", "b")
-    )
+    stepwise = get_transform(G, "c", "d") @ get_transform(G, "b", "c") @ get_transform(G, "a", "b")
     np.testing.assert_allclose(direct, stepwise, atol=1e-12)
     # Still a valid rigid transform after three compositions.
     np.testing.assert_allclose(direct[:3, :3] @ direct[:3, :3].T, np.eye(3), atol=1e-12)

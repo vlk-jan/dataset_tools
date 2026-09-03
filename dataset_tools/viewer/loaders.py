@@ -55,9 +55,7 @@ def count_lines(path: Path) -> int:
     """Line count of a text file, ignoring blanks and comments. 0 if unreadable."""
     try:
         with open(path, "rb") as fh:
-            return sum(
-                1 for line in fh if line.strip() and not line.lstrip().startswith(b"#")
-            )
+            return sum(1 for line in fh if line.strip() and not line.lstrip().startswith(b"#"))
     except OSError:
         return 0
 
@@ -304,9 +302,7 @@ def interpolate_poses(
     alpha = np.where(span > 0, (query_ts - src_ts[lo]) / np.where(span > 0, span, 1.0), 0.0)
     alpha = np.clip(alpha, 0.0, 1.0)
 
-    pos = src_poses[lo, :3, 3] + alpha[:, None] * (
-        src_poses[hi, :3, 3] - src_poses[lo, :3, 3]
-    )
+    pos = src_poses[lo, :3, 3] + alpha[:, None] * (src_poses[hi, :3, 3] - src_poses[lo, :3, 3])
     quat = quat_slerp(mat_to_quat(src_poses[lo, :3, :3]), mat_to_quat(src_poses[hi, :3, :3]), alpha)
     return pos, quat, valid
 
@@ -381,9 +377,7 @@ class ProprioTrack:
     values: dict[str, np.ndarray] = field(default_factory=dict)
 
 
-def resample_series(
-    src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarray, max_gap: float = 1.0
-) -> np.ndarray:
+def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarray, max_gap: float = 1.0) -> np.ndarray:
     """Linearly resample ``src_vals`` (T, K) onto ``query_ts``.
 
     Samples further than ``max_gap`` seconds from any source sample become NaN
@@ -402,9 +396,7 @@ def resample_series(
 
     nearest = np.searchsorted(src_ts, query_ts)
     nearest = np.clip(nearest, 1, len(src_ts) - 1)
-    gap = np.minimum(
-        np.abs(query_ts - src_ts[nearest - 1]), np.abs(src_ts[nearest] - query_ts)
-    )
+    gap = np.minimum(np.abs(query_ts - src_ts[nearest - 1]), np.abs(src_ts[nearest] - query_ts))
     out[gap > max_gap] = np.nan
     return out
 

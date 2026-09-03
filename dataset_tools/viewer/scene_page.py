@@ -218,11 +218,13 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
 
     images, clouds = p.counts.get("images"), p.counts.get("clouds")
     if images is not None or clouds is not None:
-        stats.append(stat(
-            "images · clouds",
-            f"{fmt_count(images) if images is not None else '—'}"
-            f" · {fmt_count(clouds) if clouds is not None else '—'}",
-        ))
+        stats.append(
+            stat(
+                "images · clouds",
+                f"{fmt_count(images) if images is not None else '—'}"
+                f" · {fmt_count(clouds) if clouds is not None else '—'}",
+            )
+        )
 
     if a.get("pts_mean"):
         stats.append(stat("pts / cloud", fmt_count(a["pts_mean"]), "mean over the scene"))
@@ -310,11 +312,13 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         lens = sorted((s.duration for s in segments), reverse=True)
         longest = ", ".join(f"{v:.0f}" for v in lens[:3])
         stats.append(stat("segments", len(segments), f"longest {longest} s"))
-        stats.append(stat(
-            "GT span",
-            fmt_duration(sum(lens)),
-            f"median {float(np.median(lens)):.1f} s",
-        ))
+        stats.append(
+            stat(
+                "GT span",
+                fmt_duration(sum(lens)),
+                f"median {float(np.median(lens)):.1f} s",
+            )
+        )
         poses = sum(s.n_poses for s in segments)
         if poses:
             # Only when the curated count is of the *same* poses: a scene whose
@@ -345,8 +349,9 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             stats.append(stat("moving", f"{derived[1] * 100:.0f}%", f"over {MOVING_M_S} m/s"))
 
     if a.get("win_med") is not None and a.get("win_p95") is not None:
-        stats.append(stat("2 s err med / p95", f"{a['win_med']:.2f} / {a['win_p95']:.2f} m",
-                          "vs the robot's own odometry"))
+        stats.append(
+            stat("2 s err med / p95", f"{a['win_med']:.2f} / {a['win_p95']:.2f} m", "vs the robot's own odometry")
+        )
     if a.get("flags") is not None:
         stats.append(stat("divergence flags", a["flags"]))
 
@@ -367,11 +372,15 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         "badge_class": coverage_class(coverage),
         "badge_title": "fraction of the scene inside a ground-truth segment",
         "stats": stats,
-        "timeline": {
-            "spans": spans,
-            "fill": fill,
-            "label": fmt_duration(p.duration or a.get("dur_s")),
-        } if spans else None,
+        "timeline": (
+            {
+                "spans": spans,
+                "fill": fill,
+                "label": fmt_duration(p.duration or a.get("dur_s")),
+            }
+            if spans
+            else None
+        ),
         "note": " ".join(notes) or None,
     }
 
@@ -436,37 +445,48 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     js = read_series(access.dir / "joint_states.npy") if p.has("joint_states") else None
     if js is not None and js.rows.shape[1] >= 10:
         vel = slice(4, 7)
-        stats.append(stat("wheel speed", f"{js.mean_abs(vel):.2f} rad/s",
-                          f"mean |ω|, max {js.max_abs(vel):.1f}"))
+        stats.append(stat("wheel speed", f"{js.mean_abs(vel):.2f} rad/s", f"mean |ω|, max {js.max_abs(vel):.1f}"))
         turning = float((np.abs(js.rows[:, vel]) > TURNING_RAD_S).any(axis=1).mean())
         stats.append(stat("wheels turning", f"{turning * 100:.0f}%", f"any |ω| > {TURNING_RAD_S} rad/s"))
-        stats.append(stat("wheel effort", f"{js.mean_abs(slice(7, 10)):.1f}",
-                          f"mean, max {js.max_abs(slice(7, 10)):.0f}"))
+        stats.append(
+            stat("wheel effort", f"{js.mean_abs(slice(7, 10)):.1f}", f"mean, max {js.max_abs(slice(7, 10)):.0f}")
+        )
     elif js is not None:
         notes.append(f"joint_states.npy is {js.rows.shape[1]} columns wide, not the expected 10.")
     if js is not None:
-        stats.append(stat("joint states", f"{fmt_count(js.n)} × {js.rows.shape[1]}",
-                          f"{js.rate:.1f} Hz" if js.rate else None))
+        stats.append(
+            stat("joint states", f"{fmt_count(js.n)} × {js.rows.shape[1]}", f"{js.rate:.1f} Hz" if js.rate else None)
+        )
 
     cv = read_series(access.dir / "cmd_vel.npy") if p.has("cmd_vel") else None
     if cv is not None and cv.rows.shape[1] >= 7:
-        stats.append(stat("commanded speed", f"{cv.mean_abs(1):.2f} m/s",
-                          f"mean |v|, |ω| {cv.mean_abs(6):.2f} rad/s"))
+        stats.append(stat("commanded speed", f"{cv.mean_abs(1):.2f} m/s", f"mean |v|, |ω| {cv.mean_abs(6):.2f} rad/s"))
     if cv is not None:
-        stats.append(stat("cmd_vel", f"{fmt_count(cv.n)} × {cv.rows.shape[1]}",
-                          f"{cv.rate:.1f} Hz" if cv.rate else None))
+        stats.append(
+            stat("cmd_vel", f"{fmt_count(cv.n)} × {cv.rows.shape[1]}", f"{cv.rate:.1f} Hz" if cv.rate else None)
+        )
 
     sp = read_series(access.dir / "joint_setpoints.npy") if p.has("joint_setpoints") else None
     if sp is not None and sp.rows.shape[1] >= 7:
-        stats.append(stat("commanded wheels", f"{sp.mean_abs(slice(4, 7)):.2f} rad/s",
-                          f"setpoints, {sp.rate:.1f} Hz" if sp.rate else "setpoints"))
+        stats.append(
+            stat(
+                "commanded wheels",
+                f"{sp.mean_abs(slice(4, 7)):.2f} rad/s",
+                f"setpoints, {sp.rate:.1f} Hz" if sp.rate else "setpoints",
+            )
+        )
 
     ga = access.gravity_align
     if ga is not None and np.ndim(ga) == 3:
         roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga))
         roll, pitch = np.degrees(np.abs(roll)), np.degrees(np.abs(pitch))
-        stats.append(stat("roll · pitch", f"{roll.mean():.1f}° · {pitch.mean():.1f}°",
-                          f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°"))
+        stats.append(
+            stat(
+                "roll · pitch",
+                f"{roll.mean():.1f}° · {pitch.mean():.1f}°",
+                f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°",
+            )
+        )
 
     if len(stats) < MIN_CARD_STATS:
         return None
@@ -504,13 +524,15 @@ def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
         at = None
         if ts is not None and t0 is not None and index < len(ts):
             at = f"{float(ts[index]) - t0:.0f} s"
-        out.append({
-            "url": f"/api/scene/{p.scene_id}/thumb/{slot}.jpg",
-            "href": f"/scene/{p.scene_id}/frame/{index}" if p.has("images") else None,
-            "alt": f"scene {p.scene_id} at {fraction * 100:.0f}%",
-            "label": f"{fraction * 100:.0f}%",
-            "sub": f"frame {index}" + (f" · {at}" if at else ""),
-        })
+        out.append(
+            {
+                "url": f"/api/scene/{p.scene_id}/thumb/{slot}.jpg",
+                "href": f"/scene/{p.scene_id}/frame/{index}" if p.has("images") else None,
+                "alt": f"scene {p.scene_id} at {fraction * 100:.0f}%",
+                "label": f"{fraction * 100:.0f}%",
+                "sub": f"frame {index}" + (f" · {at}" if at else ""),
+            }
+        )
     return out
 
 

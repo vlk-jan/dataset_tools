@@ -98,10 +98,7 @@ def terrain_color_modes(layer_names) -> list[dict]:
     "Color Mode" dropdown lists them, so the overlay legend can be read
     alongside it.
     """
-    return [
-        {"name": name, "description": TERRAIN_COLOR_MODE_HELP.get(name, "")}
-        for name in ["height", *layer_names]
-    ]
+    return [{"name": name, "description": TERRAIN_COLOR_MODE_HELP.get(name, "")} for name in ["height", *layer_names]]
 
 
 @dataclass
@@ -130,9 +127,14 @@ class BuildOptions:
     def cache_key(self) -> str:
         s = self.sanitized()
         return "-".join(
-            str(v) for v in (
-                s.max_cloud_frames, s.max_cloud_points, s.max_hm_frames,
-                s.max_terrain_cells, s.terrain_res, s.cloud_color,
+            str(v)
+            for v in (
+                s.max_cloud_frames,
+                s.max_cloud_points,
+                s.max_hm_frames,
+                s.max_terrain_cells,
+                s.terrain_res,
+                s.cloud_color,
             )
         )
 
@@ -743,9 +745,7 @@ def build_scalars(
             2 * (gt.quats[:, 0] * gt.quats[:, 3] + gt.quats[:, 1] * gt.quats[:, 2]),
             1 - 2 * (gt.quats[:, 2] ** 2 + gt.quats[:, 3] ** 2),
         )
-        scalars["yaw_rate"] = (
-            np.gradient(np.unwrap(yaw)) / dt if len(times) > 1 else np.zeros(len(times))
-        )
+        scalars["yaw_rate"] = np.gradient(np.unwrap(yaw)) / dt if len(times) > 1 else np.zeros(len(times))
         if not gt.valid.all():
             # Outside the pose source's own time span: mark rather than invent.
             for key in ("speed", "pose_z", "yaw_rate"):
@@ -901,10 +901,7 @@ def build_scene(
         x_lim=grid.x_lim,
         y_lim=grid.y_lim,
         grid_res=grid.res,
-        properties={
-            k: torch.from_numpy(np.ascontiguousarray(v, dtype=np.float32)) for k, v in layers.items()
-        }
-        or None,
+        properties={k: torch.from_numpy(np.ascontiguousarray(v, dtype=np.float32)) for k, v in layers.items()} or None,
         property_bounds=bounds or None,
     )
 
@@ -913,9 +910,7 @@ def build_scene(
     # Cylinders point along +z locally (the viewer rotates the geometry), so a
     # wheel needs a -90 deg turn about x to put its axis along the body's y.
     for name in WHEELS:
-        scene.create_body(
-            name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot"
-        )
+        scene.create_body(name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot")
     if ghost is not None:
         # A deliberately small, flat marker: it shows where wheel odometry thinks
         # the robot is, without reading as a second robot.
@@ -942,9 +937,7 @@ def build_scene(
         q_align = np.array([math.cos(sign * math.pi / 4), math.sin(sign * math.pi / 4), 0.0, 0.0])
         if angles is not None:
             theta = np.nan_to_num(angles[:, col], nan=0.0)
-            spin = np.stack(
-                [np.cos(theta / 2), np.zeros(T), np.sin(theta / 2), np.zeros(T)], axis=1
-            )
+            spin = np.stack([np.cos(theta / 2), np.zeros(T), np.sin(theta / 2), np.zeros(T)], axis=1)
             quat = _quat_mul(spin, np.tile(q_align, (T, 1)))
         else:
             quat = np.tile(q_align, (T, 1))
@@ -953,9 +946,7 @@ def build_scene(
     if ghost is not None:
         ghost_pos = ghost.positions.copy()
         ghost_pos[:, 2] += CHASSIS_Z
-        trajectories.append(
-            BodyTrajectory("wheel_odom_ghost", positions=ghost_pos, orientations=ghost.quats)
-        )
+        trajectories.append(BodyTrajectory("wheel_odom_ghost", positions=ghost_pos, orientations=ghost.quats))
     # `lidar_cloud` deliberately gets *no* trajectory. It is the window's clouds
     # already accumulated in the world frame, so its transform is the identity
     # at every frame -- a per-frame pose that says nothing, costs a blob, and

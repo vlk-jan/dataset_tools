@@ -66,9 +66,7 @@ def sort_bag(input_path: Path, output_path: Path) -> int:
 
         for t, topic, msgtype, rawdata in messages:
             if topic not in topic_to_conn:
-                topic_to_conn[topic] = writer.add_connection(
-                    topic, msgtype, typestore=typestore
-                )
+                topic_to_conn[topic] = writer.add_connection(topic, msgtype, typestore=typestore)
 
             # Write the raw data directly to avoid unnecessary re-serialization
             writer.write(topic_to_conn[topic], t, rawdata)
@@ -78,13 +76,9 @@ def sort_bag(input_path: Path, output_path: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Sort a ROS2 bag by header or bag timestamp."
-    )
+    parser = argparse.ArgumentParser(description="Sort a ROS2 bag by header or bag timestamp.")
     parser.add_argument("input", type=str, help="Path to input ROS2 bag")
-    parser.add_argument(
-        "output", type=str, help="Path to output sorted bag (directory)"
-    )
+    parser.add_argument("output", type=str, help="Path to output sorted bag (directory)")
 
     args = parser.parse_args(argv)
 

@@ -83,9 +83,7 @@ class SceneReport:
 # ---------------------------------------------------------------------------
 def looks_like_scene(path: Path) -> bool:
     return path.is_dir() and (
-        (path / "images").is_dir()
-        or (path / "clouds").is_dir()
-        or (path / "data_ts.txt").is_file()
+        (path / "images").is_dir() or (path / "clouds").is_dir() or (path / "data_ts.txt").is_file()
     )
 
 
@@ -98,11 +96,7 @@ def find_scenes(paths: Sequence[Path]) -> list[Path]:
         if looks_like_scene(path):
             scenes.append(path)
             continue
-        children = sorted(
-            child
-            for child in path.iterdir()
-            if child.is_dir() and SCENE_DIR_RE.match(child.name)
-        )
+        children = sorted(child for child in path.iterdir() if child.is_dir() and SCENE_DIR_RE.match(child.name))
         found = [child for child in children if looks_like_scene(child)]
         if not found:
             raise FileNotFoundError(f"no scenes found in {path}")
@@ -119,9 +113,7 @@ def _indexed_files(directory: Path, suffix: str) -> list[Path]:
     return sorted(p for p in directory.iterdir() if p.suffix == suffix)
 
 
-def _check_index_continuity(
-    report: SceneReport, files: Sequence[Path], label: str
-) -> None:
+def _check_index_continuity(report: SceneReport, files: Sequence[Path], label: str) -> None:
     stems = [p.stem for p in files]
     expected = [f"{i:05d}" for i in range(len(files))]
     if stems != expected:
@@ -141,9 +133,7 @@ def _check_timestamps(report: SceneReport, ts: np.ndarray, label: str) -> None:
         return
     diffs = np.diff(ts)
     if np.any(diffs < 0):
-        report.error(
-            f"{label}: not monotonic ({int(np.sum(diffs < 0))} decreasing steps)"
-        )
+        report.error(f"{label}: not monotonic ({int(np.sum(diffs < 0))} decreasing steps)")
     n_dup = int(np.sum(diffs == 0))
     if n_dup:
         report.warn(f"{label}: {n_dup} duplicate timestamps")
@@ -153,18 +143,13 @@ def _is_rotation(R: np.ndarray, tol: float = 1e-3) -> bool:
     if R.shape[-2:] != (3, 3):
         return False
     identity = np.einsum("...ij,...kj->...ik", R, R)
-    return bool(
-        np.allclose(identity, np.eye(3), atol=tol)
-        and np.all(np.abs(np.linalg.det(R) - 1.0) < tol)
-    )
+    return bool(np.allclose(identity, np.eye(3), atol=tol) and np.all(np.abs(np.linalg.det(R) - 1.0) < tol))
 
 
 def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> None:
     if not clouds:
         return
-    idx = np.unique(
-        np.linspace(0, len(clouds) - 1, min(n_sample, len(clouds))).astype(int)
-    )
+    idx = np.unique(np.linspace(0, len(clouds) - 1, min(n_sample, len(clouds))).astype(int))
     n_points: list[int] = []
     nan_counts = 0
     total_values = 0
@@ -174,18 +159,14 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
         try:
             cloud = np.load(path)
         except Exception as exc:  # noqa: BLE001
-            report.error(
-                f"clouds/{path.name}: unreadable ({type(exc).__name__}: {exc})"
-            )
+            report.error(f"clouds/{path.name}: unreadable ({type(exc).__name__}: {exc})")
             continue
         dtypes.add(str(cloud.dtype))
         if cloud.ndim != 2 or cloud.shape[1] != 4:
             report.error(f"clouds/{path.name}: expected (N, 4), got {cloud.shape}")
             continue
         if cloud.dtype.kind != "f":
-            report.error(
-                f"clouds/{path.name}: expected a float dtype, got {cloud.dtype}"
-            )
+            report.error(f"clouds/{path.name}: expected a float dtype, got {cloud.dtype}")
             continue
         n_points.append(int(cloud.shape[0]))
         if cloud.size:
@@ -209,9 +190,7 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
     report.stats["clouds_sampled"] = int(len(idx))
 
 
-def check_odometry(
-    report: SceneReport, transforms: np.ndarray, max_jump: float
-) -> None:
+def check_odometry(report: SceneReport, transforms: np.ndarray, max_jump: float) -> None:
     positions = transforms[:, :3, 3]
     if len(positions) < 2:
         return
@@ -220,10 +199,7 @@ def check_odometry(
     report.stats["path_len_m"] = float(np.sum(steps))
     n_jumps = int(np.sum(steps > max_jump))
     if n_jumps:
-        report.warn(
-            f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m "
-            f"(max {np.max(steps):.2f} m)"
-        )
+        report.warn(f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m " f"(max {np.max(steps):.2f} m)")
 
 
 def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) -> None:
@@ -234,8 +210,7 @@ def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) ->
     n_extreme = int(np.sum(tilt > max_tilt_deg))
     if n_extreme:
         report.warn(
-            f"gravity_align.npy: {n_extreme} frames tilted > {max_tilt_deg} deg "
-            f"(max {np.max(tilt):.1f} deg)"
+            f"gravity_align.npy: {n_extreme} frames tilted > {max_tilt_deg} deg " f"(max {np.max(tilt):.1f} deg)"
         )
 
 
@@ -305,8 +280,7 @@ def validate_scene(
             report.stats["max_sync_offset_s"] = float(offset)
             if offset > max_sync_offset:
                 report.warn(
-                    f"camera/lidar sync offset up to {offset * 1e3:.0f} ms "
-                    f"(> {max_sync_offset * 1e3:.0f} ms)"
+                    f"camera/lidar sync offset up to {offset * 1e3:.0f} ms " f"(> {max_sync_offset * 1e3:.0f} ms)"
                 )
             report.stats["duration_s"] = float(data_ts[-1] - data_ts[0])
 
@@ -361,17 +335,12 @@ def validate_scene(
             elif not np.isfinite(K).all() or K[0, 0] <= 0 or K[1, 1] <= 0:
                 report.error("camera_intrinsics.txt: implausible focal lengths")
         except Exception as exc:  # noqa: BLE001
-            report.error(
-                f"camera_intrinsics.txt: unreadable ({type(exc).__name__}: {exc})"
-            )
+            report.error(f"camera_intrinsics.txt: unreadable ({type(exc).__name__}: {exc})")
 
     if counts:
         distinct = set(counts.values())
         if len(distinct) > 1:
-            report.error(
-                "frame counts disagree: "
-                + ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
-            )
+            report.error("frame counts disagree: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         report.stats["frames"] = counts.get("images", min(counts.values()))
 
     check_clouds(report, clouds, n_sample)
@@ -449,9 +418,7 @@ def print_report(report: SceneReport, strict: bool, verbose: bool) -> None:
         print(f"    extras: {', '.join(report.extras)}")
 
 
-def write_table(
-    reports: Sequence[SceneReport], path: str, strict: bool, markdown: bool
-) -> None:
+def write_table(reports: Sequence[SceneReport], path: str, strict: bool, markdown: bool) -> None:
     rows = [[_cell(r, c, strict) for c in CSV_COLUMNS] for r in reports]
     if markdown:
         lines = [
@@ -482,9 +449,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Validate extracted HELHEST scenes.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "paths", nargs="+", type=str, help="Scene directories, or a dataset root"
-    )
+    parser.add_argument("paths", nargs="+", type=str, help="Scene directories, or a dataset root")
     parser.add_argument(
         "--sample-clouds",
         type=int,
@@ -497,12 +462,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Odometry step warning threshold [m]",
     )
-    parser.add_argument(
-        "--max-tilt", type=float, default=45.0, help="Tilt warning threshold [deg]"
-    )
-    parser.add_argument(
-        "--max-nan", type=float, default=0.01, help="Non-finite cloud value fraction"
-    )
+    parser.add_argument("--max-tilt", type=float, default=45.0, help="Tilt warning threshold [deg]")
+    parser.add_argument("--max-nan", type=float, default=0.01, help="Non-finite cloud value fraction")
     parser.add_argument(
         "--max-sync",
         type=float,
@@ -516,18 +477,10 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Write a table ('-' = stdout)",
     )
-    parser.add_argument(
-        "--markdown", action="store_true", help="Write the --csv table as markdown"
-    )
-    parser.add_argument(
-        "--strict", action="store_true", help="Treat warnings as failures"
-    )
-    parser.add_argument(
-        "-q", "--quiet", action="store_true", help="Only print the summary"
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Also list extra files"
-    )
+    parser.add_argument("--markdown", action="store_true", help="Write the --csv table as markdown")
+    parser.add_argument("--strict", action="store_true", help="Treat warnings as failures")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Only print the summary")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Also list extra files")
     return parser
 
 

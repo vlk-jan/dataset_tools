@@ -17,14 +17,10 @@ class OdomRecorder(Node):
         self.declare_parameter("file_path", "trajectory_matrices.txt")
 
         topic_name = self.get_parameter("topic").get_parameter_value().string_value
-        self.file_path = (
-            self.get_parameter("file_path").get_parameter_value().string_value
-        )
+        self.file_path = self.get_parameter("file_path").get_parameter_value().string_value
 
         # --- Subscriber ---
-        self.subscription = self.create_subscription(
-            Odometry, topic_name, self.odom_callback, 10
-        )
+        self.subscription = self.create_subscription(Odometry, topic_name, self.odom_callback, 10)
 
         # --- File Initialization ---
         # Create directory if it doesn't exist
@@ -34,13 +30,9 @@ class OdomRecorder(Node):
 
         # Open file in write mode to clear it, then close
         with open(self.file_path, "w") as f:
-            f.write(
-                "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1\n"
-            )
+            f.write("# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1\n")
 
-        self.get_logger().info(
-            f"Recording odometry from '{topic_name}' to '{self.file_path}'"
-        )
+        self.get_logger().info(f"Recording odometry from '{topic_name}' to '{self.file_path}'")
 
     def odom_callback(self, msg):
         # 1. Extract Position
@@ -89,11 +81,7 @@ class OdomRecorder(Node):
         # Format: timestamp r11 r12 r13 tx ... 0 0 0 1 (Flattened row-major)
         flattened_matrix = T.flatten()
 
-        line_str = (
-            f"{timestamp:.6f} "
-            + " ".join([f"{val:.6f}" for val in flattened_matrix])
-            + "\n"
-        )
+        line_str = f"{timestamp:.6f} " + " ".join([f"{val:.6f}" for val in flattened_matrix]) + "\n"
 
         with open(self.file_path, "a") as f:
             f.write(line_str)

@@ -19,7 +19,6 @@ import pytest
 
 from dataset_tools.viewer import loaders, probe, render, windows, wire
 
-
 # --------------------------------------------------------------------------
 # fixtures
 # --------------------------------------------------------------------------
@@ -365,8 +364,10 @@ def test_split_scene_document_extracts_every_blob():
     assert model["terrain"]["heightData"].startswith("/blob/")
     assert states["bodies"]["a"]["bodyTransform"].startswith("/blob/")
     # The viewer resolves a blob reference by its last path segment.
-    ids = {int(model["terrain"]["heightData"].rsplit("/", 1)[-1]),
-           int(states["bodies"]["a"]["bodyTransform"].rsplit("/", 1)[-1])}
+    ids = {
+        int(model["terrain"]["heightData"].rsplit("/", 1)[-1]),
+        int(states["bodies"]["a"]["bodyTransform"].rsplit("/", 1)[-1]),
+    }
     assert ids == {0, 1}
 
 
@@ -386,7 +387,7 @@ def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
     page = wire.render_viewer_page("/simview-static", "/api/data/k", "1.2.3", "<div id='x'></div>")
     assert 'window.__simviewStaticBase = "/api/data/k"' in page
     assert "/simview-static/js/main.js" in page
-    assert "<base href=\"/\">" in page
+    assert '<base href="/">' in page
     assert "{{" not in page
     assert "<div id='x'></div>" in page
 
@@ -577,20 +578,25 @@ def write_atlas(root_path: Path, scenes=("0000",), *, with_thumbs: bool = True) 
             "session": "synthetic_session",
             "thumbs": slots if with_thumbs else [],
         }
-    (atlas_dir / "atlas.json").write_text(json.dumps({
-        "schema": "dataset_tools.viewer/atlas@1",
-        "generated": "2026-09-02",
-        "title": "Synthetic Atlas",
-        "kicker": "test fixture",
-        "intro": "One paragraph of curated introduction.",
-        "root_note": "A curated note about the root.",
-        "footer": "A curated footer.",
-        "totals": [{"label": "scenes", "value": str(len(scenes)), "sub": None}],
-        "thumbs": {"dir": "thumbs", "slots": slots, "pattern": "{scene}{slot}.jpg"},
-        "groups": [{"title": "An outing", "range": "all of it", "blurb": "What happened here.",
-                    "scenes": list(scenes)}],
-        "scenes": entries,
-    }))
+    (atlas_dir / "atlas.json").write_text(
+        json.dumps(
+            {
+                "schema": "dataset_tools.viewer/atlas@1",
+                "generated": "2026-09-02",
+                "title": "Synthetic Atlas",
+                "kicker": "test fixture",
+                "intro": "One paragraph of curated introduction.",
+                "root_note": "A curated note about the root.",
+                "footer": "A curated footer.",
+                "totals": [{"label": "scenes", "value": str(len(scenes)), "sub": None}],
+                "thumbs": {"dir": "thumbs", "slots": slots, "pattern": "{scene}{slot}.jpg"},
+                "groups": [
+                    {"title": "An outing", "range": "all of it", "blurb": "What happened here.", "scenes": list(scenes)}
+                ],
+                "scenes": entries,
+            }
+        )
+    )
     return atlas_dir
 
 
@@ -665,9 +671,7 @@ def test_index_rows_use_curated_content_when_it_exists(tmp_path):
     assert "path in GT" in labels and "time with GT" in labels
     # Regeneration diagnostics stay off the index (they live on the scene page).
     assert "2 s err med / p95" not in labels and "v1 coverage" not in labels
-    assert [t["url"] for t in row["thumbs"]] == [
-        f"/api/scene/0000/thumb/{s}.jpg" for s in ("a", "b", "c")
-    ]
+    assert [t["url"] for t in row["thumbs"]] == [f"/api/scene/0000/thumb/{s}.jpg" for s in ("a", "b", "c")]
     assert page["totals"][0]["label"] == "scenes"
 
 
@@ -790,9 +794,9 @@ def test_the_frames_tab_pages_through_frames_and_jumps(client):
     assert client.get("/scene/0000?tab=frames&page=99").status_code == 200
     jump = client.get("/scene/0000/jump?index=7", follow_redirects=False)
     assert jump.headers["location"] == "/scene/0000/frame/7"
-    assert client.get("/scene/0000/jump?index=999", follow_redirects=False).headers[
-        "location"
-    ] == "/scene/0000/frame/11"
+    assert (
+        client.get("/scene/0000/jump?index=999", follow_redirects=False).headers["location"] == "/scene/0000/frame/11"
+    )
 
 
 def test_the_frame_page_states_what_the_frame_has(client):
@@ -934,7 +938,10 @@ def test_the_four_cards_state_what_the_scene_has(tmp_path):
     write_atlas(root_path)
     page = scene_page(tmp_path, root_path)
     assert [c["title"] for c in page["cards"]] == [
-        "Recording", "Ground truth", "Calibration", "Proprioception",
+        "Recording",
+        "Ground truth",
+        "Calibration",
+        "Proprioception",
     ]
     # No card is a single entry: that was the point of reworking them.
     assert all(len(c["stats"]) >= 2 for c in page["cards"])
@@ -950,7 +957,8 @@ def test_the_four_cards_state_what_the_scene_has(tmp_path):
     assert value_of(calib, "camera → base") == "0.000, 0.000, 0.000"
     assert "plumb_bob" in sub_of(calib, "image")
     assert [m["label"] for m in calib["matrices"]] == [
-        "camera_intrinsics.txt (K)", "T_cam_to_base.txt (4×4)",
+        "camera_intrinsics.txt (K)",
+        "T_cam_to_base.txt (4×4)",
     ]
 
 
@@ -965,9 +973,7 @@ def test_wheel_speeds_keep_the_units_the_file_carries(tmp_path):
 
 
 def test_a_card_with_nothing_to_say_is_dropped_rather_than_shown_empty(tmp_path):
-    root_path = make_root(
-        tmp_path, with_joints=False, with_cmd_vel=False, with_gravity=False
-    )
+    root_path = make_root(tmp_path, with_joints=False, with_cmd_vel=False, with_gravity=False)
     titles = [c["title"] for c in scene_page(tmp_path, root_path)["cards"]]
     assert "Proprioception" not in titles
     assert "Recording" in titles and "Ground truth" in titles
@@ -1024,11 +1030,11 @@ def test_path_length_is_derived_from_odometry_when_no_atlas_supplies_it(tmp_path
 def test_the_hero_thumbnails_are_the_index_slots_and_link_to_their_frames(tmp_path):
     page = scene_page(tmp_path, make_root(tmp_path))
     assert [t["label"] for t in page["hero"]] == ["10%", "50%", "90%"]
-    assert [t["url"] for t in page["hero"]] == [
-        f"/api/scene/0000/thumb/{slot}.jpg" for slot in ("a", "b", "c")
-    ]
+    assert [t["url"] for t in page["hero"]] == [f"/api/scene/0000/thumb/{slot}.jpg" for slot in ("a", "b", "c")]
     assert [t["href"] for t in page["hero"]] == [
-        "/scene/0000/frame/1", "/scene/0000/frame/6", "/scene/0000/frame/10",
+        "/scene/0000/frame/1",
+        "/scene/0000/frame/6",
+        "/scene/0000/frame/10",
     ]
 
 
@@ -1075,11 +1081,11 @@ def test_the_index_and_the_scene_page_share_one_palette():
     from dataset_tools.viewer import app as viewer_app
 
     css = (Path(viewer_app.__file__).parent / "static" / "style.css").read_text()
-    index_scope = css[css.index("body.atlas {"):].split("}", 1)[0]
+    index_scope = css[css.index("body.atlas {") :].split("}", 1)[0]
     for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line"):
         assert token not in index_scope, f"{token} is redefined for the index"
     assert "--sans" in index_scope  # only the type stacks are the index's own
-    root_scope = css[css.index(":root {"):].split("}", 1)[0]
+    root_scope = css[css.index(":root {") :].split("}", 1)[0]
     for token in ("--track", "--ok-soft", "--shade", "--mono"):
         assert token in root_scope
 
@@ -1117,8 +1123,8 @@ def test_the_tile_robot_is_helhest_drawn_to_scale():
     # x=-0.8685) and the heading wedge sticks 0.3 m past the nose.
     height_m = (rows.max() - rows.min() + 1) / px_per_m
     width_m = (cols.max() - cols.min() + 1) / px_per_m
-    assert 1.6 < height_m < 1.9, height_m          # -0.8685 .. +0.8 forward
-    assert 1.0 < width_m < 1.3, width_m            # +-0.591 across the wheels
+    assert 1.6 < height_m < 1.9, height_m  # -0.8685 .. +0.8 forward
+    assert 1.0 < width_m < 1.3, width_m  # +-0.591 across the wheels
 
     # Centred on the robot, and pointing forward: the wedge puts more ink
     # above the middle row than the rear wheel puts below it.
@@ -1168,9 +1174,7 @@ def test_the_tile_robot_matches_the_3d_robot():
     assert render.ROBOT_CHASSIS_HALF == (build.CHASSIS["hx"], build.CHASSIS["hy"])
     assert render.ROBOT_WHEEL_RADIUS == build.WHEEL_RADIUS
     assert render.ROBOT_WHEEL_WIDTH == build.WHEEL_WIDTH
-    assert sorted(render.ROBOT_WHEEL_HUBS) == sorted(
-        (x, y) for x, y, _z, _col, _sign in build.WHEELS.values()
-    )
+    assert sorted(render.ROBOT_WHEEL_HUBS) == sorted((x, y) for x, y, _z, _col, _sign in build.WHEELS.values())
 
 
 def test_every_terrain_colour_mode_is_explained():
@@ -1181,7 +1185,10 @@ def test_every_terrain_colour_mode_is_explained():
 
     modes = build.terrain_color_modes(["coverage", "validity", "cloud_points"])
     assert [m["name"] for m in modes] == [
-        "height", "coverage", "validity", "cloud_points",
+        "height",
+        "coverage",
+        "validity",
+        "cloud_points",
     ]
     assert all(m["description"] for m in modes)
     # Every layer the builder can attach has prose written for it.
@@ -1360,9 +1367,7 @@ def test_no_window_reaches_past_the_end_of_the_timestamp_file(tmp_path):
     assert p.n_frames == 14 and p.counts["data_ts"] == 8  # the disagreement
     assert any("counts disagree" in w for w in p.warnings)
 
-    ws = windows.windows_for_scene(
-        np.arange(8, dtype=np.float64), [], p.n_frames, has_transforms=False, max_frames=4
-    )
+    ws = windows.windows_for_scene(np.arange(8, dtype=np.float64), [], p.n_frames, has_transforms=False, max_frames=4)
     assert ws, "the scene still offers windows"
     assert max(w.frame_end for w in ws) == 8
 

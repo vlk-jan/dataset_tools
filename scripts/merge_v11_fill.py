@@ -14,6 +14,7 @@ the first merge, and a table already containing ``v11_fill`` is skipped. Every
 processed scene gets a ``regen/merge_v11_fill.txt`` record, so a scene that was
 processed but not filled stays distinguishable from one never processed.
 """
+
 import datetime
 import shutil
 import sys
@@ -57,9 +58,7 @@ def fill_segments(t1, T1, segs12, rt, rT):
         for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0]):
             if r1 - r0 < MIN_POSES:
                 continue
-            anchored = np.einsum(
-                "ij,njk->nik", np.linalg.inv(TT[r0]), TT[r0:r1]
-            )
+            anchored = np.einsum("ij,njk->nik", np.linalg.inv(TT[r0]), TT[r0:r1])
             out.append((tt[r0:r1], anchored))
     return out
 
@@ -111,15 +110,15 @@ def merge_scene(v11, v12, scene):
             fsg.write(f"{k} {tt[0]:.6f} {tt[-1]:.6f} {len(tt)} {reason}\n")
     span = sum(p[0][-1] - p[0][0] for p in pieces if p[2] == "v11_fill")
     record(d12, f"filled:{len(fills)}_segments_{span:.1f}s")
-    return (f"{scene}: MERGED +{len(fills)} fill segments, +{span:.1f} s "
-            f"({sum(len(p[0]) for p in pieces if p[2]=='v11_fill')} poses)")
+    return (
+        f"{scene}: MERGED +{len(fills)} fill segments, +{span:.1f} s "
+        f"({sum(len(p[0]) for p in pieces if p[2]=='v11_fill')} poses)"
+    )
 
 
 def main():
     v11, v12 = sys.argv[1], sys.argv[2]
-    scenes = sys.argv[3:] or sorted(
-        d.name for d in Path(v12).iterdir() if d.is_dir() and d.name.isdigit()
-    )
+    scenes = sys.argv[3:] or sorted(d.name for d in Path(v12).iterdir() if d.is_dir() and d.name.isdigit())
     for s in scenes:
         print(merge_scene(v11, v12, s))
 
