@@ -12,9 +12,11 @@
  *   1. `window.__simviewStaticBase` (set by the server-rendered page) points
  *      SimView's fetches at our own bundle endpoints.
  *   2. `window.__debugSimView` is the running SimView instance, whose
- *      `animationController.currentTime` is the playhead. We poll it, and write
- *      to it exactly once: when the page was opened from a frame's own page
- *      (`?frame=N`), so the window opens on that frame instead of at its start.
+ *      `animationController.currentTime` is the playhead. We read it every
+ *      frame and never write it; the one thing we ask of the playhead --
+ *      opening on the frame this page was reached from (`?frame=N`) -- goes
+ *      through `goToTime`, SimView's own seek. See `openInitialView`, which
+ *      also aims the camera at the robot.
  *
  * SimView's entry module is withheld by the server until the window's bundle
  * has been built (see `_defer_main_script`), so this file loads it once the
@@ -26,7 +28,7 @@
  * and which of them are stopgaps for upstream bugs.
  */
 
-import { installSimviewPatches, waitForSimView } from "./simview_patch.js";
+import { centerOnRobot, installSimviewPatches, waitForSimView } from "./simview_patch.js";
 
 const cfg = window.__dtViewer || {};
 
@@ -274,26 +276,54 @@ function syncLegendHighlight() {
 }
 
 /**
- * Open the playhead on the frame this page was reached from.
+ * Open the window where it should open: on the right frame, robot in shot.
  *
- * SimView has no URL parameter for a start time, so we wait for its animation
- * controller to exist and set `currentTime` once. Anything that goes wrong here
- * (no such frame in this window, SimView slow to come up) leaves playback at the
- * start, which is the normal behaviour -- never an error.
+ * Two things have to happen once SimView is up, and both are the wrapper's to
+ * do -- SimView has no URL parameter for a start time, and never frames the
+ * scene it loaded.
+ *
+ *   1. Seek, when the page was reached from a frame's own page (`?frame=N`),
+ *      by calling SimView's own `goToTime`. Assigning `currentTime` instead
+ *      looks equivalent and is not: nothing in SimView reads that field until
+ *      playback advances it, so the scene stayed on the window's first frame
+ *      and only jumped to the requested one once the play button was pressed.
+ *      `goToTime` clamps, moves `currentStateIndex` with the clock, redraws
+ *      the scene and refreshes the playback bar -- it is what every one of
+ *      SimView's own seek affordances calls.
+ *   2. Centre the camera on the robot (see `centerOnRobot`), because a window
+ *      does not always start it at the origin, which is the only place the
+ *      stock camera looks.
+ *
+ * Anything that goes wrong here -- no such frame in this window, SimView slow
+ * to come up -- leaves playback at the window's start under the stock camera,
+ * which is the normal behaviour and never an error.
  */
-function seekToInitialFrame() {
+function openInitialView() {
+  if (!meta) return;
   const target = cfg.initialFrame;
-  if (target === null || target === undefined || !meta || !meta.frames) return;
-  const local = meta.frames.indexOf(target);
-  if (local < 0 || !meta.times || local >= meta.times.length) return;
+  const local =
+    target === null || target === undefined || !meta.frames
+      ? -1
+      : meta.frames.indexOf(target);
+  const seekTo =
+    local >= 0 && meta.times && local < meta.times.length ? meta.times[local] : null;
 
   const deadline = performance.now() + 60000;
+  let seeked = false;
   const attempt = () => {
     const app = window.__debugSimView;
     if (app && app.animationController && app.store && app.store.length > 0) {
-      app.animationController.currentTime = meta.times[local];
-      update(true);
-      return;
+      if (seekTo !== null && !seeked) {
+        app.animationController.goToTime(seekTo);
+        seeked = true;
+      }
+      // The camera can only be aimed once the robot has a resolved position,
+      // which the seek above (or SimView's own initial draw) is what produces.
+      // Keep waiting if the bodies are not built yet.
+      if (centerOnRobot(app)) {
+        update(true);
+        return;
+      }
     }
     if (performance.now() < deadline) requestAnimationFrame(attempt);
   };
@@ -392,7 +422,7 @@ async function main() {
 
   els.build.classList.add("done");
   startSimView();
-  seekToInitialFrame();
+  openInitialView();
   update(true);
   requestAnimationFrame(tick);
 

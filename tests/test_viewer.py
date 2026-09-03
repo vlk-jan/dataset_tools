@@ -1278,6 +1278,45 @@ def test_the_stopgaps_switch_themselves_off_when_simview_is_upgraded(client):
     assert "if (_dtScalarFixed.has(chart)) continue;" in body
 
 
+def test_the_initial_frame_is_opened_through_simviews_own_seek(client):
+    """Assigning `currentTime` does not move the scene.
+
+    Nothing in SimView reads that field until playback advances it, so a window
+    opened from a frame's page drew the window's *first* frame and only jumped
+    to the requested one once play was pressed. `goToTime` is what every one of
+    SimView's own seek affordances calls: it moves `currentStateIndex` with the
+    clock, redraws the scene and refreshes the playback bar.
+    """
+    body = client.get("/viewer-static/overlay.js").text
+    assert "app.animationController.goToTime(seekTo);" in body
+    # The old write is what the bug was; it must not come back.
+    assert "animationController.currentTime =" not in body
+
+
+def test_the_view_opens_with_the_robot_in_shot(client):
+    """SimView's camera is fixed at the world origin, which is not where every
+    window starts the robot -- a later part of a split segment carries on from
+    the previous part, and `?frame=N` seeks into the middle of a traverse."""
+    body = client.get("/viewer-static/simview_patch.js").text
+    assert 'ROBOT_BODY = "robot"' in body
+    assert "export function centerOnRobot(app)" in body
+    # Camera and orbit target move by the same delta, so the angle and the
+    # distance the view was framed at survive the re-centring.
+    fn = body[body.index("export function centerOnRobot(app)") :]
+    fn = fn[: fn.index("\n}\n")]
+    assert "camera.position.set(" in fn and "controls.target.set(x, y, z);" in fn
+    assert "controls.update();" in fn
+    # It reads the body's world position the way SimView's own tracking does.
+    assert "app.batchManager.getBatchOffset(batch)" in fn
+    # Falsy until the robot has a resolved position, so the caller can retry.
+    assert "return false;" in fn
+
+    overlay = client.get("/viewer-static/overlay.js").text
+    assert "if (centerOnRobot(app)) {" in overlay
+    # Once, at load -- following it every frame is SimView's own trackBody.
+    assert overlay.count("centerOnRobot(app)") == 1
+
+
 def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
     """It is already in the world frame, so a per-frame identity transform is
     a blob that says nothing -- and is what would keep it in the Body states

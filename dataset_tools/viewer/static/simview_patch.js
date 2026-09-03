@@ -60,6 +60,9 @@ export const GHOST_BODY = "wheel_odom_ghost";
 /** The aggregated lidar cloud body. */
 export const CLOUD_BODY = "lidar_cloud";
 
+/** The chassis: the body a view of this dataset is meant to be looking at. */
+export const ROBOT_BODY = "robot";
+
 /** Resolve the running SimView instance once it has a loaded store. */
 export function waitForSimView(timeoutMs = 120000) {
     return new Promise((resolve, reject) => {
@@ -78,6 +81,61 @@ export function waitForSimView(timeoutMs = 120000) {
         };
         attempt();
     });
+}
+
+/**
+ * PERMANENT. Aim the orbit camera at the robot, keeping the viewing angle.
+ *
+ * SimView starts its camera at a fixed offset looking at the world origin
+ * (`CAMERA_CONFIG.position`) and never frames the scene it just loaded. That
+ * is right for a window whose robot starts at the origin, which most of ours
+ * do -- a segment is re-anchored to its own first pose. Two do not, and only
+ * the wrapper is in a position to know it:
+ *
+ *   - the second and later parts of a split segment (`seg004.1`), which carry
+ *     on from wherever the previous part left off rather than being re-anchored
+ *     themselves -- the whole segment shares one frame, which is the point;
+ *   - a window opened from a frame's own page (`?frame=N`), which seeks
+ *     straight to that frame.
+ *
+ * In both the robot can be a long traverse away from the origin, so the stock
+ * camera looks at empty ground and the view reads as broken.
+ *
+ * Moving the camera and its orbit target by the same delta re-centres the view
+ * without changing its angle or its distance -- the move SimView itself makes
+ * in `changeFocusOnBatchByRowCol`, and when `trackBody` first attaches.
+ *
+ * Called once, at load. Following the robot on every frame is what SimView's
+ * own "track body" control is for; doing it unasked would fight the first pan.
+ *
+ * Returns false when the robot has no resolved position yet, so the caller can
+ * try again on a later frame rather than silently keeping the stock camera.
+ */
+export function centerOnRobot(app) {
+    const body = app.bodies && app.bodies.get(ROBOT_BODY);
+    const scene = app.scene;
+    if (!body || !scene || !scene.camera || !scene.controls || !app.batchManager) return false;
+
+    // Body positions are per-batch and batch-local, exactly as SimView's own
+    // tracking reads them: the world position is the batch's offset plus this
+    // body's position within it.
+    const batch = app.batchManager.currentlyActiveBatch;
+    const position = body.positions && body.positions[batch];
+    if (!position) return false;
+    const offset = app.batchManager.getBatchOffset(batch);
+    const x = position.x + offset.x;
+    const y = position.y + offset.y;
+    const z = position.z + offset.z;
+
+    const { camera, controls } = scene;
+    camera.position.set(
+        camera.position.x + (x - controls.target.x),
+        camera.position.y + (y - controls.target.y),
+        camera.position.z + (z - controls.target.z),
+    );
+    controls.target.set(x, y, z);
+    controls.update();
+    return true;
 }
 
 /**
