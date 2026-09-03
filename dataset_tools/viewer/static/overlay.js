@@ -2,30 +2,18 @@
  * Time-synced per-frame data panel for the SimView viewer.
  *
  * SimView renders geometry; a dataset frame also carries a camera image, a BEV
- * height map, its validity mask and a raw cloud, none of which are geometry.
- * This controller shows those next to the 3D view and keeps them on the frame
- * the playhead is currently at.
+ * height map, its validity mask and a raw cloud, none of which are. This shows
+ * those next to the 3D view, on the frame the playhead is at.
  *
- * It does that without modifying SimView at all. Two stock affordances make it
- * possible:
+ * It modifies SimView not at all, on two stock affordances:
+ *   1. `window.__simviewStaticBase` points its fetches at our bundle endpoints.
+ *   2. `window.__debugSimView` is the running instance. We read its playhead
+ *      every frame and never write it -- the one seek we ask for goes through
+ *      `goToTime` (see `openInitialView`).
  *
- *   1. `window.__simviewStaticBase` (set by the server-rendered page) points
- *      SimView's fetches at our own bundle endpoints.
- *   2. `window.__debugSimView` is the running SimView instance, whose
- *      `animationController.currentTime` is the playhead. We read it every
- *      frame and never write it; the one thing we ask of the playhead --
- *      opening on the frame this page was reached from (`?frame=N`) -- goes
- *      through `goToTime`, SimView's own seek. See `openInitialView`, which
- *      also aims the camera at the robot.
- *
- * SimView's entry module is withheld by the server until the window's bundle
- * has been built (see `_defer_main_script`), so this file loads it once the
- * data it will immediately fetch is actually there.
- *
- * Corrections to SimView's own UI -- the ones that need to reach into its
- * objects rather than just its CSS -- live in `simview_patch.js`, which this
- * module installs once SimView is up. See that file for what each one does
- * and which of them are stopgaps for upstream bugs.
+ * The server withholds SimView's entry module until the bundle is built (see
+ * `_defer_main_script`), so this file loads it once its data is there.
+ * Corrections that reach into SimView's objects live in `simview_patch.js`.
  */
 
 import { centerOnRobot, installSimviewPatches, waitForSimView } from "./simview_patch.js";
@@ -117,17 +105,13 @@ function frameIndexForTime(t) {
   return t - times[lo] <= times[hi] - t ? lo : hi;
 }
 
-// Bandwidth-adaptive per-frame tiles. Each frame wants four images (camera,
-// height map, validity, cloud), one HTTP request each, server-rendered off
-// contended storage. Firing them on every frame floods a slow link: the browser
-// queues dozens of now-stale requests and the panel visibly lags playback,
-// only catching up when it pauses and the queue drains -- the "it jumps to the
-// current frame when I pause" report. Instead we keep at most ONE batch in
-// flight and, when it finishes, jump straight to the latest wanted frame:
-// intermediate frames are skipped, so the panel stays near-live on a fast link,
-// converges to the current frame on a slow one, and always lands exactly on the
-// frame you pause on. Frame numbers/timestamps still update every tick (below),
-// so the readout is live even while the images are a step behind.
+// Bandwidth-adaptive per-frame tiles. Four images per frame, one request each,
+// served off contended storage: firing them every frame floods a slow link and
+// the panel lags playback until it drains ("it jumps to the current frame when
+// I pause"). At most ONE batch is in flight, and on finishing it jumps to the
+// latest wanted frame -- skipping intermediates, so the panel stays near-live
+// on a fast link and always lands on the frame you pause on. Frame numbers and
+// timestamps still update every tick, so the readout is never behind.
 let tileWantFrame = null;
 let tileShownFrame = null;
 let tileInFlight = false;
@@ -206,12 +190,10 @@ function update(force) {
 
 /* Wire the 3D-view toggles to SimView, once it exists.
  *
- * Both of these used to be a single either/or switch that pushed SimView's
- * global "body visualization mode" to "points" -- which is what made the robot
- * vanish whenever the cloud was asked for, since a box body has no point
- * representation to fall back on. The cloud and the ghost are now shown and
- * hidden on their own, independently of that mode and of each other; see
- * simview_patch.js.
+ * These were once one either/or switch that pushed SimView's global mode to
+ * "points", which made the robot vanish whenever the cloud was asked for (a box
+ * has no point representation). Cloud and ghost are now independent of that
+ * mode and of each other; see simview_patch.js.
  */
 function setupViewToggles() {
   if (!patches) return;
@@ -241,10 +223,9 @@ function setupViewToggles() {
 
 /* Render the terrain colour-mode legend from the build metadata.
  *
- * SimView's "Color Mode" dropdown lists whatever properties the scene attached
- * by bare name and explains none of them. The names are ours (build.py), so
- * the descriptions ship with them in meta.json and are shown here next to the
- * viewer rather than left to be guessed at.
+ * SimView's "Color Mode" dropdown lists the scene's properties by bare name and
+ * explains none of them. The names are ours (build.py), so the descriptions
+ * travel with them in meta.json and are shown here rather than guessed at.
  */
 function setupLegend() {
   const modes = (meta.build && meta.build.terrain_color_modes) || [];
@@ -278,25 +259,18 @@ function syncLegendHighlight() {
 /**
  * Open the window where it should open: on the right frame, robot in shot.
  *
- * Two things have to happen once SimView is up, and both are the wrapper's to
- * do -- SimView has no URL parameter for a start time, and never frames the
- * scene it loaded.
+ * Both are the wrapper's to do -- SimView has no start-time URL parameter and
+ * never frames the scene it loaded.
  *
- *   1. Seek, when the page was reached from a frame's own page (`?frame=N`),
- *      by calling SimView's own `goToTime`. Assigning `currentTime` instead
- *      looks equivalent and is not: nothing in SimView reads that field until
- *      playback advances it, so the scene stayed on the window's first frame
- *      and only jumped to the requested one once the play button was pressed.
- *      `goToTime` clamps, moves `currentStateIndex` with the clock, redraws
- *      the scene and refreshes the playback bar -- it is what every one of
- *      SimView's own seek affordances calls.
- *   2. Centre the camera on the robot (see `centerOnRobot`), because a window
- *      does not always start it at the origin, which is the only place the
- *      stock camera looks.
+ *   1. Seek via `goToTime` when reached from a frame's page (`?frame=N`).
+ *      Assigning `currentTime` instead looks equivalent and is not: nothing
+ *      reads that field until playback advances it, so the view stayed on the
+ *      first frame until play was pressed.
+ *   2. Centre the camera on the robot (`centerOnRobot`) -- a window does not
+ *      always start it at the origin, the only place the stock camera looks.
  *
- * Anything that goes wrong here -- no such frame in this window, SimView slow
- * to come up -- leaves playback at the window's start under the stock camera,
- * which is the normal behaviour and never an error.
+ * Failure here (no such frame, SimView slow) leaves the window at its start
+ * under the stock camera: normal behaviour, never an error.
  */
 function openInitialView() {
   if (!meta) return;

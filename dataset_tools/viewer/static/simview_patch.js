@@ -1,26 +1,16 @@
 /*
  * Wrapper-side corrections to the stock SimView front-end.
  *
- * Nothing in the installed `simview` package is modified: every change here is
- * made from the outside, after SimView's own modules have run, through its
- * public instance (`window.__debugSimView`), its lil-gui controllers and its
- * DOM. The viewer runs against the PyPI wheel, so anything that needs a change
- * *inside* SimView is out of scope here by construction.
+ * Nothing in the installed `simview` package is modified: every change is made
+ * from outside, after SimView's own modules have run, through its public
+ * instance (`window.__debugSimView`), its lil-gui controllers and its DOM.
  *
- * Two kinds of block live in this file and they are labelled as such:
- *
- *   PERMANENT  a wrapper concern -- this dataset has bodies and layers that
- *              SimView cannot know the meaning of, so only we can present
- *              them correctly. These stay.
- *
- *   STOPGAP    a SimView bug we are papering over until the fix lands
- *              upstream. Each one is self-contained, so it can be deleted in
- *              one piece -- and until someone gets round to deleting it, it is
- *              gated on the installed version and stops firing by itself the
- *              moment the package is upgraded. That gate is the important
- *              part: a workaround still running over a version that has been
- *              fixed does not merely waste a few instructions, it overrides
- *              the real fix with a cruder one and hides whether it landed.
+ *   PERMANENT  a wrapper concern -- bodies and layers only this dataset knows
+ *              the meaning of. These stay.
+ *   STOPGAP    a SimView bug papered over until the fix lands upstream. Each is
+ *              gated on the installed version and stops firing by itself on
+ *              upgrade: a workaround left running over a fixed release would
+ *              override the real fix and hide whether it landed.
  */
 
 /** The last SimView release that needs the workarounds below. Bodies leaving
@@ -86,30 +76,16 @@ export function waitForSimView(timeoutMs = 120000) {
 /**
  * PERMANENT. Aim the orbit camera at the robot, keeping the viewing angle.
  *
- * SimView starts its camera at a fixed offset looking at the world origin
- * (`CAMERA_CONFIG.position`) and never frames the scene it just loaded. That
- * is right for a window whose robot starts at the origin, which most of ours
- * do -- a segment is re-anchored to its own first pose. Two do not, and only
- * the wrapper is in a position to know it:
+ * SimView's camera is fixed at the world origin (`CAMERA_CONFIG.position`) and
+ * never frames the scene it loaded. Most windows start the robot there -- a
+ * segment is re-anchored to its own first pose -- but a split segment's later
+ * parts carry on from where the previous one ended, and `?frame=N` seeks into
+ * the middle of a traverse; either leaves the robot out of shot.
  *
- *   - the second and later parts of a split segment (`seg004.1`), which carry
- *     on from wherever the previous part left off rather than being re-anchored
- *     themselves -- the whole segment shares one frame, which is the point;
- *   - a window opened from a frame's own page (`?frame=N`), which seeks
- *     straight to that frame.
- *
- * In both the robot can be a long traverse away from the origin, so the stock
- * camera looks at empty ground and the view reads as broken.
- *
- * Moving the camera and its orbit target by the same delta re-centres the view
- * without changing its angle or its distance -- the move SimView itself makes
- * in `changeFocusOnBatchByRowCol`, and when `trackBody` first attaches.
- *
- * Called once, at load. Following the robot on every frame is what SimView's
- * own "track body" control is for; doing it unasked would fight the first pan.
- *
- * Returns false when the robot has no resolved position yet, so the caller can
- * try again on a later frame rather than silently keeping the stock camera.
+ * Moving camera and orbit target by the same delta re-centres without changing
+ * angle or distance, the move SimView makes in `changeFocusOnBatchByRowCol`.
+ * Called once at load -- following every frame is what `trackBody` is for.
+ * Returns false until the robot has a resolved position, so the caller retries.
  */
 export function centerOnRobot(app) {
     const body = app.bodies && app.bodies.get(ROBOT_BODY);
@@ -172,24 +148,14 @@ export function installSimviewPatches(app, simviewVersion) {
     // ---------------------------------------------------------------- cloud
     //
     // STOPGAP, gated with the rest. SimView <= 4.2 draws every body in one
-    // global style, so the only way to see a point-cloud body is to put the
-    // whole scene in "points" mode -- which turns the robot into nothing at
-    // all, since a box has no point representation. The cloud is taken out of
-    // that mechanism entirely instead: the scene stays in "mesh" mode (solid
-    // robot) and the cloud's own Points objects are shown or hidden on their
-    // own, driven by the overlay's checkbox.
-    //
-    // `Body.refreshBatchVisibility` recomputes `points[i].visible` from the
-    // global mode whenever the visible batch set changes, and
-    // `updateVisualizationMode` does the same on every mode change, so the
-    // wish has to be re-asserted rather than set once. `group.visible` is
-    // never touched by SimView, which is why the outer gate can be set once.
-    //
-    // Past the gate this whole control belongs to SimView: it takes point
-    // clouds out of the mode dropdown itself and gives them a "Show Point
-    // Clouds" checkbox. Two controls for one thing that can disagree with each
-    // other would be worse than the trap this replaced, so ours steps aside
-    // (the overlay hides its row -- see setupViewToggles).
+    // global style, so seeing a point cloud means putting the whole scene in
+    // "points" mode, which leaves the robot (a box) with nothing to draw. The
+    // cloud is taken out of that mechanism instead and driven by the overlay's
+    // checkbox. `refreshBatchVisibility` and `updateVisualizationMode` both
+    // recompute `points[i].visible` from the global mode, so the wish is
+    // re-asserted rather than set once; `group.visible` SimView never touches.
+    // Past the gate SimView has its own "Show Point Clouds" checkbox and ours
+    // steps aside -- two controls for one thing would be worse than the trap.
     const cloud = app.bodies.get(CLOUD_BODY);
     const cloudPoints = () =>
         cloud ? (cloud.representations.points || []).filter(Boolean) : [];
@@ -265,12 +231,10 @@ function defaultPointCloudsOff(app) {
  * PERMANENT. Keep bookkeeping bodies out of the "Body states" list and the
  * "Track Body" camera picker.
  *
- * The cloud carries no per-frame pose at all (build.py gives it no trajectory
- * -- it is already accumulated in the window's own frame), so its row opens on
- * an empty state readout. SimView >= 4.3 drops stateless point-cloud bodies
- * from this list itself, at which point this becomes a no-op rather than a
- * workaround, which is why it is not gated: it costs one lookup and it is
- * still right if a future scene grows another housekeeping body.
+ * The cloud has no per-frame pose (it is already accumulated in the window's
+ * frame), so its row opens on an empty readout. Ungated: SimView >= 4.3 drops
+ * stateless bodies itself, making this a no-op, and it stays right for any
+ * future housekeeping body.
  */
 function hideHousekeepingBodies(app) {
     const list = app.bodyStateWindow && app.bodyStateWindow.bodyListItems;
@@ -292,11 +256,9 @@ function hideHousekeepingBodies(app) {
 /**
  * PERMANENT. Give the ghost a look that says "this is not the robot".
  *
- * SimView 4.2 builds every dynamic body's mesh material from one shared
- * `DEFAULT_MESH_CONFIG` (`Body.createInstancedRepresentation` passes
- * `BODY_CONFIG.mesh`, which does not exist), so a per-body colour cannot be
- * declared from the Python side at all -- the material has to be recoloured
- * here, on the object SimView built.
+ * SimView 4.2 builds every body's material from one shared DEFAULT_MESH_CONFIG,
+ * so a per-body colour cannot be declared from Python -- it has to be set here,
+ * on the object SimView built.
  */
 function styleGhost(app) {
     const ghost = app.bodies.get(GHOST_BODY);
@@ -313,31 +275,18 @@ function styleGhost(app) {
 /* STOPGAP for simview <= 4.2: origin-anchored frustum culling.             */
 /* Delete this block on upgrade.                                            */
 /*                                                                          */
-/* Every dynamic body is a THREE.InstancedMesh whose pose is written into    */
-/* `instanceMatrix` each frame (Body.updateInstanceMatrix). three.js r174    */
-/* computes an InstancedMesh's bounding sphere from the instance matrices    */
-/* *once*, lazily, on the first frustum test (Frustum.intersectsObject sees  */
-/* `boundingSphere === null`, computes it, and caches it forever);           */
-/* `instanceMatrix.needsUpdate = true` does not invalidate it, and SimView   */
-/* never sets `frustumCulled = false` -- which it does do for trails         */
-/* (Body.js:227). So the sphere keeps describing where the body *started*.   */
+/* three.js r174 computes an InstancedMesh's bounding sphere from the       */
+/* instance matrices once, on the first frustum test, and caches it.        */
+/* `instanceMatrix.needsUpdate` does not invalidate it, and SimView never   */
+/* sets `frustumCulled = false` for bodies (it does for trails,             */
+/* Body.js:227), so a body is culled once its STARTING pose leaves the      */
+/* frustum -- the robot blinking out down a long traverse. Turning culling  */
+/* off for a few bodies is what the upstream fix does.                      */
 /*                                                                          */
-/* The cull therefore fires when the body's STARTING pose leaves the view    */
-/* frustum, not when the body gets far from anything: it is a function of    */
-/* where the camera is pointed, which is why it reads as erratic. Following  */
-/* the robot down a long traverse is simply the easiest way to provoke it,   */
-/* since the start is behind you by then.                                    */
-/*                                                                          */
-/* Turning culling off for a handful of bodies costs nothing -- they are a   */
-/* few draw calls -- and is what the upstream fix does.                      */
-/*                                                                          */
-/* Separately, and *not* the cause above: the camera far plane and the orbit */
-/* controls' max distance are hard-coded to 500 in SimView's config.js,      */
-/* while a single window here can span more than that (segment 1 of scene    */
-/* 0000 is ~300 m end to end and its terrain mesh covers all of it plus a    */
-/* margin), so pulling back far enough to see the whole traverse clips it.   */
-/* Widened here only while the gate holds: newer SimView derives both from   */
-/* the terrain's own bounds, which is strictly better than this guess.       */
+/* Separately: config.js hard-codes the far plane and orbit max distance to */
+/* 500, but one window can span more (scene 0000 segment 1 is ~300 m plus   */
+/* terrain margin), so pulling back to see it all clips it. Newer SimView   */
+/* derives both from the terrain's own bounds.                              */
 /* ======================================================================== */
 function stopgapOriginCulling(app) {
     app.bodies.forEach((body) => {
@@ -360,17 +309,15 @@ function stopgapOriginCulling(app) {
 /* STOPGAP for simview <= 4.2: the "points" body-visualization mode.        */
 /* Delete this block on upgrade.                                            */
 /*                                                                          */
-/* `UIControls.determineAvailableVisualizationModes` offers the *union* of   */
-/* the modes any body has, and `updateVisualizationMode` then applies the    */
-/* chosen one to *every* body with no fallback (Body.js:697). A scene that   */
-/* mixes a point cloud with solid bodies therefore gets a "points" entry     */
-/* that makes the robot disappear -- it is the cloud's mode, offered as if   */
-/* it were the scene's. Upstream is adding a preference-with-fallback.       */
+/* `determineAvailableVisualizationModes` offers the union of the modes any */
+/* body has, and `updateVisualizationMode` applies the chosen one to every  */
+/* body with no fallback (Body.js:697), so a scene mixing a cloud with      */
+/* solid bodies gets a "points" entry that makes the robot disappear.       */
+/* Upstream is adding a preference-with-fallback.                           */
 /*                                                                          */
-/* Until then the entry is removed from the menu (and from the array the "B" */
-/* key cycles through, so the keyboard cannot reach it either). The cloud is */
-/* shown by the overlay's own checkbox instead, which does not go through    */
-/* the global mode at all -- see `setCloudVisible` above.                    */
+/* Until then the entry is removed from the menu and from the array the "B" */
+/* key cycles through. The cloud is shown by the overlay's own checkbox     */
+/* instead -- see `setCloudVisible` above.                                  */
 /* ======================================================================== */
 function stopgapDropPointsMode(app) {
     const ctrl = app.uiControls.findController("bodyVisualizationMode");
@@ -391,24 +338,17 @@ function stopgapDropPointsMode(app) {
 
 /* ======================================================================== */
 /* STOPGAP for simview <= 4.2.0: ScalarPlotter plots never draw (3 causes). */
-/* Version-gated with the other two (see installSimviewPatches). Fixed in   */
-/* simview 4.2.1, so this does not run there. Delete this block on upgrade   */
-/* once the viewer's floor is past 4.2.0.                                    */
+/* Fixed in 4.2.1, so this does not run there; gated with the other two.    */
+/* Delete this block on upgrade once the viewer's floor is past 4.2.0.      */
 /*                                                                          */
-/* Three independent causes (maintainers, 2026-09-02), all fixed below:      */
-/*  1. The uPlot charts are built with empty data, so init autoscale leaves  */
-/*     `scales.x.min/max` null (in uPlot the configured min/max are outputs, */
-/*     `range` is the pin). Later updates go through                         */
-/*     `setEndIndex -> setData(data, false)`, which never revisits x, so     */
-/*     `valToPos` is NaN and nothing paints. Fixed by pinning x to the       */
-/*     window's fixed time span.                                             */
-/*  2. The render loop calls `redraw(false, true)` -- rebuildPaths=false --  */
-/*     so paths freeze at the first frame's single point and later frames    */
-/*     repaint a stale stub (pixels across x, no y extent). Fixed by forcing */
-/*     `redraw(true, true)` on the active chart each tick.                   */
-/*  3. The y axis ships a single tick increment (range/5, ~150px) that never */
-/*     fits the ~76px plot, so `_found` stays [0,0] and no ticks draw. Fixed */
-/*     by offering coarser multiples so one always fits.                     */
+/* Three independent causes (maintainers, 2026-09-02), all fixed below:     */
+/*  1. charts are built with empty data, so init autoscale leaves           */
+/*     `scales.x.min/max` null and `valToPos` is NaN -- nothing paints.     */
+/*     Fixed by pinning x to the window's fixed time span.                  */
+/*  2. the render loop calls `redraw(false, true)`, so paths freeze at the  */
+/*     first frame's single point. Fixed by forcing rebuildPaths each tick. */
+/*  3. the y axis ships one tick increment (range/5, ~150px) that never     */
+/*     fits the ~76px plot. Fixed by offering coarser multiples.            */
 /* ======================================================================== */
 const _dtScalarFixed = new WeakSet();
 

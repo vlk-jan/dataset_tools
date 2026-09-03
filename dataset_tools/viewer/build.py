@@ -1,30 +1,12 @@
 """Building one SimView scene for one window of one dataset scene.
 
-Everything here is *on demand and bounded*: a build touches only the frames of
-the requested window, reads at most a few dozen clouds and height maps out of
-it, and never scans the rest of the dataset. That is what makes a 20k-frame
-scene on network storage browsable.
+Everything here is *on demand and bounded*: a build touches only the requested
+window's frames, reads at most a few dozen clouds and height maps out of it,
+and never scans the rest of the dataset. That is what makes a 20k-frame scene
+on network storage browsable.
 
-What a built scene shows
-------------------------
-
-=========================  ==============================================
-dataset file               how it appears
-=========================  ==============================================
-``odometry.txt``           the robot body's animated pose (ground truth)
-``odometry_segments.txt``  which window exists at all; episode markers
-``transforms.npy``         a "wheel odom" ghost body, and the drift scalar
-``gravity_align.npy``      roll/pitch scalars; height-map placement
-``height_maps/``           the terrain surface
-``height_masks/``          the terrain's ``validity`` colour layer
-``clouds/``                an aggregated point-cloud body + terrain layers
-``joint_states.npy``       wheel spin animation + velocity/effort scalars
-``joint_setpoints.npy``    commanded-wheel-velocity scalars
-``cmd_vel.npy``            commanded twist scalars
-``camera_intrinsics.txt``  scene metadata
-``T_cam_to_base.txt``      camera-to-base extrinsic (scene metadata only)
-``images/``                the side panel (served per frame, not in the scene)
-=========================  ==============================================
+Which dataset file becomes what in the built scene is tabulated in
+docs/VIEWER.md ("What each file turns into").
 """
 
 from __future__ import annotations
@@ -50,13 +32,10 @@ from .windows import (
 logger = logging.getLogger("dataset_tools.viewer.build")
 
 # HELHEST geometry from DRIFT's kinematic model (models/simulator.py,
-# RobotModelConfig): three wheels of radius 0.3685 m, centres at z=0 in the
-# base frame (base_link sits at axle height), front axles at x=+0.4,
-# y=+-0.52, rear centre wheel at x=-0.5.
-# and the chassis/wheel visuals match DRIFT's own SimView rendering
-# (simulator/utils.py add_helhest_visual_wheels + utils/plots.py): the chassis
-# box is centred ON base_link, wheel cylinders are turned +-90 deg about x
-# with the sign mirrored per side.
+# RobotModelConfig): three wheels of radius 0.3685 m, centres at z=0 (base_link
+# sits at axle height), front axles at x=+0.4, y=+-0.52, rear wheel at x=-0.5.
+# Visuals match DRIFT's own SimView rendering (add_helhest_visual_wheels): the
+# chassis box centred ON base_link, wheel cylinders turned +-90 deg about x.
 CHASSIS = dict(hx=0.5, hy=0.3, hz=0.15)
 CHASSIS_Z = 0.0
 WHEEL_RADIUS = 0.3685
@@ -69,19 +48,15 @@ WHEELS = {
 }
 WHEEL_LABELS = ("left", "rear", "right")
 
-#: Bumped whenever :func:`build_scene`'s ``meta`` payload gains or changes a
-#: field the overlay reads -- or whenever the same window *key* comes to mean a
-#: different range of frames.
+#: Bumped whenever :func:`build_scene`'s ``meta`` payload changes a field the
+#: overlay reads, or the same window *key* comes to mean different frames.
 #:
-#: A built window is cached on disk under ``<scene>/<window>/<options>`` --
-#: keyed by what was *asked for*, which does not change when the code that
-#: answers changes. Without a version in the file itself, a viewer upgrade
-#: would go on serving yesterday's ``meta.json`` for every window anyone had
-#: already opened, and the new field would silently never appear.
+#: The bundle cache is keyed by what was *asked for*, which does not change when
+#: the code that answers does; without a version in the file, an upgrade would
+#: serve yesterday's ``meta.json`` for every window already opened.
 #:
-#: 4: the whole-scene fallback is now bounded by ``data_ts.txt`` rather than by
-#:    the frame count, so on a scene whose per-frame directories outrun its
-#:    timestamps a key like ``raw.0`` covers fewer frames than it used to.
+#: 4: the whole-scene fallback is bounded by ``data_ts.txt`` rather than the
+#:    frame count, so ``raw.0`` can cover fewer frames than it used to.
 META_VERSION = 4
 
 #: What each terrain colour mode means, in the viewer's own terms.
@@ -341,14 +316,12 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
     """
     n = len(times)
     if window.kind == "frame":
-        # A single frame is a static inspection with no motion, so its absolute
-        # position inside the (identity-anchored) segment carries no visual
-        # meaning -- and using it would place the robot, its terrain and its
-        # cloud wherever in the segment the frame happens to fall, often tens of
-        # metres from the origin and off the initial camera entirely (the black
-        # single-frame view). Anchor the robot at the origin, upright on its own
-        # gravity-aligned height map, so every single-frame view is centred on
-        # the robot. ``pose_source`` still records whether ground truth exists.
+        # A single frame is a static inspection: its absolute position inside
+        # the identity-anchored segment carries no visual meaning, and using it
+        # would drop the robot tens of metres from the origin, off the initial
+        # camera (the black single-frame view). Anchored at the origin instead,
+        # upright on its own height map. ``pose_source`` still records whether
+        # ground truth exists.
         quats = np.zeros((n, 4))
         quats[:, 0] = 1.0
         valid = np.ones(n, dtype=bool) if window.pose_source == "odometry" else np.zeros(n, dtype=bool)

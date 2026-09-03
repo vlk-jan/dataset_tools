@@ -16,9 +16,8 @@ Three groups of routes:
     Per-frame artefacts for the side panel -- camera image, BEV height map,
     validity mask, cloud top-down -- rendered one frame at a time.
 
-Reading the dataset happens in a worker thread throughout: the root normally
-lives on contended network storage, and a slow read must never block the event
-loop that is still serving the page around it.
+Every dataset read happens in a worker thread: the root is usually on contended
+network storage, and a slow read must not block the event loop serving the page.
 """
 
 from __future__ import annotations
@@ -48,15 +47,12 @@ from .wire import render_viewer_page, scene_document, write_static_bundle
 class _RevalidatingStatic(StaticFiles):
     """StaticFiles that forces the browser to revalidate every asset.
 
-    SimView's own front-end is versioned, but only its entry point carries a
-    cache-bust (``main.js?v=<ver>``); the ES modules it imports (SimView.js,
-    ui/ScalarPlotter.js, ...) do not. Served with no ``Cache-Control`` header,
-    a browser applies heuristic freshness and keeps the OLD modules after the
-    package is upgraded -- so the server reports the new version (and our
-    version-gated workarounds stand down) while the tab still runs the buggy
-    old JS, e.g. blank Analysis plots after the 4.2.1 upgrade. ``no-cache``
-    keeps the file cached but forces a conditional request every load, so an
-    unchanged file is a cheap 304 and an upgraded one is picked up at once.
+    Only SimView's entry point carries a cache-bust (``main.js?v=<ver>``); the
+    ES modules it imports do not. With no ``Cache-Control``, a browser keeps the
+    OLD modules after an upgrade -- the server reports the new version and our
+    version-gated workarounds stand down while the tab still runs the buggy JS
+    (blank Analysis plots after 4.2.1). ``no-cache`` keeps the file cached but
+    forces a conditional request: a cheap 304, or the upgrade picked up at once.
     """
 
     async def get_response(self, path, scope):

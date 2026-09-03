@@ -148,19 +148,15 @@ def drop_invalid_returns(xyzi: np.ndarray) -> np.ndarray:
     constant), so a missed shot has to be encoded rather than omitted. Both
     encodings occur in the same bag: NaN, and exactly (0, 0, 0).
 
-    This MUST run before the cloud is transformed into base_link. Afterwards
-    the zeros are no longer at the origin -- they land on the mount
-    translation, where they stop looking like a sentinel and start looking
-    like a dense real object a few centimetres from the sensor. That is what
-    happened to HELHEST v1: 54-70% of every published cloud is one coordinate
-    repeated ten to fourteen thousand times, at (-0.170, 0, 0.145).
+    This MUST run before the cloud is transformed into base_link: afterwards
+    the zeros land on the mount translation, where they read as a dense real
+    object rather than a sentinel. That is HELHEST v1, where 54-70% of every
+    published cloud is (-0.170, 0, 0.145) repeated ten to fourteen thousand
+    times. Measured per sweep on the 2026-08-21 bags: 49152 elements, 11.2%
+    NaN, 47.1% of the rest dropped shots, ~23k real returns left.
 
-    Measured on the 2026-08-21 Odin1 bags, per sweep: 49152 elements, 11.2%
-    NaN, then 47.1% of the remainder dropped shots, leaving ~23k real returns.
-
-    Exact zeros only. A point at (0, 0, 1e-6) is a real return from something
-    against the sensor and is kept -- range gating is the consumer's decision,
-    not this function's.
+    Exact zeros only -- (0, 0, 1e-6) is a real return against the sensor, and
+    range gating is the consumer's decision, not this function's.
     """
     xyzi = xyzi[~np.isnan(xyzi).any(axis=1)]
     return xyzi[np.any(xyzi[:, :3] != 0, axis=1)]

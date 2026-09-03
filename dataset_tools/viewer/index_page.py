@@ -1,17 +1,14 @@
 """What the scene index shows, assembled once per page render.
 
-The index has two halves that must not be confused. One half is *probed*: it
-comes from listing a scene directory and reading its timestamp and segment
-files, so it exists for any dataset root, from any rig, forever. The other half
-is *curated*: prose descriptions, groupings into outings, numbers that took a
-full pass over the raw bags to produce. That half lives in ``atlas/atlas.json``
-next to the data and is optional.
+Two halves, not to be confused. *Probed*: listing a scene directory and reading
+its timestamp and segment files, so it exists for any root, from any rig.
+*Curated*: prose, groupings into outings, numbers that took a full pass over the
+raw bags -- optional, from ``atlas/atlas.json`` beside the data.
 
-This module merges the two into one row shape so the template does not have to
-ask which root it is looking at. Where the curated half is missing the row is
-simply shorter -- no description, fewer stats, thumbnails pointing at live
-frames instead of stored ones. Nothing here reads a cloud, an image or a height
-map: the probe is already cached, and the atlas file is one small JSON read.
+They merge into one row shape here so the template need not ask which root it
+is looking at; without the curated half a row is simply shorter. Nothing reads
+a cloud, an image or a height map -- the probe is cached and the atlas is one
+small JSON read.
 """
 
 from __future__ import annotations

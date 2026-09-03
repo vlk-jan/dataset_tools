@@ -135,12 +135,10 @@ def _bev_to_display(grid: np.ndarray) -> np.ndarray:
     Screen convention: +x (forward) is up, +y (left) is left, i.e. a top-down
     view with the robot at the centre facing up.
 
-    ``grid[i, j]`` has ``i`` indexing x and ``j`` indexing y, both increasing,
-    so display row ``r`` must map to ``x = N-1-r`` (forward at the top) and
-    display column ``c`` to ``y = N-1-c`` (+y at the left). That is a double
-    flip and **no** transpose -- transposing here swaps the axes and rotates
-    the map 90 degrees, which shows up as the lidar's measured cone pointing
-    sideways instead of up.
+    ``grid[i, j]`` indexes x by ``i`` and y by ``j``, both increasing, so row
+    ``r`` maps to ``x = N-1-r`` and column ``c`` to ``y = N-1-c``: a double flip
+    and **no** transpose. Transposing rotates the map 90 degrees, which shows up
+    as the lidar's cone pointing sideways.
     """
     return grid[::-1, ::-1]
 
@@ -179,17 +177,14 @@ def render_validity(mask: np.ndarray, size: int = 384) -> bytes:
 def draw_robot_silhouette(img, px_per_m: float):
     """Draw HELHEST top-down at the centre of a robot-centred, forward-up tile.
 
-    A single white pixel says "the robot is here" but not how big it is or
-    which way it faces, which is exactly what a BEV tile is read for. This
-    draws the real footprint to scale instead -- the 1.0 x 0.6 m chassis, the
-    two front wheels and the single rear wheel -- so the map's features can be
-    sized against the robot by eye.
+    A single pixel says "the robot is here" but not how big it is or which way
+    it faces -- which is what a BEV tile is read for. This draws the footprint
+    to scale (1.0 x 0.6 m chassis, two front wheels, one rear) so features can
+    be sized against it by eye.
 
-    ``px_per_m`` is the tile's own scale *after* any upscaling, so the drawing
-    is done at display resolution (smooth edges) rather than in the grid's
-    chunky cells. Drawn translucent over the data with a thin opaque outline:
-    the silhouette must stay readable on both a dark and a bright colour map
-    without hiding the cells underneath it.
+    ``px_per_m`` is the tile's scale *after* upscaling, so this draws at display
+    resolution rather than in chunky grid cells. Translucent with a thin opaque
+    outline, to stay readable over both dark and bright colour maps.
     """
     from PIL import ImageDraw
 

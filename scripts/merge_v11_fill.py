@@ -3,20 +3,16 @@
 
     merge_v11_fill.py <v11_root> <v12_root> [scenes...]
 
-Keeps every v1.2 segment (the paired comparison shows v1.2 is better wherever
-both tracked). Takes the v1.1 trajectory restricted to v1.2's gaps, applies
-THE SAME post-hoc gate as filter_segments.py (2 s windows vs the recorded
-/odom reference, drop > 1 m, keep runs >= 20 poses, re-anchor each run at the
-identity) and appends the survivors as extra segments tagged
-``v11_fill`` in the segment table, so provenance stays visible per segment.
+Keeps every v1.2 segment (the paired comparison shows v1.2 wins wherever both
+tracked), takes v1.1 restricted to v1.2's gaps, applies THE SAME gate as
+filter_segments.py (2 s windows vs recorded /odom, drop > 1 m, keep runs >= 20
+poses, re-anchor at identity), and appends the survivors tagged ``v11_fill`` so
+provenance stays visible per segment.
 
-Before the first merge of a scene, the pure-v1.2 files are preserved as
-``regen/odometry_v12only.txt`` and ``regen/odometry_segments_v12only.txt``.
-A scene whose segment table already contains ``v11_fill`` is skipped, so the
-script is idempotent. Every processed scene gets a ``regen/merge_v11_fill.txt``
-outcome record, so "has a v12only backup" means exactly "the live files were
-rewritten" while processed-but-unfilled scenes remain distinguishable from
-never-processed ones.
+Idempotent: the pure-v1.2 files are preserved as ``regen/*_v12only.txt`` before
+the first merge, and a table already containing ``v11_fill`` is skipped. Every
+processed scene gets a ``regen/merge_v11_fill.txt`` record, so a scene that was
+processed but not filled stays distinguishable from one never processed.
 """
 import datetime
 import shutil

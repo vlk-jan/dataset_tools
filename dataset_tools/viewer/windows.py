@@ -11,10 +11,9 @@ Two hard constraints shape this module:
    of files; longer segments are cut into consecutive chunks the UI can page
    through.
 
-A window also records *where its poses come from*, because that changes what
-the view means: ``odometry`` is ground truth, ``transforms`` is the drifty
-wheel-odometry fallback, and ``none`` means the scene has no pose at all and
-only per-frame data is shown.
+A window also records where its poses come from, which changes what the view
+means: ``odometry`` is ground truth, ``transforms`` the drifty wheel-odometry
+fallback, ``none`` no pose at all (per-frame data only).
 """
 
 from __future__ import annotations
@@ -168,18 +167,15 @@ def windows_for_scene(
                     )
                 )
 
-    # Whole-scene wheel-odometry fallback: drifty and NOT ground truth. It is
-    # offered only when the scene yields no ground-truth window at all -- there
-    # it is the only motion view that exists. Where ground truth exists, a
-    # whole-scene wheel-odometry reconstruction would simply be wrong, and
-    # showing it invites reading a wrong trajectory (user decision 2026-09-02).
+    # Whole-scene wheel-odometry fallback: drifty and NOT ground truth, so it is
+    # offered only when the scene yields no ground-truth window at all, where it
+    # is the only motion view there is. Alongside ground truth it would invite
+    # reading a wrong trajectory (user decision 2026-09-02).
     #
-    # Bounded by the timestamp track, not by ``n_frames``: the frame count is
-    # the largest of several disagreeing counts (a scene can have more images
-    # on disk than lines in ``data_ts.txt`` -- the probe warns about exactly
-    # that), and a frame with no timestamp cannot be placed on the playback
-    # clock at all. Offering it produced a window whose build read zero frames
-    # and died with an IndexError.
+    # Bounded by the timestamp track, not ``n_frames``: the frame count is the
+    # largest of several disagreeing counts, and a frame with no timestamp has
+    # no place on the playback clock -- offering it built a window that read
+    # zero frames and died with an IndexError.
     playable = _playable_frames(frame_ts, n_frames)
     if not windows and playable >= MIN_WINDOW_FRAMES:
         source = "transforms" if has_transforms else "none"

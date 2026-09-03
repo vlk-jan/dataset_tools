@@ -1,21 +1,17 @@
 """Serving a built scene to the SimView front-end without running SimView's server.
 
-The SimView viewer normally fetches ``/model``, ``/states`` and ``/blob/{token}/{id}``
-from its own FastAPI app, whose routes are rooted at ``/``. That makes it
-impossible to mount under a path prefix -- but the front-end has a documented
-static mode: when ``window.__simviewStaticBase`` is a string, every fetch is
-redirected to ``{base}/model.json``, ``{base}/states.json`` and
-``{base}/blob/{id}`` (SimView.js ``loadData`` / ``fetchBlobs``). That mode is
-what the project's own GitHub Pages demo is built with.
+SimView's front-end normally fetches ``/model``, ``/states`` and ``/blob/...``
+from its own app, rooted at ``/`` and so unmountable under a prefix. But it has
+a documented static mode: with ``window.__simviewStaticBase`` set, every fetch
+goes to ``{base}/model.json``, ``{base}/states.json`` and ``{base}/blob/{id}``
+(SimView.js ``loadData`` / ``fetchBlobs``) -- the mode its own GitHub Pages demo
+uses. This module splits ``SimulationScene.save``'s document into those flat
+files. Nothing in SimView is modified or subclassed; the only coupling is its
+documented, versioned on-disk format.
 
-So this module takes the JSON document ``SimulationScene.save`` produces and
-splits it into exactly those flat files. Nothing in SimView is modified or
-subclassed; the only coupling is the on-disk scene format, which is a
-documented, versioned wire format.
-
-Splitting the base64 payloads back out into standalone binary files is not just
-size: the viewer range-requests them to window very long trajectories, and
-files on disk get byte-range support from Starlette for free.
+Splitting the base64 payloads back into standalone binaries is not just size:
+the viewer range-requests them to window long trajectories, and files on disk
+get byte-range support from Starlette for free.
 """
 
 from __future__ import annotations
@@ -32,14 +28,12 @@ BLOB_PREFIX = "__b64__"
 def scene_document(scene) -> dict:
     """The saved-scene document for a built :class:`SimulationScene`, in memory.
 
-    This is what ``scene.save(path)`` would write, without the detour through a
-    file. The important part is ``columnarize_states``: ``add_trajectory``
-    leaves ``scene.states`` as one dict per frame, each holding a small
-    base64 blob per body, so splitting *that* yields thousands of tiny blobs
-    (one per body per frame) and thousands of browser requests. The columnar
-    layout packs each body's whole trajectory into a single blob instead --
-    tens of blobs for a scene, which is also the layout the viewer's windowed
-    range-fetching relies on.
+    What ``scene.save(path)`` would write, without the detour through a file.
+    The important part is ``columnarize_states``: ``add_trajectory`` leaves
+    ``scene.states`` as one dict per frame with a small blob per body, so
+    splitting that yields thousands of tiny blobs and as many requests. The
+    columnar layout packs each body's whole trajectory into one blob -- tens
+    per scene, and the layout windowed range-fetching relies on.
     """
     model_json = scene.model.to_json()
     states = scene.states

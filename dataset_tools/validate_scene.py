@@ -10,9 +10,8 @@ shapes, non-monotonic timestamps) are reported as errors and make the tool exit
 non-zero. Data-quality observations (NaNs, odometry jumps, extreme tilt) are
 warnings; ``--strict`` turns them into failures too.
 
-The checker also accepts the older HELHEST layout, whose extra files
-(``odometry.txt``, ``trajectory.txt``, ``T_cam_to_lidar.txt``, ``height_maps/``,
-``height_masks/``, ``<scene>_full.npz``) are treated as optional extras.
+The older HELHEST layout is accepted too; its extra files (``trajectory.txt``,
+``T_cam_to_lidar.txt``, ``<scene>_full.npz``, ...) count as optional extras.
 """
 
 from __future__ import annotations

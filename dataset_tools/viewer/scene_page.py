@@ -1,25 +1,18 @@
 """What a scene page states about one scene, above the tabs.
 
-Four cards -- what was recorded, what ground truth exists inside it, how the
-camera was calibrated, what the robot itself reported -- assembled from three
-sources: the cheap directory probe, the curated ``atlas.json`` entry when the
-root has one, and a small number of per-scene arrays read here and nowhere
-else.
+Four cards -- what was recorded, what ground truth is inside it, how the camera
+was calibrated, what the robot reported -- from the directory probe, the curated
+``atlas.json`` entry if there is one, and a few per-scene arrays read only here.
 
-The reading budget is deliberate. Everything on this page is either already in
-memory (the probe, the segments file, the atlas entry) or lives in a file whose
-size is bounded by the scene's frame count: ``joint_states.npy``,
-``cmd_vel.npy`` and ``gravity_align.npy`` are a few megabytes at worst and are
-read strided through a memory map, ``camera_info.yaml`` is under a kilobyte.
-Clouds, images and height maps are never opened. ``odometry.txt`` is parsed
-only when no curated path length exists *and* the file is small -- on a curated
-root it is never touched.
+The reading budget is deliberate: everything is either already in memory or in
+a file bounded by the frame count (the proprioception arrays, read strided
+through a memory map; ``camera_info.yaml``). Clouds, images and height maps are
+never opened, and ``odometry.txt`` only when no curated path length exists and
+the file is small.
 
-Nothing here is rig-specific. Wheel speeds are reported in the units the file
-carries (rad/s), never converted through a wheel radius, because that constant
-belongs to one robot and would be silently wrong on the next one. Every card
-degrades on its own: a missing file removes the entries it would have filled,
-and a card left with nothing to say is dropped rather than shown empty.
+Nothing here is rig-specific -- wheel speeds stay in the file's own rad/s,
+never divided through a wheel radius that belongs to one robot. Each card
+degrades alone, and one left with nothing to say is dropped, not shown empty.
 """
 
 from __future__ import annotations
