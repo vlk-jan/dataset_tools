@@ -70,6 +70,21 @@ Nothing in the viewer is specific to a sensor generation. A scene is any
 segments therefore share no reference frame, and a trajectory, an aggregated
 cloud or a splatted terrain drawn across a boundary would be meaningless.
 
+That anchoring zeroes the robot's roll and pitch as well as its position and
+yaw, which is wrong: roll and pitch are absolute, measured against gravity. So
+a window is **levelled** before it is drawn — rotated by the attitude
+`gravity_align.npy` records at the segment's anchor frame, which is the attitude
+the anchor threw away. Without it a segment that opens on a slope renders level
+and stays level for its whole length, and one that opens with the robot on its
+side renders it upright.
+
+Segment edges are timestamps on the ground-truth pose clock; frames carry their
+own. A frame landing within half a frame period of an edge counts as inside the
+segment, so the frame nearest a segment's first pose is that segment's first
+frame rather than a frame belonging to nothing. The slack never reaches past the
+midpoint of the gap to a neighbouring segment, so no frame is ever claimed by
+two.
+
 So the unit of viewing is a *window*:
 
 | window | pose source | what it is |
@@ -103,7 +118,7 @@ driving. Below 2 Hz the rate is flagged.
 | `odometry.txt` | the robot body's animated pose |
 | `odometry_segments.txt` | the window list; the episode marker on the playback bar |
 | `transforms.npy` | a second "wheel odom" ghost body, plus the `wheel_odom_drift` plot |
-| `gravity_align.npy` | `roll_deg` / `pitch_deg` plots; places each height map level in the world |
+| `gravity_align.npy` | `roll_deg` / `pitch_deg` plots; places each height map level in the world; levels the window (above) |
 | `height_maps/` | the terrain surface, and a per-frame tile in the side panel |
 | `height_masks/` | the terrain's `validity` colour layer, and its own panel tile |
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
@@ -112,6 +127,14 @@ driving. Below 2 Hz the rate is flagged.
 | `joint_setpoints.npy` | commanded wheel-velocity plots |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
+
+A window splats ~80 height maps 12.8 m across along a path a few tens of metres
+long, so every terrain cell is covered by dozens of them. Their contributions
+are weighted by how far the sample sat from the robot that measured it
+(`build.HM_BLEND_SIGMA`), so a cell is decided by the frames that drove over it.
+Averaged flat instead, a cell blends observations made from poses whose z
+disagrees by however much the odometry drifted between them, and the ground ends
+up floating away from the robot standing on it.
 
 The terrain offers several colour modes: `height`, plus `coverage` (how many
 height maps actually observed each cell — cells nothing observed are filled from
@@ -230,6 +253,14 @@ digits*, so a root whose scenes are named `scene_01/` reads as empty.
 waits for the build and loads the scene when it is ready. Builds are cached per
 (scene, window, options), so reopening is immediate. On slow storage, lower
 `cloud_frames` and `hm_frames`.
+
+**The robot floats above the terrain, or sinks into it.** The window levels and
+weights what it can, but it cannot correct the ground truth. A robot that keeps
+a steady few centimetres of clearance and then lifts off over a stretch is
+showing `odometry.txt` drifting in z: the terrain under it was built from the
+height maps of frames whose poses had drifted differently. Check the `pose_z`
+plot against `pitch_deg` — a climb with no pitch behind it did not happen, and
+the episode is an odometry failure rather than a viewer artefact.
 
 **Every window rebuilds once after an upgrade.** The bundle cache is keyed by
 what was *asked for*, which does not change when the builder does, so

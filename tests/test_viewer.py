@@ -179,6 +179,14 @@ def test_interpolate_poses_marks_queries_outside_the_track_invalid():
     assert pos[3, 0] == pytest.approx(2.0)
 
 
+def test_interpolate_poses_counts_a_query_within_tolerance_as_on_the_track():
+    ts = np.array([10.0, 11.0, 12.0])
+    poses = np.stack([np.eye(4)] * 3)
+    just_early = np.array([9.99])
+    assert not loaders.interpolate_poses(ts, poses, just_early)[2][0]
+    assert loaders.interpolate_poses(ts, poses, just_early, tol=0.05)[2][0]
+
+
 def test_resample_series_does_not_invent_values_across_a_long_gap():
     src_ts = np.array([0.0, 1.0, 50.0, 51.0])
     vals = np.array([[0.0], [1.0], [2.0], [3.0]])
@@ -341,6 +349,39 @@ def test_long_segments_are_split_into_even_chunks():
         assert a.frame_end == b.frame_start
 
 
+def test_a_frame_just_before_a_segment_starts_still_belongs_to_it():
+    """Segment edges are on the ground-truth pose clock, frames on their own.
+
+    A frame a few ms short of a segment's first pose is that segment's first
+    frame; treated strictly it belongs to nothing and the frame page reports no
+    ground truth for a frame that plainly has some.
+    """
+    ts = np.arange(20, dtype=np.float64) * 0.32
+    # The segment opens 3 ms after frame 5 -- a hundredth of a frame period.
+    segs = [loaders.Segment(0, float(ts[5]) + 0.003, float(ts[15]), 30, "a")]
+    assert windows.segment_of_frame(ts, segs, 5) is segs[0]
+    seg_window = [w for w in windows.windows_for_scene(ts, segs, len(ts), False) if w.kind == "segment"][0]
+    assert seg_window.frame_start == 5
+    # A frame a whole period early is genuinely outside it.
+    assert windows.segment_of_frame(ts, segs, 4) is None
+
+
+def test_the_boundary_slack_never_gives_one_frame_to_two_segments():
+    """Segments share no reference frame, so a frame in both would be in neither."""
+    ts = np.arange(40, dtype=np.float64) * 0.32
+    # Two segments whose gap is narrower than the slack a frame period allows.
+    segs = [
+        loaders.Segment(0, float(ts[2]), float(ts[10]) + 0.02, 20, "a"),
+        loaders.Segment(1, float(ts[10]) + 0.08, float(ts[20]), 20, "b"),
+    ]
+    owners = [windows.segment_of_frame(ts, segs, i) for i in range(len(ts))]
+    assert all(o is None or o in segs for o in owners)
+    lo, hi = windows.segment_bounds(ts, segs)
+    assert lo[1] <= hi[0]  # the widened spans meet, they do not overlap
+    seg_windows = [w for w in windows.windows_for_scene(ts, segs, len(ts), False) if w.kind == "segment"]
+    assert seg_windows[0].frame_end <= seg_windows[1].frame_start
+
+
 def test_whole_scene_window_reports_its_pose_source():
     ts = np.arange(50, dtype=np.float64)
     with_tf = windows.windows_for_scene(ts, [], 50, has_transforms=True)
@@ -390,6 +431,107 @@ def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
     assert '<base href="/">' in page
     assert "{{" not in page
     assert "<div id='x'></div>" in page
+
+
+# --------------------------------------------------------------------------
+# pose resolution and terrain
+# --------------------------------------------------------------------------
+
+
+def _roll_pitch(quat):
+    """Roll and pitch, in degrees, of a [w, x, y, z] quaternion."""
+    R = loaders.poses_from_quat(np.zeros((1, 3)), np.asarray(quat)[None])[0, :3, :3]
+    return np.degrees(np.arctan2(R[2, 1], R[2, 2])), np.degrees(-np.arcsin(np.clip(R[2, 0], -1, 1)))
+
+
+def _tilt_gravity(root: Path, scene: str, frames: int, roll_deg: float) -> None:
+    """Rewrite gravity_align.npy so every frame carries a constant roll."""
+    a = np.radians(roll_deg)
+    R = np.array([[1, 0, 0], [0, np.cos(a), -np.sin(a)], [0, np.sin(a), np.cos(a)]])
+    np.save(root / scene / "gravity_align.npy", np.stack([R] * frames))
+
+
+def test_a_window_is_levelled_by_the_attitude_its_segment_anchor_discarded(tmp_path):
+    """A segment is re-anchored to identity at its own first pose, which zeroes
+    the robot's roll and pitch there. Those are absolute, so a segment opening
+    on a slope -- or with the robot on its side -- would otherwise render level
+    and stay level for its whole length."""
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 30.0)
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    track = build.resolve_poses(access, window, access.frame_ts[frames])
+
+    # The anchor pose is the identity; levelled, it stands at the real attitude.
+    roll, _ = _roll_pitch(track.quats[0])
+    assert roll == pytest.approx(30.0, abs=0.5)
+
+
+def test_a_single_frame_stands_at_its_own_attitude(tmp_path):
+    """A one-frame view is robot-centric, but centred is not the same as level."""
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, -20.0)
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window(windows.frame_window_key(3), 1500)
+    track = build.resolve_poses(access, window, access.frame_ts[3:4])
+    assert np.allclose(track.positions, 0.0)  # still at the origin
+    roll, _ = _roll_pitch(track.quats[0])
+    assert roll == pytest.approx(-20.0, abs=0.5)
+
+
+def test_a_scene_without_gravity_alignment_is_left_unlevelled(tmp_path):
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=12, with_gravity=False)
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    track = build.resolve_poses(access, window, access.frame_ts[frames])
+    assert np.allclose(track.quats[0], [1.0, 0.0, 0.0, 0.0], atol=1e-6)
+
+
+def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_path):
+    """Every cell is covered by dozens of the ~80 maps a window splats. Averaged
+    flat, a cell mixes observations made from poses whose z disagrees by however
+    much the odometry drifted between them, and the ground drifts away from the
+    robot standing on it."""
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
+    scene = root_path / "0000"
+    ts = loaders.read_timestamps(scene / "data_ts.txt")
+    # Two frames 6 m apart, each reporting flat ground at a different height.
+    with open(scene / "odometry.txt", "w") as fh:
+        for i, t in enumerate(ts):
+            T = np.eye(4)
+            T[0, 3] = 6.0 * i
+            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
+    for i in range(2):
+        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), float(i)))
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    track = build.resolve_poses(access, window, access.frame_ts[frames])
+    poses = loaders.poses_from_quat(track.positions, track.quats)
+    opts = build.BuildOptions().sanitized()
+    grid = build._make_grid(track.positions, opts)
+    build.splat_height_maps(access, grid, frames, poses, opts)
+    height, _, _ = build._finish_terrain(grid, None)
+
+    row, col, inside = grid.cell_of(track.positions[:, 0], track.positions[:, 1])
+    assert inside.all()
+    under = height[row[inside], col[inside]]
+    # Both maps reach both robots, so a flat mean would put each on 0.5.
+    assert under[0] == pytest.approx(0.0, abs=0.1)
+    assert under[1] == pytest.approx(1.0, abs=0.1)
 
 
 # --------------------------------------------------------------------------

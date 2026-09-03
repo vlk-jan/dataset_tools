@@ -819,7 +819,9 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
             "reason": seg.reason,
             "duration": round(seg.duration, 2),
             "n_poses": seg.n_poses,
-            "t_into_segment": round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
+            # Clamped: a frame within the boundary slack sits a few ms before the
+            # segment's first pose, and "-0.0 s into the segment" reads as a bug.
+            "t_into_segment": max(0.0, round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2)),
         }
     else:
         details["segment"] = None

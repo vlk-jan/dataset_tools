@@ -23,6 +23,7 @@ from .probe import DatasetRoot, SceneProbe
 from .render import unit_colors
 from .windows import (
     Window,
+    frame_slack,
     parse_frame_window_key,
     segment_of_frame,
     single_frame_window,
@@ -40,6 +41,15 @@ CHASSIS = dict(hx=0.5, hy=0.3, hz=0.15)
 CHASSIS_Z = 0.0
 WHEEL_RADIUS = 0.3685
 WHEEL_WIDTH = 0.142
+#: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
+#: being how far the sample sat from the robot that measured it. A window splats
+#: ~80 maps 12.8 m across along a path a few tens of metres long, so every cell
+#: is covered by dozens of them; a plain mean blends observations made from
+#: poses whose z disagrees by however much the odometry drifted between them,
+#: which lifts the ground away from the robot standing on it. Weighting by
+#: distance lets each cell be decided by the frames that drove over it.
+HM_BLEND_SIGMA = 3.0
+
 #: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
 WHEELS = {
     "wheel_left": (0.4, 0.52, 0.0, 0, -1.0),
@@ -57,7 +67,9 @@ WHEEL_LABELS = ("left", "rear", "right")
 #:
 #: 4: the whole-scene fallback is bounded by ``data_ts.txt`` rather than the
 #:    frame count, so ``raw.0`` can cover fewer frames than it used to.
-META_VERSION = 4
+#: 5: windows are gravity-levelled and terrain is distance-weighted, so every
+#:    cached bundle holds poses and a height field that no longer match.
+META_VERSION = 5
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -307,6 +319,45 @@ def _identity_track(n: int, source: str, note: str) -> PoseTrack:
     return PoseTrack(np.zeros((n, 3)), quats, np.zeros(n, dtype=bool), source, note)
 
 
+def _gravity_level(access: SceneAccess, frame_index: int) -> np.ndarray | None:
+    """Rotation taking a window's anchor frame into a gravity-aligned world.
+
+    Each segment is re-anchored to identity at its own first pose. That is right
+    for position and yaw -- the window is its own frame -- but roll and pitch are
+    absolute, measured against gravity, and zeroing them renders a robot that
+    starts on a slope as level, and one that starts on its side as upright.
+    ``gravity_align.npy`` holds the attitude the anchor discarded; rotating the
+    whole window by the anchor frame's own value puts it back.
+    """
+    ga = access.gravity_align
+    if ga is None or frame_index < 0 or frame_index >= len(ga):
+        return None
+    R = np.asarray(ga[frame_index], dtype=np.float64)
+    return R if R.shape == (3, 3) else None
+
+
+def _level_track(track: PoseTrack, R: np.ndarray | None) -> PoseTrack:
+    """Rotate a whole pose track into the gravity-aligned world."""
+    if R is None:
+        return track
+    q = L.mat_to_quat(R[None])
+    return PoseTrack(
+        track.positions @ R.T,
+        _quat_mul(q, track.quats),
+        track.valid,
+        track.source,
+        track.note,
+    )
+
+
+def _anchor_frame(access: SceneAccess, ts: float) -> int:
+    """Index of the frame nearest ``ts`` -- where a segment's anchor pose sits."""
+    frame_ts = access.frame_ts
+    if frame_ts is None or not len(frame_ts):
+        return 0
+    return int(np.argmin(np.abs(np.asarray(frame_ts) - ts)))
+
+
 def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> PoseTrack:
     """The window's robot pose, in the window's own reference frame.
 
@@ -324,8 +375,9 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         # camera (the black single-frame view). Anchored at the origin instead,
         # upright on its own height map. ``pose_source`` still records whether
         # ground truth exists.
-        quats = np.zeros((n, 4))
-        quats[:, 0] = 1.0
+        R = _gravity_level(access, window.frame_start)
+        one = L.mat_to_quat(R[None])[0] if R is not None else np.array([1.0, 0.0, 0.0, 0.0])
+        quats = np.tile(one, (n, 1))
         valid = np.ones(n, dtype=bool) if window.pose_source == "odometry" else np.zeros(n, dtype=bool)
         return PoseTrack(np.zeros((n, 3)), quats, valid, window.pose_source, "single frame, robot-centric")
 
@@ -341,8 +393,12 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
             ts, poses = ts[lo:hi], poses[lo:hi]
         if len(ts) < 2:
             return _identity_track(n, "none", "segment has fewer than two poses")
-        pos, quat, valid = L.interpolate_poses(ts, poses, times)
-        return PoseTrack(pos, quat, valid, "odometry", f"ground truth, segment {window.segment_index}")
+        pos, quat, valid = L.interpolate_poses(ts, poses, times, tol=frame_slack(access.frame_ts))
+        track = PoseTrack(pos, quat, valid, "odometry", f"ground truth, segment {window.segment_index}")
+        # Levelled about the *segment's* anchor, not the window's first frame:
+        # a later chunk of a split segment is still expressed in that anchor.
+        anchor = _anchor_frame(access, seg.start_ts) if seg is not None else window.frame_start
+        return _level_track(track, _gravity_level(access, anchor))
 
     if window.pose_source == "transforms":
         tf = access.transforms
@@ -361,7 +417,8 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
             pos = np.vstack([pos, np.repeat(pos[-1:], pad, axis=0)])
             quat = np.vstack([quat, np.repeat(quat[-1:], pad, axis=0)])
             valid = np.concatenate([valid, np.zeros(pad, dtype=bool)])
-        return PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
+        track = PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
+        return _level_track(track, _gravity_level(access, int(idx[0])))
 
     return _identity_track(n, "none", "no pose data; robot held at the origin")
 
@@ -407,13 +464,18 @@ class TerrainGrid:
     res: float
     nx: int
     ny: int
-    sum_z: np.ndarray = field(init=False)
+    #: Weighted height sum and the weights behind it; their ratio is the
+    #: surface. ``count`` stays a plain observation tally for the coverage
+    #: layer, which reports how much was seen, not how much it was trusted.
+    sum_wz: np.ndarray = field(init=False)
+    sum_w: np.ndarray = field(init=False)
     count: np.ndarray = field(init=False)
     validity: np.ndarray = field(init=False)
     layers: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.sum_z = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.sum_wz = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.sum_w = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.count = np.zeros((self.ny, self.nx), dtype=np.int32)
         self.validity = np.zeros((self.ny, self.nx), dtype=np.uint8)
 
@@ -474,6 +536,11 @@ def splat_height_maps(
     needs both the robot pose and the inverse of that frame's gravity rotation:
     ``p_world = R_pose @ R_ga.T @ p_map + t_pose``. Skipping the ``R_ga.T``
     would tilt every map by the robot's roll/pitch.
+
+    Each sample carries a weight falling off with its distance from the robot
+    that measured it (:data:`HM_BLEND_SIGMA`), so a cell is decided by the
+    frames that drove over it rather than averaged flat across every frame that
+    could see it.
     """
     have = access.available_frames("height_maps")
     have_mask = access.available_frames("height_masks")
@@ -502,7 +569,9 @@ def splat_height_maps(
         row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
         if not inside.any():
             continue
-        np.add.at(grid.sum_z, (row[inside], col[inside]), world[inside, 2])
+        w = np.exp(-((np.hypot(local[inside, 0], local[inside, 1]) / HM_BLEND_SIGMA) ** 2))
+        np.add.at(grid.sum_wz, (row[inside], col[inside]), world[inside, 2] * w)
+        np.add.at(grid.sum_w, (row[inside], col[inside]), w)
         np.add.at(grid.count, (row[inside], col[inside]), 1)
         stats["used"] += 1
 
@@ -677,10 +746,10 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
     and reported through the ``coverage`` layer, so invented ground is visible
     in the viewer instead of being indistinguishable from measured ground.
     """
-    covered = grid.count > 0
+    covered = grid.sum_w > 0.0
     height = np.zeros((grid.ny, grid.nx), dtype=np.float64)
     if covered.any():
-        height[covered] = grid.sum_z[covered] / grid.count[covered]
+        height[covered] = grid.sum_wz[covered] / grid.sum_w[covered]
         background = _background_surface(height, covered)
         height[~covered] = background[~covered]
     else:
@@ -688,7 +757,7 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
         height[:] = fill
 
     layers = {
-        "coverage": covered.astype(np.float64) * grid.count,
+        "coverage": (grid.count > 0).astype(np.float64) * grid.count,
         "validity": grid.validity.astype(np.float64),
     }
     layers.update(grid.layers)
@@ -710,7 +779,9 @@ def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
     if not inside.any():
         return
     r, c, z = row[inside], col[inside], cloud[inside, 2]
-    np.add.at(grid.sum_z, (r, c), z)
+    # Points, not a robot-centred raster: nothing here to weight by distance.
+    np.add.at(grid.sum_wz, (r, c), z)
+    np.add.at(grid.sum_w, (r, c), 1.0)
     np.add.at(grid.count, (r, c), 1)
 
 

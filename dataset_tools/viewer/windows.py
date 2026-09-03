@@ -122,6 +122,35 @@ def _playable_frames(frame_ts: np.ndarray | None, n_frames: int) -> int:
     return min(n_frames, len(frame_ts))
 
 
+def frame_slack(frame_ts: np.ndarray | None) -> float:
+    """Half a frame period: how far off a segment edge a frame may still fall.
+
+    Segment edges come from the ground-truth pose clock, frames from their own,
+    and the two are unrelated. A frame a few ms before a segment's first pose is
+    that segment's first frame; without the slack it belongs to nothing, and the
+    frame page reports no ground truth for it.
+    """
+    if frame_ts is None or len(frame_ts) < 2:
+        return 0.0
+    return 0.5 * float(np.median(np.diff(frame_ts)))
+
+
+def segment_bounds(frame_ts: np.ndarray | None, segments: list[Segment]) -> list[tuple[float, float]]:
+    """Each segment's time span widened to nearest-frame edges.
+
+    Widened by :func:`frame_slack`, but never past the midpoint of the gap to a
+    neighbour, so no frame is ever claimed by two segments -- segments share no
+    reference frame, so a frame in both would be in neither.
+    """
+    slack = frame_slack(frame_ts)
+    bounds: list[tuple[float, float]] = []
+    for i, seg in enumerate(segments):
+        lo = slack if i == 0 else min(slack, max(0.0, (seg.start_ts - segments[i - 1].end_ts) / 2.0))
+        hi = slack if i == len(segments) - 1 else min(slack, max(0.0, (segments[i + 1].start_ts - seg.end_ts) / 2.0))
+        bounds.append((seg.start_ts - lo, seg.end_ts + hi))
+    return bounds
+
+
 def windows_for_scene(
     frame_ts: np.ndarray | None,
     segments: list[Segment],
@@ -138,9 +167,9 @@ def windows_for_scene(
     windows: list[Window] = []
 
     if frame_ts is not None and len(frame_ts) and segments:
-        for seg in segments:
-            lo = int(np.searchsorted(frame_ts, seg.start_ts, side="left"))
-            hi = int(np.searchsorted(frame_ts, seg.end_ts, side="right"))
+        for seg, (lo_ts, hi_ts) in zip(segments, segment_bounds(frame_ts, segments)):
+            lo = int(np.searchsorted(frame_ts, lo_ts, side="left"))
+            hi = int(np.searchsorted(frame_ts, hi_ts, side="right"))
             if hi - lo < MIN_WINDOW_FRAMES:
                 continue
             chunks = _chunk_ranges(lo, hi, max_frames)
@@ -264,6 +293,11 @@ def segment_of_frame(frame_ts: np.ndarray | None, segments: list[Segment], index
     for seg in segments:
         if seg.start_ts <= t <= seg.end_ts:
             return seg
+    # Nothing contains it outright: a frame just off an edge is still that
+    # segment's, on the widened bounds (see ``segment_bounds``).
+    for seg, (lo, hi) in zip(segments, segment_bounds(frame_ts, segments)):
+        if lo <= t <= hi:
+            return seg
     return None
 
 
@@ -311,8 +345,8 @@ def single_frame_window(
 def frames_covered_by_segments(frame_ts: np.ndarray, segments: list[Segment]) -> np.ndarray:
     """Boolean mask of frames that fall inside some ground-truth segment."""
     covered = np.zeros(len(frame_ts), dtype=bool)
-    for seg in segments:
-        lo = np.searchsorted(frame_ts, seg.start_ts, side="left")
-        hi = np.searchsorted(frame_ts, seg.end_ts, side="right")
+    for lo_ts, hi_ts in segment_bounds(frame_ts, segments):
+        lo = np.searchsorted(frame_ts, lo_ts, side="left")
+        hi = np.searchsorted(frame_ts, hi_ts, side="right")
         covered[lo:hi] = True
     return covered

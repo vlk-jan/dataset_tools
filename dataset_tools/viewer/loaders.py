@@ -284,7 +284,7 @@ def quat_slerp(q0: np.ndarray, q1: np.ndarray, t: np.ndarray) -> np.ndarray:
 
 
 def interpolate_poses(
-    src_ts: np.ndarray, src_poses: np.ndarray, query_ts: np.ndarray
+    src_ts: np.ndarray, src_poses: np.ndarray, query_ts: np.ndarray, tol: float = 0.0
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Interpolate a pose track at arbitrary times.
 
@@ -292,10 +292,12 @@ def interpolate_poses(
     ``(positions (M, 3), quaternions (M, 4), valid (M,) bool)``; ``valid`` is
     False for query times outside ``[src_ts[0], src_ts[-1]]`` (those entries
     hold the clamped endpoint pose so callers can still render something, but
-    must not treat them as ground truth).
+    must not treat them as ground truth). ``tol`` widens that span: the pose and
+    frame clocks are unrelated, so a frame a few ms outside it is still on the
+    track, not off it.
     """
     query_ts = np.asarray(query_ts, dtype=np.float64)
-    valid = (query_ts >= src_ts[0]) & (query_ts <= src_ts[-1])
+    valid = (query_ts >= src_ts[0] - tol) & (query_ts <= src_ts[-1] + tol)
     hi = np.clip(np.searchsorted(src_ts, query_ts, side="left"), 1, len(src_ts) - 1)
     lo = hi - 1
     span = src_ts[hi] - src_ts[lo]
