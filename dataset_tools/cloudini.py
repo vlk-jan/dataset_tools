@@ -1,4 +1,4 @@
-"""ctypes wrapper for libcloudini_shim.so — decodes cloudini-compressed point
+"""ctypes wrapper for libcloudini_shim.so -- decodes cloudini-compressed point
 clouds (point_cloud_interfaces/msg/CompressedPointCloud2, as produced by the
 Odin1 unit on HELHEST). Build the shim with cloudini_shim/build_shim.sh."""
 

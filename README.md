@@ -38,7 +38,7 @@ The command-line defaults target the **new** stack; see
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt      # or: pip install -e ".[test]"
+.venv/bin/pip install -e ".[test]"
 ```
 
 Python >= 3.10 (not declared in `pyproject.toml`: colcon's setup.py introspection cannot evaluate `requires-python`). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`,

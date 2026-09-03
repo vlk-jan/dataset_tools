@@ -66,5 +66,10 @@ dataset_tools = ["libcloudini_shim.so"]
 testpaths = ["tests"]
 addopts = "-q"
 
+# 88 described nothing: nineteen files were in violation of it. At 120 all but
+# fourteen lines fit, and those fourteen are two deliberate patterns that do not
+# wrap into anything more readable -- probe.py's artefact table, one aligned
+# declaration per line, and build.py's one-line property accessors, long only
+# because of the trailing `# type: ignore` pragma.
 [tool.black]
-line-length = 88
+line-length = 120
