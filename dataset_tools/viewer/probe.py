@@ -22,14 +22,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .loaders import count_lines, frame_indices_dir, read_segments, read_text
+from .loaders import count_lines, read_segments, read_text
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
 #: "not looked at yet", distinct from "looked, and there is none".
 _UNSET = object()
-
-SCENE_NAME_LEN = 4
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
@@ -265,6 +263,9 @@ class DatasetRoot:
         self._scene_ids: list[str] | None = None
         self._csv_rows: dict[str, dict] | None = None
         self._atlas: dict | None | object = _UNSET
+        #: Set by every fresh probe, cleared by every save: what makes
+        #: ``probe_all`` able to write the cache once instead of once a scene.
+        self._probe_dirty = False
         self._load_probe_cache()
 
     # -- scene discovery ---------------------------------------------------
@@ -368,7 +369,12 @@ class DatasetRoot:
 
     # -- probing -----------------------------------------------------------
 
-    def probe(self, scene_id: str, refresh: bool = False) -> SceneProbe:
+    def probe(self, scene_id: str, refresh: bool = False, persist: bool = True) -> SceneProbe:
+        """Probe one scene, reusing the on-disk cache while its mtime holds.
+
+        ``persist=False`` records the result without writing the cache file;
+        the caller is then responsible for calling :meth:`save_probe_cache`.
+        """
         scene_dir = self.scene_dir(scene_id)
         cached = self._probe_cache.get(scene_id)
         if cached is not None and not refresh:
@@ -382,11 +388,25 @@ class DatasetRoot:
         if row:
             probe.bag = probe.bag or (row.get("bag") or None)
         self._probe_cache[scene_id] = probe
-        self._save_probe_cache()
+        self._probe_dirty = True
+        if persist:
+            self.save_probe_cache()
         return probe
 
     def probe_all(self, refresh: bool = False) -> list[SceneProbe]:
-        return [self.probe(sid, refresh=refresh) for sid in self.scene_ids(refresh=refresh)]
+        """Probe every scene, writing the cache at most once.
+
+        Saving inside the loop rewrote the whole (growing) cache file once per
+        scene, so the first index render of a 43-scene root serialised it 43
+        times -- quadratic in the number of scenes, for one file that only has
+        to be right at the end.
+        """
+        probes = [
+            self.probe(sid, refresh=refresh, persist=False)
+            for sid in self.scene_ids(refresh=refresh)
+        ]
+        self.save_probe_cache()
+        return probes
 
     # -- probe cache persistence ------------------------------------------
 
@@ -410,7 +430,10 @@ class DatasetRoot:
             except TypeError:
                 continue  # cache written by an older version: just re-probe
 
-    def _save_probe_cache(self) -> None:
+    def save_probe_cache(self) -> None:
+        """Write the probe cache, unless nothing has been probed since the last one."""
+        if not self._probe_dirty:
+            return
         payload = {
             "root": str(self.path),
             "format": PROBE_CACHE_FORMAT,
@@ -421,6 +444,7 @@ class DatasetRoot:
         try:
             tmp.write_text(json.dumps(payload))
             tmp.replace(self._probe_cache_path)
+            self._probe_dirty = False
         except OSError as exc:
             logger.debug("cannot persist probe cache: %s", exc)
 

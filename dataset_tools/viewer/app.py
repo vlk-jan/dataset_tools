@@ -182,8 +182,15 @@ def create_app(
     import hashlib
 
     _h = hashlib.sha1()
-    for _f in ("build.py", "wire.py", "app.py"):
-        _h.update(str((Path(__file__).parent / _f).stat().st_mtime_ns).encode())
+    # Every module whose output ends up inside a bundle, not just the three
+    # that write it: a change to how windows are cut (windows.py), how poses
+    # are interpolated (loaders.py) or how cloud colours are chosen (render.py)
+    # changes the bytes at an unchanged URL just as surely as build.py does.
+    for _f in ("build.py", "wire.py", "app.py", "windows.py", "loaders.py", "render.py"):
+        try:
+            _h.update(str((Path(__file__).parent / _f).stat().st_mtime_ns).encode())
+        except OSError:  # pragma: no cover - a zipped/partial install
+            _h.update(_f.encode())
     stamp = _h.hexdigest()[:8]
 
     @app.get("/", response_class=HTMLResponse)
@@ -214,7 +221,11 @@ def create_app(
     ):
         access = _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames)
-        details = await run_in_threadpool(_scene_details, access)
+        # `_scene_details` is deliberately NOT computed here: the page renders
+        # none of it (the four cards below carry the same facts, read through a
+        # memory map instead), and asking for it loaded joint_states.npy,
+        # cmd_vel.npy and joint_setpoints.npy whole on every page view. It
+        # remains what /api/scene/{id} returns, which is where it is read.
         # The thumbnails and the four cards. Cached on the scene handle, so
         # switching tabs does not re-read this scene's small arrays.
         card_page = await run_in_threadpool(build_scene_page, root, access)
@@ -230,8 +241,6 @@ def create_app(
                 "probe": access.probe,
                 "windows": windows,
                 "artefacts": ARTEFACTS,
-                "details": details,
-                "csv": root.csv_rows().get(scene_id, {}),
                 "tab": tab,
                 "frames": frames,
                 "page": card_page,
@@ -442,7 +451,10 @@ def create_app(
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
     async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
         path = state.bundle_dir / scene_id / window_key / opts_key
-        return {"ready": (path / "model.json").is_file(), "path": str(path)}
+        # The same test _ensure_bundle uses. Reporting "ready" for a bundle
+        # written by an older viewer would promise a fetch that in fact blocks
+        # on a full rebuild.
+        return {"ready": _bundle_is_current(path), "path": str(path)}
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
     async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):

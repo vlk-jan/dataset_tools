@@ -1509,3 +1509,76 @@ def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
     body = c.get("/scene/0000/frame/560").text
     assert f"tab=frames&amp;page={560 // FRAMES_PER_PAGE}" not in body
     assert "tab=frames&amp;page=0" in body  # 15 sparse frames: all on page 0
+
+
+def test_probing_a_root_writes_its_cache_once_not_once_per_scene(tmp_path):
+    """`probe_all` rewrote the whole growing cache file after every scene."""
+    root_path = make_root(tmp_path, scenes=("0000", "0001", "0002", "0003"), frames=4)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+
+    writes = []
+    original = probe.DatasetRoot.save_probe_cache
+
+    def counting(self):
+        if self._probe_dirty:
+            writes.append(1)
+        original(self)
+
+    probe.DatasetRoot.save_probe_cache = counting
+    try:
+        assert len(root.probe_all()) == 4
+        assert len(writes) == 1
+        root.probe_all()  # everything cached and unchanged: nothing to write
+        assert len(writes) == 1
+        root.probe("0000", refresh=True)  # a fresh probe still gets persisted
+        assert len(writes) == 2
+    finally:
+        probe.DatasetRoot.save_probe_cache = original
+
+
+def test_the_bundle_stamp_covers_every_module_that_shapes_a_bundle(client):
+    """The stamp is what makes a browser-cached bundle unaddressable after a
+    code change, so it has to cover windowing and pose interpolation too --
+    not only the three modules that write the files out."""
+    import inspect
+
+    from dataset_tools.viewer import app as appmod
+
+    source = inspect.getsource(appmod.create_app)
+    for module in ("build.py", "wire.py", "app.py", "windows.py", "loaders.py", "render.py"):
+        assert f'"{module}"' in source, module
+
+
+def test_the_status_endpoint_agrees_with_what_a_fetch_would_do(client, tmp_path):
+    """Reporting "ready" for a bundle an upgrade has superseded promises a
+    fetch that in fact blocks on a full rebuild."""
+    opts = "40-160000-80-500000-0.1-height"
+    base = f"/api/data/0000/seg000/{opts}/x"
+    assert client.get(f"{base}/status").json()["ready"] is False
+    client.get(f"{base}/meta.json")
+    status = client.get(f"{base}/status").json()
+    assert status["ready"] is True
+
+    meta = Path(status["path"]) / "meta.json"
+    stale = json.loads(meta.read_text())
+    stale["meta_version"] = 0
+    meta.write_text(json.dumps(stale))
+    assert client.get(f"{base}/status").json()["ready"] is False
+
+
+def test_the_scene_page_does_not_read_arrays_it_never_renders(client, tmp_path):
+    """`_scene_details` loads joint_states/cmd_vel whole (no memory map) and
+    the scene template renders none of it -- the four cards carry the same
+    facts, read strided. It stays what /api/scene/{id} returns."""
+    from dataset_tools.viewer import app as appmod
+
+    calls = []
+    original = appmod._scene_details
+    appmod._scene_details = lambda access: (calls.append(access.scene_id), original(access))[1]
+    try:
+        assert client.get("/scene/0000").status_code == 200
+        assert calls == []
+        assert client.get("/api/scene/0000").status_code == 200
+        assert calls == ["0000"]
+    finally:
+        appmod._scene_details = original
