@@ -259,9 +259,11 @@ round-trips, bag discovery / scene selection / `scenes.csv` merging, the scene
 validator, and the viewer (probing, window enumeration, pose interpolation,
 rendering and every route, against synthetic scene directories).
 
-The viewer's tests need its extra; run them from the viewer's virtualenv:
+The viewer's tests need its extra as well as the test extra; run them from the
+viewer's virtualenv:
 
 ```bash
+.venv-viewer/bin/pip install -e ".[viewer,test]"
 .venv-viewer/bin/python -m pytest tests
 ```
 

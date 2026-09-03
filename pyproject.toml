@@ -27,7 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7"]
+# httpx is what starlette's TestClient imports, so the viewer's route tests
+# error at fixture setup without it even though nothing imports it directly.
+test = ["pytest>=7", "httpx>=0.27"]
 # The dataset viewer (dataset_tools.viewer). SimView provides the 3D front-end
 # and the scene format; its "authoring" extra (torch + einops) is what the
 # scene-building API needs, and it is the reason the viewer requires Python
