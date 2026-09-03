@@ -1374,3 +1374,59 @@ def test_every_offered_window_actually_builds(tmp_path):
     assert offered
     for w in offered:
         assert c.get(f"/view/0000/{w['key']}").status_code == 200, w["key"]
+
+
+# --------------------------------------------------------------------------
+# the live segment file, not a stale atlas, decides the timeline
+# --------------------------------------------------------------------------
+
+
+def test_the_atlas_cannot_add_filled_segments_the_live_file_does_not_have(tmp_path):
+    """The segment file is the truth. "No filled segments" is an answer, not a
+    hole to fall through to the atlas with -- a scene re-filtered since the
+    atlas was written used to keep claiming amber v1.1 stretches, on the index
+    card, on the scene timeline and in the card's prose."""
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)
+    atlas_file = root_path / "atlas" / "atlas.json"
+    data = json.loads(atlas_file.read_text())
+    data["scenes"]["0000"]["seg_spans"] = [[0.0, 0.4]]
+    data["scenes"]["0000"]["fill_spans"] = [[0.5, 0.9]]
+    atlas_file.write_text(json.dumps(data))
+
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    p = root.probe("0000")
+    assert p.segment_spans and not p.fill_spans  # the live file has no fills
+
+    from dataset_tools.viewer.index_page import build_row
+    from dataset_tools.viewer.scene_page import ground_truth_card
+    from dataset_tools.viewer.build import SceneAccess
+
+    row = build_row(root, p)
+    assert row["fill_spans"] == []
+    assert row["spans"] == p.segment_spans
+
+    card = ground_truth_card(SceneAccess(root, "0000"), root.atlas_scene("0000"))
+    assert card["timeline"]["fill"] == []
+    assert "filled from v1.1" not in (card["note"] or "")
+
+
+def test_a_filled_span_is_drawn_once_not_twice(tmp_path):
+    """`fill_spans` is a subset of `segment_spans`, so the plain half has to
+    have it removed or a filled stretch gets a green bar under its amber one."""
+    root_path = make_root(tmp_path, segments=False)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[4]:.6f} 40 filtered:pose_jump\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[-1]:.6f} 50 v11_fill:end_of_run\n")
+
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    p = root.probe("0000")
+    assert len(p.segment_spans) == 2 and len(p.fill_spans) == 1
+
+    from dataset_tools.viewer.index_page import build_row
+
+    row = build_row(root, p)
+    assert len(row["spans"]) == 1 and len(row["fill_spans"]) == 1
+    assert row["spans"][0] not in row["fill_spans"]

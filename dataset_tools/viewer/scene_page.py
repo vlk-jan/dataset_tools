@@ -40,6 +40,7 @@ from .index_page import (
     coverage_class,
     fmt_count,
     fmt_duration,
+    segment_timeline,
     stat,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
@@ -359,8 +360,7 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
     if not p.has("odometry") and p.has("transforms"):
         notes.append("Wheel odometry only (transforms.npy): continuous, drifty, not ground truth.")
 
-    fill = p.fill_spans or [list(s) for s in (a.get("fill_spans") or [])]
-    spans = p.segment_spans or [list(s) for s in (a.get("seg_spans") or [])] + fill
+    spans, fill = segment_timeline(p, a)
     if fill:
         notes.append(
             f"{len(fill)} segment{'s' if len(fill) != 1 else ''} (amber) filled from v1.1 "
@@ -375,7 +375,7 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         "badge_title": "fraction of the scene inside a ground-truth segment",
         "stats": stats,
         "timeline": {
-            "spans": [s for s in spans if s not in fill],
+            "spans": spans,
             "fill": fill,
             "label": fmt_duration(p.duration or a.get("dur_s")),
         } if spans else None,

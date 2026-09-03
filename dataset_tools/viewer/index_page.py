@@ -122,6 +122,27 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
     return stats
 
 
+def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> tuple[list, list]:
+    """``(normal spans, filled spans)`` for a scene's ground-truth timeline.
+
+    Both halves come from ONE source. The live segment file wins whenever it
+    produced any span at all, because that file is the truth and the atlas may
+    predate a re-filtering; but "the live file has no filled segments" is an
+    answer, not a hole, so it must not fall through to the atlas's list. Mixing
+    them drew an amber "filled from v1.1" band at atlas coordinates over live
+    spans -- a scene whose fills had since been dropped still claimed them, on
+    the index card, on the scene page's timeline and in its prose.
+    """
+    if probe.segment_spans:
+        # `fill_spans` is a subset of `segment_spans`, so the plain half has to
+        # have it taken out or every filled stretch is drawn twice.
+        spans, fill = list(probe.segment_spans), list(probe.fill_spans)
+    else:
+        fill = [list(s) for s in (atlas_entry.get("fill_spans") or [])]
+        spans = [list(s) for s in (atlas_entry.get("seg_spans") or [])] + fill
+    return [s for s in spans if s not in fill], fill
+
+
 def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[str, str]]:
     """Three thumbnail URLs for a scene, stored ones preferred.
 
@@ -146,11 +167,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     a = root.atlas_scene(probe.scene_id)
     coverage = a.get("cov", probe.segment_coverage)
 
-    # Prefer the live segment file over the curated copy: the file is the truth,
-    # and the atlas may have been generated before a scene was re-filtered.
-    fill = probe.fill_spans or [list(s) for s in (a.get("fill_spans") or [])]
-    spans = probe.segment_spans or [list(s) for s in (a.get("seg_spans") or [])] + fill
-    normal = [s for s in spans if s not in fill]
+    normal, fill = segment_timeline(probe, a)
 
     return {
         "probe": probe,
