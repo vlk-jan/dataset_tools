@@ -113,7 +113,7 @@
 
       <div class="card">
         <h2 style="margin-top:0">Look at it</h2>
-        {% if simview_ok %}
+        {% if simview_ok and frame_window %}
         <p>
           <a class="btn primary" href="/view/{{ scene_id }}/{{ frame_window }}">Visualise this frame</a>
         </p>
@@ -134,8 +134,13 @@
           opening at frame {{ index }} (offset {{ details.window.offset }} inside the window).
         </p>
         {% endif %}
-        {% else %}
+        {% elif not simview_ok %}
         <p class="warn" style="margin:0">simview's assets are not installed, so no 3D view is available.</p>
+        {% else %}
+        <p class="warn" style="margin:0">
+          This frame is past the end of <code>data_ts.txt</code>, so it has no timestamp
+          to place it on the playback clock and there is nothing 3D to build for it.
+        </p>
         {% endif %}
       </div>
     </div>

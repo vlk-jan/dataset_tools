@@ -1292,3 +1292,85 @@ def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
     posed = {b["name"] for b in states["bodies"]}
     assert "robot" in posed
     assert "lidar_cloud" not in posed
+
+
+# --------------------------------------------------------------------------
+# a scene whose per-frame directories outrun its timestamp file
+# --------------------------------------------------------------------------
+
+
+def _root_with_untimestamped_frames(tmp_path: Path, timestamped: int = 8, extra: int = 6) -> Path:
+    """A root mid-extraction: more images on disk than lines in data_ts.txt.
+
+    Exactly what ``probe`` warns about ("per-frame counts disagree"), and what
+    the module docstrings promise the viewer degrades gracefully for.
+    """
+    root_path = make_root(tmp_path, frames=timestamped, segments=False, with_transforms=False)
+    scene = root_path / "0000"
+    for i in range(timestamped, timestamped + extra):
+        _write_png(scene / "images" / f"{i:05d}.png")
+    return root_path
+
+
+def test_no_window_reaches_past_the_end_of_the_timestamp_file(tmp_path):
+    """A frame with no timestamp has no place on the playback clock, so no
+    window may contain one -- a window made only of such frames used to be
+    offered, built zero frames and died with an IndexError (HTTP 500)."""
+    root = probe.DatasetRoot(_root_with_untimestamped_frames(tmp_path), cache_dir=tmp_path / "c")
+    p = root.probe("0000")
+    assert p.n_frames == 14 and p.counts["data_ts"] == 8  # the disagreement
+    assert any("counts disagree" in w for w in p.warnings)
+
+    ws = windows.windows_for_scene(
+        np.arange(8, dtype=np.float64), [], p.n_frames, has_transforms=False, max_frames=4
+    )
+    assert ws, "the scene still offers windows"
+    assert max(w.frame_end for w in ws) == 8
+
+
+def test_a_frame_with_no_timestamp_has_no_single_frame_window(tmp_path):
+    root = probe.DatasetRoot(_root_with_untimestamped_frames(tmp_path), cache_dir=tmp_path / "c")
+    from dataset_tools.viewer.build import SceneAccess
+
+    access = SceneAccess(root, "0000")
+    assert access.window(windows.frame_window_key(3), 1500) is not None
+    assert access.window(windows.frame_window_key(10), 1500) is None
+
+
+def test_an_untimestamped_frame_is_a_404_and_its_page_says_why(tmp_path):
+    """Not a 500: the frame page still renders (the image is on disk), it just
+    does not offer a 3D view it cannot build."""
+    pytest.importorskip("simview")
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = _root_with_untimestamped_frames(tmp_path)
+    c = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+
+    page = c.get("/scene/0000/frame/10")
+    assert page.status_code == 200
+    assert "Visualise this frame" not in page.text
+    assert "past the end of" in page.text
+    assert c.get("/view/0000/frame00010").status_code == 404
+
+    ok = c.get("/scene/0000/frame/3")
+    assert "Visualise this frame" in ok.text
+    assert c.get("/view/0000/frame00003").status_code == 200
+
+
+def test_every_offered_window_actually_builds(tmp_path):
+    """The windows table is a list of buttons; every one of them must work."""
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = _root_with_untimestamped_frames(tmp_path)
+    c = TestClient(create_app(root_path, max_frames=4, cache_dir=tmp_path / "cache"))
+    offered = c.get("/api/scene/0000").json()["windows"]
+    assert offered
+    for w in offered:
+        assert c.get(f"/view/0000/{w['key']}").status_code == 200, w["key"]

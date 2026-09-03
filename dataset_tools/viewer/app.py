@@ -255,6 +255,10 @@ def create_app(
         if index < 0 or (n_frames and index >= n_frames):
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
         details = await run_in_threadpool(_frame_details, access, index, state.max_frames)
+        # A frame past the end of data_ts.txt has no clock to sit on, so there
+        # is no single-frame window to build for it; offering the button anyway
+        # led straight to a 500.
+        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames)
         return templates.TemplateResponse(
             request=request,
             name="frame.html",
@@ -265,7 +269,7 @@ def create_app(
                 "probe": access.probe,
                 "details": details,
                 "simview_ok": simview_ok,
-                "frame_window": frame_window_key(index),
+                "frame_window": single.key if single is not None else None,
             },
         )
 

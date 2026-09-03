@@ -75,6 +75,13 @@ Segments longer than `--max-frames` (default 1500) are split into consecutive
 parts, so building one window reads a bounded number of files no matter how long
 the scene is.
 
+No window reaches past the last line of `data_ts.txt`. A scene's frame count is
+the largest of several counts that can disagree — a directory built in flight
+has more images on disk than the timestamp file has lines — and a frame with no
+timestamp has no place on the playback clock, so there is nothing to build for
+it. Such a frame still gets its own page (the image and the cloud are there);
+it just does not offer a 3D view.
+
 ## What each file turns into
 
 | file | in the viewer |

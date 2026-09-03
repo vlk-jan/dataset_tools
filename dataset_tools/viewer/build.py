@@ -70,14 +70,19 @@ WHEELS = {
 WHEEL_LABELS = ("left", "rear", "right")
 
 #: Bumped whenever :func:`build_scene`'s ``meta`` payload gains or changes a
-#: field the overlay reads.
+#: field the overlay reads -- or whenever the same window *key* comes to mean a
+#: different range of frames.
 #:
 #: A built window is cached on disk under ``<scene>/<window>/<options>`` --
 #: keyed by what was *asked for*, which does not change when the code that
 #: answers changes. Without a version in the file itself, a viewer upgrade
 #: would go on serving yesterday's ``meta.json`` for every window anyone had
 #: already opened, and the new field would silently never appear.
-META_VERSION = 3
+#:
+#: 4: the whole-scene fallback is now bounded by ``data_ts.txt`` rather than by
+#:    the frame count, so on a scene whose per-frame directories outrun its
+#:    timestamps a key like ``raw.0`` covers fewer frames than it used to.
+META_VERSION = 4
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -864,6 +869,15 @@ def build_scene(
     if frame_ts is None or len(frame_ts) == 0:
         raise ValueError(f"scene {scene_id} has no frame timestamps")
     frames = frames[frames < len(frame_ts)]
+    if len(frames) == 0:
+        # Only reachable for a window whose whole range is past the end of the
+        # timestamp track; `windows` refuses to enumerate one, so this is the
+        # guard for a hand-typed key rather than a path the UI can take.
+        raise KeyError(
+            f"scene {scene_id} window {window_key!r} covers frames "
+            f"{window.frame_start}-{window.frame_end - 1}, none of which has a "
+            f"timestamp ({len(frame_ts)} in data_ts.txt)"
+        )
     abs_times = frame_ts[frames]
     times = abs_times - abs_times[0]
 
