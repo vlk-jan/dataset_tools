@@ -46,16 +46,20 @@ Python >= 3.10 (not declared in `pyproject.toml`: colcon's setup.py introspectio
 
 ### Container (CTU cluster)
 
-The `.venv` in this repository was built with the container's Python 3.12, so
-it has to be run through the container. Note the **`--bind /mnt/data`**: the
-data share is not mounted inside the container by default, and neither the
-bags nor the dataset are reachable without it.
+Build the venv with the container's own Python, then run everything through the
+container. Note the **`--bind`**: the data shares are not mounted inside it by
+default, so neither the bags nor the dataset are reachable without them.
 
 ```bash
-singularity exec --bind /mnt/data /mnt/data/vras/data/helhest-jazzy.sif \
-    /home/vlkjan6/projects/dataset_tools/.venv/bin/python \
-    -m dataset_tools.extract_data <bags> <output> --jobs 8
+SIF=/mnt/data/vras/data/helhest-jazzy.sif
+singularity exec --bind /mnt/data $SIF python3 -m venv .venv
+singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[test]"
+singularity exec --bind /mnt/data $SIF \
+    .venv/bin/python -m dataset_tools.extract_data <bags> <output> --jobs 8
 ```
+
+The `.venv` is not in the repository (it is gitignored) -- `slurm_extract.batch`
+and the Slurm example below both expect one built this way at `$REPO/.venv`.
 
 Add further `--bind` options for any other filesystem you read or write
 (e.g. `--bind /mnt/personal`).
@@ -249,7 +253,7 @@ one stopped.
 No bags are needed; everything runs on synthetic data.
 
 ```bash
-.venv/bin/pip install pytest
+.venv/bin/pip install -e ".[test]"
 .venv/bin/python -m pytest tests
 ```
 
@@ -259,8 +263,8 @@ round-trips, bag discovery / scene selection / `scenes.csv` merging, the scene
 validator, and the viewer (probing, window enumeration, pose interpolation,
 rendering and every route, against synthetic scene directories).
 
-The viewer's tests need its extra as well as the test extra; run them from the
-viewer's virtualenv:
+The viewer's tests need its extra too, and with it Python 3.12+; run them from
+the viewer's own virtualenv:
 
 ```bash
 .venv-viewer/bin/pip install -e ".[viewer,test]"

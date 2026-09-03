@@ -40,6 +40,12 @@ the cache directory -- so it is safe to point at a read-only or shared copy.
 Start at the index, click a scene id for its inventory and window list, then a
 window to open the 3D view. Nothing else needs configuring.
 
+A view opens with the camera aimed at the robot, wherever in the window it
+starts -- which is not always the origin, since the later parts of a split
+segment carry on from where the previous part ended. Opening a window from a
+frame's own page (`?frame=N`) seeks the playhead to that frame rather than to
+the window's start.
+
 ## It follows the file structure, not the rig
 
 Nothing in the viewer is specific to a sensor generation. A scene is any
