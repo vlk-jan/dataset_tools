@@ -5,7 +5,7 @@ __pycache__/
 *.so
 cloudini_shim/build/
 cloudini_shim/cloudini/
-slurm_out/
+slurm/slurm_out/
 
 # Python packaging / test artefacts
 build/

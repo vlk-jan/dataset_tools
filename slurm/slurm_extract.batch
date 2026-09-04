@@ -7,8 +7,8 @@
 #SBATCH --mem=64G
 #SBATCH --time=4:00:00
 #SBATCH --partition=cpufast
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.out
-#SBATCH --error=/home/vlkjan6/projects/dataset_tools/slurm_out/extract_%j.err
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/extract_%j.out
+#SBATCH --error=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/extract_%j.err
 
 set -euo pipefail
 

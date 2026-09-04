@@ -6,8 +6,8 @@
 #SBATCH --mem=32G
 #SBATCH --time=8:00:00
 #SBATCH --partition=cpu
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/viewer_%j.out
-#
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/viewer_%j.out
+
 # Run the dataset viewer on a compute node instead of the login node, and reach
 # it from a laptop over an SSH tunnel.
 #

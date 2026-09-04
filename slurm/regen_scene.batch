@@ -6,8 +6,8 @@
 #SBATCH --mem=32G
 #SBATCH --time=8:00:00
 #SBATCH --partition=cpu
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/regen_%A_%a.out
-#
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/regen_%A_%a.out
+
 # HELHEST v1 odometry regeneration + re-extraction, ONE SCENE PER ARRAY TASK,
 # staged entirely on node-local NVMe so the shared NFS is touched only for the
 # sif, the workspace, and one final rsync of the finished scene. Rationale: a
