@@ -1,0 +1,79 @@
+#!/bin/bash
+#SBATCH --job-name=helhest_viewer
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=8:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm_out/viewer_%j.out
+#
+# Run the dataset viewer on a compute node instead of the login node, and reach
+# it from a laptop over an SSH tunnel.
+#
+#   sbatch slurm/viewer.batch [dataset_root]
+#   scripts/viewer_connect.sh          # from the laptop, opens the tunnel
+#
+# The node's sshd runs pam_slurm_adopt: you may ssh to a node only while you
+# have a job on it, which is exactly what this job provides. So the tunnel is
+#
+#   ssh -J login3.rci.cvut.cz -L 8080:127.0.0.1:<port> <node>
+#
+# and the forward's endpoint is resolved on the node, inside the ssh channel --
+# nothing has to be reachable between login3 and the node by plain TCP. This
+# works on any cpu* partition (they share nodes n01-n33); pick by walltime:
+# cpufast 4 h, cpu 1 d, cpulong 3 d, cpuextralong 42 d. Override on the command
+# line, e.g. `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`.
+#
+# The viewer binds 127.0.0.1 deliberately: the cluster network is shared, and
+# the tunnel does not need the port exposed on it.
+set -uo pipefail
+
+REPO=/home/vlkjan6/projects/dataset_tools
+ROOT=${1:-/mnt/personal/vlkjan6/HELHEST_v1_3}
+VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
+
+# Built windows are cached per (scene, window, options), so a cache that
+# outlives the job means each window is built once and every later session
+# opens it instantly. Keep it off $HOME (quota) and off node-local disk (which
+# is wiped between jobs). VIEWER_CACHE overrides.
+CACHE=${VIEWER_CACHE:-/mnt/personal/vlkjan6/viewer_cache}
+
+[ -d "$ROOT" ] || { echo "no dataset root at $ROOT"; exit 1; }
+[ -x "$VIEWER" ] || { echo "no viewer venv at $VIEWER -- build it with:
+    cd $REPO && uv venv --python 3.12 .venv-viewer && .venv-viewer/bin/pip install -e '.[viewer]'"; exit 1; }
+mkdir -p "$CACHE" || { echo "cannot write cache dir $CACHE"; exit 1; }
+
+# Several viewers can share a node, so take the first free port rather than a
+# fixed one. Start from a job-derived offset to keep concurrent jobs apart.
+port_taken() { (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null; }
+PORT=""
+base=$((8080 + SLURM_JOB_ID % 100))
+for p in $(seq "$base" $((base + 99))); do
+    port_taken "$p" || { PORT=$p; break; }
+done
+[ -n "$PORT" ] || { echo "no free port in $base-$((base + 99))"; exit 1; }
+
+# scripts/viewer_connect.sh reads this; the .out below says the same thing.
+# Not `exec` below, and the trap covers TERM: scancel and the walltime both
+# arrive as a signal, and an exec'd viewer would leave the file behind.
+CONN="$REPO/slurm_out/viewer_${SLURM_JOB_ID}.conn"
+echo "$(hostname -s) $PORT" > "$CONN"
+trap 'rm -f "$CONN"' EXIT TERM INT
+
+cat <<EOF
+[$(date '+%F %T')] viewer job $SLURM_JOB_ID on $(hostname -s), port $PORT
+  root  $ROOT
+  cache $CACHE
+  time  $(squeue -h -j "$SLURM_JOB_ID" -o %L 2>/dev/null) remaining
+
+From your laptop:
+
+  ssh -N -J login3.rci.cvut.cz -L 8080:127.0.0.1:$PORT $(hostname -s)
+
+then open http://127.0.0.1:8080/ -- or just run scripts/viewer_connect.sh,
+which finds this job and does the same. The tunnel dies with the job.
+EOF
+
+"$VIEWER" "$ROOT" --host 127.0.0.1 --port "$PORT" --cache-dir "$CACHE" &
+wait $!
