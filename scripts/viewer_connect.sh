@@ -26,9 +26,9 @@ if [ -z "$JOB" ]; then
         echo "no viewer running yet; queued:"; echo "$pend"
     else
         echo "no viewer job. Start one with:"
-        # mkdir: slurm_out is untracked, and sbatch fails outright if the
+        # mkdir: slurm/slurm_out is untracked, and sbatch fails outright if the
         # directory its --output names is missing.
-        echo "  ssh $LOGIN 'cd $REPO && mkdir -p slurm_out && sbatch slurm/viewer.batch'"
+        echo "  ssh $LOGIN 'cd $REPO && mkdir -p slurm/slurm_out && sbatch slurm/viewer.batch'"
     fi
     exit 1
 fi
@@ -42,9 +42,9 @@ NODE_SSH=(-o BatchMode=yes
           -o UserKnownHostsFile="$NODE_HOSTS $HOME/.ssh/known_hosts"
           -o StrictHostKeyChecking=accept-new)
 
-conn=$(ssh -o BatchMode=yes "$LOGIN" "cat $REPO/slurm_out/viewer_$JOB.conn" 2>/dev/null)
+conn=$(ssh -o BatchMode=yes "$LOGIN" "cat $REPO/slurm/slurm_out/viewer_$JOB.conn" 2>/dev/null)
 if [ -z "$conn" ]; then
-    # slurm_out is untracked, so a `git clean` or a purge can take the .conn
+    # slurm/slurm_out is untracked, so a `git clean` or a purge can take the .conn
     # file out from under a job that is still happily serving. Ask slurm which
     # node, and the node which port the viewer is listening on.
     node=$(ssh -o BatchMode=yes "$LOGIN" \
@@ -58,7 +58,7 @@ if [ -z "$conn" ]; then
          [ -n "$pid" ] && ss -ltnpH 2>/dev/null | grep -o "127.0.0.1:[0-9]*.*pid=$pid," |
              head -1 | cut -d: -f2 | cut -d" " -f1' 2>/dev/null)
     [ -n "$port" ] || { echo "job $JOB runs on $node but publishes no port -- viewer not up?"; exit 1; }
-    echo "no slurm_out/viewer_$JOB.conn; found the viewer on $node:$port instead."
+    echo "no slurm/slurm_out/viewer_$JOB.conn; found the viewer on $node:$port instead."
 else
     node=${conn%% *}
     port=${conn##* }

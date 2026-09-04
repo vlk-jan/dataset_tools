@@ -41,7 +41,7 @@ CACHE=${VIEWER_CACHE:-/mnt/personal/vlkjan6/viewer_cache}
 
 [ -d "$ROOT" ] || { echo "no dataset root at $ROOT"; exit 1; }
 [ -x "$VIEWER" ] || { echo "no viewer venv at $VIEWER -- build it with:
-    cd $REPO && uv venv --python 3.12 .venv-viewer && .venv-viewer/bin/pip install -e '.[viewer]'"; exit 1; }
+    cd $REPO && uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e '.[viewer]'"; exit 1; }
 mkdir -p "$CACHE" || { echo "cannot write cache dir $CACHE"; exit 1; }
 
 # Several viewers can share a node, so take the first free port rather than a
@@ -57,7 +57,7 @@ done
 # scripts/viewer_connect.sh reads this; the .out below says the same thing.
 # Not `exec` below, and the trap covers TERM: scancel and the walltime both
 # arrive as a signal, and an exec'd viewer would leave the file behind.
-CONN="$REPO/slurm_out/viewer_${SLURM_JOB_ID}.conn"
+CONN="$REPO/slurm/slurm_out/viewer_${SLURM_JOB_ID}.conn"
 echo "$(hostname -s) $PORT" > "$CONN"
 trap 'rm -f "$CONN"' EXIT TERM INT
 
