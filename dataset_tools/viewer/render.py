@@ -69,7 +69,7 @@ VALIDITY_COLORS = np.array(
 #:
 #: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
 #: than imported: ``build`` imports *this* module, so importing back would be a
-#: cycle. ``tests/test_viewer.py`` asserts the two stay in agreement.
+#: cycle. ``tests/test_viewer_app.py`` asserts the two stay in agreement.
 ROBOT_CHASSIS_HALF = (0.5, 0.3)  # half length (x), half width (y)
 ROBOT_WHEEL_RADIUS = 0.3685
 ROBOT_WHEEL_WIDTH = 0.142

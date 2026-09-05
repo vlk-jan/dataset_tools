@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -83,7 +84,13 @@ class _ImmutableStatic(StaticFiles):
 logger = logging.getLogger("dataset_tools.viewer.app")
 
 HERE = Path(__file__).parent
-IMMUTABLE = {"Cache-Control": "public, max-age=86400"}
+#: Per-frame renders of files that never change once extracted.
+DAY_CACHE = {"Cache-Control": "public, max-age=86400"}
+#: The shapes a window key (``windows.py``) and a build-options key
+#: (``BuildOptions.cache_key``) can take. Both are URL segments that end up in
+#: a cache *path*, so anything else is refused before a path is formed.
+WINDOW_KEY_RE = re.compile(r"^(seg\d+(\.\d+)?|raw(\.\d+)?|frame\d+)$")
+OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 #: Stored atlas thumbnails are curated files that only change when someone
 #: regenerates them by hand, and the index asks for 129 of them at once.
 CURATED = {"Cache-Control": "public, max-age=31536000, immutable"}
@@ -107,9 +114,7 @@ def _simview_version() -> str:
 class ViewerState:
     """Shared, per-process state: the dataset root, caches and build locks."""
 
-    def __init__(
-        self, root: DatasetRoot, max_frames: int, cache_scenes: int = 4
-    ) -> None:
+    def __init__(self, root: DatasetRoot, max_frames: int, cache_scenes: int = 4) -> None:
         self.root = root
         self.max_frames = max_frames
         self._access: dict[str, SceneAccess] = {}
@@ -268,11 +273,7 @@ def create_app(
         card_page = await run_in_threadpool(build_scene_page, root, access)
         # The frame strip is only assembled when it is the tab being shown: it
         # is the one part of this page that may list a directory.
-        frames = (
-            await run_in_threadpool(_frame_page, access, page)
-            if tab == "frames"
-            else None
-        )
+        frames = await run_in_threadpool(_frame_page, access, page) if tab == "frames" else None
         scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return templates.TemplateResponse(
             request=request,
@@ -289,9 +290,7 @@ def create_app(
                 "atlas": root.atlas_scene(scene_id),
                 "notes": scene_notes,
                 "notes_status": notes_store.status(),
-                "notes_stale": await run_in_threadpool(
-                    notes_store.stale_version, scene_id
-                ),
+                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
                 # Which windows a note lands in, so the table says where the
                 # flagged stretches are without anyone reading every note.
                 "notes_per_window": _notes_per_window(scene_notes, windows),
@@ -305,9 +304,7 @@ def create_app(
 
         access = _access_or_404(state, scene_id)
         last = max(0, access.probe.n_frames - 1)
-        return RedirectResponse(
-            f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303
-        )
+        return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
 
     @app.get("/scene/{scene_id}/frame/{index}", response_class=HTMLResponse)
     async def frame_page(request: Request, scene_id: str, index: int):
@@ -315,15 +312,11 @@ def create_app(
         n_frames = access.probe.n_frames
         if index < 0 or (n_frames and index >= n_frames):
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
-        details = await run_in_threadpool(
-            _frame_details, access, index, state.max_frames
-        )
+        details = await run_in_threadpool(_frame_details, access, index, state.max_frames)
         # A frame past the end of data_ts.txt has no clock to sit on, so there
         # is no single-frame window to build for it; offering the button anyway
         # led straight to a 500.
-        single = await run_in_threadpool(
-            access.window, frame_window_key(index), state.max_frames
-        )
+        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames)
         return templates.TemplateResponse(
             request=request,
             name="frame.html",
@@ -390,9 +383,7 @@ def create_app(
             '<link rel="stylesheet" href="/viewer-static/overlay.css">'
             f"<script>window.__dtViewer = {config};</script>"
         )
-        body = (
-            overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
-        )
+        body = overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
         page = await run_in_threadpool(
             render_viewer_page,
             f"/simview-static/{_simview_version()}",
@@ -436,17 +427,13 @@ def create_app(
         return await run_in_threadpool(_frame_info, access, index)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/image.jpg")
-    async def api_frame_image(
-        scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)
-    ):
+    async def api_frame_image(scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)):
         access = _access_or_404(state, scene_id)
         path = access.frame_path("images", index)
-        data = await run_in_threadpool(
-            _safe_render, render.render_camera_image, path, w
-        )
+        data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
         if data is None:
             raise HTTPException(404, f"no image for frame {index}")
-        return Response(data, media_type="image/jpeg", headers=IMMUTABLE)
+        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
 
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
@@ -479,29 +466,23 @@ def create_app(
                 available = sorted(access.available_frames("images"))
                 if not available:
                     return None
-                path = access.frame_path(
-                    "images", min(available, key=lambda i: abs(i - index))
-                )
+                path = access.frame_path("images", min(available, key=lambda i: abs(i - index)))
             return _safe_render(render.render_camera_image, path, 384)
 
         data = await run_in_threadpool(work)
         if data is None:
             raise HTTPException(404, f"no image to thumbnail for scene {scene_id}")
-        return Response(data, media_type="image/jpeg", headers=IMMUTABLE)
+        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(
-            access, index, "height_maps", "height_map", render.render_height_map
-        )
+        return await _npz_png(access, index, "height_maps", "height_map", render.render_height_map)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(
-            access, index, "height_masks", "validity", render.render_validity
-        )
+        return await _npz_png(access, index, "height_masks", "validity", render.render_validity)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
@@ -517,7 +498,7 @@ def create_app(
         data = await run_in_threadpool(work)
         if data is None:
             raise HTTPException(404, f"no cloud for frame {index}")
-        return Response(data, media_type="image/png", headers=IMMUTABLE)
+        return Response(data, media_type="image/png", headers=DAY_CACHE)
 
     # ------------------------------------------------------------------ notes
 
@@ -536,9 +517,7 @@ def create_app(
             "n_frames": access.probe.n_frames,
             "notes": [n.to_json() for n in scene_notes],
             "status": notes_store.status(),
-            "stale_version": await run_in_threadpool(
-                notes_store.stale_version, scene_id
-            ),
+            "stale_version": await run_in_threadpool(notes_store.stale_version, scene_id),
         }
 
     @app.post("/api/scene/{scene_id}/notes", status_code=201)
@@ -585,9 +564,7 @@ def create_app(
     @app.delete("/api/scene/{scene_id}/notes/{note_id}")
     async def api_delete_note(scene_id: str, note_id: str):
         _access_or_404(state, scene_id)
-        removed = await _notes_write(
-            state, scene_id, notes_store.delete, scene_id, note_id
-        )
+        removed = await _notes_write(state, scene_id, notes_store.delete, scene_id, note_id)
         if not removed:
             raise HTTPException(404, f"scene {scene_id} has no note {note_id!r}")
         return {"deleted": note_id}
@@ -595,19 +572,15 @@ def create_app(
     # ------------------------------------------------------------ scene data
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
-    async def api_status(
-        request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str
-    ):
-        path = state.bundle_dir / scene_id / window_key / opts_key
+    async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
+        path = _bundle_path(state, scene_id, window_key, opts_key)
         # The same test _ensure_bundle uses. Reporting "ready" for a bundle
         # written by an older viewer would promise a fetch that in fact blocks
         # on a full rebuild.
         return {"ready": _bundle_is_current(path), "path": str(path)}
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
-    async def api_meta(
-        request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str
-    ):
+    async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "meta.json", media_type="application/json")
 
@@ -622,9 +595,7 @@ def create_app(
         return FileResponse(bundle / "states.json", media_type="application/json")
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/blob/{blob_id}")
-    async def api_blob(
-        scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str
-    ):
+    async def api_blob(scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str):
         if not blob_id.isdigit():
             raise HTTPException(404, "bad blob id")
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
@@ -666,7 +637,7 @@ def _frames_from_payload(payload: dict) -> tuple[int, int]:
     the overlay sends when you mark the frame you are paused on.
     """
     frames = payload.get("frames")
-    if isinstance(frames, (list, tuple)) and len(frames) == 2:
+    if isinstance(frames, list | tuple) and len(frames) == 2:
         start, end = frames
     elif "frame" in payload:
         start = end = payload["frame"]
@@ -682,7 +653,7 @@ def _frames_from_payload(payload: dict) -> tuple[int, int]:
 def _optional_frames(payload: dict) -> tuple[int | None, int | None]:
     """The ends of a range an edit names, ``None`` for each one it leaves alone."""
     frames = payload.get("frames")
-    if isinstance(frames, (list, tuple)) and len(frames) == 2:
+    if isinstance(frames, list | tuple) and len(frames) == 2:
         pair = list(frames)
     else:
         pair = [payload.get("frame_start"), payload.get("frame_end")]
@@ -717,10 +688,14 @@ def _notes_per_window(notes: list, windows: list) -> dict[str, list]:
     spans a segment boundary legitimately shows up under both windows, since
     both are stretches you would want warned about when you open them.
     """
-    return {
-        w.key: [n for n in notes if n.overlaps(w.frame_start, w.frame_end)]
-        for w in windows
-    }
+    return {w.key: [n for n in notes if n.overlaps(w.frame_start, w.frame_end)] for w in windows}
+
+
+def _bundle_path(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
+    """The on-disk bundle directory for a request, after checking its parts."""
+    if not scene_id.isdigit() or not WINDOW_KEY_RE.match(window_key) or not OPTS_KEY_RE.match(opts_key):
+        raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
+    return state.bundle_dir / scene_id / window_key / opts_key
 
 
 def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
@@ -740,9 +715,7 @@ def _defer_main_script(page: str) -> str:
     """
     import re
 
-    match = re.search(
-        r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page
-    )
+    match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
     if not match:
         logger.warning("could not find simview's main.js script tag; loading it inline")
         return page
@@ -810,16 +783,14 @@ def _bundle_is_current(dest: Path) -> bool:
     return meta.get("meta_version") == META_VERSION
 
 
-async def _ensure_bundle(
-    state: ViewerState, scene_id: str, window_key: str, opts_key: str
-) -> Path:
+async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
     """Return the on-disk bundle for a window, building it if necessary.
 
     One lock per bundle key: several browser fetches for the same window arrive
     together (model, states, then every blob), and without it they would each
     kick off their own build of the same thing.
     """
-    dest = state.bundle_dir / scene_id / window_key / opts_key
+    dest = _bundle_path(state, scene_id, window_key, opts_key)
     if _bundle_is_current(dest):
         return dest
 
@@ -830,9 +801,7 @@ async def _ensure_bundle(
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(
-                state.root, scene_id, window_key, opts, max_frames=state.max_frames
-            )
+            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames)
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
@@ -854,14 +823,10 @@ async def _ensure_bundle(
             raise HTTPException(404, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser
             logger.exception("build failed for %s/%s", scene_id, window_key)
-            raise HTTPException(
-                500, f"build failed: {type(exc).__name__}: {exc}"
-            ) from exc
+            raise HTTPException(500, f"build failed: {type(exc).__name__}: {exc}") from exc
 
 
-async def _npz_png(
-    access: SceneAccess, index: int, kind: str, key: str, renderer
-) -> Response:
+async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
     from .loaders import load_npz_key
 
     def work():
@@ -871,7 +836,7 @@ async def _npz_png(
     data = await run_in_threadpool(work)
     if data is None:
         raise HTTPException(404, f"no {kind} for frame {index}")
-    return Response(data, media_type="image/png", headers=IMMUTABLE)
+    return Response(data, media_type="image/png", headers=DAY_CACHE)
 
 
 def _safe_render(fn, *args):
@@ -911,9 +876,7 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
     ts = access.frame_ts
     if ts is not None and len(ts) > 1:
         diffs = np.diff(ts)
-        details["frame_rate_hz"] = (
-            round(float(1.0 / np.median(diffs)), 2) if np.median(diffs) > 0 else None
-        )
+        details["frame_rate_hz"] = round(float(1.0 / np.median(diffs)), 2) if np.median(diffs) > 0 else None
         details["duration_s"] = round(float(ts[-1] - ts[0]), 1)
     for key in ("joint_states", "cmd_vel", "joint_setpoints"):
         arr = getattr(access, key)
@@ -921,9 +884,7 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
             details[f"{key}_shape"] = list(arr.shape)
             if arr.ndim == 2 and arr.shape[0] > 1:
                 span = float(arr[-1, 0] - arr[0, 0])
-                details[f"{key}_rate_hz"] = (
-                    round(arr.shape[0] / span, 1) if span > 0 else None
-                )
+                details[f"{key}_rate_hz"] = round(arr.shape[0] / span, 1) if span > 0 else None
     return details
 
 
@@ -990,17 +951,13 @@ def _frame_page(access: SceneAccess, page: int) -> dict[str, Any]:
         "entries": [
             {
                 "index": i,
-                "t": round(float(ts[i]) - t0, 2)
-                if ts is not None and t0 is not None and i < len(ts)
-                else None,
+                "t": round(float(ts[i]) - t0, 2) if ts is not None and t0 is not None and i < len(ts) else None,
             }
             for i in shown
         ],
         # A window of pages around the current one, so a 200-page scene does
         # not render 200 links.
-        "page_links": sorted(
-            {0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}
-        ),
+        "page_links": sorted({0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}),
     }
 
 
@@ -1034,9 +991,7 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     if pcd is not None and 0 <= index < len(pcd):
         details["lidar_timestamp"] = float(pcd[index])
         if "timestamp" in details:
-            details["camera_lidar_offset_ms"] = round(
-                (details["timestamp"] - float(pcd[index])) * 1000, 2
-            )
+            details["camera_lidar_offset_ms"] = round((details["timestamp"] - float(pcd[index])) * 1000, 2)
 
     present: dict[str, bool] = {}
     for kind in ("images", "clouds", "height_maps", "height_masks"):
@@ -1077,12 +1032,8 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     # The enumerated window this frame sits in: a ground-truth one if there is
     # one, otherwise the whole-scene fallback. This is the "show me the motion
     # around this frame" link, as opposed to the static single-frame view.
-    containing = [
-        w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end
-    ]
-    best = next((w for w in containing if w.kind == "segment"), None) or (
-        containing[0] if containing else None
-    )
+    containing = [w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end]
+    best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
     if best is not None:
         details["window"] = {
             "key": best.key,
@@ -1109,9 +1060,7 @@ def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
     if pcd is not None and 0 <= index < len(pcd):
         info["lidar_timestamp"] = float(pcd[index])
         if "timestamp" in info:
-            info["camera_lidar_offset_ms"] = round(
-                (info["timestamp"] - float(pcd[index])) * 1000, 2
-            )
+            info["camera_lidar_offset_ms"] = round((info["timestamp"] - float(pcd[index])) * 1000, 2)
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
         from .loaders import roll_pitch_from_gravity_align

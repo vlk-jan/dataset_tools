@@ -167,7 +167,7 @@ def windows_for_scene(
     windows: list[Window] = []
 
     if frame_ts is not None and len(frame_ts) and segments:
-        for seg, (lo_ts, hi_ts) in zip(segments, segment_bounds(frame_ts, segments)):
+        for seg, (lo_ts, hi_ts) in zip(segments, segment_bounds(frame_ts, segments), strict=False):
             lo = int(np.searchsorted(frame_ts, lo_ts, side="left"))
             hi = int(np.searchsorted(frame_ts, hi_ts, side="right"))
             if hi - lo < MIN_WINDOW_FRAMES:
@@ -296,7 +296,7 @@ def segment_of_frame(frame_ts: np.ndarray | None, segments: list[Segment], index
             return seg
     # Nothing contains it outright: a frame just off an edge is still that
     # segment's, on the widened bounds (see ``segment_bounds``).
-    for seg, (lo, hi) in zip(segments, segment_bounds(frame_ts, segments)):
+    for seg, (lo, hi) in zip(segments, segment_bounds(frame_ts, segments), strict=False):
         if lo <= t <= hi:
             return seg
     return None

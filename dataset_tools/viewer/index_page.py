@@ -69,10 +69,10 @@ def _curated_stats(a: dict) -> list[dict[str, Any]]:
         stat("duration", fmt_duration(a.get("dur_s"))),
         stat("frames", fmt_count(a.get("frames"))),
     ]
-    if a.get("images") is not None and a.get("clouds") is not None:
-        # Redundant when everything matches the frame count -- show only a mismatch.
-        if a["images"] != a["clouds"] or a["images"] != a.get("frames"):
-            stats.append(stat("images · clouds", f"{fmt_count(a['images'])} · {fmt_count(a['clouds'])}"))
+    images, clouds = a.get("images"), a.get("clouds")
+    # Redundant when everything matches the frame count -- show only a mismatch.
+    if images is not None and clouds is not None and (images != clouds or images != a.get("frames")):
+        stats.append(stat("images · clouds", f"{fmt_count(images)} · {fmt_count(clouds)}"))
     if a.get("pts_mean"):
         stats.append(stat("points / cloud", fmt_count(a["pts_mean"])))
     if a.get("poses") is not None:

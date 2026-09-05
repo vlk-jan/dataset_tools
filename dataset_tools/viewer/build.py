@@ -58,6 +58,9 @@ WHEELS = {
 }
 WHEEL_LABELS = ("left", "rear", "right")
 
+#: File suffix of each per-frame directory's entries.
+FRAME_SUFFIX = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}
+
 #: Bumped whenever :func:`build_scene`'s ``meta`` payload changes a field the
 #: overlay reads, or the same window *key* comes to mean different frames.
 #:
@@ -133,7 +136,7 @@ class BuildOptions:
     cloud_color: str = "height"  # "height" | "intensity"
     terrain_margin: float = 7.0
 
-    def sanitized(self) -> "BuildOptions":
+    def sanitized(self) -> BuildOptions:
         return BuildOptions(
             max_cloud_frames=int(np.clip(self.max_cloud_frames, 0, 200)),
             max_cloud_points=int(np.clip(self.max_cloud_points, 0, 1_500_000)),
@@ -271,12 +274,11 @@ class SceneAccess:
         Directories are built in flight, so a scene routinely has height maps
         for only a prefix (or a subsample) of its frames.
         """
-        suffix = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}[kind]
+        suffix = FRAME_SUFFIX[kind]
         return self._get(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
 
     def frame_path(self, kind: str, index: int) -> Path:
-        suffix = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}[kind]
-        return self.dir / kind / f"{index:05d}{suffix}"
+        return self.dir / kind / f"{index:05d}{FRAME_SUFFIX[kind]}"
 
     # -- windows -----------------------------------------------------------
 

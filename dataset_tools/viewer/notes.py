@@ -127,7 +127,7 @@ def _note_from_json(entry: dict) -> Note | None:
     """
     try:
         frames = entry.get("frames")
-        if isinstance(frames, (list, tuple)) and len(frames) == 2:
+        if isinstance(frames, list | tuple) and len(frames) == 2:
             start, end = int(frames[0]), int(frames[1])
         else:
             start = int(entry["frame_start"])

@@ -82,8 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{args.host}:{args.port}/"
     print(f"dataset viewer for {args.root}\n  {url}")
     if args.open:
-        import webbrowser
         import threading
+        import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(app, host=args.host, port=args.port, log_level="debug" if args.verbose else "info")
