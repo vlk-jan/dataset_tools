@@ -13,7 +13,11 @@ re-anchors each run at its first pose.
 
 Reads  <regen_dir>/odometry.txt and odometry_segments.txt (run_scene.sh output)
 Writes <out_dir>/odometry.txt            filtered runs, each anchored at identity
-       <out_dir>/odometry_segments.txt   "segment start_ts end_ts n_poses reason"
+       <out_dir>/odometry_segments.txt   "segment start_ts end_ts n_poses reason",
+                                         the reason naming why that run ENDED:
+                                         the input segment's tag for the run
+                                         that reaches its end, `odom_mismatch`
+                                         for a run this filter cut short
        <regen_dir>/filter_stats.txt      key=value summary (the pre-filter
                                          trajectory already lives in regen_dir)
 Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span_out
@@ -109,7 +113,13 @@ def main():
             anchored = np.einsum("ij,njk->nik", np.linalg.inv(run_T[0]), run_T)
             for k in range(len(run_t)):
                 kept_rows.append(np.concatenate([[run_t[k]], anchored[k].ravel()]))
-            kept_segs.append((run_t[0], run_t[-1], len(run_t), f"filtered:{reason}"))
+            # The input tag says why the input segment ENDED, so only the run
+            # that reaches that end inherits it; every earlier run ends where
+            # this filter cut it, which is a different reason and its own tag.
+            # Without the distinction a segment could read "the recording
+            # ended" 97 s before the recording ended (scene 0000, seg 7).
+            tag = reason if r1 == len(ts) else "odom_mismatch"
+            kept_segs.append((run_t[0], run_t[-1], len(run_t), f"filtered:{tag}"))
             span_out += run_t[-1] - run_t[0]
 
     with open(out / "odometry.txt", "w") as f:

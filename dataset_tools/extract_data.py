@@ -826,6 +826,9 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, m
     bridged. Segments break at time gaps > ``max_gap`` and at teleports
     (displacement implying > ``max_speed`` m/s, e.g. GNSS out-and-back spikes);
     spike samples end up in tiny segments that ``min_poses`` discards.
+
+    Each segment's ``reason`` names why *that* segment ended: ``gap``,
+    ``teleport``, or ``end_of_run`` for the last one.
     """
     if len(odom_data) < min_poses:
         return False
@@ -848,7 +851,10 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, m
             anchored = np.einsum("ij,njk->nik", np.linalg.inv(Ts[a]), Ts[a:b])
             for t, T in zip(ts[a:b], anchored):
                 f_out.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
-            reason = reasons[k - 1] if k > 0 else "start"
+            # The tag names why this segment ENDED -- the break that closes it,
+            # not the one that opened it -- so it means the same thing here as
+            # in the regenerated (FAST-LIO) tables the viewer also reads.
+            reason = reasons[k] if k < len(reasons) else "end_of_run"
             f_seg.write(f"{seg_id} {ts[a]:.6f} {ts[b-1]:.6f} {b-a} {reason}\n")
             seg_id += 1
     return seg_id > 0

@@ -18,6 +18,7 @@ def test_continuous_run_is_one_anchored_segment(tmp_path):
     rows = np.loadtxt(tmp_path / "odometry.txt", comments="#")
     segs = [l.split() for l in open(tmp_path / "odometry_segments.txt") if not l.startswith("#")]
     assert len(segs) == 1 and int(segs[0][3]) == len(ts)
+    assert segs[0][4] == "end_of_run"
     T0 = rows[0, 1:].reshape(4, 4)
     assert np.allclose(T0, np.eye(4))  # anchored
 
@@ -29,7 +30,10 @@ def test_teleport_splits_and_spike_dropped(tmp_path):
     assert write_ground_truth(_traj(ts, xs), tmp_path, min_poses=20)
     segs = [l.split() for l in open(tmp_path / "odometry_segments.txt") if not l.startswith("#")]
     assert len(segs) == 2  # spike sample's 1-pose segment discarded
-    assert segs[1][4] == "teleport"
+    # The tag names why the segment ENDED: the first ends at the spike, the
+    # second runs out the recording.
+    assert segs[0][4] == "teleport"
+    assert segs[1][4] == "end_of_run"
     n = sum(int(s[3]) for s in segs)
     assert n == len(ts) - 1  # only the spike sample lost
     rows = np.loadtxt(tmp_path / "odometry.txt", comments="#")
@@ -45,7 +49,8 @@ def test_gap_reason_and_min_poses(tmp_path):
     assert write_ground_truth(_traj(ts, np.zeros(len(ts))), tmp_path, min_poses=20)
     segs = [l.split() for l in open(tmp_path / "odometry_segments.txt") if not l.startswith("#")]
     assert len(segs) == 2  # the 5-sample middle chunk is discarded
-    assert segs[1][4] == "gap"
+    assert segs[0][4] == "gap"
+    assert segs[1][4] == "end_of_run"
 
 
 def test_too_few_samples(tmp_path):

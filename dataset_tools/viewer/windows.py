@@ -242,8 +242,9 @@ def windows_for_scene(
 _REASON_TEXT = {
     "pose_jump": "the GT pose jumped against the robot's live odometry",
     "speed_mismatch": "the GT speed disagreed with the robot's live odometry",
+    "yawrate_mismatch": "the GT yaw rate disagreed with the robot's live odometry",
+    "odom_mismatch": "the post-hoc check against live odometry rejected the poses that follow",
     "end_of_run": "the recording ended",
-    "start": "the GT stream started",
     "gap": "a gap of over 1 s in the GT stream",
     "teleport": "an implied speed over 4 m/s (GT jump)",
     "fix_lost": "the GNSS fix was lost",
