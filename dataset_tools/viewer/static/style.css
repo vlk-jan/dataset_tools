@@ -311,6 +311,47 @@ details.matrix pre { margin: 6px 0 0; background: var(--shade); }
 }
 .frameside .card h2 { font-size: 16px; }
 
+/* ------------------------------------------------------------------ notes
+   Reviewer notes on the scene page: what a person found, pinned to a frame
+   range. Styled as one more card so it sits in the same document as the
+   probed facts around it -- it is not a separate app, it is the half of the
+   scene's description that only a person can write. */
+.notelist { list-style: none; margin: 0; padding: 0; }
+.notelist li { padding: 9px 0; border-top: 1px solid var(--line); }
+.notelist li:first-child { border-top: 0; padding-top: 2px; }
+.notehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.notehead .chip { font-family: var(--mono); }
+.chip.topic { color: var(--accent); border-color: #2b6d9c; }
+.notetools { margin-left: auto; display: flex; gap: 10px; }
+.linkbtn {
+  background: none; border: 0; padding: 0; color: var(--muted);
+  font: inherit; cursor: pointer; text-decoration: underline;
+}
+.linkbtn:hover { color: var(--fg); }
+.notetext { margin: 4px 0 0; font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.noteform { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+.noterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.noterow label { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.noteform input, .noteform select, .noteform textarea, .noteedit textarea {
+  padding: 4px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--line); color: var(--fg); font: inherit;
+}
+.noteform input { width: 7em; font-variant-numeric: tabular-nums; }
+.noteform textarea, .noteedit textarea {
+  width: 100%; margin-top: 8px; font-size: 14.5px; resize: vertical;
+}
+.noteform .btn { margin-left: auto; }
+.noteedit { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; }
+.noteedit .btn { margin-top: 0; }
+.notemsg { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.notemsg.bad { color: var(--bad); }
+/* The windows table's marker: a window whose frames someone has written about. */
+.notemark {
+  margin-left: 8px; font: 400 11.5px var(--mono); color: var(--warn);
+  border: 1px solid #6b5a2f; border-radius: 2px; padding: 0 5px; white-space: nowrap;
+}
+.notemark:hover { text-decoration: none; border-color: var(--warn); }
+
 /* -------------------------------------------------------- index typography
    The scene index reads as a document rather than a control panel, so it
    swaps in the atlas page's type. Loaded non-blocking: without the web fonts

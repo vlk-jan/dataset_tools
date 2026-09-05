@@ -40,6 +40,36 @@
     <div class="dt-hint" id="dt-att-verdict"></div>
   </details>
 
+  <details class="dt-legend dt-notes" id="dt-notes">
+    <summary><span class="dt-k">notes</span>
+      <span class="dt-legend-now" id="dt-notes-count"></span></summary>
+    <div class="dt-notelist" id="dt-notelist"></div>
+    <form class="dt-noteform" id="dt-noteform" hidden>
+      <div class="dt-noterange">
+        <label class="dt-rangefield">from
+          <input type="number" id="dt-note-from" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" aria-label="first frame of the range">
+          <button type="button" class="dt-nowbtn" data-act="from"
+                  title="Set this end to the frame showing now">now</button>
+        </label>
+        <label class="dt-rangefield">to
+          <input type="number" id="dt-note-to" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" aria-label="last frame of the range">
+          <button type="button" class="dt-nowbtn" data-act="to"
+                  title="Set this end to the frame showing now">now</button>
+        </label>
+        <select id="dt-note-topic" aria-label="topic"></select>
+      </div>
+      <textarea id="dt-note-text" rows="2"
+                placeholder="What is wrong with these frames?"></textarea>
+      <div class="dt-noteactions">
+        <span class="dt-hint" id="dt-note-msg"></span>
+        <button class="dt-rangebtn dt-save" type="submit">Save note</button>
+      </div>
+    </form>
+    <div class="dt-hint" id="dt-notes-why"></div>
+  </details>
+
   <div class="dt-view" id="dt-view" hidden>
     <div class="dt-toggles">
       <label class="dt-toggle" id="dt-cloud-row" hidden

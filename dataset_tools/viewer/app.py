@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -38,6 +38,7 @@ from starlette.concurrency import run_in_threadpool
 from . import render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
+from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, DatasetRoot
 from .scene_page import build_scene_page
 from .windows import describe_reason, frame_window_key
@@ -106,7 +107,9 @@ def _simview_version() -> str:
 class ViewerState:
     """Shared, per-process state: the dataset root, caches and build locks."""
 
-    def __init__(self, root: DatasetRoot, max_frames: int, cache_scenes: int = 4) -> None:
+    def __init__(
+        self, root: DatasetRoot, max_frames: int, cache_scenes: int = 4
+    ) -> None:
         self.root = root
         self.max_frames = max_frames
         self._access: dict[str, SceneAccess] = {}
@@ -138,16 +141,35 @@ def create_app(
     root_path: str | Path,
     max_frames: int = 1500,
     cache_dir: str | Path | None = None,
+    notes_dir: str | Path | None = None,
+    notes: bool = True,
+    author: str = "",
 ) -> FastAPI:
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None)
     state = ViewerState(root, max_frames=max_frames)
+    # Resolved once: the pages report where notes go and why they cannot be
+    # written when they cannot, and probing that per request would put a write
+    # on the hot path of an otherwise read-only server.
+    notes_store = NoteStore(
+        root.path,
+        notes_dir=Path(notes_dir) if notes_dir else None,
+        enabled=notes,
+        author=author,
+        dataset_version=str((root.manifest() or {}).get("dataset_version") or ""),
+    )
+    if notes_store.enabled and not notes_store.writable:
+        logger.warning("notes are read-only: %s", notes_store.reason)
 
     app = FastAPI(title="dataset_tools viewer", docs_url=None, redoc_url=None)
     app.state.viewer = state
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals["reason_text"] = describe_reason
-    app.mount("/viewer-static", _RevalidatingStatic(directory=str(HERE / "static")), name="viewer_static")
+    app.mount(
+        "/viewer-static",
+        _RevalidatingStatic(directory=str(HERE / "static")),
+        name="viewer_static",
+    )
 
     simview_static = _simview_static_dir()
     simview_ok = simview_static.is_dir()
@@ -164,10 +186,21 @@ def create_app(
         )
         # Unversioned fallback (revalidating), still needed for SimView's own
         # document-relative asset paths (config.js: "static/textures/...").
-        app.mount("/simview-static", _RevalidatingStatic(directory=str(simview_static)), name="simview_static")
-        app.mount("/static", _RevalidatingStatic(directory=str(simview_static)), name="simview_static_root")
+        app.mount(
+            "/simview-static",
+            _RevalidatingStatic(directory=str(simview_static)),
+            name="simview_static",
+        )
+        app.mount(
+            "/static",
+            _RevalidatingStatic(directory=str(simview_static)),
+            name="simview_static_root",
+        )
     else:  # pragma: no cover - only when simview is missing/broken
-        logger.error("simview static assets not found at %s; the 3D view will not work", simview_static)
+        logger.error(
+            "simview static assets not found at %s; the 3D view will not work",
+            simview_static,
+        )
 
     # ------------------------------------------------------------------ pages
 
@@ -183,7 +216,14 @@ def create_app(
     # that write it: a change to how windows are cut (windows.py), how poses
     # are interpolated (loaders.py) or how cloud colours are chosen (render.py)
     # changes the bytes at an unchanged URL just as surely as build.py does.
-    for _f in ("build.py", "wire.py", "app.py", "windows.py", "loaders.py", "render.py"):
+    for _f in (
+        "build.py",
+        "wire.py",
+        "app.py",
+        "windows.py",
+        "loaders.py",
+        "render.py",
+    ):
         try:
             _h.update(str((Path(__file__).parent / _f).stat().st_mtime_ns).encode())
         except OSError:  # pragma: no cover - a zipped/partial install
@@ -228,7 +268,12 @@ def create_app(
         card_page = await run_in_threadpool(build_scene_page, root, access)
         # The frame strip is only assembled when it is the tab being shown: it
         # is the one part of this page that may list a directory.
-        frames = await run_in_threadpool(_frame_page, access, page) if tab == "frames" else None
+        frames = (
+            await run_in_threadpool(_frame_page, access, page)
+            if tab == "frames"
+            else None
+        )
+        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return templates.TemplateResponse(
             request=request,
             name="scene.html",
@@ -242,6 +287,14 @@ def create_app(
                 "frames": frames,
                 "page": card_page,
                 "atlas": root.atlas_scene(scene_id),
+                "notes": scene_notes,
+                "notes_status": notes_store.status(),
+                "notes_stale": await run_in_threadpool(
+                    notes_store.stale_version, scene_id
+                ),
+                # Which windows a note lands in, so the table says where the
+                # flagged stretches are without anyone reading every note.
+                "notes_per_window": _notes_per_window(scene_notes, windows),
             },
         )
 
@@ -252,7 +305,9 @@ def create_app(
 
         access = _access_or_404(state, scene_id)
         last = max(0, access.probe.n_frames - 1)
-        return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
+        return RedirectResponse(
+            f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303
+        )
 
     @app.get("/scene/{scene_id}/frame/{index}", response_class=HTMLResponse)
     async def frame_page(request: Request, scene_id: str, index: int):
@@ -260,11 +315,15 @@ def create_app(
         n_frames = access.probe.n_frames
         if index < 0 or (n_frames and index >= n_frames):
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
-        details = await run_in_threadpool(_frame_details, access, index, state.max_frames)
+        details = await run_in_threadpool(
+            _frame_details, access, index, state.max_frames
+        )
         # A frame past the end of data_ts.txt has no clock to sit on, so there
         # is no single-frame window to build for it; offering the button anyway
         # led straight to a 500.
-        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames)
+        single = await run_in_threadpool(
+            access.window, frame_window_key(index), state.max_frames
+        )
         return templates.TemplateResponse(
             request=request,
             name="frame.html",
@@ -316,6 +375,10 @@ def create_app(
                 "metaUrl": f"/api/data/{bundle_key}/{stamp}/meta.json",
                 "initialFrame": initial_frame,
                 "sceneUrl": f"/scene/{scene_id}",
+                "notesUrl": f"/api/scene/{scene_id}/notes",
+                "notes": notes_store.status(),
+                "frameStart": window.frame_start,
+                "frameEnd": window.frame_end - 1,
                 # Which SimView the page is running against. The overlay gates
                 # its workarounds on this so that upgrading the package turns
                 # them off by itself -- a stopgap left running over a fixed
@@ -327,7 +390,9 @@ def create_app(
             '<link rel="stylesheet" href="/viewer-static/overlay.css">'
             f"<script>window.__dtViewer = {config};</script>"
         )
-        body = overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
+        body = (
+            overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
+        )
         page = await run_in_threadpool(
             render_viewer_page,
             f"/simview-static/{_simview_version()}",
@@ -371,10 +436,14 @@ def create_app(
         return await run_in_threadpool(_frame_info, access, index)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/image.jpg")
-    async def api_frame_image(scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)):
+    async def api_frame_image(
+        scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)
+    ):
         access = _access_or_404(state, scene_id)
         path = access.frame_path("images", index)
-        data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
+        data = await run_in_threadpool(
+            _safe_render, render.render_camera_image, path, w
+        )
         if data is None:
             raise HTTPException(404, f"no image for frame {index}")
         return Response(data, media_type="image/jpeg", headers=IMMUTABLE)
@@ -410,7 +479,9 @@ def create_app(
                 available = sorted(access.available_frames("images"))
                 if not available:
                     return None
-                path = access.frame_path("images", min(available, key=lambda i: abs(i - index)))
+                path = access.frame_path(
+                    "images", min(available, key=lambda i: abs(i - index))
+                )
             return _safe_render(render.render_camera_image, path, 384)
 
         data = await run_in_threadpool(work)
@@ -421,12 +492,16 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_maps", "height_map", render.render_height_map)
+        return await _npz_png(
+            access, index, "height_maps", "height_map", render.render_height_map
+        )
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_masks", "validity", render.render_validity)
+        return await _npz_png(
+            access, index, "height_masks", "validity", render.render_validity
+        )
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
@@ -444,10 +519,85 @@ def create_app(
             raise HTTPException(404, f"no cloud for frame {index}")
         return Response(data, media_type="image/png", headers=IMMUTABLE)
 
+    # ------------------------------------------------------------------ notes
+
+    # Deliberately NOT under /api/data/: a bundle URL carries a content stamp
+    # and its meta.json is cached on disk per window, so a note folded in there
+    # would either be invisible until the next code change or force every
+    # window it touches to rebuild. Notes are their own resource, fetched
+    # uncached, and nothing about them can invalidate a built window.
+
+    @app.get("/api/scene/{scene_id}/notes")
+    async def api_notes(scene_id: str):
+        access = _access_or_404(state, scene_id)
+        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
+        return {
+            "scene": scene_id,
+            "n_frames": access.probe.n_frames,
+            "notes": [n.to_json() for n in scene_notes],
+            "status": notes_store.status(),
+            "stale_version": await run_in_threadpool(
+                notes_store.stale_version, scene_id
+            ),
+        }
+
+    @app.post("/api/scene/{scene_id}/notes", status_code=201)
+    async def api_add_note(scene_id: str, payload: dict = Body(...)):
+        access = _access_or_404(state, scene_id)
+        start, end = _frames_from_payload(payload)
+        note = await _notes_write(
+            state,
+            scene_id,
+            notes_store.add,
+            scene_id,
+            start,
+            end,
+            payload.get("text", ""),
+            topic=payload.get("topic", "other"),
+            author=payload.get("author", ""),
+            n_frames=access.probe.n_frames,
+        )
+        return note.to_json()
+
+    @app.patch("/api/scene/{scene_id}/notes/{note_id}")
+    async def api_edit_note(scene_id: str, note_id: str, payload: dict = Body(...)):
+        access = _access_or_404(state, scene_id)
+        # Either end may move on its own -- ``update`` leaves out whatever is
+        # None -- so this does not go through _frames_from_payload, which is
+        # for a whole range being named at once.
+        start, end = _optional_frames(payload)
+        note = await _notes_write(
+            state,
+            scene_id,
+            notes_store.update,
+            scene_id,
+            note_id,
+            text=payload.get("text"),
+            topic=payload.get("topic"),
+            frame_start=start,
+            frame_end=end,
+            n_frames=access.probe.n_frames,
+        )
+        if note is None:
+            raise HTTPException(404, f"scene {scene_id} has no note {note_id!r}")
+        return note.to_json()
+
+    @app.delete("/api/scene/{scene_id}/notes/{note_id}")
+    async def api_delete_note(scene_id: str, note_id: str):
+        _access_or_404(state, scene_id)
+        removed = await _notes_write(
+            state, scene_id, notes_store.delete, scene_id, note_id
+        )
+        if not removed:
+            raise HTTPException(404, f"scene {scene_id} has no note {note_id!r}")
+        return {"deleted": note_id}
+
     # ------------------------------------------------------------ scene data
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
-    async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
+    async def api_status(
+        request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str
+    ):
         path = state.bundle_dir / scene_id / window_key / opts_key
         # The same test _ensure_bundle uses. Reporting "ready" for a bundle
         # written by an older viewer would promise a fetch that in fact blocks
@@ -455,7 +605,9 @@ def create_app(
         return {"ready": _bundle_is_current(path), "path": str(path)}
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
-    async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
+    async def api_meta(
+        request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str
+    ):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "meta.json", media_type="application/json")
 
@@ -470,7 +622,9 @@ def create_app(
         return FileResponse(bundle / "states.json", media_type="application/json")
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/blob/{blob_id}")
-    async def api_blob(scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str):
+    async def api_blob(
+        scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str
+    ):
         if not blob_id.isdigit():
             raise HTTPException(404, "bad blob id")
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
@@ -491,12 +645,82 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True, "root": str(root.path), "scenes": len(root.scene_ids())}
+        return {
+            "ok": True,
+            "root": str(root.path),
+            "scenes": len(root.scene_ids()),
+            "notes": notes_store.status(),
+        }
 
     return app
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def _frames_from_payload(payload: dict) -> tuple[int, int]:
+    """The inclusive frame range a request names.
+
+    Accepts ``{"frames": [a, b]}`` (the stored form) or the two fields spelled
+    out, and a bare ``{"frame": n}`` for a note on one frame -- which is what
+    the overlay sends when you mark the frame you are paused on.
+    """
+    frames = payload.get("frames")
+    if isinstance(frames, (list, tuple)) and len(frames) == 2:
+        start, end = frames
+    elif "frame" in payload:
+        start = end = payload["frame"]
+    else:
+        start = payload.get("frame_start")
+        end = payload.get("frame_end", start)
+    try:
+        return int(start), int(end)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "a note needs a frame range") from None
+
+
+def _optional_frames(payload: dict) -> tuple[int | None, int | None]:
+    """The ends of a range an edit names, ``None`` for each one it leaves alone."""
+    frames = payload.get("frames")
+    if isinstance(frames, (list, tuple)) and len(frames) == 2:
+        pair = list(frames)
+    else:
+        pair = [payload.get("frame_start"), payload.get("frame_end")]
+    try:
+        return tuple(None if v is None else int(v) for v in pair)  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        raise HTTPException(400, "frame numbers must be integers") from None
+
+
+async def _notes_write(state: ViewerState, scene_id: str, fn, *args, **kwargs):
+    """Run one note mutation under the scene's lock, in a worker thread.
+
+    Serialised per scene because every write replaces the whole file: two
+    concurrent adds without the lock would each save their own read of it, and
+    the second would drop the first.
+    """
+    async with state.lock(f"notes:{scene_id}"):
+        try:
+            return await run_in_threadpool(fn, *args, **kwargs)
+        except NotesUnavailable as exc:
+            raise HTTPException(403, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        except OSError as exc:
+            raise HTTPException(500, f"could not save the note: {exc}") from None
+
+
+def _notes_per_window(notes: list, windows: list) -> dict[str, list]:
+    """Which notes touch each window, keyed by window key.
+
+    A note is a range of frames and a window is a range of frames; a note that
+    spans a segment boundary legitimately shows up under both windows, since
+    both are stretches you would want warned about when you open them.
+    """
+    return {
+        w.key: [n for n in notes if n.overlaps(w.frame_start, w.frame_end)]
+        for w in windows
+    }
 
 
 def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
@@ -516,7 +740,9 @@ def _defer_main_script(page: str) -> str:
     """
     import re
 
-    match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
+    match = re.search(
+        r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page
+    )
     if not match:
         logger.warning("could not find simview's main.js script tag; loading it inline")
         return page
@@ -584,7 +810,9 @@ def _bundle_is_current(dest: Path) -> bool:
     return meta.get("meta_version") == META_VERSION
 
 
-async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
+async def _ensure_bundle(
+    state: ViewerState, scene_id: str, window_key: str, opts_key: str
+) -> Path:
     """Return the on-disk bundle for a window, building it if necessary.
 
     One lock per bundle key: several browser fetches for the same window arrive
@@ -602,7 +830,9 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames)
+            scene, meta = build_scene(
+                state.root, scene_id, window_key, opts, max_frames=state.max_frames
+            )
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
@@ -624,10 +854,14 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             raise HTTPException(404, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser
             logger.exception("build failed for %s/%s", scene_id, window_key)
-            raise HTTPException(500, f"build failed: {type(exc).__name__}: {exc}") from exc
+            raise HTTPException(
+                500, f"build failed: {type(exc).__name__}: {exc}"
+            ) from exc
 
 
-async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
+async def _npz_png(
+    access: SceneAccess, index: int, kind: str, key: str, renderer
+) -> Response:
     from .loaders import load_npz_key
 
     def work():
@@ -677,7 +911,9 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
     ts = access.frame_ts
     if ts is not None and len(ts) > 1:
         diffs = np.diff(ts)
-        details["frame_rate_hz"] = round(float(1.0 / np.median(diffs)), 2) if np.median(diffs) > 0 else None
+        details["frame_rate_hz"] = (
+            round(float(1.0 / np.median(diffs)), 2) if np.median(diffs) > 0 else None
+        )
         details["duration_s"] = round(float(ts[-1] - ts[0]), 1)
     for key in ("joint_states", "cmd_vel", "joint_setpoints"):
         arr = getattr(access, key)
@@ -685,7 +921,9 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
             details[f"{key}_shape"] = list(arr.shape)
             if arr.ndim == 2 and arr.shape[0] > 1:
                 span = float(arr[-1, 0] - arr[0, 0])
-                details[f"{key}_rate_hz"] = round(arr.shape[0] / span, 1) if span > 0 else None
+                details[f"{key}_rate_hz"] = (
+                    round(arr.shape[0] / span, 1) if span > 0 else None
+                )
     return details
 
 
@@ -752,13 +990,17 @@ def _frame_page(access: SceneAccess, page: int) -> dict[str, Any]:
         "entries": [
             {
                 "index": i,
-                "t": round(float(ts[i]) - t0, 2) if ts is not None and t0 is not None and i < len(ts) else None,
+                "t": round(float(ts[i]) - t0, 2)
+                if ts is not None and t0 is not None and i < len(ts)
+                else None,
             }
             for i in shown
         ],
         # A window of pages around the current one, so a 200-page scene does
         # not render 200 links.
-        "page_links": sorted({0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}),
+        "page_links": sorted(
+            {0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}
+        ),
     }
 
 
@@ -792,7 +1034,9 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     if pcd is not None and 0 <= index < len(pcd):
         details["lidar_timestamp"] = float(pcd[index])
         if "timestamp" in details:
-            details["camera_lidar_offset_ms"] = round((details["timestamp"] - float(pcd[index])) * 1000, 2)
+            details["camera_lidar_offset_ms"] = round(
+                (details["timestamp"] - float(pcd[index])) * 1000, 2
+            )
 
     present: dict[str, bool] = {}
     for kind in ("images", "clouds", "height_maps", "height_masks"):
@@ -822,7 +1066,10 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
             "n_poses": seg.n_poses,
             # Clamped: a frame within the boundary slack sits a few ms before the
             # segment's first pose, and "-0.0 s into the segment" reads as a bug.
-            "t_into_segment": max(0.0, round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2)),
+            "t_into_segment": max(
+                0.0,
+                round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
+            ),
         }
     else:
         details["segment"] = None
@@ -830,8 +1077,12 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     # The enumerated window this frame sits in: a ground-truth one if there is
     # one, otherwise the whole-scene fallback. This is the "show me the motion
     # around this frame" link, as opposed to the static single-frame view.
-    containing = [w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end]
-    best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
+    containing = [
+        w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end
+    ]
+    best = next((w for w in containing if w.kind == "segment"), None) or (
+        containing[0] if containing else None
+    )
     if best is not None:
         details["window"] = {
             "key": best.key,
@@ -858,7 +1109,9 @@ def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
     if pcd is not None and 0 <= index < len(pcd):
         info["lidar_timestamp"] = float(pcd[index])
         if "timestamp" in info:
-            info["camera_lidar_offset_ms"] = round((info["timestamp"] - float(pcd[index])) * 1000, 2)
+            info["camera_lidar_offset_ms"] = round(
+                (info["timestamp"] - float(pcd[index])) * 1000, 2
+            )
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
         from .loaders import roll_pitch_from_gravity_align

@@ -42,6 +42,16 @@ const els = {
   attErr: document.getElementById("dt-att-err"),
   attVerdict: document.getElementById("dt-att-verdict"),
   buildInfo: document.getElementById("dt-buildinfo"),
+  notes: document.getElementById("dt-notes"),
+  noteList: document.getElementById("dt-notelist"),
+  noteCount: document.getElementById("dt-notes-count"),
+  noteForm: document.getElementById("dt-noteform"),
+  noteFrom: document.getElementById("dt-note-from"),
+  noteTo: document.getElementById("dt-note-to"),
+  noteTopic: document.getElementById("dt-note-topic"),
+  noteText: document.getElementById("dt-note-text"),
+  noteMsg: document.getElementById("dt-note-msg"),
+  notesWhy: document.getElementById("dt-notes-why"),
   tiles: Array.from(document.querySelectorAll(".dt-tile")),
 };
 
@@ -53,6 +63,7 @@ let lastUpdate = 0;
 let patches = null;
 /** meta.attitude once the window has one: absent without gravity_align.npy. */
 let attitude = null;
+
 /** Legend rows by colour-mode name, for highlighting the active one. */
 const legendRows = new Map();
 let lastColorMode = null;
@@ -313,6 +324,190 @@ function syncLegendHighlight() {
   for (const [name, row] of legendRows) row.classList.toggle("active", name === mode);
 }
 
+/* -------------------------------------------------------------------- notes
+ *
+ * Notes are written here because here is where a bad stretch is actually
+ * noticed -- scrubbing a segment and seeing the ground truth walk off the
+ * terrain. The two range buttons pin either end to the frame showing now, so
+ * marking "frames 1204-1388 have wrong odometry" is two clicks and a sentence.
+ *
+ * They are fetched from their own endpoint, never from the window bundle: a
+ * bundle URL carries a content stamp and its meta.json is cached per window on
+ * disk, so a note folded in there would be invisible until the next code
+ * change, or would rebuild the window every time someone typed one.
+ */
+
+/** Seek the playhead to a frame of this window, if it holds it. */
+function seekToFrame(frame) {
+  const app = window.__debugSimView;
+  if (!app || !app.animationController || !meta || !meta.frames) return;
+  const local = meta.frames.indexOf(frame);
+  if (local < 0 || !meta.times || local >= meta.times.length) return;
+  // goToTime, not `currentTime =`: nothing reads that field until playback
+  // advances it, so an assignment leaves the view where it was (openInitialView).
+  app.animationController.goToTime(meta.times[local]);
+  update(true);
+}
+
+/**
+ * The range the form will save, both ends inclusive.
+ *
+ * Read out of the two fields rather than kept in a variable beside them, so a
+ * number typed by hand and one pinned with `now` are the same thing. A blank
+ * or unparseable field falls back to the window's own edge -- a half-filled
+ * form still means something -- and the ends are ordered, so typing them the
+ * other way round is not an error.
+ */
+function readNoteRange() {
+  const from = parseInt(els.noteFrom.value, 10);
+  const to = parseInt(els.noteTo.value, 10);
+  let lo = Number.isFinite(from) ? from : cfg.frameStart;
+  let hi = Number.isFinite(to) ? to : cfg.frameEnd;
+  if (lo > hi) [lo, hi] = [hi, lo];
+  return [Math.max(0, lo), Math.max(0, hi)];
+}
+
+function noteRangeText() {
+  const [lo, hi] = readNoteRange();
+  return lo === hi ? `frame ${lo}` : `frames ${lo}–${hi}`;
+}
+
+function setNoteRange(lo, hi) {
+  els.noteFrom.value = lo;
+  els.noteTo.value = hi;
+}
+
+/** Only the notes touching this window: the rest are about other driving. */
+function notesHere(all) {
+  const lo = cfg.frameStart;
+  const hi = cfg.frameEnd;
+  return all.filter((n) => n.frame_start <= hi && lo <= n.frame_end);
+}
+
+function renderNotes(all) {
+  const here = notesHere(all);
+  els.noteCount.textContent = here.length
+    ? `${here.length} on this window`
+    : (all.length ? `none here, ${all.length} in the scene` : "");
+  els.noteList.textContent = "";
+  for (const note of here) {
+    const item = document.createElement("div");
+    item.className = "dt-note";
+    const head = document.createElement("div");
+    head.className = "dt-notehead";
+    const range = document.createElement("button");
+    range.type = "button";
+    range.className = "dt-noterangebtn";
+    range.textContent = note.label;
+    range.title = "Seek to the first frame of this note";
+    range.addEventListener("click", () => seekToFrame(note.frame_start));
+    const topic = document.createElement("span");
+    topic.className = "dt-notetopic";
+    topic.textContent = note.topic;
+    head.append(range, topic);
+    const body = document.createElement("div");
+    body.className = "dt-notebody";
+    body.textContent = note.text;
+    item.append(head, body);
+    els.noteList.appendChild(item);
+  }
+}
+
+async function loadNotes() {
+  const response = await fetch(cfg.notesUrl, { cache: "no-store" });
+  if (!response.ok) throw new Error(`${response.status}`);
+  const data = await response.json();
+  renderNotes(data.notes || []);
+}
+
+/**
+ * Wire up the notes section.
+ *
+ * Never fatal: a root whose notes are disabled or read-only still gets the
+ * panel and the 3D view, with the section saying which -- the same rule the
+ * page follows for an absent artefact, where "this scene has none" is shown
+ * rather than implied by an empty space.
+ */
+async function setupNotes() {
+  const status = cfg.notes || {};
+  if (!status.enabled) {
+    els.notes.hidden = true;
+    return;
+  }
+  // Opens as the whole window: the common case is "this whole segment is
+  // wrong", and either end is then narrowed by hand or by `now`.
+  setNoteRange(cfg.frameStart, cfg.frameEnd);
+
+  try {
+    await loadNotes();
+  } catch (error) {
+    els.noteCount.textContent = "unavailable";
+    console.warn("could not load notes:", error);
+  }
+
+  if (!status.writable) {
+    els.notesWhy.textContent = `Read-only here: ${status.reason}`;
+    return;
+  }
+  els.notesWhy.textContent =
+    "Saved to " + status.dir + ". Both ends of the range are included.";
+
+  for (const topic of status.topics || []) {
+    const option = document.createElement("option");
+    option.value = option.textContent = topic;
+    els.noteTopic.appendChild(option);
+  }
+  els.noteForm.hidden = false;
+
+  for (const button of els.noteForm.querySelectorAll(".dt-nowbtn[data-act]")) {
+    button.addEventListener("click", () => {
+      const frame = meta && meta.frames ? meta.frames[lastFrame] : null;
+      if (frame === null || frame === undefined) return;
+      const field = button.dataset.act === "from" ? els.noteFrom : els.noteTo;
+      field.value = frame;
+      // Pinning one end past the other means the two were meant the other way
+      // round, so write both back ordered rather than refusing the click.
+      const [lo, hi] = readNoteRange();
+      setNoteRange(lo, hi);
+    });
+  }
+
+  els.noteForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = els.noteText.value.trim();
+    if (!text) {
+      els.noteMsg.textContent = "A note needs some text.";
+      return;
+    }
+    els.noteMsg.textContent = "saving…";
+    try {
+      const response = await fetch(cfg.notesUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          frames: readNoteRange(),
+          topic: els.noteTopic.value,
+          text,
+        }),
+      });
+      if (!response.ok) {
+        let detail = `${response.status}`;
+        try {
+          const body = await response.json();
+          if (body && body.detail) detail = body.detail;
+        } catch (e) { /* the status alone is enough */ }
+        throw new Error(detail);
+      }
+      const saved = noteRangeText();
+      els.noteText.value = "";
+      els.noteMsg.textContent = `saved on ${saved}`;
+      await loadNotes();
+    } catch (error) {
+      els.noteMsg.textContent = `could not save: ${error.message}`;
+    }
+  });
+}
+
 /**
  * Open the window where it should open: on the right frame, robot in shot.
  *
@@ -387,7 +582,37 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+/**
+ * A focused field in the panel owns the keyboard.
+ *
+ * SimView binds its shortcuts to `document` and `window` with no check on what
+ * has focus: `PlaybackControls` (`keydownListener`) has none at all, so typing
+ * a space into a note toggled playback and a left arrow stepped the playhead
+ * instead of moving the caret; `Controls` checks `activeElement.tagName !==
+ * "INPUT"`, which a textarea is not. Both listen in the bubble phase, so
+ * stopping the event on our own panel is enough to keep it from reaching them,
+ * and the field still gets it -- the target is reached first.
+ *
+ * This is not a version-gated stopgap like the ones in `simview_patch.js`: it
+ * is not reaching into SimView at all, and "the thing you are typing into gets
+ * the keystroke" stays right whatever upstream does.
+ */
+function claimKeyboardForFields() {
+  const editable = (node) =>
+    node &&
+    (node.tagName === "INPUT" ||
+      node.tagName === "TEXTAREA" ||
+      node.tagName === "SELECT" ||
+      node.isContentEditable);
+  for (const type of ["keydown", "keyup", "keypress"]) {
+    els.panel.addEventListener(type, (event) => {
+      if (editable(event.target)) event.stopPropagation();
+    });
+  }
+}
+
 function setupPanel() {
+  claimKeyboardForFields();
   // A single tab on the panel's own edge, so it slides out with the panel and
   // is always reachable at the middle of the window edge -- the old pair of
   // buttons put the "show again" one under SimView's control panel.
@@ -451,6 +676,9 @@ async function main() {
 
   setupLegend();
   setupAttitude();
+  // Never fatal: the panel and the 3D view are the point of this page, and
+  // notes are a thing you can add on top of them.
+  setupNotes().catch((error) => console.warn("notes are unavailable:", error));
 
   els.build.classList.add("done");
   startSimView();

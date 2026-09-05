@@ -131,6 +131,64 @@
 .dt-legend .active dt { color: #7ec2f0; }
 .dt-legend .active dd { border-left-color: #2b6d9c; color: #939aa8; }
 
+/* Notes: written here because here is where a bad stretch is noticed. The
+   range buttons read as the values they hold (the frame each end is pinned
+   to), so the form states what it will save without a legend. */
+.dt-notes .dt-notelist { margin: 6px 0 0; display: flex; flex-direction: column; gap: 6px; }
+.dt-note { border-left: 2px solid #2b6d9c; padding-left: 8px; }
+.dt-notehead { display: flex; align-items: baseline; gap: 6px; }
+.dt-notetopic {
+  color: #7ec2f0; font-size: 10px; letter-spacing: .04em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dt-noterangebtn {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: #c9cedb; font-size: 11px; font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dt-noterangebtn:hover { color: #7ec2f0; text-decoration: underline; }
+.dt-notebody { color: #939aa8; font-size: 10.5px; line-height: 1.4; white-space: pre-wrap; }
+.dt-noteform { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dt-noterange { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Each end of the range is a field with a `now` button beside it: type a frame
+   number, or take the one showing. Both spellings write the same value. */
+.dt-rangefield {
+  display: flex; align-items: center; gap: 4px;
+  color: #6f7683; font-size: 10.5px;
+}
+.dt-noterange input {
+  width: 5.5em; background: #14161a; border: 1px solid #333844; border-radius: 4px;
+  color: #e6e8ec; font: inherit; font-size: 10.5px; padding: 2px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.dt-noterange input:focus { outline: none; border-color: #2b6d9c; }
+.dt-nowbtn {
+  background: #23272f; border: 1px solid #454b58; border-radius: 4px;
+  color: #939aa8; font: inherit; font-size: 10px; padding: 1px 5px; cursor: pointer;
+}
+.dt-nowbtn:hover { border-color: #2b6d9c; color: #c9cedb; }
+.dt-rangebtn {
+  background: #23272f; border: 1px solid #454b58; border-radius: 4px;
+  color: #939aa8; font: inherit; font-size: 10.5px; padding: 2px 7px; cursor: pointer;
+}
+.dt-rangebtn b {
+  color: #c9cedb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.dt-rangebtn:hover { border-color: #2b6d9c; }
+.dt-noterange select {
+  background: #23272f; border: 1px solid #454b58; border-radius: 4px;
+  color: #c9cedb; font: inherit; font-size: 10.5px; padding: 2px 4px; margin-left: auto;
+}
+.dt-noteform textarea {
+  background: #14161a; border: 1px solid #333844; border-radius: 4px;
+  color: #e6e8ec; font: inherit; font-size: 11px; padding: 5px 6px; resize: vertical;
+}
+.dt-noteactions { display: flex; align-items: center; gap: 8px; }
+.dt-noteactions .dt-hint { flex: 1; }
+.dt-save { color: #c9cedb; background: #1f4a6b; border-color: #2b6d9c; }
+.dt-notes .dt-hint { margin-top: 6px; }
+
 /* Ground truth against the IMU. The IMU is independent of the odometry, so
    the gap between the two attitudes is a check on the ground truth rather
    than a restatement of it -- the summary line carries the live number and

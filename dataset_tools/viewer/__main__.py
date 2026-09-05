@@ -27,6 +27,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="frames per viewing window; longer segments are split (default: %(default)s)",
     )
     parser.add_argument("--cache-dir", type=Path, default=None, help="where built scenes are cached")
+    parser.add_argument(
+        "--notes-dir",
+        type=Path,
+        default=None,
+        help="where reviewer notes are kept (default: <root>/notes, so they travel with the dataset)",
+    )
+    parser.add_argument(
+        "--no-notes",
+        dest="notes",
+        action="store_false",
+        help="turn reviewer notes off entirely: nothing is read, written or shown",
+    )
+    parser.add_argument(
+        "--author",
+        default="",
+        help="who new notes are from (default: $USER)",
+    )
     parser.add_argument("--open", action="store_true", help="open a browser at the index page")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser
@@ -54,7 +71,14 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    app = create_app(args.root, max_frames=args.max_frames, cache_dir=args.cache_dir)
+    app = create_app(
+        args.root,
+        max_frames=args.max_frames,
+        cache_dir=args.cache_dir,
+        notes_dir=args.notes_dir,
+        notes=args.notes,
+        author=args.author,
+    )
     url = f"http://{args.host}:{args.port}/"
     print(f"dataset viewer for {args.root}\n  {url}")
     if args.open:

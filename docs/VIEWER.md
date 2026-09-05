@@ -31,11 +31,17 @@ python3.12 -m venv .venv-viewer
 | `--port` | port (default `8080`) |
 | `--max-frames N` | frames per viewing window; longer segments are split into equal parts (default `1500`) |
 | `--cache-dir DIR` | where built scenes are cached (default: a per-root directory under `$XDG_CACHE_HOME/dataset_tools_viewer/`) |
+| `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
+| `--no-notes` | turn notes off entirely: none read, written or shown |
+| `--author NAME` | who new notes are from (default: `$USER`) |
 | `--open` | open a browser at the index page |
 | `-v` | debug logging |
 
-The dataset root is only ever **read** -- every byte the viewer writes goes to
-the cache directory -- so it is safe to point at a read-only or shared copy.
+Apart from notes (below), the dataset root is only ever **read** -- every byte
+the viewer writes goes to the cache directory -- so it is safe to point at a
+read-only or shared copy. Notes are the one thing a person adds, and they are
+written into `<root>/notes/`; on a root that will not take them the viewer says
+so and keeps composing switched off rather than failing at the save.
 
 Start at the index, click a scene id for its inventory and window list, then a
 window to open the 3D view. Nothing else needs configuring.
@@ -170,6 +176,95 @@ hero caption and the frame it links to all resolve through one
 whose atlas predates this names no frames, and the slots fall back to 10/50/90 %
 of the scene — which is where those files were cut.
 
+## Notes: what only a person can say
+
+Everything else on a page is probed or computed. A note is the one thing that
+cannot be: a stretch whose odometry is visibly wrong, a camera that dropped
+out, something that happened in front of the robot. So notes are stored next to
+the data, the way `atlas/` is, one file per scene:
+
+```
+<root>/notes/0007.json
+```
+
+A note is free text pinned to a **frame range**, with a topic (`odometry`,
+`camera`, `event`, `other`) so a stretch can be found again by what is wrong
+with it. The range is the anchor because it is the most durable identifier a
+scene has: segment indices are renumbered whenever `scripts/filter_segments.py`
+or `scripts/relabel_segments.py` rewrites `odometry_segments.txt`, so a note
+anchored to "segment 7" would afterwards point at different driving. Both ends
+of the range are **inclusive** — "frames 1204–1388" means what a person writing
+that means, which is deliberately not `windows.Window`'s convention, where
+`frame_end` is exclusive.
+
+```json
+{
+  "scene": "0007",
+  "dataset_version": "HELHEST_v1_3",
+  "notes": [
+    {
+      "id": "3f9a1c",
+      "frames": [1204, 1388],
+      "topic": "odometry",
+      "text": "GT jumps ~2 m sideways around 1250 and never recovers.",
+      "author": "jan",
+      "created": "2026-09-05T10:42:11+00:00",
+      "updated": null
+    }
+  ]
+}
+```
+
+The file is a person's to edit. A malformed entry drops out and the rest of the
+scene's notes still load; a topic the UI does not offer is kept verbatim,
+exactly as an unrecognised segment `reason` tag is.
+
+**Where they are written from.** The 3D view's panel, because that is where a
+bad stretch is actually noticed — scrubbing a segment and watching the ground
+truth walk off the terrain. The panel's **notes** section holds the range as
+two frame-number fields: type either end, or press its *now* button to take the
+frame showing, so marking a stretch is two clicks and a sentence. Ends typed
+the other way round are ordered rather than refused. It lists the notes that
+touch the open window, and clicking one seeks the playhead to its first frame.
+
+While a field there has focus it owns the keyboard. SimView binds space, the
+arrows and `p` to `document` and `window` with no useful focus check —
+`PlaybackControls` has none at all, and `Controls` tests for an `INPUT`, which
+a textarea is not — so a space typed into a note used to toggle playback
+instead. Both listen in the bubble phase, so the panel stops key events coming
+from a field it holds before they get that far. The scene page carries the same notes as a card, where
+they can also be written, edited and deleted; its window table marks every
+window a note's frames land in, so a scene shows at a glance where the flagged
+stretches are.
+
+**When the root will not take them.** Roots are routinely read-only or shared
+copies. The viewer probes the location once at startup — an actual write, since
+network mounts report permissions they will not honour — and lands in one of
+three states, which `/healthz` and the scene page both report:
+
+| | what happens |
+| --- | --- |
+| the root is writable | notes go to `<root>/notes/`, and travel with the dataset |
+| `--notes-dir PATH` | notes go there instead; they no longer travel with the data |
+| `--no-notes` | off entirely: nothing read, written or shown |
+
+A read-only root with no `--notes-dir` still **reads** its notes. Only
+composing is refused, with the reason on the page rather than the form silently
+missing — the same habit as an absent artefact, which is struck through rather
+than hidden. The notes directory itself is created by the first note, not by
+opening the root: looking at a dataset leaves it as it was found.
+
+**Stale frame numbers.** A frame index only means the same thing while the
+extraction does. Each notes file records the `dataset_version` it was written
+against, and the scene page says so when that stops matching `manifest.json` —
+the same check, for the same reason, as the atlas's.
+
+Notes are served from their own endpoint and are never folded into a window
+bundle. A bundle URL carries a content stamp and its `meta.json` is cached per
+window on disk, so a note stored in there would be invisible until the next
+code change, or would rebuild every window it touched each time someone typed
+one.
+
 ## Ground truth against the IMU
 
 Levelling puts the ground truth's own attitude and the IMU's in the same frame,
@@ -295,6 +390,8 @@ Dataset roots usually live on contended network storage, so:
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scenes` | the index as JSON |
 | `/api/scene/{scene}` | one scene's probe, windows and details as JSON |
+| `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
+| `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
@@ -349,6 +446,11 @@ line. Without `height_maps/` the terrain is accumulated from the clouds, and
 without clouds either it is flat; and a long traverse is coarsened to stay
 inside the cell budget. Cells nothing ever observed are filled from a trend
 surface -- the `coverage` colour mode shows which cells were really measured.
+
+**A note will not save.** The scene page's notes card says why: most often the
+root is read-only, in which case pass `--notes-dir PATH` to keep notes
+somewhere else (they then no longer travel with the dataset) or `--no-notes` to
+switch the feature off. `/healthz` reports the same state under `notes`.
 
 **A scene changed on disk and the index still shows the old numbers.** The
 probe cache is keyed by each scene directory's mtime and refreshes itself; to
