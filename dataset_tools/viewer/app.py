@@ -37,7 +37,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
-from .index_page import THUMB_FRACTIONS, build_index
+from .index_page import THUMB_SLOTS, build_index, thumb_index
 from .probe import ARTEFACTS, DatasetRoot
 from .scene_page import build_scene_page
 from .windows import describe_reason, frame_window_key
@@ -394,15 +394,16 @@ def create_app(
         if stored is not None:
             return FileResponse(stored, media_type="image/jpeg", headers=CURATED)
 
-        fraction = THUMB_FRACTIONS.get(slot)
-        if fraction is None:
+        if slot not in THUMB_SLOTS:
             raise HTTPException(404, f"no thumbnail slot {slot!r}")
         n_frames = access.probe.n_frames
         if not n_frames or not access.probe.has("images"):
             raise HTTPException(404, f"scene {scene_id} has no images to thumbnail")
+        # The same resolver the index and the scene page use, so a curated index
+        # with no file behind it still renders the frame it names.
+        index = thumb_index(root.atlas_scene(scene_id), slot, n_frames)
 
         def work():
-            index = min(n_frames - 1, max(0, round(fraction * (n_frames - 1))))
             path = access.frame_path("images", index)
             if not path.is_file():
                 # Sparse images/: fall back to the nearest index that exists.

@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from dataset_tools.viewer import loaders, probe, render, windows, wire
+from dataset_tools.viewer import index_page, loaders, probe, render, windows, wire
 
 # --------------------------------------------------------------------------
 # fixtures
@@ -742,11 +742,29 @@ def test_a_scene_without_optional_files_still_builds(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def write_atlas(root_path: Path, scenes=("0000",), *, with_thumbs: bool = True) -> Path:
-    """The optional ``atlas/`` half of a root: descriptions, groups, thumbnails."""
+#: The fixture's curated thumbnail frames. Deliberately NOT the 10/50/90 %
+#: fractions of a 12-frame scene (1, 6, 10), so a test can tell which one the
+#: viewer used.
+CURATED_THUMBS = {"a": 2, "b": 7, "c": 11}
+
+
+def write_atlas(
+    root_path: Path,
+    scenes=("0000",),
+    *,
+    with_thumbs: bool = True,
+    legacy_thumbs: bool = False,
+    dataset_version: str | None = None,
+) -> Path:
+    """The optional ``atlas/`` half of a root: descriptions, groups, thumbnails.
+
+    ``legacy_thumbs`` writes the pre-generator spelling, a bare list of slots
+    that names no frame -- roots in the wild still carry it.
+    """
     atlas_dir = root_path / "atlas"
     (atlas_dir / "thumbs").mkdir(parents=True, exist_ok=True)
     slots = ["a", "b", "c"]
+    thumbs = slots if legacy_thumbs else dict(CURATED_THUMBS)
     entries = {}
     for scene in scenes:
         if with_thumbs:
@@ -767,7 +785,6 @@ def write_atlas(root_path: Path, scenes=("0000",), *, with_thumbs: bool = True) 
             "seg_med_s": 18.7,
             "gt_span_s": 565.0,
             "cov": 0.867,
-            "old_cov": 0.5667,
             "path_m": 439.5,
             "moving_frac": 0.763,
             "win_med": 0.1207,
@@ -775,13 +792,14 @@ def write_atlas(root_path: Path, scenes=("0000",), *, with_thumbs: bool = True) 
             "flags": 24,
             "bag_gb": 25.1,
             "session": "synthetic_session",
-            "thumbs": slots if with_thumbs else [],
+            "thumbs": thumbs if with_thumbs else {},
         }
     (atlas_dir / "atlas.json").write_text(
         json.dumps(
             {
-                "schema": "dataset_tools.viewer/atlas@1",
+                "schema": "dataset_tools.viewer/atlas@2",
                 "generated": "2026-09-02",
+                "dataset_version": dataset_version,
                 "title": "Synthetic Atlas",
                 "kicker": "test fixture",
                 "intro": "One paragraph of curated introduction.",
@@ -814,6 +832,41 @@ def test_atlas_thumbnails_are_looked_up_through_the_manifest_not_the_path(tmp_pa
     # A slot the atlas does not list is not a path to try -- it is simply absent.
     assert root.atlas_thumb("0000", "../../../etc/passwd") is None
     assert root.atlas_thumb("0000", "z") is None
+
+
+def test_a_thumbnail_slot_resolves_to_the_frame_the_atlas_names(tmp_path):
+    """The curated index wins over the fraction, and both spellings are read."""
+    curated = {"thumbs": dict(CURATED_THUMBS)}
+    assert index_page.thumb_slots(curated) == ["a", "b", "c"]
+    assert [index_page.thumb_index(curated, s, 12) for s in ("a", "b", "c")] == [2, 7, 11]
+
+    # The older spelling names no frame, so the fractions stand in -- which is
+    # what those files were cut at anyway.
+    legacy = {"thumbs": ["a", "b", "c"]}
+    assert index_page.thumb_slots(legacy) == ["a", "b", "c"]
+    assert [index_page.thumb_index(legacy, s, 12) for s in ("a", "b", "c")] == [1, 6, 10]
+
+    # A slot the atlas skipped, and an index pointing past a re-cut scene.
+    assert index_page.thumb_slots({"thumbs": {"b": 3}}) == ["b"]
+    assert index_page.thumb_index({}, "a", 12) == 1
+    assert index_page.thumb_index({"thumbs": {"a": 900}}, "a", 12) == 11
+    assert index_page.thumb_index({"thumbs": {"a": 5}}, "a", 0) == 0
+
+
+def test_an_atlas_from_another_release_says_so_on_the_index(tmp_path):
+    """The v1.3 failure: atlas/ symlinked to v1.2's, so every curated number on
+    the page described the previous release under the previous release's title."""
+    root_path = make_root(tmp_path)
+    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "1.3"}))
+    write_atlas(root_path, dataset_version="1.2")
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    assert "1.2" in page["atlas_warning"] and "1.3" in page["atlas_warning"]
+
+    # Regenerated against this root: nothing to say.
+    write_atlas(root_path, dataset_version="1.3")
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache2")
+    assert index_page.build_index(root, root.probe_all())["atlas_warning"] is None
 
 
 def test_a_malformed_atlas_file_degrades_to_no_atlas(tmp_path):
@@ -1235,6 +1288,45 @@ def test_the_hero_thumbnails_are_the_index_slots_and_link_to_their_frames(tmp_pa
         "/scene/0000/frame/6",
         "/scene/0000/frame/10",
     ]
+
+
+def test_a_curated_hero_thumbnail_links_to_the_frame_it_was_cut_from(tmp_path):
+    """Picture and caption come from one number, so they cannot drift apart:
+    before the atlas named the frame, the link was recomputed from the fraction
+    and simply assumed the stored JPEG had been cut there."""
+    root_path = make_root(tmp_path)
+    write_atlas(root_path)
+    page = scene_page(tmp_path, root_path)
+    assert [t["href"] for t in page["hero"]] == [f"/scene/0000/frame/{i}" for i in CURATED_THUMBS.values()]
+    assert [t["sub"].split(" ·")[0] for t in page["hero"]] == [f"frame {i}" for i in CURATED_THUMBS.values()]
+
+
+def test_a_curated_thumbnail_with_no_stored_file_renders_the_frame_it_names(tmp_path):
+    """The stored JPEG is a cache of the frame, not the definition of it: delete
+    it and the endpoint renders exactly the same frame at the same width."""
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path)
+    atlas_dir = write_atlas(root_path)
+    for stored in (atlas_dir / "thumbs").glob("*.jpg"):
+        stored.unlink()
+    # The fixture writes one flat colour per frame, so mark the frame the 50 %
+    # fraction would have picked -- otherwise every frame renders alike and the
+    # test cannot tell the two rules apart.
+    from PIL import Image
+
+    Image.new("RGB", (16, 10), (200, 30, 30)).save(root_path / "0000" / "images" / "00006.png")
+
+    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    thumb = client.get("/api/scene/0000/thumb/b.jpg")
+    assert thumb.status_code == 200
+    frame = client.get(f"/api/scene/0000/frame/{CURATED_THUMBS['b']}/image.jpg?w=384")
+    assert thumb.content == frame.content
+    assert thumb.content != client.get("/api/scene/0000/frame/6/image.jpg?w=384").content
 
 
 def test_the_scene_page_leads_with_its_thumbnails_and_the_four_cards(atlas_client):

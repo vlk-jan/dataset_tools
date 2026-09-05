@@ -128,6 +128,48 @@ driving. Below 2 Hz the rate is flagged.
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
 
+## The atlas: curated prose, generated numbers
+
+A root may carry an `atlas/` directory the index renders instead of its own
+probe output: a masthead, groupings into outings, a description per scene, and
+three thumbnails per card. It is entirely optional — without it the same page
+renders from the probe alone.
+
+Only the prose in it is editorial. Everything else on those cards is a rendered
+number, and rendered numbers go stale: HELHEST v1.3 shipped with `atlas/`
+symlinked to v1.2's (v1.3 refines odometry in place, so almost every other file
+is legitimately shared) and the index quietly showed v1.2's poses, segments,
+coverage and path lengths under a v1.2 title. So the two halves live in two
+files, and only one of them is written by hand:
+
+| file | who writes it |
+| --- | --- |
+| `atlas/curation.json` | a person. Title, kicker, intro, root note, footer, the groups, one description per scene, and the frame index behind each thumbnail. |
+| `atlas/atlas.json` | `scripts/make_atlas.py`. The curated half copied through, every number computed from the root, and the `dataset_version` it was generated against. |
+
+```sh
+scripts/make_atlas.py <root> --init     # seed curation.json from an existing atlas
+scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
+scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
+```
+
+Numbers come from the same code the pages use (`SceneProbe`,
+`scene_page.path_and_motion`), so the atlas cannot disagree with the page it
+feeds; the rest comes from `<scene>/regen/` and, for the 2 s window error, from
+that scene's `regen/odom_ref.txt`. Run it after anything that changes odometry,
+frames or clouds — and when the atlas's `dataset_version` stops matching
+`manifest.json`, the index says so above the masthead rather than showing the
+old numbers silently.
+
+**Thumbnails.** A slot names the *frame* it shows (`"thumbs": {"a": 196}`), and
+the stored `atlas/thumbs/<scene><slot>.jpg` is a cache of that frame, not the
+definition of it: delete it and `/api/scene/<id>/thumb/<slot>.jpg` renders the
+same frame live at the same width (384 px). The index card, the scene page's
+hero caption and the frame it links to all resolve through one
+`index_page.thumb_index` call, so they cannot name different frames. A root
+whose atlas predates this names no frames, and the slots fall back to 10/50/90 %
+of the scene — which is where those files were cut.
+
 ## Ground truth against the IMU
 
 Levelling puts the ground truth's own attitude and the IMU's in the same frame,

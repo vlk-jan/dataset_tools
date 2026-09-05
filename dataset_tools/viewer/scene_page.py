@@ -35,6 +35,8 @@ from .index_page import (
     fmt_duration,
     segment_timeline,
     stat,
+    thumb_index,
+    thumb_slots,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
 from .probe import DatasetRoot
@@ -252,7 +254,7 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
     }
 
 
-def _path_and_motion(access: SceneAccess) -> tuple[float, float] | None:
+def path_and_motion(access: SceneAccess) -> tuple[float, float] | None:
     """``(path metres, moving fraction)`` from this scene's own odometry.
 
     Only ever called when the atlas did not supply the numbers. Distances are
@@ -343,7 +345,7 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         if a.get("moving_frac") is not None:
             stats.append(stat("moving", f"{a['moving_frac'] * 100:.0f}%", f"over {MOVING_M_S} m/s"))
     else:
-        derived = _path_and_motion(access)
+        derived = path_and_motion(access)
         if derived:
             stats.append(stat("path in GT", f"{derived[0]:.0f} m", "from odometry.txt"))
             stats.append(stat("moving", f"{derived[1] * 100:.0f}%", f"over {MOVING_M_S} m/s"))
@@ -508,19 +510,20 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
 def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
     """The same three frames the index card shows, at the top of the scene page.
 
-    Same endpoint and same fractions as the index, so a scene looks the same in
-    both places; here each one also links to the frame it was cut from.
+    Same endpoint and same resolver as the index, so a scene looks the same in
+    both places; here each one also links to the frame it was cut from. The link
+    and the picture come from one ``thumb_index`` call: a curated thumbnail cut
+    at some other frame than the default fraction still captions itself right.
     """
     p = access.probe
-    stored = [s for s in (a.get("thumbs") or []) if s in THUMB_SLOTS]
+    stored = thumb_slots(a)
     slots = stored or (list(THUMB_SLOTS) if p.has("images") and p.n_frames else [])
     ts = access.frame_ts if slots else None
     t0 = float(ts[0]) if ts is not None and len(ts) else None
 
     out = []
     for slot in slots:
-        fraction = THUMB_FRACTIONS[slot]
-        index = min(p.n_frames - 1, max(0, round(fraction * (p.n_frames - 1)))) if p.n_frames else 0
+        index = thumb_index(a, slot, p.n_frames)
         at = None
         if ts is not None and t0 is not None and index < len(ts):
             at = f"{float(ts[index]) - t0:.0f} s"
@@ -528,8 +531,8 @@ def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
             {
                 "url": f"/api/scene/{p.scene_id}/thumb/{slot}.jpg",
                 "href": f"/scene/{p.scene_id}/frame/{index}" if p.has("images") else None,
-                "alt": f"scene {p.scene_id} at {fraction * 100:.0f}%",
-                "label": f"{fraction * 100:.0f}%",
+                "alt": f"scene {p.scene_id} frame {index}",
+                "label": f"{THUMB_FRACTIONS[slot] * 100:.0f}%",
                 "sub": f"frame {index}" + (f" · {at}" if at else ""),
             }
         )

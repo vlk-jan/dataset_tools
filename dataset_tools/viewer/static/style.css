@@ -85,6 +85,12 @@ pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: a
    as one document whether or not the root has an atlas/ next to the data.
    Only the *typography* is still the index's own (body.atlas, at the end). */
 
+/* Said above the masthead, because the masthead itself is the stale part. */
+.stale {
+  margin: 0 0 14px; padding: 8px 12px; border: 1px solid var(--warn);
+  border-left-width: 4px; border-radius: 6px; background: var(--panel);
+  font-size: 13.5px; color: var(--warn);
+}
 .masthead { padding: 4px 0 12px; border-bottom: 2px solid var(--fg); margin-bottom: 8px; }
 .kicker {
   font: 500 12px/1 var(--mono); letter-spacing: .14em;

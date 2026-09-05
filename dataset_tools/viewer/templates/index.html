@@ -23,6 +23,10 @@
 </header>
 <main>
 
+  {# Curated content carries rendered numbers, so an atlas copied from an
+     earlier release is wrong in a way nothing else on the page reveals. #}
+  {% if atlas_warning %}<p class="stale">{{ atlas_warning }}</p>{% endif %}
+
   <div class="masthead">
     <div class="kicker">
       {%- if atlas and atlas.kicker %}{{ atlas.kicker }}

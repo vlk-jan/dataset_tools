@@ -330,10 +330,13 @@ class DatasetRoot:
 
         ``slot`` is one short token (``a``/``b``/``c``); it is checked against
         the manifest in ``atlas.json`` rather than pasted into a path, so a
-        request cannot walk out of the atlas directory.
+        request cannot walk out of the atlas directory. The manifest is either
+        ``{"a": <frame index>}`` or the older bare ``["a", "b", "c"]``; only
+        membership matters here, and both spell it the same way.
         """
         entry = self.atlas_scene(scene_id)
-        if slot not in (entry.get("thumbs") or []):
+        thumbs = entry.get("thumbs") or ()
+        if slot not in (thumbs.keys() if isinstance(thumbs, dict) else thumbs):
             return None
         spec = (self.atlas() or {}).get("thumbs") or {}
         pattern = spec.get("pattern") or "{scene}{slot}.jpg"

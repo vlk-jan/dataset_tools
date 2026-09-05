@@ -17,9 +17,10 @@ from typing import Any
 
 from .probe import DatasetRoot, SceneProbe
 
-#: Thumbnail slots and where in a scene they sample it. The stored thumbnails
-#: in ``atlas/thumbs/`` were cut at these same fractions, so a root with an
-#: atlas and a root without it show the same three moments of a scene.
+#: Thumbnail slots and where in a scene they sample it when the atlas does not
+#: say. A curated root names the frame each slot was cut from, so the picture,
+#: its caption and the frame it links to are one number; these fractions are the
+#: fallback for a root with no atlas at all.
 THUMB_SLOTS: tuple[str, ...] = ("a", "b", "c")
 THUMB_FRACTIONS: dict[str, float] = {"a": 0.1, "b": 0.5, "c": 0.9}
 
@@ -142,6 +143,32 @@ def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> tuple[list, list]:
     return [s for s in spans if s not in fill], fill
 
 
+def thumb_slots(atlas_entry: dict) -> list[str]:
+    """The slots the atlas curates for a scene, in slot order.
+
+    Two spellings are accepted: ``{"a": 196}`` names the frame each slot was cut
+    from (what ``scripts/make_atlas.py`` writes), and a bare ``["a", "b", "c"]``
+    is the older form that only claimed a file exists -- there the frame falls
+    back to the fraction, which is what those files were cut at anyway.
+    """
+    raw = atlas_entry.get("thumbs")
+    keys = raw.keys() if isinstance(raw, dict) else (raw or ())
+    return [s for s in THUMB_SLOTS if s in keys]
+
+
+def thumb_index(atlas_entry: dict, slot: str, n_frames: int) -> int:
+    """The frame one thumbnail slot shows: the curated index, else the fraction.
+
+    One function for the picture, its caption and its link, so a curated
+    thumbnail cannot be captioned with a frame it was not cut from.
+    """
+    raw = atlas_entry.get("thumbs")
+    index = raw.get(slot) if isinstance(raw, dict) else None
+    if not isinstance(index, int) or isinstance(index, bool):
+        index = round(THUMB_FRACTIONS[slot] * (n_frames - 1)) if n_frames else 0
+    return min(max(0, index), max(0, n_frames - 1))
+
+
 def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[str, str]]:
     """Three thumbnail URLs for a scene, stored ones preferred.
 
@@ -149,12 +176,12 @@ def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[st
     root has one and renders a live frame when it does not, so the template does
     not branch and a root that later grows an ``atlas/`` needs no template change.
     """
-    stored = [s for s in (atlas_entry.get("thumbs") or []) if s in THUMB_SLOTS]
+    stored = thumb_slots(atlas_entry)
     slots = stored or (list(THUMB_SLOTS) if probe.has("images") and probe.n_frames else [])
     return [
         {
             "url": f"/api/scene/{scene_id}/thumb/{slot}.jpg",
-            "alt": f"scene {scene_id} at {THUMB_FRACTIONS[slot] * 100:.0f}%",
+            "alt": f"scene {scene_id} frame {thumb_index(atlas_entry, slot, probe.n_frames)}",
             "stored": bool(stored),
         }
         for slot in slots
@@ -247,5 +274,27 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
         "rows": rows,
         "groups": groups,
         "atlas": atlas or None,
+        "atlas_warning": atlas_warning(root, atlas),
         "totals": atlas.get("totals") or _derived_totals(rows),
     }
+
+
+def atlas_warning(root: DatasetRoot, atlas: dict) -> str | None:
+    """Why this root's atlas should not be believed, if there is a reason.
+
+    A curated atlas carries rendered numbers, not just prose, so one copied from
+    an earlier release describes that release: HELHEST v1.3 shipped with its
+    ``atlas/`` symlinked to v1.2's and the index quietly showed v1.2's poses,
+    segments and coverage under a v1.2 title. The generator stamps the dataset
+    version it was run against; a mismatch says so on the page instead.
+    """
+    if not atlas:
+        return None
+    manifest = root.manifest() or {}
+    theirs, ours = atlas.get("dataset_version"), manifest.get("dataset_version")
+    if theirs and ours and str(theirs) != str(ours):
+        return (
+            f"atlas/atlas.json describes dataset {theirs}, this root is {ours} — "
+            "its prose and numbers are stale; regenerate with scripts/make_atlas.py"
+        )
+    return None
