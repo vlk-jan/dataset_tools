@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "black==24.8.0" "ruff==0.6.9"
+      - run: black --check dataset_tools scripts tests
+      - run: ruff check dataset_tools scripts tests
+
+  # The extraction tools promise Python 3.10; the viewer needs 3.12 (SimView).
+  # One job per floor, each installing only what that floor supports.
+  extraction:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[test]"
+      # The viewer tests skip themselves when its extra is absent.
+      - run: python -m pytest tests
+
+  viewer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[viewer,test]" --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: python -m pytest tests

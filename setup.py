@@ -14,7 +14,10 @@ setup(
     name=package_name,
     version="1.0.1",
     packages=find_packages(exclude=["test", "tests"]),
-    package_data={"dataset_tools.viewer": ["static/*", "templates/*"]},
+    package_data={
+        "dataset_tools": ["libcloudini_shim.so"],
+        "dataset_tools.viewer": ["static/*", "templates/*"],
+    },
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         (os.path.join("share", package_name), ["package.xml"]),
