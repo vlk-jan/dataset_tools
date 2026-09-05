@@ -6,10 +6,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import write_scene
 
 from dataset_tools import validate_scene as vs
-
-from conftest import write_scene
 
 
 def test_clean_scene_passes(scene: Path):
@@ -126,9 +125,11 @@ def test_sync_offset_warning(scene: Path):
 
 
 def test_old_layout_extras_are_optional_and_reported(scene: Path):
-    (scene / "odometry.txt").write_text("# Timestamp(sec) r11\n")
+    # The extras are inspected, not just counted, so they have to be well formed.
+    pose = " ".join(["1700000000.000000", *(f"{v:.6f}" for v in np.eye(4).ravel())])
+    (scene / "odometry.txt").write_text("# Timestamp(sec) r11 ... 0 0 0 1\n" + pose + "\n")
     (scene / "trajectory.txt").write_text("# Timestamp(sec) r11\n")
-    (scene / "T_cam_to_lidar.txt").write_text("1 0 0 0\n")
+    np.savetxt(scene / "T_cam_to_lidar.txt", np.eye(4))
     (scene / "height_maps").mkdir()
     (scene / "height_masks").mkdir()
     (scene / f"{scene.name}_full.npz").write_bytes(b"")
@@ -180,3 +181,69 @@ def test_main_markdown_table(tmp_path: Path, capsys):
     out = capsys.readouterr().out
     assert out.startswith("| scene | status |")
     assert "| 0000 | OK | 2 |" in out.replace(" |  |", " |")
+
+
+def _write_gt(scene: Path, segments: list[tuple[float, float, int, str]], stray: int = 0) -> None:
+    """Anchored ground truth at 10 Hz for the given (start, end, n_poses, reason) rows."""
+    from dataset_tools import gt_io
+
+    ts, poses = [], []
+    for start, _end, n, _reason in segments:
+        t = start + 0.1 * np.arange(n)
+        T = np.tile(np.eye(4), (n, 1, 1))
+        T[:, 0, 3] = 0.2 * np.arange(n)
+        ts.append(t)
+        poses.append(T)
+    if stray:
+        ts.append(9_000_000.0 + 0.1 * np.arange(stray))
+        poses.append(np.tile(np.eye(4), (stray, 1, 1)))
+    gt_io.write_trajectory(scene / "odometry.txt", np.concatenate(ts), np.concatenate(poses))
+    gt_io.write_segments(
+        scene / "odometry_segments.txt",
+        [gt_io.SegmentRow(i, s, e, n, r) for i, (s, e, n, r) in enumerate(segments)],
+    )
+
+
+def test_ground_truth_that_matches_its_segment_table_is_clean(scene: Path):
+    _write_gt(scene, [(100.0, 101.9, 20, "gap"), (110.0, 110.9, 10, "end_of_run")])
+    report = vs.validate_scene(scene)
+    assert report.status() == "OK", (report.errors, report.warnings)
+    assert report.stats["gt_poses"] == 30 and report.stats["gt_segments"] == 2
+
+
+def test_a_segment_pose_count_that_disagrees_with_the_poses_is_an_error(scene: Path):
+    _write_gt(scene, [(100.0, 101.9, 20, "gap")])
+    (scene / "odometry_segments.txt").write_text("# h\n0 100.000000 101.900000 25 gap\n")
+    report = vs.validate_scene(scene)
+    assert any("n_poses is 25" in e for e in report.errors)
+
+
+def test_overlapping_segments_are_an_error(scene: Path):
+    _write_gt(scene, [(100.0, 101.9, 20, "gap"), (101.5, 102.4, 10, "end_of_run")])
+    report = vs.validate_scene(scene)
+    assert any("overlap" in e for e in report.errors)
+
+
+def test_poses_outside_every_segment_and_unanchored_segments_are_warnings(scene: Path):
+    _write_gt(scene, [(100.0, 101.9, 20, "gap")], stray=3)
+    T = np.loadtxt(scene / "odometry.txt", comments="#")
+    T[0, 4] = 7.0  # first pose of the segment: x = 7, not the identity
+    np.savetxt(scene / "odometry.txt", T, fmt="%.6f", header=vs.read_trajectory.__module__)
+    report = vs.validate_scene(scene)
+    assert not report.errors
+    assert any("3 poses lie outside" in w for w in report.warnings)
+    assert any("not the identity" in w for w in report.warnings)
+
+
+def test_a_segment_table_without_odometry_is_an_error(scene: Path):
+    (scene / "odometry_segments.txt").write_text("# h\n0 1.0 2.0 5 gap\n")
+    report = vs.validate_scene(scene)
+    assert any("odometry_segments.txt is present but odometry.txt is not" in e for e in report.errors)
+
+
+def test_a_malformed_camera_extrinsic_is_an_error(scene: Path):
+    np.savetxt(scene / "T_cam_to_base.txt", np.ones((4, 4)))
+    report = vs.validate_scene(scene)
+    assert any("T_cam_to_base.txt: not a rigid transform" in e for e in report.errors)
+    np.savetxt(scene / "T_cam_to_base.txt", np.eye(4))
+    assert not vs.validate_scene(scene).errors
