@@ -407,6 +407,10 @@ exposed integration bugs — missing LiDAR-to-base extrinsic, empty wheel
 velocities, an unreferenced IMU — and are not part of the dataset; see the
 repository README for details and the collection checklist.
 
+The 2026-09-02 test recordings show the first two of those fixed. What that rig
+does and does not yet provide, measured against the v1.3 contract, is in
+[`NEW_RIG_READINESS.md`](NEW_RIG_READINESS.md).
+
 ## 8. Tooling
 
 Extraction, validation and statistics scripts live in
