@@ -12,6 +12,7 @@ dataset or the network.
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -530,6 +531,97 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
     assert inside.all()
     under = height[row[inside], col[inside]]
     # Both maps reach both robots, so a flat mean would put each on 0.5.
+    assert under[0] == pytest.approx(0.0, abs=0.1)
+    assert under[1] == pytest.approx(1.0, abs=0.1)
+
+
+def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
+    """A cell is reached by dozens of maps. Taking the best validity among them
+    paints a cell measured on the strength of one distant frame whose map edge
+    caught a return, while the near frames that actually decided the height were
+    extrapolating. The layer has to be weighted as the height is."""
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
+    scene = root_path / "0000"
+    ts = loaders.read_timestamps(scene / "data_ts.txt")
+    # Two frames 6 m apart. Each stands where the other only reaches with the
+    # far edge of its map, worth ~2% of a sample directly underfoot.
+    with open(scene / "odometry.txt", "w") as fh:
+        for i, t in enumerate(ts):
+            T = np.eye(4)
+            T[0, 3] = 6.0 * i
+            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
+    for i in range(2):
+        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.zeros((128, 128)))
+        # Frame 0 measured everything it saw; frame 1 extrapolated everything.
+        np.savez_compressed(
+            scene / "height_masks" / f"{i:05d}.npz",
+            validity=np.full((128, 128), 2 if i == 0 else 0, dtype=np.uint8),
+        )
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    track = build.resolve_poses(access, window, access.frame_ts[frames])
+    poses = loaders.poses_from_quat(track.positions, track.quats)
+    opts = build.BuildOptions().sanitized()
+    grid = build._make_grid(track.positions, opts)
+    build.splat_height_maps(access, grid, frames, poses, opts)
+    _, layers, bounds = build._finish_terrain(grid, None)
+
+    row, col, inside = grid.cell_of(track.positions[:, 0], track.positions[:, 1])
+    under = layers["validity"][row[inside], col[inside]]
+    assert bounds["validity"] == (0.0, 2.0)
+    assert under[0] == pytest.approx(2.0, abs=0.1)
+    # Both maps reach it, so the best of them would call this cell measured.
+    assert under[1] == pytest.approx(0.0, abs=0.1)
+
+
+def test_a_nan_in_a_height_map_does_not_poison_the_terrain(tmp_path):
+    """The generator is free to leave a cell NaN. Splatted, it would sit in the
+    weighted sums for good -- the cell counts as covered, so nothing fills it,
+    and a NaN reaches the heightfield -- and it smears into world x and y too,
+    where the cast to a cell index is undefined."""
+    from dataset_tools.viewer import build, probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
+    scene = root_path / "0000"
+    ts = loaders.read_timestamps(scene / "data_ts.txt")
+    with open(scene / "odometry.txt", "w") as fh:
+        for i, t in enumerate(ts):
+            T = np.eye(4)
+            T[0, 3] = 6.0 * i
+            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
+    for i in range(2):
+        hm = np.full((128, 128), float(i))
+        hm[100:120, 100:120] = np.nan  # ahead and to the right of the robot
+        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=hm)
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    frames = np.arange(window.frame_start, window.frame_end)
+    track = build.resolve_poses(access, window, access.frame_ts[frames])
+    poses = loaders.poses_from_quat(track.positions, track.quats)
+    opts = build.BuildOptions().sanitized()
+    grid = build._make_grid(track.positions, opts)
+    with warnings.catch_warnings():
+        # The undefined cast announces itself; the guard has to run before it.
+        warnings.simplefilter("error", RuntimeWarning)
+        stats = build.splat_height_maps(access, grid, frames, poses, opts)
+    height, layers, _ = build._finish_terrain(grid, None)
+
+    assert stats["used"] == 2
+    assert np.isfinite(height).all()
+    # The NaN cells are simply unobserved, not observed-as-nothing: they fill
+    # from the trend around them and read as zero coverage.
+    assert layers["coverage"].min() == 0.0
+    row, col, inside = grid.cell_of(track.positions[:, 0], track.positions[:, 1])
+    under = height[row[inside], col[inside]]
     assert under[0] == pytest.approx(0.0, abs=0.1)
     assert under[1] == pytest.approx(1.0, abs=0.1)
 

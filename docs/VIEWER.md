@@ -120,7 +120,7 @@ driving. Below 2 Hz the rate is flagged.
 | `transforms.npy` | a second "wheel odom" ghost body, plus the `wheel_odom_drift` plot |
 | `gravity_align.npy` | the attitude comparison and its plots; places each height map level in the world; levels the window (above) |
 | `height_maps/` | the terrain surface, and a per-frame tile in the side panel |
-| `height_masks/` | the terrain's `validity` colour layer, and its own panel tile |
+| `height_masks/` | the terrain's `validity` colour layer (weighted mean per cell), and its own panel tile |
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
 | `images/` | the side panel's camera tile, served per frame |
 | `joint_states.npy` | wheel spin animation + velocity/effort plots |
@@ -203,6 +203,15 @@ a trend surface and show as zero coverage), `validity`, and `cloud_points` /
 means travels with the window (`build.TERRAIN_COLOR_MODE_HELP` → `meta.json` →
 the panel's **terrain colour modes** legend), so the names in SimView's own
 "Color Mode" dropdown are explained next to it rather than left to be guessed.
+
+`validity` is the mean validity of the samples behind a cell, weighted exactly
+as its height was, so it reports how measured the surface you are looking at
+actually is. Taking the best of them instead reads far more of the map as
+measured than the height warrants: a distant frame's map edge does get real
+lidar returns and does mark the cell measured, while the near frames that
+decided the height were driving past it and extrapolating behind themselves — on
+a straight traverse that describes roughly two covered cells in five. The
+per-frame Validity tile still shows the three states unmixed.
 
 ### The 3D view toggles
 

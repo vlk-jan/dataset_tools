@@ -71,7 +71,10 @@ WHEEL_LABELS = ("left", "rear", "right")
 #:    cached bundle holds poses and a height field that no longer match.
 #: 6: ``meta`` carries the GT-vs-IMU attitude comparison the panel reads, and
 #:    the attitude scalars are renamed to say which source they came from.
-META_VERSION = 6
+#: 7: the ``validity`` terrain layer is the weighted mean of the samples behind
+#:    each cell rather than the best of them, so cached bundles hold a layer
+#:    that no longer means what its legend says.
+META_VERSION = 7
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -88,9 +91,12 @@ TERRAIN_COLOR_MODE_HELP = {
         "from the trend around it rather than measured."
     ),
     "validity": (
-        "Best height-map validity that landed in the cell: 0 extrapolated, "
-        "1 interpolated (inside the hull, no return), 2 measured (a lidar "
-        "return). The same three states as the Validity tile."
+        "How measured this cell's height actually is: the mean validity of the "
+        "height-map samples behind it, weighted exactly as the height was. 0 is "
+        "extrapolated throughout, 1 interpolated (inside the hull, no return), "
+        "2 a lidar return every time; dozens of samples land in a cell, so the "
+        "values in between are real mixtures. The Validity tile shows the same "
+        "three states unmixed, for one frame."
     ),
     "cloud_points": (
         "Number of aggregated raw lidar points that fell in the cell. Near "
@@ -472,14 +478,20 @@ class TerrainGrid:
     sum_wz: np.ndarray = field(init=False)
     sum_w: np.ndarray = field(init=False)
     count: np.ndarray = field(init=False)
-    validity: np.ndarray = field(init=False)
+    #: Weighted validity sum and *its own* weights. A separate pair from the
+    #: height's, because a frame whose validity mask is missing contributes a
+    #: height but no validity, and dividing by the height's weights would read
+    #: that absence as "extrapolated" rather than as "not said".
+    sum_wv: np.ndarray = field(init=False)
+    sum_w_v: np.ndarray = field(init=False)
     layers: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.sum_wz = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.sum_w = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.count = np.zeros((self.ny, self.nx), dtype=np.int32)
-        self.validity = np.zeros((self.ny, self.nx), dtype=np.uint8)
+        self.sum_wv = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.sum_w_v = np.zeros((self.ny, self.nx), dtype=np.float64)
 
     @property
     def x_lim(self) -> tuple[float, float]:
@@ -560,7 +572,17 @@ def splat_height_maps(
             continue
         xs, ys = L.height_map_cell_centers(hm.shape)
         X, Y = np.meshgrid(xs, ys, indexing="ij")
-        local = np.stack([X.ravel(), Y.ravel(), np.asarray(hm, dtype=np.float64).ravel()], axis=1)
+        z = np.asarray(hm, dtype=np.float64).ravel()
+        # A cell the generator left as NaN has to go before the grid ever sees
+        # it. It would poison its grid cell for good -- the weighted sums go
+        # NaN, ``covered`` stays true, and a NaN reaches the float32 heightfield
+        # -- and the rotation below smears it across world x and y as well,
+        # where the integer cast in ``cell_of`` is undefined. Clouds are
+        # filtered the same way, in ``L.load_cloud``.
+        finite = np.isfinite(z)
+        if not finite.any():
+            continue
+        local = np.stack([X.ravel()[finite], Y.ravel()[finite], z[finite]], axis=1)
 
         R = poses[i][:3, :3]
         t = poses[i][:3, 3]
@@ -580,8 +602,9 @@ def splat_height_maps(
         if frame in have_mask:
             mask = L.load_npz_key(access.frame_path("height_masks", frame), "validity")
             if mask is not None and mask.shape == hm.shape:
-                flat = np.asarray(mask, dtype=np.uint8).ravel()[inside]
-                np.maximum.at(grid.validity, (row[inside], col[inside]), flat)
+                flat = np.asarray(mask, dtype=np.float64).ravel()[finite][inside]
+                np.add.at(grid.sum_wv, (row[inside], col[inside]), flat * w)
+                np.add.at(grid.sum_w_v, (row[inside], col[inside]), w)
                 stats["with_masks"] += 1
     return stats
 
@@ -744,9 +767,10 @@ def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 5
 def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.ndarray, dict, dict]:
     """Turn the accumulated grid into a height field plus its colour layers.
 
-    Cells nothing was observed in are filled with the median observed height
-    and reported through the ``coverage`` layer, so invented ground is visible
-    in the viewer instead of being indistinguishable from measured ground.
+    Cells nothing was observed in are filled from the trend surface through
+    the observed ones (:func:`_background_surface`) and reported through the
+    ``coverage`` layer, so invented ground is visible in the viewer instead of
+    being indistinguishable from measured ground.
     """
     covered = grid.sum_w > 0.0
     height = np.zeros((grid.ny, grid.nx), dtype=np.float64)
@@ -758,9 +782,13 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
         fill = float(np.median(cloud[:, 2])) if cloud is not None and len(cloud) else 0.0
         height[:] = fill
 
+    validity = np.zeros((grid.ny, grid.nx), dtype=np.float64)
+    said = grid.sum_w_v > 0.0
+    validity[said] = grid.sum_wv[said] / grid.sum_w_v[said]
+
     layers = {
         "coverage": (grid.count > 0).astype(np.float64) * grid.count,
-        "validity": grid.validity.astype(np.float64),
+        "validity": validity,
     }
     layers.update(grid.layers)
     bounds = {"validity": (0.0, 2.0)}
@@ -772,7 +800,7 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
 
 
 def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
-    """Fill the grid's height from the aggregated cloud (median z per cell).
+    """Fill the grid's height from the aggregated cloud (mean z per cell).
 
     Used when a scene has no height maps at all -- the terrain is then the
     lidar's own ground estimate rather than the pipeline's BEV product.
