@@ -1,0 +1,49 @@
+"""Viewer: colour maps and the per-frame tiles (dataset_tools.viewer.render).
+
+Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
+here touches a real dataset or the network. The end-to-end HTTP tests skip
+cleanly when the viewer extra (SimView + torch) is not installed.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+from dataset_tools.viewer import render
+
+# --------------------------------------------------------------------------
+# rendering
+# --------------------------------------------------------------------------
+
+
+def test_bev_display_puts_forward_at_the_top_and_left_at_the_left():
+    """Known answer: the height map is [row=x forward, col=y left], and the
+    rendered image must be a top-down view with forward up."""
+    grid = np.zeros((8, 8))
+    grid[7, 4] = 1.0  # far forward (max x), slightly left of centre
+    disp = render._bev_to_display(grid)
+    row, col = np.unravel_index(np.argmax(disp), disp.shape)
+    assert row == 0, "max-x cell must land in the top row"
+    assert col == 3, "the y axis must be mirrored so +y is on the left"
+
+
+def test_colorize_handles_nan_and_a_flat_range():
+    out = render.colorize(np.array([[np.nan, np.nan]]), cmap="turbo")
+    assert out.shape == (1, 2, 3)
+    assert out.dtype == np.uint8
+    flat = render.colorize(np.full((4, 4), 3.0))
+    assert flat.shape == (4, 4, 3)
+
+
+def test_renderers_produce_valid_images():
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    hm = np.random.default_rng(0).normal(size=(128, 128))
+    for data in (render.render_height_map(hm), render.render_validity((hm > 0).astype(np.uint8))):
+        assert Image.open(io.BytesIO(data)).size[0] > 0
+    cloud = np.random.default_rng(1).normal(size=(500, 4))
+    assert Image.open(io.BytesIO(render.render_cloud_bev(cloud))).size[0] > 0

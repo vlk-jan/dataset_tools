@@ -54,3 +54,36 @@ def write_scene(
 @pytest.fixture
 def scene(tmp_path: Path) -> Path:
     return write_scene(tmp_path / "0000")
+
+
+# -- viewer ---------------------------------------------------------------
+# The viewer's HTTP fixtures. They skip when its optional extra is absent.
+
+
+@pytest.fixture
+def client(tmp_path):
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=12, with_cmd_vel=False)
+    app = create_app(root_path, cache_dir=tmp_path / "cache")
+    return TestClient(app)
+
+
+@pytest.fixture
+def atlas_client(tmp_path):
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root, write_atlas
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=12)
+    write_atlas(root_path, scenes=("0000", "0001"))
+    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
