@@ -26,6 +26,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,23 @@ def _simview_static_dir() -> Path:
     from importlib.resources import files
 
     return Path(str(files("simview") / "static"))
+
+
+def _warm_build_imports() -> None:
+    """Import SimView's authoring API and torch ahead of the first build.
+
+    ``build_scene`` imports them lazily so that ``import dataset_tools.viewer``
+    stays cheap, but the first window anyone opens after the viewer starts then
+    paid about a second for the torch import inside the request. Done here on
+    a background thread, that second is spent while the index is being looked
+    at instead.
+    """
+    try:
+        import simview.scene  # noqa: F401
+        import simview.state  # noqa: F401
+        import torch  # noqa: F401
+    except Exception as exc:  # noqa: BLE001 - the build reports it properly on demand
+        logger.debug("build imports not warmed: %s", exc)
 
 
 def _simview_version() -> str:
@@ -206,6 +224,7 @@ def create_app(
             "simview static assets not found at %s; the 3D view will not work",
             simview_static,
         )
+    threading.Thread(target=_warm_build_imports, name="warm-build-imports", daemon=True).start()
 
     # ------------------------------------------------------------------ pages
 

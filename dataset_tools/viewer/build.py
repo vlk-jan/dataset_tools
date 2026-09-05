@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +62,21 @@ WHEEL_LABELS = ("left", "rear", "right")
 
 #: File suffix of each per-frame directory's entries.
 FRAME_SUFFIX = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}
+
+#: Threads reading a window's per-frame files. A root usually sits on network
+#: storage, where a serial loop pays one round trip of latency per file before
+#: any bytes flow; a build touches ~200 files, so overlapping those round trips
+#: is what makes it fast. File reads release the GIL.
+READ_WORKERS = 16
+
+
+def _read_all(paths: Sequence, loader: Callable) -> list:
+    """``[loader(p) for p in paths]``, with the reads overlapped in threads."""
+    if len(paths) <= 1:
+        return [loader(p) for p in paths]
+    with ThreadPoolExecutor(max_workers=min(READ_WORKERS, len(paths))) as pool:
+        return list(pool.map(loader, paths))
+
 
 #: Bumped whenever :func:`build_scene`'s ``meta`` payload changes a field the
 #: overlay reads, or the same window *key* comes to mean different frames.
@@ -491,7 +508,7 @@ class TerrainGrid:
     def __post_init__(self) -> None:
         self.sum_wz = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.sum_w = np.zeros((self.ny, self.nx), dtype=np.float64)
-        self.count = np.zeros((self.ny, self.nx), dtype=np.int32)
+        self.count = np.zeros((self.ny, self.nx), dtype=np.int64)
         self.sum_wv = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.sum_w_v = np.zeros((self.ny, self.nx), dtype=np.float64)
 
@@ -509,6 +526,16 @@ class TerrainGrid:
         row = np.floor((y - self.y0) / self.res).astype(np.int64)
         inside = (col >= 0) & (col < self.nx) & (row >= 0) & (row < self.ny)
         return row, col, inside
+
+    def binned(self, row: np.ndarray, col: np.ndarray, weights: np.ndarray | None = None) -> np.ndarray:
+        """Per-cell sum of ``weights`` (or a count) for samples at ``(row, col)``.
+
+        ``np.bincount`` over the flattened cell index: ``np.add.at`` does the
+        same job an order of magnitude slower, and a window splats over a
+        million samples.
+        """
+        flat = np.bincount(row * self.nx + col, weights=weights, minlength=self.ny * self.nx)
+        return flat.reshape(self.ny, self.nx)
 
 
 def _make_grid(positions: np.ndarray, opts: BuildOptions) -> TerrainGrid:
@@ -567,9 +594,18 @@ def splat_height_maps(
     chosen = _pick(usable, opts.max_hm_frames)
     ga = access.gravity_align
 
-    for i in chosen:
+    # Every file of the window in flight at once, then the arithmetic in order.
+    maps = _read_all(
+        [access.frame_path("height_maps", int(frames[i])) for i in chosen],
+        lambda p: L.load_npz_key(p, "height_map"),
+    )
+    masks = _read_all(
+        [access.frame_path("height_masks", int(frames[i])) if int(frames[i]) in have_mask else None for i in chosen],
+        lambda p: None if p is None else L.load_npz_key(p, "validity"),
+    )
+
+    for i, hm, mask in zip(chosen, maps, masks, strict=True):
         frame = int(frames[i])
-        hm = L.load_npz_key(access.frame_path("height_maps", frame), "height_map")
         if hm is None or hm.ndim != 2:
             continue
         xs, ys = L.height_map_cell_centers(hm.shape)
@@ -595,19 +631,18 @@ def splat_height_maps(
         row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
         if not inside.any():
             continue
+        r, c = row[inside], col[inside]
         w = np.exp(-((np.hypot(local[inside, 0], local[inside, 1]) / HM_BLEND_SIGMA) ** 2))
-        np.add.at(grid.sum_wz, (row[inside], col[inside]), world[inside, 2] * w)
-        np.add.at(grid.sum_w, (row[inside], col[inside]), w)
-        np.add.at(grid.count, (row[inside], col[inside]), 1)
+        grid.sum_wz += grid.binned(r, c, world[inside, 2] * w)
+        grid.sum_w += grid.binned(r, c, w)
+        grid.count += grid.binned(r, c)
         stats["used"] += 1
 
-        if frame in have_mask:
-            mask = L.load_npz_key(access.frame_path("height_masks", frame), "validity")
-            if mask is not None and mask.shape == hm.shape:
-                flat = np.asarray(mask, dtype=np.float64).ravel()[finite][inside]
-                np.add.at(grid.sum_wv, (row[inside], col[inside]), flat * w)
-                np.add.at(grid.sum_w_v, (row[inside], col[inside]), w)
-                stats["with_masks"] += 1
+        if mask is not None and mask.shape == hm.shape:
+            flat = np.asarray(mask, dtype=np.float64).ravel()[finite][inside]
+            grid.sum_wv += grid.binned(r, c, flat * w)
+            grid.sum_w_v += grid.binned(r, c, w)
+            stats["with_masks"] += 1
     return stats
 
 
@@ -637,14 +672,14 @@ def aggregate_clouds(
 
     if grid is not None:
         sum_i = np.zeros((grid.ny, grid.nx), dtype=np.float64)
-        cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int32)
+        cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int64)
         max_z = np.full((grid.ny, grid.nx), -np.inf)
         min_z = np.full((grid.ny, grid.nx), np.inf)
 
+    clouds = _read_all([access.frame_path("clouds", int(frames[i])) for i in chosen], L.load_cloud)
+
     parts: list[np.ndarray] = []
-    for i in chosen:
-        frame = int(frames[i])
-        cloud = L.load_cloud(access.frame_path("clouds", frame))
+    for i, cloud in zip(chosen, clouds, strict=True):
         if cloud is None or len(cloud) == 0:
             continue
         R, t = poses[i][:3, :3], poses[i][:3, 3]
@@ -655,8 +690,8 @@ def aggregate_clouds(
             row, col, inside = grid.cell_of(world_xyz[:, 0], world_xyz[:, 1])
             if inside.any():
                 r, c = row[inside], col[inside]
-                np.add.at(sum_i, (r, c), intensity[inside])
-                np.add.at(cnt_i, (r, c), 1)
+                sum_i += grid.binned(r, c, intensity[inside])
+                cnt_i += grid.binned(r, c)
                 np.maximum.at(max_z, (r, c), world_xyz[inside, 2])
                 np.minimum.at(min_z, (r, c), world_xyz[inside, 2])
 
@@ -812,9 +847,10 @@ def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
         return
     r, c, z = row[inside], col[inside], cloud[inside, 2]
     # Points, not a robot-centred raster: nothing here to weight by distance.
-    np.add.at(grid.sum_wz, (r, c), z)
-    np.add.at(grid.sum_w, (r, c), 1.0)
-    np.add.at(grid.count, (r, c), 1)
+    grid.sum_wz += grid.binned(r, c, z)
+    hits = grid.binned(r, c)
+    grid.sum_w += hits
+    grid.count += hits
 
 
 # --------------------------------------------------------------------------
