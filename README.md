@@ -58,7 +58,7 @@ singularity exec --bind /mnt/data $SIF \
     .venv/bin/python -m dataset_tools.extract_data <bags> <output> --jobs 8
 ```
 
-The `.venv` is not in the repository (it is gitignored) -- `slurm_extract.batch`
+The `.venv` is not in the repository (it is gitignored) -- `slurm/slurm_extract.batch`
 and the Slurm example below both expect one built this way at `$REPO/.venv`.
 
 Add further `--bind` options for any other filesystem you read or write
@@ -136,7 +136,8 @@ lidar works.
 | Flag | Meaning |
 | --- | --- |
 | `--jobs N` | worker processes, one bag each (default 4; `1` runs in-process) |
-| `--overwrite` | re-extract scenes that are already complete |
+| `--overwrite` | re-extract scenes that are already complete (a scene's previous outputs are removed first) |
+| `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so only for Fixposition topics |
 | `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories |
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
@@ -186,7 +187,10 @@ index-aligned.
 | `../scenes.csv` | — | text | — | dataset-level index: `scene,bag,start_time,frames` |
 
 Files whose source topic is missing from a bag are simply not written, and the
-extractor logs a warning saying so.
+extractor logs a warning saying so. `helhest-validate` then reports the missing
+`transforms.npy` / `gravity_align.npy` / `camera_intrinsics.txt` as errors: the
+scene contract requires them, and a bag without odometry or orientation is a
+recording to look into rather than a scene to ship.
 
 ## Validation
 
@@ -201,7 +205,9 @@ Checks file presence, equal frame counts across images / clouds / timestamps /
 transforms / gravity alignment, contiguous frame numbering, monotonic
 timestamps, cloud shape and dtype, the non-finite fraction, valid rotation
 matrices, camera/lidar sync offset, frame-to-frame odometry jumps and tilt
-statistics.
+statistics. When a scene carries ground truth, `odometry.txt` and
+`odometry_segments.txt` are checked against each other: segment pose counts,
+no overlaps, each segment anchored at the identity.
 
 Structural problems are **errors** (exit code `1`); data-quality observations
 (NaNs, jumps, extreme tilt) are **warnings** — `--strict` makes them fail too.
@@ -235,7 +241,7 @@ See [docs/VIEWER.md](docs/VIEWER.md).
 
 ## Slurm
 
-`slurm_extract.batch` is a working example (16 CPUs, 8 workers). The essential
+`slurm/slurm_extract.batch` is a working example (16 CPUs, 8 workers). The essential
 part:
 
 ```bash
@@ -259,9 +265,12 @@ No bags are needed; everything runs on synthetic data.
 
 Covered: nearest-neighbour synchronisation against a brute-force reference,
 `PointCloud2` field parsing, static-TF graph composition, rotation helper
-round-trips, bag discovery / scene selection / `scenes.csv` merging, the scene
-validator, and the viewer (probing, window enumeration, pose interpolation,
-rendering and every route, against synthetic scene directories).
+round-trips, bag discovery / scene selection / `scenes.csv` merging, a full
+extraction of a synthetic bag written with `rosbags`, the scene validator, and
+the viewer (probing, window enumeration, pose interpolation, rendering and every
+route, against synthetic scene directories). `.github/workflows/ci.yml` runs
+the same on Python 3.10 (extraction) and 3.12 (with the viewer), plus `black`
+and `ruff`.
 
 The viewer's tests need its extra too, and with it Python 3.12+; run them from
 the viewer's own virtualenv:

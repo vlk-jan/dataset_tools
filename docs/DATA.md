@@ -15,7 +15,7 @@ banks, a drained reservoir bed, snow, and three tip-over events are all in.
 | Synchronised frames | 182,913 LiDAR–camera pairs, 7.5 h |
 | Sessions | 12–14 Sep 2025 (0000–0011), 9 Oct 2025 (0012–0029), 16 Feb 2026 (0030–0042) |
 | Sites | Robotour 2025 venue — chateau landscape park & arboretum [LOCATION]; Temešvár area (Písek district) — village farmyard, pine-forest edge & fallow meadow, forested hills around a drained pond; Milíčovský háj (Prague) — snow-covered lowland deciduous forest |
-| Odometry | present in 32 scenes (see table); absent in 11 |
+| Odometry | present in 32 scenes (17 covering the whole scene, 15 only part of it; see table); absent in 11 |
 | Size on disk | ~7 GB per 10k frames (PNG images dominate) |
 | Location | `/mnt/data/vras/data/HELHEST/` (CTU VRAS storage); raw bags on `subtdata:/data/` (see [Raw recordings](#raw-recordings)) |
 

@@ -1,8 +1,17 @@
 # Regenerating the v1 ground-truth odometry ("level 2")
 
-Status: **plan, nothing run yet** (2026-09-01). Owner of the run: the laptop that
+Status: **run (v1.2 full pass 2026-09-02, v1.3 in place)**; written as a plan on 2026-09-01 and kept as the record of what was decided and why. Owner of the run: the laptop that
 generated v1 (`~/Documents/setprop/flio_ws`). Consumer: DRIFT, via a HELHEST v1.2
 root on RCI.
+
+> **Where the pieces live.** The per-scene driver `run_scene.sh`, the
+> segment-restarting recorder it runs (`dataset_tools/odom_node.py` with
+> `--restart`) and `extract_wheels.py` are on the `odometry-regen-recorder`
+> branch, which `scripts/dgx07_regen.sh` and `slurm/regen_scene.batch` expect
+> checked out at `$REGEN_REPO`. `extract_odom_ref.py`, which both drivers also
+> call, is not committed on any branch; it lived only in that checkout. Main
+> carries the post-processing (`scripts/filter_segments.py`,
+> `merge_v11_fill.py`, `relabel_segments.py`) and the extraction.
 
 ## Why
 
