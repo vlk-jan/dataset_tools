@@ -9,29 +9,47 @@ ROS installation is required.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import logging
 import math
 import re
+import shutil
+import struct
 import sys
 import traceback
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
 
 import cv2
-import numpy as np
 import networkx as nx
-from tqdm import tqdm
+import numpy as np
 from rosbags.highlevel import AnyReader
+from tqdm import tqdm
 
 try:
     from dataset_tools import cloudini, rosbags_compat  # noqa: F401  (patches rosbags)
+    from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
+    from dataset_tools.transforms import (  # noqa: F401  (re-exported: the transform helpers used to live here)
+        euler_matrix,
+        pose_to_matrix,
+        quaternion_matrix,
+        roll_pitch_from_matrix,
+        roll_pitch_from_quat,
+    )
 except ImportError:  # when the file is run directly from dataset_tools/
     import cloudini
     import rosbags_compat  # noqa: F401
-
+    from gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
+    from transforms import (  # noqa: F401
+        euler_matrix,
+        pose_to_matrix,
+        quaternion_matrix,
+        roll_pitch_from_matrix,
+        roll_pitch_from_quat,
+    )
 
 LOG = logging.getLogger("helhest.extract")
 
@@ -47,52 +65,52 @@ STATUS_SKIPPED = "skipped"
 STATUS_EMPTY = "empty"
 STATUS_FAILED = "failed"
 
+#: Everything one extraction run writes into a scene directory. A re-extraction
+#: (``--overwrite``, or resuming a scene that never finished) removes these
+#: first, so frames of a previous run cannot outlive it and skew the counts.
+SCENE_OUTPUT_DIRS = ("images", "clouds")
+SCENE_OUTPUT_FILES = (
+    "data_ts.txt",
+    "pcd_ts.txt",
+    "transforms.npy",
+    "gravity_align.npy",
+    "camera_intrinsics.txt",
+    "camera_info.yaml",
+    "T_cam_to_base.txt",
+    "joint_states.npy",
+    "joint_setpoints.npy",
+    "cmd_vel.npy",
+    SENTINEL_FILE,
+)
+#: Written only when the odometry source is its own ground truth (``--gt``).
+GROUND_TRUTH_FILES = ("odometry.txt", "odometry_segments.txt")
+
 
 # ---------------------------------------------------------------------------
-# Small transform helpers (replacing tf_transformations, 'sxyz' convention)
+# Message helpers
 # ---------------------------------------------------------------------------
-def quaternion_matrix(q: Sequence[float]) -> np.ndarray:
-    """4x4 homogeneous rotation matrix from quaternion [x, y, z, w]."""
-    x, y, z, w = q
-    n = x * x + y * y + z * z + w * w
-    if n < 1e-12:
-        return np.eye(4)
-    s = 2.0 / n
-    T = np.eye(4)
-    T[:3, :3] = [
-        [1 - s * (y * y + z * z), s * (x * y - z * w), s * (x * z + y * w)],
-        [s * (x * y + z * w), 1 - s * (x * x + z * z), s * (y * z - x * w)],
-        [s * (x * z - y * w), s * (y * z + x * w), 1 - s * (x * x + y * y)],
-    ]
-    return T
+def header_stamp(msg, fallback: float) -> float:
+    """``header.stamp`` of a deserialised message in seconds, or ``fallback``."""
+    if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
+        return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    return fallback
 
 
-def euler_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
-    """4x4 matrix R = Rz(yaw) @ Ry(pitch) @ Rx(roll) ('sxyz')."""
-    cr, sr = math.cos(roll), math.sin(roll)
-    cp, sp = math.cos(pitch), math.sin(pitch)
-    cy, sy = math.cos(yaw), math.sin(yaw)
-    T = np.eye(4)
-    T[:3, :3] = [
-        [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-        [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-        [-sp, cp * sr, cp * cr],
-    ]
-    return T
+def header_stamp_from_cdr(raw: bytes) -> float | None:
+    """``header.stamp`` read straight out of a CDR buffer, without deserialising.
 
-
-def roll_pitch_from_quat(q: Sequence[float]) -> tuple[float, float]:
-    """Roll and pitch ('sxyz') of quaternion [x, y, z, w]."""
-    R = quaternion_matrix(q)
-    roll = math.atan2(R[2, 1], R[2, 2])
-    pitch = math.asin(np.clip(-R[2, 0], -1.0, 1.0))
-    return roll, pitch
-
-
-def pose_to_matrix(pose) -> np.ndarray:
-    T = quaternion_matrix([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w])
-    T[:3, 3] = [pose.position.x, pose.position.y, pose.position.z]
-    return T
+    Valid only for messages whose first field is a ``std_msgs/Header``: after
+    the 4-byte CDR encapsulation (whose second byte says little- or big-endian)
+    the header starts with ``stamp.sec`` (int32) and ``stamp.nanosec``
+    (uint32). Images and clouds are megabytes each and the first pass needs
+    nothing but this number, so skipping the full decode is what makes that
+    pass cheap. Returns None for a buffer too short to hold a stamp.
+    """
+    if len(raw) < 12:
+        return None
+    fmt = "<iI" if raw[1] == 1 else ">iI"
+    sec, nanosec = struct.unpack_from(fmt, raw, 4)
+    return sec + nanosec * 1e-9
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +134,8 @@ def fields_to_dtype(fields, point_step: int, big_endian: bool = False) -> np.dty
 
 def cloud_to_xyzi(msg) -> np.ndarray:
     """PointCloud2 or CompressedPointCloud2 message -> (N, 4) float32 [x y z i]."""
-    if hasattr(msg, "compressed_data"):  # point_cloud_interfaces/CompressedPointCloud2
-        data = cloudini.decode(bytes(msg.compressed_data))
-    else:
-        data = bytes(msg.data)
+    # point_cloud_interfaces/CompressedPointCloud2 carries a cloudini blob instead of raw data
+    data = cloudini.decode(bytes(msg.compressed_data)) if hasattr(msg, "compressed_data") else bytes(msg.data)
     dtype = fields_to_dtype(msg.fields, msg.point_step, msg.is_bigendian)
     points = np.frombuffer(data, dtype=dtype, count=msg.width * msg.height)
     names = points.dtype.names
@@ -402,11 +418,27 @@ def merge_scenes_csv(output_dir: Path) -> Path:
     if parts_dir.is_dir():
         for part in parts_dir.glob("*.csv"):
             part.unlink()
-        try:
+        with contextlib.suppress(OSError):  # someone else is still writing; harmless
             parts_dir.rmdir()
-        except OSError:  # someone else is still writing; harmless
-            pass
     return csv_path
+
+
+def clear_scene_outputs(scene_dir: Path, ground_truth: bool) -> None:
+    """Remove what a previous extraction of this scene wrote.
+
+    Only the extractor's own outputs go; anything else in the directory (a
+    ``regen/`` provenance folder, height maps, reviewer notes) is left alone.
+    ``odometry.txt`` and its segment table are removed only when this run will
+    write them itself: on the old rig they come from the FAST-LIO regeneration,
+    which runs *before* the extraction and has to survive it.
+    """
+    if not scene_dir.is_dir():
+        return
+    for name in SCENE_OUTPUT_DIRS:
+        shutil.rmtree(scene_dir / name, ignore_errors=True)
+    files = SCENE_OUTPUT_FILES + (GROUND_TRUTH_FILES if ground_truth else ())
+    for name in files:
+        (scene_dir / name).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -456,11 +488,11 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         result.message = f"missing topic(s): {', '.join(missing)}"
         return result
 
-    (scene_dir / "images").mkdir(parents=True, exist_ok=True)
-    (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
+    # A scene is extracted from scratch every time, so whatever an earlier run
+    # left behind must go first (see clear_scene_outputs).
+    clear_scene_outputs(scene_dir, ground_truth=gt_enabled(args))
 
     # Pass 1: Collect timestamps for synchronization
-    # We only deserialize headers for efficiency
     cam_timestamps = []
     lidar_timestamps = []
 
@@ -488,13 +520,26 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     tf_msgs = []
 
-    for conn, timestamp, raw in reader.messages(relevant_conns):
-        msg = reader.deserialize(raw, conn.msgtype)
+    # Images and clouds are the bulk of the bag and this pass needs only their
+    # stamps, which are read out of the raw bytes (header_stamp_from_cdr). The
+    # shortcut is checked against a full decode of each connection's first
+    # message and dropped for that connection if the two disagree.
+    stamp_only = {id(cam_conn), id(lidar_conn)}
+    verified: set[int] = set()
 
-        # Get header timestamp if available
-        t = timestamp
-        if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
-            t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    for conn, timestamp, raw in reader.messages(relevant_conns):
+        if id(conn) in stamp_only and id(conn) in verified:
+            t = header_stamp_from_cdr(raw)
+            if t is None:
+                t = header_stamp(reader.deserialize(raw, conn.msgtype), timestamp)
+        else:
+            msg = reader.deserialize(raw, conn.msgtype)
+            t = header_stamp(msg, timestamp)
+            if id(conn) in stamp_only:
+                if header_stamp_from_cdr(raw) == t:
+                    verified.add(id(conn))
+                else:
+                    stamp_only.discard(id(conn))
 
         if conn.topic == camera_topic:
             cam_timestamps.append(t)
@@ -539,7 +584,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     if len(valid_cam_ts) == 0:
         LOG.warning(
-            "%s: no synchronised camera/lidar pairs (%d camera, %d lidar messages); " "scene left empty",
+            "%s: no synchronised camera/lidar pairs (%d camera, %d lidar messages); scene left empty",
             bag_path.name,
             len(cam_timestamps),
             len(lidar_timestamps),
@@ -547,6 +592,9 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         result.status = STATUS_EMPTY
         result.message = f"no synced pairs ({len(cam_timestamps)} cam, {len(lidar_timestamps)} lidar)"
         return result
+
+    (scene_dir / "images").mkdir(parents=True, exist_ok=True)
+    (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
 
     # Map timestamps to their chronological frame indices
     cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
@@ -579,7 +627,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             T_lidar_to_base[:3, 3] = [x, y, z]
         else:
             LOG.warning(
-                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; " "using identity",
+                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; using identity",
                 bag_path.name,
                 lidar_frame,
                 args.base_frame,
@@ -608,7 +656,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         imu_data = [(t, R @ T_base_in_imu) for t, R in imu_data]
     elif imu_frame and T_imu_to_base is None:
         LOG.warning(
-            "%s: no TF path from orientation frame '%s' to '%s'; using raw " "orientations for gravity alignment",
+            "%s: no TF path from orientation frame '%s' to '%s'; using raw orientations for gravity alignment",
             bag_path.name,
             imu_frame,
             args.base_frame,
@@ -618,16 +666,18 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     cam_set = set(valid_cam_ts)
     pcd_set = set(valid_pcd_ts)
 
-    # For odom interpolation/matching
-    odom_ts = np.array([x[0] for x in odom_data])
-    odom_poses = [x[1] for x in odom_data]
-
-    transforms_dict = {}
     intrinsics_saved = False
 
-    for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
-        msg = reader.deserialize(raw, conn.msgtype)
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+    for conn, _, raw in reader.messages([cam_conn, lidar_conn]):
+        # Same stamp arithmetic as pass 1, so the set lookups below hit exactly.
+        t = header_stamp_from_cdr(raw) if id(conn) in verified else None
+        if t is None:
+            msg = reader.deserialize(raw, conn.msgtype)
+            t = header_stamp(msg, float("nan"))
+        elif t not in (cam_set if conn.topic == camera_topic else pcd_set):
+            continue  # not a synchronised frame: never decoded at all
+        else:
+            msg = reader.deserialize(raw, conn.msgtype)
 
         if conn.topic == camera_topic and t in cam_set:
             img_idx = cam_ts_to_idx[t]  # Get correct chronological index
@@ -642,11 +692,6 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
                 save_intrinsics(reader, conns, camera_topic, scene_dir)
                 save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
                 intrinsics_saved = True
-
-            # Match Odom and save via dict instead of list append
-            if len(odom_ts):
-                idx = np.argmin(np.abs(odom_ts - t))
-                transforms_dict[img_idx] = odom_poses[idx]
 
             cam_set.remove(t)  # Handle duplicates
 
@@ -669,20 +714,15 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         else:
             LOG.warning("%s: too few odometry samples for ground truth", bag_path.name)
 
-    if transforms_dict:
-        missing = [i for i in range(len(valid_cam_ts)) if i not in transforms_dict]
-        if missing:
-            raise RuntimeError(
-                f"odometry pose missing for {len(missing)} of {len(valid_cam_ts)} "
-                "frames (duplicate camera timestamps in the bag?)"
-            )
-        # Reconstruct sequential list based on chronological indices
-        transforms = [transforms_dict[i] for i in range(len(valid_cam_ts))]
-        rel_transforms = [np.eye(4)]
-        first_inv = np.linalg.inv(transforms[0])
-        for i in range(1, len(transforms)):
-            rel_transforms.append(first_inv @ transforms[i])
-        np.save(scene_dir / "transforms.npy", np.array(rel_transforms))
+    if odom_data:
+        # The odometry sample nearest each camera stamp, relative to frame 0.
+        odom_data.sort(key=lambda x: x[0])
+        odom_ts = np.array([x[0] for x in odom_data])
+        odom_poses = np.array([x[1] for x in odom_data])
+        matched = odom_poses[nearest_idx(valid_cam_ts, odom_ts)]
+        rel_transforms = anchor_to_first(matched)
+        rel_transforms[0] = np.eye(4)
+        np.save(scene_dir / "transforms.npy", rel_transforms)
     else:
         LOG.warning(
             "%s: no odometry messages on '%s'; transforms.npy not written",
@@ -692,26 +732,14 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Process gravity alignment
     if imu_data:
+        # The orientation sample nearest each lidar stamp; yaw is dropped.
+        imu_data.sort(key=lambda x: x[0])
         imu_ts = np.array([x[0] for x in imu_data])
-        imu_rolls = np.empty(len(imu_data))
-        imu_pitches = np.empty(len(imu_data))
-        for i, (_, R) in enumerate(imu_data):
-            imu_rolls[i] = math.atan2(R[2, 1], R[2, 2])
-            imu_pitches[i] = math.asin(np.clip(-R[2, 0], -1.0, 1.0))
-
-        gravity_aligns = []
-        for pcd_t in valid_pcd_ts:
-            # Find the closest IMU message to the Lidar timestamp
-            idx = np.argmin(np.abs(imu_ts - pcd_t))
-
-            roll = imu_rolls[idx]
-            pitch = imu_pitches[idx]
-
-            # Gravity alignment rotation (corrects pitch/roll, ignores yaw)
-            R_align = euler_matrix(roll, pitch, 0.0)[:3, :3]
-            gravity_aligns.append(R_align)
-
-        np.save(scene_dir / "gravity_align.npy", np.array(gravity_aligns))
+        gravity_aligns = np.empty((len(valid_pcd_ts), 3, 3))
+        for k, i in enumerate(nearest_idx(valid_pcd_ts, imu_ts)):
+            roll, pitch = roll_pitch_from_matrix(imu_data[i][1])
+            gravity_aligns[k] = euler_matrix(roll, pitch, 0.0)[:3, :3]
+        np.save(scene_dir / "gravity_align.npy", gravity_aligns)
     else:
         LOG.warning(
             "%s: no orientation messages on '%s'; gravity_align.npy not written",
@@ -802,9 +830,6 @@ def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> b
     return True
 
 
-GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
-
-
 def gt_enabled(args) -> bool:
     """--gt auto: the odometry is its own ground truth only on rigs where the
     source is absolute (Fixposition GNSS/INS); wheel-IMU /odom drifts and the
@@ -841,23 +866,24 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, m
     reasons = ["gap" if dt[b - 1] > max_gap else "teleport" for b in breaks]
     starts = [0, *breaks]
     ends = [*breaks, len(ts)]
-    seg_id = 0
-    with open(scene_dir / "odometry.txt", "w") as f_out, open(scene_dir / "odometry_segments.txt", "w") as f_seg:
-        f_out.write(GT_HEADER + "\n")
-        f_seg.write("# segment start_ts end_ts n_poses reason\n")
-        for k, (a, b) in enumerate(zip(starts, ends)):
-            if b - a < min_poses:
-                continue
-            anchored = np.einsum("ij,njk->nik", np.linalg.inv(Ts[a]), Ts[a:b])
-            for t, T in zip(ts[a:b], anchored):
-                f_out.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
-            # The tag names why this segment ENDED -- the break that closes it,
-            # not the one that opened it -- so it means the same thing here as
-            # in the regenerated (FAST-LIO) tables the viewer also reads.
-            reason = reasons[k] if k < len(reasons) else "end_of_run"
-            f_seg.write(f"{seg_id} {ts[a]:.6f} {ts[b-1]:.6f} {b-a} {reason}\n")
-            seg_id += 1
-    return seg_id > 0
+    kept_ts: list[np.ndarray] = []
+    kept_poses: list[np.ndarray] = []
+    rows: list[SegmentRow] = []
+    for k, (a, b) in enumerate(zip(starts, ends, strict=True)):
+        if b - a < min_poses:
+            continue
+        kept_ts.append(ts[a:b])
+        kept_poses.append(anchor_to_first(Ts[a:b]))
+        # The tag names why this segment ENDED -- the break that closes it,
+        # not the one that opened it -- so it means the same thing here as
+        # in the regenerated (FAST-LIO) tables the viewer also reads.
+        reason = reasons[k] if k < len(reasons) else "end_of_run"
+        rows.append(SegmentRow(len(rows), float(ts[a]), float(ts[b - 1]), b - a, reason))
+    write_trajectory(
+        scene_dir / "odometry.txt", np.concatenate(kept_ts or [ts[:0]]), np.concatenate(kept_poses or [Ts[:0]])
+    )
+    write_segments(scene_dir / "odometry_segments.txt", rows)
+    return bool(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -883,13 +909,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--cam",
         type=str,
         default="/odin1/image/compressed",
-        help="Compressed image topic (old bags: " "/luxonis/oak/rgb/image_raw/compressed)",
+        help="Compressed image topic (old bags: /luxonis/oak/rgb/image_raw/compressed)",
     )
     parser.add_argument(
         "--lidar",
         type=str,
         default="/odin1/cloud_filtered/cloudini",
-        help="PointCloud2 or CompressedPointCloud2 topic (old bags: " "/livox/lidar_front)",
+        help="PointCloud2 or CompressedPointCloud2 topic (old bags: /livox/lidar_front)",
     )
     parser.add_argument(
         "--odom",

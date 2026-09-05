@@ -5,10 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import write_scene
 
 from dataset_tools import extract_data as ed
-
-from conftest import write_scene
 
 
 def make_bag(root: Path, name: str) -> Path:
