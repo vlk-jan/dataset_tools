@@ -24,31 +24,25 @@ Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import numpy as np
 
-HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
-
-
-def load_traj(p):
-    d = np.loadtxt(p, comments="#")
-    if d.size == 0:
-        return np.zeros(0), np.zeros((0, 4, 4))
-    if d.ndim == 1:
-        d = d[None, :]
-    o = np.argsort(d[:, 0], kind="stable")
-    return d[o, 0], d[o, 1:].reshape(-1, 4, 4)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
+from dataset_tools.gt_io import (  # noqa: E402
+    SegmentRow,
+    anchor_to_first,
+    read_segments,
+    read_trajectory,
+    write_segments,
+    write_trajectory,
+)
 
 
 def load_segments(p):
-    segs = []
-    for line in open(p):
-        if line.startswith("#") or not line.strip():
-            continue
-        f = line.split()
-        segs.append((float(f[1]), float(f[2]), int(f[3]), f[4] if len(f) > 4 else ""))
-    return segs
+    """``(start, end, n_poses, reason)`` per row of a segment table."""
+    return [(s.start_ts, s.end_ts, s.n_poses, s.reason) for s in read_segments(p)]
 
 
 def rel(T, i, j):
@@ -87,14 +81,14 @@ def main():
     src = regen / "odometry_prefilter.txt"
     if not src.exists():
         src = regen / "odometry.txt"
-    t, T = load_traj(src)
+    t, T = read_trajectory(src)
     segp = regen / "odometry_segments.txt"
     if not segp.exists():
         segp = regen / "odometry_segments_prefilter.txt"
     segs = load_segments(segp) if segp.exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
-    rt, rT = load_traj(a.odom_ref)
+    rt, rT = read_trajectory(a.odom_ref)
 
-    kept_rows, kept_segs = [], []
+    kept_ts, kept_T, kept_segs = [], [], []
     span_in = span_out = 0.0
     for s0, s1, _, reason in segs:
         idx = np.where((t >= s0) & (t <= s1))[0]
@@ -106,33 +100,31 @@ def main():
         # runs of consecutive good poses
         good = ~bad
         edges = np.diff(np.concatenate([[0], good.astype(int), [0]]))
-        for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0]):
+        for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0], strict=True):
             if r1 - r0 < a.min_poses:
                 continue
             run_t, run_T = ts[r0:r1], Ts[r0:r1]
-            anchored = np.einsum("ij,njk->nik", np.linalg.inv(run_T[0]), run_T)
-            for k in range(len(run_t)):
-                kept_rows.append(np.concatenate([[run_t[k]], anchored[k].ravel()]))
+            kept_ts.append(run_t)
+            kept_T.append(anchor_to_first(run_T))
             # The input tag says why the input segment ENDED, so only the run
             # that reaches that end inherits it; every earlier run ends where
             # this filter cut it, which is a different reason and its own tag.
             # Without the distinction a segment could read "the recording
             # ended" 97 s before the recording ended (scene 0000, seg 7).
             tag = reason if r1 == len(ts) else "odom_mismatch"
-            kept_segs.append((run_t[0], run_t[-1], len(run_t), f"filtered:{tag}"))
+            kept_segs.append(SegmentRow(len(kept_segs), run_t[0], run_t[-1], len(run_t), f"filtered:{tag}"))
             span_out += run_t[-1] - run_t[0]
 
-    with open(out / "odometry.txt", "w") as f:
-        f.write(HEADER + "\n")
-        for row in kept_rows:
-            f.write(" ".join(f"{v:.6f}" for v in row) + "\n")
-    with open(out / "odometry_segments.txt", "w") as f:
-        f.write("# segment start_ts end_ts n_poses reason\n")
-        for k, (s0, s1, n, reason) in enumerate(kept_segs):
-            f.write(f"{k} {s0:.6f} {s1:.6f} {n} {reason}\n")
+    poses_out = int(sum(len(x) for x in kept_ts))
+    write_trajectory(
+        out / "odometry.txt",
+        np.concatenate(kept_ts) if kept_ts else t[:0],
+        np.concatenate(kept_T) if kept_T else T[:0],
+    )
+    write_segments(out / "odometry_segments.txt", kept_segs)
     summary = dict(
         poses_in=len(t),
-        poses_out=len(kept_rows),
+        poses_out=poses_out,
         segments_in=len(segs),
         segments_out=len(kept_segs),
         span_in_s=round(span_in, 1),

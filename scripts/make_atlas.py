@@ -52,8 +52,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))  # compare_v1_v12, a sibling script
 sys.path.insert(0, str(HERE.parent))  # the package, when it is not installed
 
-from compare_v1_v12 import load_traj, windows  # noqa: E402
+from compare_v1_v12 import windows  # noqa: E402
 
+from dataset_tools.gt_io import read_trajectory  # noqa: E402
 from dataset_tools.viewer import render  # noqa: E402
 from dataset_tools.viewer.build import SceneAccess  # noqa: E402
 from dataset_tools.viewer.index_page import (  # noqa: E402
@@ -164,7 +165,7 @@ def window_errors(access: SceneAccess) -> tuple[float, float] | None:
     if len(ts) < 2:
         return None
     try:
-        rt, rT = load_traj(ref_path)
+        rt, rT = read_trajectory(ref_path)
     except (OSError, ValueError) as exc:
         logger.warning("%s: cannot read odom_ref.txt: %s", access.scene_id, exc)
         return None

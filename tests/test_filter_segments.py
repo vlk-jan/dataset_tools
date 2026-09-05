@@ -24,14 +24,14 @@ HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
 def _write_traj(path: Path, ts, xs) -> None:
     with open(path, "w") as f:
         f.write(HEADER + "\n")
-        for t, x in zip(ts, xs):
+        for t, x in zip(ts, xs, strict=False):
             T = np.eye(4)
             T[0, 3] = x
             f.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
 
 
 def _segments(path: Path):
-    return [line.split() for line in open(path) if not line.startswith("#")]
+    return [line.split() for line in path.read_text().splitlines() if not line.startswith("#")]
 
 
 def test_only_the_run_reaching_the_end_inherits_the_tag(tmp_path):

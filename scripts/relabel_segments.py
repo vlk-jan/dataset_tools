@@ -30,7 +30,11 @@ still ends before its parent's end, so a second run finds nothing to do.
 """
 
 import argparse
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
+from dataset_tools import gt_io  # noqa: E402
 
 #: Tag for a segment that ends where the post-hoc /odom filter cut it, under the
 #: prefix ``filter_segments.py`` puts on every row it writes.
@@ -42,14 +46,12 @@ END_TOL = 1e-3
 
 
 def read_segments(path: Path):
-    """``(index, start_ts, end_ts, n_poses, reason)`` per data row, in file order."""
-    rows = []
-    for line in path.read_text().splitlines():
-        if line.startswith("#") or not line.strip():
-            continue
-        f = line.split()
-        rows.append((len(rows), float(f[1]), float(f[2]), int(f[3]), f[4] if len(f) > 4 else ""))
-    return rows
+    """``(row, start_ts, end_ts, n_poses, reason)`` per data row, in file order.
+
+    ``row`` is the position in the file, which is what ``apply_scene`` rewrites
+    by; it equals the segment index for every table this package writes.
+    """
+    return [(i, s.start_ts, s.end_ts, s.n_poses, s.reason) for i, s in enumerate(gt_io.read_segments(path))]
 
 
 def plan_scene(scene_dir: Path):

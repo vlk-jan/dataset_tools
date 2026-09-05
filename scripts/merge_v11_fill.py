@@ -23,19 +23,24 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from filter_segments import HEADER, bad_poses, load_traj  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
+from filter_segments import bad_poses  # noqa: E402
+
+from dataset_tools.gt_io import (  # noqa: E402
+    SegmentRow,
+    anchor_to_first,
+    read_segments,
+    read_trajectory,
+    write_segments,
+    write_trajectory,
+)
 
 WINDOW, MAX_ERR, MIN_POSES, MARGIN, MAX_GAP = 2.0, 1.0, 20, 0.15, 1.0
 
 
 def load_segment_rows(p):
-    rows = []
-    for line in open(p):
-        if line.startswith("#") or not line.strip():
-            continue
-        f = line.split()
-        rows.append([float(f[1]), float(f[2]), int(f[3]), f[4] if len(f) > 4 else ""])
-    return rows
+    """``[start, end, n_poses, reason]`` per row of a segment table."""
+    return [[s.start_ts, s.end_ts, s.n_poses, s.reason] for s in read_segments(p)]
 
 
 def fill_segments(t1, T1, segs12, rt, rT):
@@ -55,11 +60,10 @@ def fill_segments(t1, T1, segs12, rt, rT):
         bad = bad_poses(tt, TT, rt, rT, WINDOW, MAX_ERR)
         good = ~bad
         edges = np.diff(np.concatenate([[0], good.astype(int), [0]]))
-        for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0]):
+        for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0], strict=True):
             if r1 - r0 < MIN_POSES:
                 continue
-            anchored = np.einsum("ij,njk->nik", np.linalg.inv(TT[r0]), TT[r0:r1])
-            out.append((tt[r0:r1], anchored))
+            out.append((tt[r0:r1], anchor_to_first(TT[r0:r1])))
     return out
 
 
@@ -80,9 +84,9 @@ def merge_scene(v11, v12, scene):
         return f"{scene}: no v1.1 odometry, nothing to fill"
     if "v11_fill" in seg_path.read_text():
         return f"{scene}: already merged, skipping"
-    t1, T1 = load_traj(p11)
+    t1, T1 = read_trajectory(p11)
     segs12 = load_segment_rows(seg_path)
-    rt, rT = load_traj(ref_path)
+    rt, rT = read_trajectory(ref_path)
     fills = fill_segments(t1, T1, segs12, rt, rT)
     if not fills:
         record(d12, "no_fill_survives_gate")
@@ -93,21 +97,19 @@ def merge_scene(v11, v12, scene):
         if not target.exists():
             shutil.copy(src, target)
     # existing rows grouped per segment, then merge in time order
-    t2, T2 = load_traj(odo_path)
+    t2, T2 = read_trajectory(odo_path)
     pieces = []
-    for a, b, n, reason in segs12:
+    for a, b, _n, reason in segs12:
         m = (t2 >= a) & (t2 <= b)
         pieces.append((t2[m], T2[m], reason))
     for tt, TT in fills:
         pieces.append((tt, TT, "v11_fill"))
     pieces.sort(key=lambda p: p[0][0])
-    with open(odo_path, "w") as fo, open(seg_path, "w") as fsg:
-        fo.write(HEADER + "\n")
-        fsg.write("# segment start_ts end_ts n_poses reason\n")
-        for k, (tt, TT, reason) in enumerate(pieces):
-            for t, T in zip(tt, TT):
-                fo.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
-            fsg.write(f"{k} {tt[0]:.6f} {tt[-1]:.6f} {len(tt)} {reason}\n")
+    write_trajectory(odo_path, np.concatenate([p[0] for p in pieces]), np.concatenate([p[1] for p in pieces]))
+    write_segments(
+        seg_path,
+        [SegmentRow(k, tt[0], tt[-1], len(tt), reason) for k, (tt, _TT, reason) in enumerate(pieces)],
+    )
     span = sum(p[0][-1] - p[0][0] for p in pieces if p[2] == "v11_fill")
     record(d12, f"filled:{len(fills)}_segments_{span:.1f}s")
     return (

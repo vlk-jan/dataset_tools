@@ -18,6 +18,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
+from dataset_tools.gt_io import read_segments, read_trajectory  # noqa: E402
+
 X = np.eye(4)
 X[:3, :3] = np.diag([1, -1, -1])
 X[:3, 3] = [0.17, 0, 0.145]
@@ -27,38 +30,23 @@ XP = X @ L
 WHEEL_EPS = 0.05
 
 
-def load_traj(p):
-    d = np.loadtxt(p, comments="#")
-    if d.size == 0:
-        return np.zeros(0), np.zeros((0, 4, 4))
-    if d.ndim == 1:
-        d = d[None, :]
-    o = np.argsort(d[:, 0], kind="stable")
-    return d[o, 0], d[o, 1:].reshape(-1, 4, 4)
-
-
 def conjugate(T):
     Tp = T @ np.linalg.inv(XP)
     return np.einsum("ij,njk->nik", np.linalg.inv(Tp[0]), Tp)
 
 
-def load_segments(p):
+def segment_spans(p):
+    """``[(start, end), ...]`` of a segment table, or None when the scene has none."""
     if not Path(p).exists():
         return None
-    segs = []
-    for line in open(p):
-        if line.startswith("#") or not line.strip():
-            continue
-        f = line.split()
-        segs.append((float(f[1]), float(f[2])))
-    return segs
+    return [(s.start_ts, s.end_ts) for s in read_segments(p)]
 
 
 def coverage(ts, t, segs):
     if len(t) == 0:
         return 0.0
     cov = np.zeros(len(ts), bool)
-    for a, b in (segs if segs else [(t[0], t[-1])]):
+    for a, b in segs if segs else [(t[0], t[-1])]:
         cov |= (ts >= a - 0.15) & (ts <= b + 0.15)
     return cov.mean()
 
@@ -90,7 +78,7 @@ def stationary_drift(t, T, wheels):
     stopped = (np.abs(wheels[:, 1:]) < WHEEL_EPS).all(1)
     edges = np.diff(np.concatenate([[0], stopped.astype(int), [0]]))
     worst, n = 0.0, 0
-    for a, b in zip(np.where(edges == 1)[0], np.where(edges == -1)[0] - 1):
+    for a, b in zip(np.where(edges == 1)[0], np.where(edges == -1)[0] - 1, strict=True):
         if wt[b] - wt[a] < 0.5:
             continue
         m = (t >= wt[a]) & (t <= wt[b])
@@ -142,12 +130,14 @@ def main():
         ts = ts if ts.ndim == 1 else ts[:, 0]
         r = dict(scene=s, frames=len(ts))
         ref = (
-            load_traj(n / "regen" / "odom_ref.txt") if (n / "regen" / "odom_ref.txt").exists() else (np.zeros(0), None)
+            read_trajectory(n / "regen" / "odom_ref.txt")
+            if (n / "regen" / "odom_ref.txt").exists()
+            else (np.zeros(0), None)
         )
         wheels = np.loadtxt(n / "regen" / "wheels.txt") if (n / "regen" / "wheels.txt").exists() else None
         # old
         if (o / "odometry.txt").exists():
-            ot, oT = load_traj(o / "odometry.txt")
+            ot, oT = read_trajectory(o / "odometry.txt")
             oC = conjugate(oT)
             r["old_cov"] = coverage(ts, ot, None)
             e = windows(ot, oC, *ref, None, 2.0) if ref[1] is not None else np.array([])
@@ -162,8 +152,8 @@ def main():
             r["old_cov"] = 0.0
         # new
         if (n / "odometry.txt").exists():
-            nt, nT = load_traj(n / "odometry.txt")
-            segs = load_segments(n / "odometry_segments.txt")
+            nt, nT = read_trajectory(n / "odometry.txt")
+            segs = segment_spans(n / "odometry_segments.txt")
             r["new_cov"] = coverage(ts, nt, segs)
             r["new_segments"] = len(segs) if segs else 1
             e = windows(nt, nT, *ref, segs, 2.0) if ref[1] is not None else np.array([])

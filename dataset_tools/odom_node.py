@@ -1,11 +1,22 @@
 #!/usr/bin/env python3
+"""ROS 2 node that records a ``nav_msgs/Odometry`` topic as a text trajectory.
+
+One line per message: ``timestamp`` followed by the row-major 4x4 pose, the
+same layout as a scene's ``odometry.txt`` (see :mod:`dataset_tools.gt_io`).
+"""
 
 import os
 
 import rclpy
-from rclpy.node import Node
 from nav_msgs.msg import Odometry
-import numpy as np
+from rclpy.node import Node
+
+try:
+    from dataset_tools.gt_io import GT_HEADER, format_pose_line
+    from dataset_tools.transforms import pose_to_matrix
+except ImportError:  # when the file is run directly from dataset_tools/
+    from gt_io import GT_HEADER, format_pose_line
+    from transforms import pose_to_matrix
 
 
 class OdomRecorder(Node):
@@ -19,72 +30,28 @@ class OdomRecorder(Node):
         topic_name = self.get_parameter("topic").get_parameter_value().string_value
         self.file_path = self.get_parameter("file_path").get_parameter_value().string_value
 
+        # --- File ---
+        directory = os.path.dirname(self.file_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        # One handle for the whole run, flushed per message: a line is on disk
+        # as soon as it is written, without reopening the file at 100 Hz.
+        self._file = open(self.file_path, "w")  # noqa: SIM115 - closed in destroy_node
+        self._file.write(GT_HEADER + "\n")
+        self._file.flush()
+
         # --- Subscriber ---
         self.subscription = self.create_subscription(Odometry, topic_name, self.odom_callback, 10)
-
-        # --- File Initialization ---
-        # Create directory if it doesn't exist
-        directory = os.path.dirname(self.file_path)
-        if directory and not os.path.exists(directory):
-            os.makedirs(directory, exist_ok=True)
-
-        # Open file in write mode to clear it, then close
-        with open(self.file_path, "w") as f:
-            f.write("# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1\n")
-
         self.get_logger().info(f"Recording odometry from '{topic_name}' to '{self.file_path}'")
 
     def odom_callback(self, msg):
-        # 1. Extract Position
-        tx = msg.pose.pose.position.x
-        ty = msg.pose.pose.position.y
-        tz = msg.pose.pose.position.z
-
-        # 2. Extract Orientation (Quaternion)
-        qx = msg.pose.pose.orientation.x
-        qy = msg.pose.pose.orientation.y
-        qz = msg.pose.pose.orientation.z
-        qw = msg.pose.pose.orientation.w
-
-        # 3. Convert Quaternion to Rotation Matrix
-        R = np.array(
-            [
-                [
-                    1 - 2 * qy**2 - 2 * qz**2,
-                    2 * qx * qy - 2 * qz * qw,
-                    2 * qx * qz + 2 * qy * qw,
-                ],
-                [
-                    2 * qx * qy + 2 * qz * qw,
-                    1 - 2 * qx**2 - 2 * qz**2,
-                    2 * qy * qz - 2 * qx * qw,
-                ],
-                [
-                    2 * qx * qz - 2 * qy * qw,
-                    2 * qy * qz + 2 * qx * qw,
-                    1 - 2 * qx**2 - 2 * qy**2,
-                ],
-            ]
-        )
-
-        # 4. Construct 4x4 Transformation Matrix
-        T = np.eye(4)
-        T[:3, :3] = R
-        T[0, 3] = tx
-        T[1, 3] = ty
-        T[2, 3] = tz
-
-        # 5. Get Timestamp
         timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self._file.write(format_pose_line(timestamp, pose_to_matrix(msg.pose.pose)) + "\n")
+        self._file.flush()
 
-        # 6. Save to file
-        # Format: timestamp r11 r12 r13 tx ... 0 0 0 1 (Flattened row-major)
-        flattened_matrix = T.flatten()
-
-        line_str = f"{timestamp:.6f} " + " ".join([f"{val:.6f}" for val in flattened_matrix]) + "\n"
-
-        with open(self.file_path, "a") as f:
-            f.write(line_str)
+    def destroy_node(self):
+        self._file.close()
+        return super().destroy_node()
 
 
 def main(args=None):

@@ -24,7 +24,12 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import gt_io
+from ..gt_io import SegmentRow as Segment
+
 logger = logging.getLogger("dataset_tools.viewer.loaders")
+
+__all__ = ["Segment"]
 
 # Per-frame BEV height map geometry. These are the values the DRIFT height-map
 # generator uses; they are re-derived per file from the array shape where
@@ -116,86 +121,36 @@ def read_text(path: Path, max_bytes: int = 200_000) -> str | None:
 
 
 def read_odometry(path: Path) -> tuple[np.ndarray, np.ndarray] | None:
-    """Parse ``odometry.txt``: ``ts`` + a row-major 4x4 per line.
+    """Parse ``odometry.txt`` (:func:`dataset_tools.gt_io.read_trajectory`).
 
-    Accepts both the 17-column form (timestamp + full 4x4, trailing ``0 0 0 1``
-    included) and the 13-column form (timestamp + the top 3x4 only), so a rig
-    that writes the shorter row still loads.
-
-    Returns ``(ts (N,), poses (N, 4, 4))`` sorted by timestamp, or None.
+    Returns ``(ts (N,), poses (N, 4, 4))`` sorted by timestamp, or None for a
+    missing, malformed or empty file.
     """
     try:
-        raw = np.loadtxt(path, dtype=np.float64, comments="#", ndmin=2)
+        ts, poses = gt_io.read_trajectory(path)
     except (OSError, ValueError) as exc:
         logger.warning("cannot read odometry %s: %s", path, exc)
         return None
-    if raw.size == 0:
+    if ts.size == 0:
         return None
-    if raw.shape[1] == 17:
-        ts, flat = raw[:, 0], raw[:, 1:]
-        poses = flat.reshape(-1, 4, 4)
-    elif raw.shape[1] == 13:
-        ts, flat = raw[:, 0], raw[:, 1:]
-        poses = np.zeros((raw.shape[0], 4, 4), dtype=np.float64)
-        poses[:, :3, :] = flat.reshape(-1, 3, 4)
-        poses[:, 3, 3] = 1.0
-    else:
-        logger.warning("odometry %s: unexpected %d columns", path, raw.shape[1])
-        return None
-    order = np.argsort(ts, kind="stable")
-    return ts[order], poses[order]
+    return ts, poses
 
 
-@dataclass
-class Segment:
-    """One independently-anchored stretch of ground-truth odometry.
-
-    Poses from different segments share **no** common frame -- each segment is
-    re-anchored to identity at its own first pose -- so nothing (trajectory,
-    aggregated cloud, terrain) may ever be built across a segment boundary.
-    """
-
-    index: int
-    start_ts: float
-    end_ts: float
-    n_poses: int = 0
-    reason: str = ""
-
-    @property
-    def duration(self) -> float:
-        return max(0.0, self.end_ts - self.start_ts)
+# ``Segment`` is :class:`dataset_tools.gt_io.SegmentRow`: one independently
+# anchored stretch of ground truth. Poses from different segments share **no**
+# common frame -- each is re-anchored to identity at its own first pose -- so
+# nothing (trajectory, aggregated cloud, terrain) may ever be built across a
+# segment boundary.
 
 
 def read_segments(path: Path) -> list[Segment]:
-    """Parse ``odometry_segments.txt`` (``id start_ts end_ts n_poses reason``).
+    """Parse ``odometry_segments.txt``, sorted by start time.
 
     Unknown trailing columns are folded into ``reason``; unparseable lines are
     skipped. Returns [] when the file is missing or empty.
     """
-    segments: list[Segment] = []
     try:
-        with open(path) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                parts = line.split()
-                if len(parts) < 3:
-                    continue
-                try:
-                    idx = int(float(parts[0]))
-                    start, end = float(parts[1]), float(parts[2])
-                except ValueError:
-                    continue
-                n_poses = 0
-                reason = ""
-                if len(parts) >= 4:
-                    try:
-                        n_poses = int(float(parts[3]))
-                        reason = " ".join(parts[4:])
-                    except ValueError:
-                        reason = " ".join(parts[3:])
-                segments.append(Segment(idx, start, end, n_poses, reason))
+        segments = gt_io.read_segments(path)
     except OSError as exc:
         logger.warning("cannot read segments %s: %s", path, exc)
         return []

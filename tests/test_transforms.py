@@ -80,7 +80,7 @@ def test_euler_matrix_composition_order_is_zyx():
 def test_pose_to_matrix():
     pose = SimpleNamespace(
         position=SimpleNamespace(x=1.0, y=2.0, z=3.0),
-        orientation=SimpleNamespace(**dict(zip("xyzw", quat_from_euler(0.0, 0.0, math.pi / 2)))),
+        orientation=SimpleNamespace(**dict(zip("xyzw", quat_from_euler(0.0, 0.0, math.pi / 2), strict=False))),
     )
     T = pose_to_matrix(pose)
     np.testing.assert_allclose(T[:3, 3], [1.0, 2.0, 3.0])
