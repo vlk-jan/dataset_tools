@@ -32,6 +32,7 @@ def make_root(
     with_gravity: bool = True,
     with_joints: bool = True,
     with_camera_info: bool = True,
+    with_gps: bool = False,
     segments: bool = True,
 ) -> Path:
     """A synthetic dataset root with a controllable set of optional files."""
@@ -100,6 +101,19 @@ def make_root(
                 validity = np.full((128, 128), 2, dtype=np.uint8)
                 validity[:64] = 0  # behind the robot: extrapolated
                 np.savez_compressed(d / "height_masks" / f"{i:05d}.npz", validity=validity)
+        if with_gps:
+            # Off by default: most roots have no GNSS, and the viewer must look
+            # exactly as it always did on those. Four fixes per frame, walking
+            # east-north-east across a hundred metres or so of Prague.
+            gt = np.linspace(ts[0], ts[-1], frames * 4)
+            gps = np.zeros((len(gt), 8))
+            gps[:, 0] = gt
+            gps[:, 1] = 50.109 + 3e-6 * np.arange(len(gt))
+            gps[:, 2] = 14.418 + 8e-6 * np.arange(len(gt))
+            gps[:, 3] = 227.0
+            gps[:, 4] = 2  # RTK / GBAS
+            gps[:, 5:8] = [0.09, 0.16, 0.25]
+            np.save(d / "gps.npy", gps)
         np.savetxt(d / "camera_intrinsics.txt", np.eye(3) * 700.0)
         np.savetxt(d / "T_cam_to_base.txt", np.eye(4))
         if with_camera_info:

@@ -26,6 +26,7 @@ from typing import Any
 
 import numpy as np
 
+from . import geo
 from .build import SceneAccess
 from .index_page import (
     THUMB_FRACTIONS,
@@ -158,7 +159,7 @@ def read_series(path: Path, max_rows: int = PROPRIO_SAMPLES) -> Series | None:
     return Series(rows=rows, n=int(arr.shape[0]), t0=float(arr[0, 0]), t1=float(arr[-1, 0]))
 
 
-def _utc(ts: float | None) -> tuple[str, str] | None:
+def utc_stamp(ts: float | None) -> tuple[str, str] | None:
     """``(date, time)`` in UTC for an epoch timestamp, or None."""
     if not ts or ts < 1e8:  # not a wall-clock stamp (a synthesised 0-based one)
         return None
@@ -202,7 +203,7 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
     p = access.probe
     stats: list[dict[str, Any]] = []
 
-    stamp = _utc(p.start_ts)
+    stamp = utc_stamp(p.start_ts)
     if stamp:
         stats.append(stat("recorded", stamp[0], f"{stamp[1]} UTC"))
     elif a.get("date"):
@@ -502,6 +503,76 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     }
 
 
+def _gps_src(scene_id: str, segment, frame: int | None) -> str:
+    """The endpoint one map fetches its track from."""
+    query = []
+    if segment is not None:
+        query.append(f"segment={segment.index}")
+    if frame is not None:
+        query.append(f"frame={frame}")
+    return f"/api/scene/{scene_id}/gps.json" + ("?" + "&".join(query) if query else "")
+
+
+def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dict[str, Any] | None:
+    """Where on the Earth this was recorded -- ``None`` when nothing says.
+
+    A scene with no ``gps.npy`` gets no card, and the template then renders no
+    map, no grid and no Leaflet at all: a root from a rig without GNSS looks
+    exactly as it did before any of this existed.
+
+    ``segment`` narrows the numbers (not just the drawn track) to one segment's
+    time span, which is what makes the same card honest on the segment page.
+    ``frame`` marks where one frame was, for the frame page; the numbers then
+    still describe the whole track the marker sits on.
+
+    The fixes are the receiver's own position -- on the new rig the fusion
+    point, a few tens of centimetres from ``base_link``, well inside its own
+    sigma -- and they are not ground truth: the poses in ``odometry.txt`` are
+    anchored per segment and say nothing about the Earth.
+    """
+    gps = access.gps
+    if not geo.is_track(gps):
+        return None
+    track = geo.slice_time(gps, segment.start_ts, segment.end_ts) if segment is not None else gps
+    if not len(track):
+        return None
+
+    stats: list[dict[str, Any]] = []
+    if frame is not None:
+        ts = access.frame_ts
+        here = geo.locate(gps, float(ts[frame])) if ts is not None and 0 <= frame < len(ts) else None
+        stats.append(
+            stat("this frame", f"{here[0]:.6f}, {here[1]:.6f}" if here else "—", "latitude, longitude")
+            if here
+            else stat("this frame", "—", "no fix within a second of it")
+        )
+    span = float(track[-1, geo.T] - track[0, geo.T])
+    rate = f"{len(track) / span:.1f} Hz" if span > 0 else None
+    stats.append(stat("fixes", fmt_count(len(track)), rate))
+    stats.append(stat("track", f"{geo.track_length_m(track):.0f} m", "along the fixes"))
+    ew, ns = geo.span_m(track)
+    stats.append(stat("extent", f"{ew:.0f} × {ns:.0f} m", "east–west × north–south"))
+    sigma = geo.sigma_m(track)
+    if sigma is not None:
+        stats.append(stat("accuracy", f"± {sigma:.2f} m", "median horizontal 1σ"))
+    shares = geo.fix_shares(track)
+    if len(shares) > 1:
+        rest = "; ".join(f"{label} {share * 100:.0f}%" for label, share in shares[1:4])
+        stats.append(stat("also", rest, "of the fixes"))
+
+    best = shares[0] if shares else None
+    return {
+        "kind": "map",
+        "title": "Where",
+        "badge": f"{best[0]} {best[1] * 100:.0f}%" if best else None,
+        "badge_class": coverage_class(best[1]) if best else "none",
+        "badge_title": "the commonest GNSS fix quality over this track",
+        "stats": stats,
+        "src": _gps_src(access.scene_id, segment, frame),
+        "note": "GNSS as the receiver reported it — where the robot was on the Earth, not ground truth.",
+    }
+
+
 # --------------------------------------------------------------------------
 # the page
 # --------------------------------------------------------------------------
@@ -559,6 +630,9 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             "hero": hero_thumbs(access, a),
             "cards": [c for c in cards if c],
             "camera_info": info,
+            # Not one of the four: it sits beside the file inventory, and it is
+            # absent -- not empty -- on a scene without GNSS.
+            "map": map_card(access),
         }
 
     return access.cached("scene_page", work)

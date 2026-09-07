@@ -267,6 +267,13 @@ class SceneAccess:
     def cmd_vel(self) -> np.ndarray | None:
         return self._optional("cmd_vel", "cmd_vel", lambda: L.load_npy(self.dir / "cmd_vel.npy"))  # type: ignore[return-value]
 
+    # -- geolocation -------------------------------------------------------
+
+    @property
+    def gps(self) -> np.ndarray | None:
+        """This scene's GNSS track, or None. Bounded by the recording length."""
+        return self._optional("gps", "gps", lambda: L.read_gps(self.dir / "gps.npy"))  # type: ignore[return-value]
+
     # -- calibration -------------------------------------------------------
 
     @property

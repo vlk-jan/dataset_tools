@@ -374,3 +374,69 @@ body.atlas {
   font-family: var(--sans);
 }
 body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-wrap: balance; }
+
+/* --------------------------------------------------------- the GNSS map
+   Two cards side by side, each as tall as the other: what the scene has on
+   disk, and where on the Earth it was recorded. Without gps.npy the map card
+   is not rendered at all and the files card is the full-width strip it has
+   always been -- so a scene with no GNSS looks exactly as it did. */
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  align-items: stretch;
+}
+.pair > .card { display: flex; flex-direction: column; }
+.pair > .card > .chips { flex: 1; align-content: flex-start; }
+
+.mapbox {
+  flex: 1;
+  min-height: 300px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--shade);
+}
+.mapnote { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.mapnote.warn { color: var(--warn); }
+
+/* OpenStreetMap ships one raster style, and it is a light one. Inverting the
+   tiles (and only the tiles -- the track, the markers and the controls are
+   drawn over them) puts the backdrop in the same register as the rest of the
+   viewer instead of a white rectangle in a dark page.
+
+   On the *pane*, not on `.leaflet-tile`: Leaflet declares `filter: inherit`
+   there precisely so a page can filter the pane, and its own stylesheet loads
+   after this one, so a rule of the same specificity would simply lose. */
+.leaflet-container { background: var(--shade); font: inherit; }
+.leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(0.5) brightness(0.95) contrast(0.85); }
+.leaflet-container .leaflet-control-attribution {
+  background: rgba(20, 22, 26, 0.78); color: var(--muted); font-size: 11px;
+}
+.leaflet-container .leaflet-control-attribution a { color: var(--accent); }
+.leaflet-bar a, .leaflet-bar a:hover {
+  background: var(--panel); color: var(--fg); border-bottom-color: var(--line);
+}
+
+/* The track itself. `track` is the stretch being looked at; `trackctx` is the
+   rest of the scene behind it, present for context and never for detail. */
+.track { stroke: var(--accent); stroke-width: 3; fill: none; }
+/* Dashed and dimmed: the rest of the outing, there to place the highlighted
+   stretch in it, and never to be mistaken for the stretch itself. */
+.trackctx {
+  stroke: var(--accent); stroke-width: 2; stroke-opacity: 0.45;
+  stroke-dasharray: 5 4; fill: none;
+}
+.mapdot {
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.mapdot.start { background: var(--ok); }
+.mapdot.end { background: var(--bad); }
+.mapdot.here { background: var(--warn); }
+
+/* Paging between one scene's segments, above the segment page's own cards. */
+.segnav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.btn.disabled { color: var(--muted); border-style: dashed; cursor: default; }

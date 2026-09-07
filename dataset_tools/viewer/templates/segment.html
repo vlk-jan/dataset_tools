@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scene {{ scene_id }} segment {{ seg.index }} &mdash; dataset viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/viewer-static/style.css">
+{% if page.map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
+</head>
+<body>
+<header>
+  <h1><a href="/">Dataset viewer</a> / <a href="/scene/{{ scene_id }}">scene {{ scene_id }}</a>
+    / segment {{ seg.index }}</h1>
+  <span class="path">{{ root.path }}/{{ scene_id }}</span>
+  <span class="muted">{{ page.position + 1 }} of {{ page.n_segments }} in this scene</span>
+</header>
+<main>
+
+  {# Paging between segments in scene order, so a scene can be read segment by
+     segment without going back to its window table each time. #}
+  <nav class="segnav">
+    {% if page.prev %}
+    <a class="btn" href="/scene/{{ scene_id }}/segment/{{ page.prev.index }}">&larr; segment {{ page.prev.index }}</a>
+    {% else %}<span class="btn disabled">&larr; first segment</span>{% endif %}
+    <a class="btn" href="/scene/{{ scene_id }}">all segments</a>
+    {% if page.next %}
+    <a class="btn" href="/scene/{{ scene_id }}/segment/{{ page.next.index }}">segment {{ page.next.index }} &rarr;</a>
+    {% else %}<span class="btn disabled">last segment &rarr;</span>{% endif %}
+  </nav>
+
+  {# Three frames from inside this segment, at 10 / 50 / 90 % of it. #}
+  {% if page.hero %}
+  <div class="hero">
+    {% for thumb in page.hero %}
+    <a href="{{ thumb.href }}">
+      <figure>
+        <img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async">
+        <figcaption><b>{{ thumb.label }}</b><span>{{ thumb.sub }}</span></figcaption>
+      </figure>
+    </a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# The facts on the left, where the segment happened on the right. Without
+     gps.npy there is no map and the cards simply take the full width. #}
+  {% if page.map %}<div class="pair"><div>{% endif %}
+    {% for card in page.cards %}
+    <div class="card">
+      <header>
+        <h2>{{ card.title }}</h2>
+        {% if card.badge %}
+        <span class="cov {{ card.badge_class }}" title="{{ card.badge_title }}">{{ card.badge }}</span>
+        {% endif %}
+      </header>
+      {% if card.stats %}
+      <dl class="stats">
+        {% for s in card.stats %}
+        <div>
+          <dt>{{ s.label }}</dt>
+          <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+      {% endif %}
+      {% if card.note %}<p class="cardnote">{{ card.note }}</p>{% endif %}
+    </div>
+    {% endfor %}
+  {% if page.map %}
+    </div>
+    {% with map = page.map %}{% include "_map.html" %}{% endwith %}
+  </div>
+  {% endif %}
+
+  {% with notes_scope = "segment", note_range = [page.frames[0], page.frames[1] - 1] %}
+    {% include "_notes.html" %}
+  {% endwith %}
+
+  <h2>3D views &mdash; {{ page.windows|length }}</h2>
+  <p class="muted" style="margin-top:-4px">
+    One window per buildable chunk of this segment; a long segment is cut into
+    parts so that building one reads a bounded number of files.
+  </p>
+  {% if page.windows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Window</th><th>Frames</th><th class="num">Count</th>
+        <th class="num">Duration</th><th class="num">GT poses</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for w in page.windows %}
+      <tr>
+        <td><strong>{{ w.label }}</strong></td>
+        <td class="muted">{{ w.frame_start }} &ndash; {{ w.frame_end - 1 }}</td>
+        <td class="num">{{ w.n_frames }}</td>
+        <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
+        <td class="num">
+          {%- if w.pose_rate %}{{ w.n_poses }}
+            <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
+          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+        </td>
+        <td><a class="btn primary" href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="card"><span class="muted">
+    This segment is too short to build a view from &mdash; it covers fewer frames than a
+    window needs.
+  </span></div>
+  {% endif %}
+
+  <h2>Frames{% if frames %} &mdash; {{ frames.total }}{% endif %}</h2>
+  <p class="muted" style="margin-top:-4px">
+    Only this segment's frames, {{ frames.per_page if frames else 100 }} at a time.
+    Click one to inspect it on its own.
+  </p>
+  {% with strip_base = "/scene/" ~ scene_id ~ "/segment/" ~ seg.index ~ "?", strip_jump = false %}
+    {% include "_frames.html" %}
+  {% endwith %}
+
+</main>
+<script type="module" src="/viewer-static/notes.js"></script>
+{% if page.map %}
+<script src="/viewer-static/vendor/leaflet.js"></script>
+<script type="module" src="/viewer-static/map.js"></script>
+{% endif %}
+</body>
+</html>

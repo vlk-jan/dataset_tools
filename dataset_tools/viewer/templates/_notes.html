@@ -1,0 +1,102 @@
+{# The reviewer-notes card, shared by the scene and segment pages.
+
+   Always rendered, even when there are none and even when they cannot be
+   written: "nothing noted yet" and "this root is read-only" are both worth
+   knowing, and a card that disappears says neither.
+
+   `notes` is the list to show (the segment page passes only the notes touching
+   its own frames), `notes_scope` names what that list is about, and
+   `note_range` pre-fills the compose form -- a note written from a segment
+   page starts out pinned to that segment's frames. #}
+{% set scope = notes_scope | default("scene") %}
+  <div class="card notes" id="notes"
+       data-scene="{{ scene_id }}"
+       data-frames="{{ probe.n_frames }}"
+       data-topics="{{ notes_status.topics | join(',') }}"
+       data-writable="{{ 'yes' if notes_status.writable else 'no' }}">
+    <header>
+      <h2>Notes</h2>
+      <span class="scount">{{ notes | length }}</span>
+    </header>
+
+    {% if notes_stale %}
+    <p class="cardnote warn">
+      These notes were written against dataset {{ notes_stale }}; this root is
+      {{ notes_status.dataset_version or 'a different version' }}. Frame numbers
+      only mean the same thing while the extraction does, so check a range
+      before believing it.
+    </p>
+    {% endif %}
+
+    {% if notes %}
+    <ul class="notelist">
+      {% for n in notes %}
+      {# The stored values, not the rendered ones: the inline editor opens on
+         them, and re-parsing "frames 3–7" out of the label to get them back
+         would break the first time the label reads differently. #}
+      <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
+          data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}">
+        <div class="notehead">
+          <a class="chip" href="/scene/{{ scene_id }}/frame/{{ n.frame_start }}"
+             title="open the first frame of this range">{{ n.label }}</a>
+          <span class="chip topic">{{ n.topic }}</span>
+          <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
+            {%- if n.updated %} &middot; edited{% endif %}</span>
+          {% if notes_status.writable %}
+          <span class="notetools">
+            <button type="button" class="linkbtn" data-act="edit">edit</button>
+            <button type="button" class="linkbtn" data-act="delete">delete</button>
+          </span>
+          {% endif %}
+        </div>
+        <p class="notetext">{{ n.text }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">
+      Nothing noted on this {{ scope }} yet. Notes are for what only a person looking
+      at the data can say &mdash; a stretch whose odometry is wrong, a camera
+      that dropped out, something that happened in front of the robot.
+    </p>
+    {% endif %}
+
+    {% if notes_status.writable %}
+    <form class="noteform" id="noteform">
+      <div class="noterow">
+        {# Pre-filled from the segment a note is being written on; empty on the
+           scene page, where there is no range to assume. #}
+        <label>frames
+          <input type="number" name="frame_start" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" required
+                 {% if note_range %}value="{{ note_range[0] }}"{% endif %}></label>
+        <label>to
+          <input type="number" name="frame_end" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" required
+                 {% if note_range %}value="{{ note_range[1] }}"{% endif %}></label>
+        <label>topic
+          <select name="topic">
+            {% for t in notes_status.topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+        </label>
+        <button class="btn primary" type="submit">Save note</button>
+      </div>
+      <textarea name="text" rows="2" required
+                placeholder="What did you see? e.g. GT jumps sideways at 1250 and never recovers."></textarea>
+      <p class="notemsg" hidden></p>
+    </form>
+    <p class="cardnote">
+      Saved to <code>{{ notes_status.dir }}</code>, one file per scene. Both
+      frame numbers are included in the range. You can also write a note while
+      scrubbing, from the 3D view&rsquo;s panel.
+    </p>
+    {% elif notes_status.enabled %}
+    <p class="cardnote warn">Notes here are read-only: {{ notes_status.reason }}</p>
+    {% endif %}
+    {% if scope == "segment" %}
+    <p class="cardnote">
+      Only the notes whose frames touch this segment are listed;
+      <a href="/scene/{{ scene_id }}#notes">the scene page</a> has all of them.
+    </p>
+    {% endif %}
+  </div>

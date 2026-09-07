@@ -5,6 +5,8 @@
 <title>Scene {{ scene_id }} &mdash; dataset viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/viewer-static/style.css">
+{# Leaflet is loaded only by a page that actually has a map on it. #}
+{% if page.map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
 </head>
 <body>
 <header>
@@ -83,6 +85,12 @@
     {% endfor %}
   </div>
 
+  {# The file inventory, and -- only on a scene that carries gps.npy -- the map
+     beside it, the two of them a pair of equal squares. Without GNSS neither
+     the wrapper nor the map exists, so the inventory is the full-width strip it
+     has always been. #}
+  {% if page.map %}<div class="pair">{% endif %}
+
   <div class="card files">
     <header>
       <h2>Files present</h2>
@@ -103,91 +111,12 @@
     </p>
   </div>
 
-  {# Reviewer notes: free text pinned to a frame range. Always shown, even
-     when the scene has none and even when they cannot be written -- "no notes
-     yet" and "this root is read-only" are both worth knowing, and a card that
-     disappears says neither. #}
-  <div class="card notes" id="notes"
-       data-scene="{{ scene_id }}"
-       data-frames="{{ probe.n_frames }}"
-       data-topics="{{ notes_status.topics | join(',') }}"
-       data-writable="{{ 'yes' if notes_status.writable else 'no' }}">
-    <header>
-      <h2>Notes</h2>
-      <span class="scount">{{ notes | length }}</span>
-    </header>
-
-    {% if notes_stale %}
-    <p class="cardnote warn">
-      These notes were written against dataset {{ notes_stale }}; this root is
-      {{ notes_status.dataset_version or 'a different version' }}. Frame numbers
-      only mean the same thing while the extraction does, so check a range
-      before believing it.
-    </p>
-    {% endif %}
-
-    {% if notes %}
-    <ul class="notelist">
-      {% for n in notes %}
-      {# The stored values, not the rendered ones: the inline editor opens on
-         them, and re-parsing "frames 3–7" out of the label to get them back
-         would break the first time the label reads differently. #}
-      <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
-          data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}">
-        <div class="notehead">
-          <a class="chip" href="/scene/{{ scene_id }}/frame/{{ n.frame_start }}"
-             title="open the first frame of this range">{{ n.label }}</a>
-          <span class="chip topic">{{ n.topic }}</span>
-          <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
-            {%- if n.updated %} &middot; edited{% endif %}</span>
-          {% if notes_status.writable %}
-          <span class="notetools">
-            <button type="button" class="linkbtn" data-act="edit">edit</button>
-            <button type="button" class="linkbtn" data-act="delete">delete</button>
-          </span>
-          {% endif %}
-        </div>
-        <p class="notetext">{{ n.text }}</p>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="muted">
-      Nothing noted on this scene yet. Notes are for what only a person looking
-      at the data can say &mdash; a stretch whose odometry is wrong, a camera
-      that dropped out, something that happened in front of the robot.
-    </p>
-    {% endif %}
-
-    {% if notes_status.writable %}
-    <form class="noteform" id="noteform">
-      <div class="noterow">
-        <label>frames
-          <input type="number" name="frame_start" min="0" max="{{ probe.n_frames - 1 }}"
-                 inputmode="numeric" required></label>
-        <label>to
-          <input type="number" name="frame_end" min="0" max="{{ probe.n_frames - 1 }}"
-                 inputmode="numeric" required></label>
-        <label>topic
-          <select name="topic">
-            {% for t in notes_status.topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-          </select>
-        </label>
-        <button class="btn primary" type="submit">Save note</button>
-      </div>
-      <textarea name="text" rows="2" required
-                placeholder="What did you see? e.g. GT jumps sideways at 1250 and never recovers."></textarea>
-      <p class="notemsg" hidden></p>
-    </form>
-    <p class="cardnote">
-      Saved to <code>{{ notes_status.dir }}</code>, one file per scene. Both
-      frame numbers are included in the range. You can also write a note while
-      scrubbing, from the 3D view&rsquo;s panel.
-    </p>
-    {% elif notes_status.enabled %}
-    <p class="cardnote warn">Notes here are read-only: {{ notes_status.reason }}</p>
-    {% endif %}
+  {% if page.map %}
+  {% with map = page.map %}{% include "_map.html" %}{% endwith %}
   </div>
+  {% endif %}
+
+  {% include "_notes.html" %}
 
   <nav class="tabs">
     <a class="tab {{ 'active' if tab == 'windows' else '' }}" href="/scene/{{ scene_id }}?tab=windows">
@@ -206,49 +135,9 @@
     reads a page of images in bulk. Click a frame to inspect it on its own.
   </p>
 
-  {% if frames and frames.entries %}
-  <div class="card framebar">
-    <form action="/scene/{{ scene_id }}/jump" method="get">
-      <label for="jump">Jump to frame</label>
-      <input id="jump" name="index" type="number" min="0" max="{{ probe.n_frames - 1 }}"
-             value="{{ frames.first }}" inputmode="numeric">
-      <button class="btn" type="submit">Go</button>
-    </form>
-    <span class="muted">showing {{ frames.first }}&ndash;{{ frames.last }}
-      &middot; page {{ frames.page + 1 }} of {{ frames.n_pages }}</span>
-  </div>
-
-  <div class="framegrid">
-    {% for item in frames.entries %}
-    <a class="frametile" href="/scene/{{ scene_id }}/frame/{{ item.index }}">
-      <img src="/api/scene/{{ scene_id }}/frame/{{ item.index }}/image.jpg?w=192"
-           alt="frame {{ item.index }}" loading="lazy" decoding="async">
-      <span class="framelabel">{{ item.index }}{% if item.t is not none %}
-        <small>{{ "%.1f s"|format(item.t) }}</small>{% endif %}</span>
-    </a>
-    {% endfor %}
-  </div>
-
-  {% if frames.n_pages > 1 %}
-  <div class="pager">
-    {% if frames.page > 0 %}
-    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ frames.page - 1 }}">&larr; previous</a>
-    {% endif %}
-    {% for n in frames.page_links %}
-      {% if n == frames.page %}
-        <span class="btn primary">{{ n + 1 }}</span>
-      {% else %}
-        <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ n }}">{{ n + 1 }}</a>
-      {% endif %}
-    {% endfor %}
-    {% if frames.page + 1 < frames.n_pages %}
-    <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ frames.page + 1 }}">next &rarr;</a>
-    {% endif %}
-  </div>
-  {% endif %}
-  {% else %}
-  <div class="card"><span class="muted">This scene has no per-frame data to browse.</span></div>
-  {% endif %}
+  {% with strip_base = "/scene/" ~ scene_id ~ "?tab=frames&", strip_jump = true %}
+    {% include "_frames.html" %}
+  {% endwith %}
 
   {% else %}
   <h2>Windows &mdash; {{ windows|length }}</h2>
@@ -271,7 +160,10 @@
     <tbody>
     {% for w in windows %}
       <tr>
-        <td><strong>{{ w.label }}</strong>
+        <td>
+          {%- if w.segment_index is not none %}
+          <a href="/scene/{{ scene_id }}/segment/{{ w.segment_index }}"><strong>{{ w.label }}</strong></a>
+          {%- else %}<strong>{{ w.label }}</strong>{% endif %}
           {%- set wn = notes_per_window.get(w.key) %}
           {%- if wn %}
           <a class="notemark" href="#notes"
@@ -307,5 +199,9 @@
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>
+{% if page.map %}
+<script src="/viewer-static/vendor/leaflet.js"></script>
+<script type="module" src="/viewer-static/map.js"></script>
+{% endif %}
 </body>
 </html>

@@ -16,7 +16,7 @@ setup(
     packages=find_packages(exclude=["test", "tests"]),
     package_data={
         "dataset_tools": ["libcloudini_shim.so"],
-        "dataset_tools.viewer": ["static/*", "templates/*"],
+        "dataset_tools.viewer": ["static/*", "static/vendor/*", "templates/*"],
     },
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),

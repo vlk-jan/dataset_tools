@@ -32,6 +32,21 @@ def test_probe_reports_what_a_scene_has_and_lacks(tmp_path):
     assert p.n_segments == 2
 
 
+def test_gps_is_probed_like_any_other_optional_file(tmp_path):
+    """Absent on most roots, counted like the rest of them where it exists."""
+    root_path = make_root(tmp_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert not root.probe("0000").has("gps")
+    assert "gps" in root.probe("0000").missing
+
+    (tmp_path / "gps").mkdir()
+    with_gps = probe.DatasetRoot(make_root(tmp_path / "gps", with_gps=True), cache_dir=tmp_path / "cache2")
+    p = with_gps.probe("0000")
+    assert p.has("gps") and p.counts["gps"] == 48
+    # The frame count is unaffected: gps.npy is not frame-aligned.
+    assert p.n_frames == 12
+
+
 def test_probe_cache_is_reused_and_invalidated_by_an_mtime_change(tmp_path):
     root_path = make_root(tmp_path)
     cache = tmp_path / "cache"

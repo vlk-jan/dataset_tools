@@ -1,8 +1,10 @@
 # Dataset viewer
 
 A browsable web view of an extracted dataset root: an index of every scene, a
-per-scene inventory of what is actually on disk, and a 3D view of each odometry
-segment with the camera image, BEV height map and raw cloud alongside it.
+per-scene inventory of what is actually on disk, a page per ground-truth
+segment, and a 3D view of each odometry segment with the camera image, BEV
+height map and raw cloud alongside it. Where a scene carries GNSS fixes, a map
+shows where it happened.
 
 ```bash
 pip install "dataset_tools[viewer]"                      # or, from a checkout: pip install -e ".[viewer]"
@@ -62,6 +64,8 @@ Nothing in the viewer is specific to a sensor generation. A scene is any
   (`height_maps 1856/15434`, for a directory still being built).
 - Absent files are struck through rather than hidden, so "this scene has no
   `cmd_vel.npy`" is visible rather than silently implied.
+- A scene with no `gps.npy` has no map anywhere, and every page it could have
+  been on looks exactly as it did before maps existed.
 - A window builds from whatever it has: no height maps means the terrain comes
   from the aggregated cloud instead, no `joint_states.npy` means no wheel-velocity
   plots and no wheel spin, no `transforms.npy` means no drift comparison.
@@ -134,6 +138,64 @@ driving. Below 2 Hz the rate is flagged.
 | `joint_setpoints.npy` | commanded wheel-velocity plots |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
+| `gps.npy` | the map, on the scene, segment and frame pages |
+
+## The segment page
+
+A segment is the unit the ground truth is actually anchored in, and until it
+had a page of its own there was nowhere to *read* about one: the scene page
+lists segments and the 3D view plays one. `/scene/{scene}/segment/{n}` is the
+page in between, and it is reachable from everywhere a segment is named — the
+window table, a frame's ground-truth card, the 3D view's panel.
+
+It carries three frames from inside the segment, what the segment is (when,
+how long, how densely anchored, how many frames, the silence either side, why
+it ended), what the robot did inside it (path, moving fraction, speed, net
+displacement, z range, roll and pitch), the map of where it happened, the notes
+whose frames touch it, its windows with their **Open 3D** buttons, and a strip
+of its own frames.
+
+The number in the URL is the segment's number in `odometry_segments.txt`, not
+its position in the file — the same number the window keys carry (`seg003`),
+so a link from a window and a link from a frame resolve to the same page even
+after `scripts/filter_segments.py` has renumbered the table. Every figure on
+the page stops at the segment's own boundaries: poses either side of one share
+no reference frame, so nothing is ever accumulated across a boundary.
+
+## The map: where the recording happened
+
+A scene that carries `gps.npy` gets a map. On the scene page it sits beside the
+file inventory, the two of them a pair; on a segment page the segment's own
+stretch is highlighted with the rest of the outing dashed behind it; on a frame
+page a marker shows where that frame was, interpolated between the fixes around
+it (and left off when the nearest fix is more than a second away — a line drawn
+across a receiver dropout would be a claim about where the robot went).
+
+**A scene without `gps.npy` renders no map at all** — no card, no grid, no
+Leaflet, no request. That is the same habit as everything else here, in the one
+case where it is inverted: an absent artefact is normally struck through rather
+than hidden, but a struck-through map is a hole in the page, and most roots
+have no GNSS at all.
+
+The fixes are the receiver's own position and are **not** ground truth. The
+numbers beside the map are the track's: how many fixes and at what rate, the
+distance along them, the extent of the box they cover, the median horizontal
+sigma out of the covariance the receiver reported, and the share of the track
+at each fix quality. On a segment page they describe that segment only.
+
+Leaflet is **vendored** (`static/vendor/`, BSD-2-Clause, unmodified) rather than
+loaded from a CDN: the viewer is routinely run on a cluster node or in a
+container with no route to the internet, and a map whose library fails to load
+is a blank box that explains nothing. The OpenStreetMap *tiles* do need the
+network; without them the track is drawn on a plain backdrop and the card says
+so. The tiles are inverted in CSS, since OSM ships one raster style and it is a
+light one.
+
+The track is thinned server-side (`?max_points=`, 2000 by default) so a long
+scene ships tens of kilobytes rather than ten thousand pairs of doubles, and it
+is served from its own endpoint rather than folded into a window bundle: a
+bundle is cached per window under a content stamp, and a track belongs to the
+scene, not to a view of it.
 
 ## The atlas: curated prose, generated numbers
 
@@ -419,9 +481,13 @@ Dataset roots usually live on contended network storage, so:
 | --- | --- |
 | `/` | the scene index |
 | `/scene/{scene}` | one scene's inventory, window list and calibration |
+| `/scene/{scene}/segment/{n}` | one ground-truth segment: what it is, what happened inside it, where |
+| `/scene/{scene}/frame/{n}` | one frame: its image, its derived tiles and its numbers |
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scenes` | the index as JSON |
 | `/api/scene/{scene}` | one scene's probe, windows and details as JSON |
+| `/api/scene/{scene}/segment/{n}` | one segment's cards, frame range and windows as JSON |
+| `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
@@ -479,7 +545,19 @@ without clouds either it is flat; and a long traverse is coarsened to stay
 inside the cell budget. Cells nothing ever observed are filled from a trend
 surface -- the `coverage` colour mode shows which cells were really measured.
 
-**A note will not save.** The scene page's notes card says why: most often the
+**The map is a grey box with the track on it.** No tiles could be fetched:
+either the machine running the viewer has no route to the internet or
+`tile.openstreetmap.org` is unreachable from it. The card says so, and
+everything that comes out of the dataset — the track, the markers, the numbers
+— is still there. Leaflet itself is vendored and never needs the network.
+
+**A scene has GNSS but no map.** The viewer only reads `gps.npy`; a scene
+extracted before `--gps` existed does not have one, and re-extracting that bag
+writes it (`helhest-extract ... --overwrite`). `/api/scene/<id>/gps.json`
+returning `404` is the quickest way to tell the two cases apart.
+
+**A note will not save.**
+ The scene page's notes card says why: most often the
 root is read-only, in which case pass `--notes-dir PATH` to keep notes
 somewhere else (they then no longer travel with the dataset) or `--no-notes` to
 switch the feature off. `/healthz` reports the same state under `notes`.

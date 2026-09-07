@@ -1,0 +1,31 @@
+{# One map card, shared by the scene, segment and frame pages.
+
+   `map` is the dict a *_page module built (scene_page.map_card): a few stats
+   read from gps.npy, and the endpoint the track itself is fetched from. The
+   card is only ever included when that dict exists, so there is no such thing
+   as an empty map: a scene without GNSS renders no map markup at all. #}
+<div class="card map">
+  <header>
+    <h2>{{ map.title }}</h2>
+    {% if map.badge %}
+    <span class="cov {{ map.badge_class }}" title="{{ map.badge_title }}">{{ map.badge }}</span>
+    {% endif %}
+  </header>
+
+  {% if map.stats %}
+  <dl class="stats">
+    {% for s in map.stats %}
+    <div>
+      <dt>{{ s.label }}</dt>
+      <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  {% endif %}
+
+  {# The track is fetched, not inlined: the server thins it to a drawable
+     number of points, and the page renders before it arrives. #}
+  <div class="mapbox" data-map data-src="{{ map.src }}"></div>
+  <p class="mapnote warn" hidden></p>
+  {% if map.note %}<p class="cardnote">{{ map.note }}</p>{% endif %}
+</div>

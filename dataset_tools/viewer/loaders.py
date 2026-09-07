@@ -120,6 +120,27 @@ def read_text(path: Path, max_bytes: int = 200_000) -> str | None:
 # --------------------------------------------------------------------------
 
 
+def read_gps(path: Path) -> np.ndarray | None:
+    """``gps.npy`` as ``(M, >= 4)`` sorted by time, or None if it is unusable.
+
+    Rows whose latitude or longitude is not finite are dropped rather than
+    drawn: a receiver reporting no position at all is a hole in the track, and
+    a hole is not a place the robot was.
+    """
+    arr = load_npy(path)
+    if arr is None:
+        return None
+    arr = np.asarray(arr, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 4:
+        logger.warning("gps %s: expected (M, >=4), got %s", path, getattr(arr, "shape", None))
+        return None
+    good = np.isfinite(arr[:, 0]) & np.isfinite(arr[:, 1]) & np.isfinite(arr[:, 2])
+    arr = arr[good]
+    if not len(arr):
+        return None
+    return arr[np.argsort(arr[:, 0], kind="stable")]
+
+
 def read_odometry(path: Path) -> tuple[np.ndarray, np.ndarray] | None:
     """Parse ``odometry.txt`` (:func:`dataset_tools.gt_io.read_trajectory`).
 

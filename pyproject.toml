@@ -62,7 +62,8 @@ packages = ["dataset_tools", "dataset_tools.viewer"]
 
 [tool.setuptools.package-data]
 dataset_tools = ["libcloudini_shim.so"]
-"dataset_tools.viewer" = ["static/*", "templates/*"]
+# Not recursive: the vendored front-end libraries need their own line.
+"dataset_tools.viewer" = ["static/*", "static/vendor/*", "templates/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

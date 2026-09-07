@@ -38,12 +38,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 
-from . import render
+from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot
-from .scene_page import build_scene_page
+from .scene_page import build_scene_page, map_card
+from .segment_page import build_segment_page
+from .segment_page import find as find_segment
 from .windows import describe_reason, frame_window_key, neighbour_windows
 from .wire import render_viewer_page, scene_document, write_static_bundle
 
@@ -318,6 +320,46 @@ def create_app(
             },
         )
 
+    @app.get("/scene/{scene_id}/segment/{segment_index}", response_class=HTMLResponse)
+    async def segment_detail(
+        request: Request,
+        scene_id: str,
+        segment_index: int,
+        page: int = Query(0, ge=0),
+    ):
+        """One ground-truth segment: what it is, what happened inside it, where.
+
+        Addressed by the number in ``odometry_segments.txt`` -- the same number
+        the window keys carry -- so a link from a window, from a frame or from
+        another segment all resolve the same way.
+        """
+        access = _access_or_404(state, scene_id)
+        found = await run_in_threadpool(find_segment, access, segment_index)
+        if found is None:
+            raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
+        position, seg = found
+        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames)
+        lo, hi = detail["frames"]
+        frames = await run_in_threadpool(_frame_page, access, page, (lo, hi))
+        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
+        return templates.TemplateResponse(
+            request=request,
+            name="segment.html",
+            context={
+                "root": root,
+                "scene_id": scene_id,
+                "seg": seg,
+                "probe": access.probe,
+                "page": detail,
+                "frames": frames,
+                # Only the notes that touch this segment; the card says so and
+                # links to the scene page, which has all of them.
+                "notes": [n for n in scene_notes if n.overlaps(lo, hi)],
+                "notes_status": notes_store.status(),
+                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
+            },
+        )
+
     @app.get("/scene/{scene_id}/jump")
     async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
         """The frames tab's jump box: clamp to the scene and go to that frame."""
@@ -338,6 +380,9 @@ def create_app(
         # is no single-frame window to build for it; offering the button anyway
         # led straight to a 500.
         single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames)
+        # Where this frame was, when the recording says: the scene's track with
+        # a marker on it. None without gps.npy, and the page then has no map.
+        frame_map = await run_in_threadpool(map_card, access, None, index)
         return templates.TemplateResponse(
             request=request,
             name="frame.html",
@@ -349,6 +394,7 @@ def create_app(
                 "details": details,
                 "simview_ok": simview_ok,
                 "frame_window": single.key if single is not None else None,
+                "map": frame_map,
             },
         )
 
@@ -455,6 +501,50 @@ def create_app(
             "windows": [w.to_json() for w in windows],
             "details": details,
         }
+
+    @app.get("/api/scene/{scene_id}/segment/{segment_index}")
+    async def api_segment(scene_id: str, segment_index: int):
+        access = _access_or_404(state, scene_id)
+        found = await run_in_threadpool(find_segment, access, segment_index)
+        if found is None:
+            raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
+        position, seg = found
+        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames)
+        return {
+            "scene": scene_id,
+            "segment": {
+                "index": seg.index,
+                "start_ts": seg.start_ts,
+                "end_ts": seg.end_ts,
+                "duration": seg.duration,
+                "n_poses": seg.n_poses,
+                "reason": seg.reason,
+            },
+            "position": detail["position"],
+            "frames": list(detail["frames"]),
+            "cards": detail["cards"],
+            "windows": [w.to_json() for w in detail["windows"]],
+        }
+
+    @app.get("/api/scene/{scene_id}/gps.json")
+    async def api_scene_gps(
+        scene_id: str,
+        segment: int | None = Query(None, ge=0),
+        frame: int | None = Query(None, ge=0),
+        max_points: int = Query(2000, ge=2, le=20000),
+    ):
+        """This scene's GNSS track, thinned for drawing.
+
+        ``segment`` highlights one segment's stretch (the whole scene comes
+        back as ``context`` behind it); ``frame`` adds a marker where that
+        frame was. A scene without ``gps.npy`` is a 404, not an empty track:
+        the page then draws no map at all rather than an empty one.
+        """
+        access = _access_or_404(state, scene_id)
+        payload = await run_in_threadpool(_gps_payload, access, segment, frame, max_points)
+        if payload is None:
+            raise HTTPException(404, f"scene {scene_id} has no gps.npy")
+        return payload
 
     @app.get("/api/scene/{scene_id}/frame/{index}/info")
     async def api_frame_info(scene_id: str, index: int):
@@ -933,12 +1023,60 @@ def _scene_details(access: SceneAccess) -> dict[str, Any]:
     return details
 
 
+#: Fixes drawn for the *context* track -- the whole scene behind a highlighted
+#: stretch. Thinner than the highlight: it is there for shape, not for detail.
+GPS_CONTEXT_POINTS = 800
+
+
+def _gps_payload(
+    access: SceneAccess,
+    segment_index: int | None,
+    frame_index: int | None,
+    max_points: int,
+) -> dict[str, Any] | None:
+    """The map's whole answer for one scene: track, extent, quality, marker.
+
+    Read straight from ``gps.npy`` and thinned here rather than in the browser,
+    so a 16-minute scene ships tens of kilobytes instead of ten thousand pairs
+    of doubles. Deliberately its own endpoint and never folded into a window
+    bundle: bundles are cached per window under a content stamp, and a track
+    belongs to the scene, not to a view of it.
+    """
+    gps = access.gps
+    if not geo.is_track(gps):
+        return None
+
+    track = gps
+    scope = "scene"
+    if segment_index is not None:
+        seg = next((s for s in access.segments if s.index == segment_index), None)
+        if seg is None:
+            raise HTTPException(404, f"scene {access.scene_id} has no segment {segment_index}")
+        track = geo.slice_time(gps, seg.start_ts, seg.end_ts)
+        scope = f"segment {seg.index}"
+
+    marker = None
+    if frame_index is not None:
+        ts = access.frame_ts
+        if ts is not None and 0 <= frame_index < len(ts):
+            marker = geo.locate(gps, float(ts[frame_index]))
+
+    payload: dict[str, Any] = {"scene": access.scene_id, "scope": scope, "marker": marker}
+    payload.update(geo.summarise(track, max_points))
+    # The rest of the scene, faint, behind a highlighted stretch -- so a
+    # segment is seen where in the outing it happened, not just on its own.
+    payload["context"] = (
+        geo.points(geo.decimate(gps, GPS_CONTEXT_POINTS)) if track is not gps and len(gps) > len(track) else None
+    )
+    return payload
+
+
 #: Thumbnails per page of the frame browser. One HTTP request each, lazily,
 #: so this is a bound on concurrent image renders rather than on bytes read.
 FRAMES_PER_PAGE = 100
 
 
-def _frame_indices(access: SceneAccess) -> list[int]:
+def _frame_indices(access: SceneAccess, frame_range: tuple[int, int] | None = None) -> list[int]:
     """Every frame index this scene can show, in order.
 
     Normally just ``range(n_frames)``. Only when the per-frame directory is
@@ -948,15 +1086,23 @@ def _frame_indices(access: SceneAccess) -> list[int]:
     is skipped rather than accepted as the answer -- otherwise a scene whose
     ``images/`` had been created but not yet filled fell back to
     ``range(n_frames)`` and offered a page of tiles that all 404.
+
+    ``frame_range`` narrows the result to a half-open range of frames, which is
+    how the segment page shows a strip of its own frames rather than the
+    scene's.
     """
     probe = access.probe
+    indices = list(range(probe.n_frames))
     for kind in ("images", "clouds"):
         if not probe.has(kind) or not probe.counts.get(kind):
             continue
         if probe.counts[kind] != probe.n_frames:
-            return sorted(access.available_frames(kind))
+            indices = sorted(access.available_frames(kind))
         break
-    return list(range(probe.n_frames))
+    if frame_range is not None:
+        lo, hi = frame_range
+        indices = [i for i in indices if lo <= i < hi]
+    return indices
 
 
 def _page_of_frame(access: SceneAccess, index: int) -> int:
@@ -977,9 +1123,9 @@ def _page_of_frame(access: SceneAccess, index: int) -> int:
     return position // FRAMES_PER_PAGE
 
 
-def _frame_page(access: SceneAccess, page: int) -> dict[str, Any]:
-    """One page of the frame browser."""
-    indices = _frame_indices(access)
+def _frame_page(access: SceneAccess, page: int, frame_range: tuple[int, int] | None = None) -> dict[str, Any]:
+    """One page of the frame browser, over the scene or over one segment."""
+    indices = _frame_indices(access, frame_range)
     n_pages = max(1, -(-len(indices) // FRAMES_PER_PAGE))
     page = min(max(page, 0), n_pages - 1)
     start = page * FRAMES_PER_PAGE

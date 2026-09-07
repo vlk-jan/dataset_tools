@@ -651,3 +651,67 @@ def test_the_scene_page_does_not_read_arrays_it_never_renders(client, tmp_path):
         assert calls == ["0000"]
     finally:
         appmod._scene_details = original
+
+
+# --------------------------------------------------------------------------
+# GNSS: the track endpoint, and the map that is not there without it
+# --------------------------------------------------------------------------
+
+
+def test_a_root_without_gps_has_no_map_anywhere(client):
+    """The promise: a scene with no gps.npy looks exactly as it always did.
+
+    Not "an empty map" and not "a map that fails to load" -- no map markup, no
+    Leaflet, no fetch. Checked on every page that can carry one.
+    """
+    for path in ("/scene/0000", "/scene/0000/segment/0", "/scene/0000/frame/3"):
+        page = client.get(path).text
+        assert "leaflet" not in page.lower()
+        assert "data-map" not in page and 'class="pair"' not in page
+    assert client.get("/api/scene/0000/gps.json").status_code == 404
+
+
+def test_the_track_endpoint_serves_what_the_map_draws(gps_client):
+    data = gps_client.get("/api/scene/0000/gps.json").json()
+    assert data["scope"] == "scene"
+    assert data["n_fixes"] == 48 and len(data["points"]) == 48
+    assert data["bounds"][0][0] < data["bounds"][1][0]  # south of north
+    assert data["fix"][0]["label"] == "RTK / GBAS"
+    assert data["sigma_m"] == 0.5  # sqrt(0.09 + 0.16)
+    assert data["marker"] is None and data["context"] is None
+
+
+def test_a_long_track_is_thinned_before_it_is_shipped(gps_client):
+    data = gps_client.get("/api/scene/0000/gps.json?max_points=10").json()
+    assert data["n_fixes"] == 48 and len(data["points"]) <= 11
+    # The numbers still describe every fix, not the ten that were drawn.
+    assert data["n_points"] < data["n_fixes"]
+
+
+def test_a_segments_track_comes_with_the_rest_of_the_scene_behind_it(gps_client):
+    data = gps_client.get("/api/scene/0000/gps.json?segment=1").json()
+    assert data["scope"] == "segment 1"
+    assert 0 < data["n_fixes"] < 48
+    assert data["context"], "the whole scene, faint, for context"
+    assert gps_client.get("/api/scene/0000/gps.json?segment=7").status_code == 404
+
+
+def test_a_frames_position_is_marked_on_the_track(gps_client):
+    data = gps_client.get("/api/scene/0000/gps.json?frame=6").json()
+    lat, lon = data["marker"]
+    assert data["bounds"][0][0] <= lat <= data["bounds"][1][0]
+    assert data["bounds"][0][1] <= lon <= data["bounds"][1][1]
+
+
+def test_the_map_sits_beside_the_files_card_when_there_is_a_track(gps_client):
+    page = gps_client.get("/scene/0000").text
+    assert 'class="pair"' in page
+    assert 'data-src="/api/scene/0000/gps.json"' in page
+    assert "/viewer-static/vendor/leaflet.js" in page
+    # The file inventory now lists gps.npy as present, like any other artefact.
+    assert "gps.npy" in page
+
+
+def test_the_frame_page_marks_the_frame_it_is_showing(gps_client):
+    page = gps_client.get("/scene/0000/frame/6").text
+    assert 'data-src="/api/scene/0000/gps.json?frame=6"' in page

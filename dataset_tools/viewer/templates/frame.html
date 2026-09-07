@@ -5,6 +5,7 @@
 <title>Scene {{ scene_id }} frame {{ index }} &mdash; dataset viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/viewer-static/style.css">
+{% if map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
 </head>
 <body>
 <header>
@@ -91,7 +92,9 @@
         <h2 style="margin-top:0">Ground truth</h2>
         {% if details.segment %}
         <dl class="kv">
-          <dt>Segment</dt><dd>{{ details.segment.index }}</dd>
+          <dt>Segment</dt>
+          <dd><a href="/scene/{{ scene_id }}/segment/{{ details.segment.index }}"
+                 title="what this segment is, and what happened inside it">{{ details.segment.index }}</a></dd>
           <dt>Into segment</dt><dd>{{ details.segment.t_into_segment }} s
             <span class="muted">of {{ details.segment.duration }} s</span></dd>
           <dt>Poses</dt><dd>{{ details.segment.n_poses }}</dd>
@@ -143,9 +146,17 @@
         </p>
         {% endif %}
       </div>
+
+      {# Where the robot was standing when this frame was taken -- only on a
+         scene that carries gps.npy. #}
+      {% if map %}{% include "_map.html" %}{% endif %}
     </div>
   </div>
 
 </main>
+{% if map %}
+<script src="/viewer-static/vendor/leaflet.js"></script>
+<script type="module" src="/viewer-static/map.js"></script>
+{% endif %}
 </body>
 </html>

@@ -76,6 +76,21 @@ def client(tmp_path):
 
 
 @pytest.fixture
+def gps_client(tmp_path):
+    """The same root, but with gps.npy -- the only thing that turns maps on."""
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=12, with_gps=True)
+    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+
+
+@pytest.fixture
 def atlas_client(tmp_path):
     pytest.importorskip("simview")
     pytest.importorskip("torch")

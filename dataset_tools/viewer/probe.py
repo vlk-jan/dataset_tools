@@ -31,7 +31,7 @@ _UNSET = object()
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
-PROBE_CACHE_FORMAT = 2
+PROBE_CACHE_FORMAT = 3
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("joint_states", "joint_states.npy", "file", "Joint states", "(T, 10) ts + wheel position/velocity/effort"),
     Artefact("joint_setpoints", "joint_setpoints.npy", "file", "Joint setpoints", "(T, 10) commanded wheel state"),
     Artefact("cmd_vel", "cmd_vel.npy", "file", "Command velocity", "(T, 7) ts + commanded twist"),
+    Artefact("gps", "gps.npy", "file", "GNSS fixes", "(M, 8) ts + lat/lon/alt, fix status and covariance"),
     Artefact("camera_intrinsics", "camera_intrinsics.txt", "file", "Camera intrinsics", "3x3 K"),
     Artefact("camera_info", "camera_info.yaml", "file", "Camera info", "full camera_info message"),
     Artefact("T_cam_to_base", "T_cam_to_base.txt", "file", "Camera extrinsic", "4x4 camera-optical -> base"),
@@ -164,7 +165,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         shape = _npy_shape(scene_dir / "transforms.npy")
         if shape:
             probe.counts["transforms"] = int(shape[0])
-    for key in ("joint_states", "joint_setpoints", "cmd_vel", "gravity_align"):
+    for key in ("joint_states", "joint_setpoints", "cmd_vel", "gravity_align", "gps"):
         if probe.present.get(key):
             shape = _npy_shape(scene_dir / ARTEFACTS_BY_KEY[key].relpath)
             if shape:
