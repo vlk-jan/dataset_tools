@@ -158,3 +158,70 @@ def test_relabel_without_apply_changes_nothing(tmp_path):
     sys.argv = ["relabel_segments.py", str(root)]
     relabel_segments.main()
     assert (root / "0000" / "odometry_segments.txt").read_text() == before
+
+
+def test_a_hole_the_wheels_drove_through_cuts_the_run(tmp_path):
+    """No window closes inside a 10 s hole, so the window test is blind to it;
+    the wheel-distance rule cuts there because /odom travelled 10 m while the
+    GT pose moved 1 m."""
+    ts = np.concatenate([np.arange(0, 10, 0.1), np.arange(20, 30, 0.1)])
+    ref_ts = np.arange(0, 30, 0.1)
+    ref = ref_ts * 1.0
+    poses = np.where(ts < 15, ts, ts - 9.0)  # 10 s hole, the GT pose advanced only 1 m across it
+
+    regen, out = tmp_path / "regen", tmp_path / "out"
+    regen.mkdir()
+    _write_traj(regen / "odometry.txt", ts, poses)
+    _write_traj(tmp_path / "odom_ref.txt", ref_ts, ref)
+    with open(regen / "odometry_segments.txt", "w") as f:
+        f.write("# segment start_ts end_ts n_poses reason\n")
+        f.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} {len(ts)} end_of_run\n")
+
+    sys.argv = ["filter_segments.py", str(regen), str(tmp_path / "odom_ref.txt"), str(out), "--max-gap", "100"]
+    filter_segments.main()
+
+    segs = _segments(out / "odometry_segments.txt")
+    assert [s[4] for s in segs] == ["filtered:wheel_gap", "filtered:end_of_run"]
+    assert float(segs[0][2]) == float(f"{ts[99]:.6f}")
+    assert float(segs[1][1]) == float(f"{ts[100]:.6f}")
+    stats = dict(line.split("=") for line in (regen / "filter_stats.txt").read_text().split())
+    assert stats["seams_wheel_gap"] == "1" and stats["seams_gap"] == "0"
+
+
+def test_a_long_gap_cuts_even_when_the_endpoints_agree(tmp_path):
+    """The GT pose and /odom agree across a 3 s hole; nothing in between is known."""
+    ts = np.concatenate([np.arange(0, 10, 0.1), np.arange(13, 23, 0.1)])
+    xs = ts * 1.0
+
+    regen, out = tmp_path / "regen", tmp_path / "out"
+    regen.mkdir()
+    _write_traj(regen / "odometry.txt", ts, xs)
+    _write_traj(tmp_path / "odom_ref.txt", np.arange(0, 23, 0.1), np.arange(0, 23, 0.1) * 1.0)
+    with open(regen / "odometry_segments.txt", "w") as f:
+        f.write("# segment start_ts end_ts n_poses reason\n")
+        f.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} {len(ts)} pose_jump\n")
+
+    sys.argv = ["filter_segments.py", str(regen), str(tmp_path / "odom_ref.txt"), str(out)]
+    filter_segments.main()
+
+    segs = _segments(out / "odometry_segments.txt")
+    assert [s[4] for s in segs] == ["filtered:gap", "filtered:pose_jump"]
+
+
+def test_a_dense_stream_is_never_cut_by_the_gap_rules(tmp_path):
+    """0.1 s steps cannot accumulate 1 m of wheel disagreement: one run, untouched."""
+    ts = np.arange(0, 20, 0.1)
+    xs = ts * 2.0  # 2 m/s
+
+    regen, out = tmp_path / "regen", tmp_path / "out"
+    regen.mkdir()
+    _write_traj(regen / "odometry.txt", ts, xs)
+    _write_traj(tmp_path / "odom_ref.txt", ts, xs * 1.1)  # 10 % wheel slip
+    with open(regen / "odometry_segments.txt", "w") as f:
+        f.write("# segment start_ts end_ts n_poses reason\n")
+        f.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} {len(ts)} end_of_run\n")
+
+    sys.argv = ["filter_segments.py", str(regen), str(tmp_path / "odom_ref.txt"), str(out)]
+    filter_segments.main()
+
+    assert [s[4] for s in _segments(out / "odometry_segments.txt")] == ["filtered:end_of_run"]

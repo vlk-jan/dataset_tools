@@ -8,8 +8,15 @@ the robot's live /odom over short windows, drops the poses that disagree,
 splits the remainder into runs, keeps runs long enough to matter and
 re-anchors each run at its first pose.
 
+The window test cannot see a HOLE -- FAST-LIO publishing nothing for seconds to
+minutes while the robot drives on -- because no window closes inside it. So
+every consecutive pose pair is also judged as a gap (``dataset_tools.gt_gaps``):
+the run is cut where the live odometry travelled more than --max-err further
+across the gap than the GT pose moved (tag ``wheel_gap``), or where the gap is
+longer than --max-gap regardless (tag ``gap``).
+
     filter_segments.py <regen_dir> <odom_ref.txt> <out_dir> [--window 2.0]
-                       [--max-err 1.0] [--min-poses 20]
+                       [--max-err 1.0] [--min-poses 20] [--max-gap 1.0]
 
 Reads  <regen_dir>/odometry.txt and odometry_segments.txt (run_scene.sh output)
 Writes <out_dir>/odometry.txt            filtered runs, each anchored at identity
@@ -30,6 +37,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
+from dataset_tools.gt_gaps import ReferencePath, gap_seams, split_runs  # noqa: E402
 from dataset_tools.gt_io import (  # noqa: E402
     SegmentRow,
     anchor_to_first,
@@ -74,6 +82,7 @@ def main():
     ap.add_argument("--window", type=float, default=2.0)
     ap.add_argument("--max-err", type=float, default=1.0)
     ap.add_argument("--min-poses", type=int, default=20)
+    ap.add_argument("--max-gap", type=float, default=1.0, help="s; a longer pose gap always ends the run")
     a = ap.parse_args()
 
     regen, out = Path(a.regen_dir), Path(a.out_dir)
@@ -87,9 +96,12 @@ def main():
         segp = regen / "odometry_segments_prefilter.txt"
     segs = load_segments(segp) if segp.exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
     rt, rT = read_trajectory(a.odom_ref)
+    ref_path = ReferencePath.from_trajectory(rt, rT)
 
     kept_ts, kept_T, kept_segs = [], [], []
     span_in = span_out = 0.0
+    seams = {"wheel_gap": 0, "gap": 0}
+    hole_s = 0.0
     for s0, s1, _, reason in segs:
         idx = np.where((t >= s0) & (t <= s1))[0]
         if len(idx) == 0:
@@ -97,10 +109,12 @@ def main():
         span_in += t[idx[-1]] - t[idx[0]]
         ts, Ts = t[idx], T[idx]
         bad = bad_poses(ts, Ts, rt, rT, a.window, a.max_err)
-        # runs of consecutive good poses
-        good = ~bad
-        edges = np.diff(np.concatenate([[0], good.astype(int), [0]]))
-        for r0, r1 in zip(np.where(edges == 1)[0], np.where(edges == -1)[0], strict=True):
+        seam, tags = gap_seams(ts, Ts, ref_path, a.max_gap, a.max_err)
+        for k in np.where(seam)[0]:
+            seams[tags[k]] += 1
+            hole_s += ts[k + 1] - ts[k]
+        # runs of consecutive good poses, cut again at every seam
+        for r0, r1, cut in split_runs(len(ts), seam, tags, bad):
             if r1 - r0 < a.min_poses:
                 continue
             run_t, run_T = ts[r0:r1], Ts[r0:r1]
@@ -111,7 +125,7 @@ def main():
             # this filter cut it, which is a different reason and its own tag.
             # Without the distinction a segment could read "the recording
             # ended" 97 s before the recording ended (scene 0000, seg 7).
-            tag = reason if r1 == len(ts) else "odom_mismatch"
+            tag = reason if cut is None else cut
             kept_segs.append(SegmentRow(len(kept_segs), run_t[0], run_t[-1], len(run_t), f"filtered:{tag}"))
             span_out += run_t[-1] - run_t[0]
 
@@ -132,6 +146,10 @@ def main():
         window=a.window,
         max_err=a.max_err,
         min_poses=a.min_poses,
+        max_gap=a.max_gap,
+        seams_wheel_gap=seams["wheel_gap"],
+        seams_gap=seams["gap"],
+        hole_s=round(hole_s, 1),
     )
     with open(regen / "filter_stats.txt", "w") as f:
         for k, v in summary.items():
