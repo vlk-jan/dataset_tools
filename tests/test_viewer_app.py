@@ -128,6 +128,24 @@ def test_viewer_page_wires_the_static_base_and_defers_simview(client):
     assert client.get("/view/0000/nosuchwindow").status_code == 404
 
 
+def test_the_viewer_page_pages_between_a_scene_s_windows(client):
+    """The panel's < / > next to the title: a link to the neighbouring window,
+    a dead end at either end of the scene, and the build options carried over
+    so paging keeps the view you set up."""
+    first = client.get("/view/0000/seg000").text
+    assert '/view/0000/seg001"' in first
+    assert 'aria-disabled="true"' in first  # nothing before the first window
+
+    last = client.get("/view/0000/seg001").text
+    assert '/view/0000/seg000"' in last
+
+    # ?frame= names a frame of *this* window, so it is not carried over; the
+    # build options are.
+    carried = client.get("/view/0000/seg000?cloud_frames=40&frame=3").text
+    assert "/view/0000/seg001?cloud_frames=40" in carried
+    assert "frame=3" not in carried.split("dt-winnav")[1].split("</nav>")[0]
+
+
 def test_a_scene_without_optional_files_still_builds(tmp_path):
     """The degradation contract: no height maps, no gravity alignment, no
     proprioception, no wheel odometry -- the window must still build."""

@@ -31,6 +31,20 @@
 .dt-sub a { color: #5aa9e6; text-decoration: none; }
 .dt-sub a:hover { text-decoration: underline; }
 
+/* Segment paging, in the header row beside the title. Sized to stay on one
+   line with it however long a window label runs (the head is a flex row and
+   the title's column is what gives). */
+.dt-winnav { display: flex; gap: 4px; flex: 0 0 auto; }
+.dt-winstep {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px;
+  border: 1px solid #333844; background: #21242c; color: #c7ccd6;
+  font-size: 15px; line-height: 1; text-decoration: none; user-select: none;
+}
+.dt-winstep:hover { background: #2b303a; color: #fff; text-decoration: none; }
+.dt-winstep-off { opacity: 0.35; cursor: default; }
+.dt-winstep-off:hover { background: #21242c; color: #c7ccd6; }
+
 .dt-badge { padding: 0 6px; border-radius: 9px; border: 1px solid #333844; font-size: 10.5px; }
 .dt-odometry { color: #4caf7d; border-color: #2f6b4f; }
 .dt-transforms { color: #d8a640; border-color: #6b5a2f; }

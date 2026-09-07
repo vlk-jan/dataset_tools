@@ -25,6 +25,8 @@ const els = {
   buildMsg: document.querySelector("#dt-build .dt-build-msg"),
   panel: document.getElementById("dt-panel"),
   edge: document.getElementById("dt-edge"),
+  prevWindow: document.getElementById("dt-prev-window"),
+  nextWindow: document.getElementById("dt-next-window"),
   view: document.getElementById("dt-view"),
   cloudRow: document.getElementById("dt-cloud-row"),
   cloud: document.getElementById("dt-cloud"),
@@ -611,8 +613,38 @@ function claimKeyboardForFields() {
   }
 }
 
+/**
+ * `[` / `]` page to the previous / next window of this scene.
+ *
+ * The two keys are SimView's own episode shortcuts, which do nothing here --
+ * a dataset scene declares no episodes -- so they are free, and they already
+ * mean "the segment either side of this one" to anyone who knows SimView.
+ * A key pressed while typing is left alone (the panel's fields stop their own
+ * events, but this listens on the document, which a note textarea does not
+ * cover), and so is one carrying a modifier, which is a browser shortcut.
+ */
+function setupWindowNav() {
+  const editable = (node) =>
+    node &&
+    (node.tagName === "INPUT" ||
+      node.tagName === "TEXTAREA" ||
+      node.tagName === "SELECT" ||
+      node.isContentEditable);
+  document.addEventListener("keydown", (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (editable(event.target) || editable(document.activeElement)) return;
+    const link = event.key === "[" ? els.prevWindow : event.key === "]" ? els.nextWindow : null;
+    // Absent at either end of the scene: the template renders a disabled
+    // <span> with no id rather than a link that goes nowhere.
+    if (!link) return;
+    event.preventDefault();
+    window.location.href = link.href;
+  });
+}
+
 function setupPanel() {
   claimKeyboardForFields();
+  setupWindowNav();
   // A single tab on the panel's own edge, so it slides out with the panel and
   // is always reachable at the middle of the window edge -- the old pair of
   // buttons put the "show again" one under SimView's control panel.

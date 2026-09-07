@@ -236,6 +236,26 @@ def windows_for_scene(
     return windows
 
 
+def neighbour_windows(windows: list[Window], current: Window) -> tuple[Window | None, Window | None]:
+    """The windows immediately before and after ``current``, in scene order.
+
+    Ordered by frame range rather than by position in ``windows``, so a
+    one-frame window -- addressable but never enumerated, see
+    ``single_frame_window`` -- has neighbours at all: the previous window is
+    the last one starting before it, which for a frame inside a segment is
+    that segment, so paging back from a single frame opens the stretch it
+    belongs to. Either end is ``None`` where the scene runs out.
+    """
+
+    def span(w: Window) -> tuple[int, int]:
+        return (w.frame_start, w.frame_end)
+
+    ordered = sorted(windows, key=span)
+    before = [w for w in ordered if span(w) < span(current)]
+    after = [w for w in ordered if span(w) > span(current)]
+    return (before[-1] if before else None, after[0] if after else None)
+
+
 #: Plain-language text for the machine tags in ``odometry_segments.txt``.
 #: A tag names why the segment ENDED (except ``v11_fill``, which names where
 #: the whole segment came from). Unknown tags pass through verbatim.
@@ -246,6 +266,7 @@ _REASON_TEXT = {
     "odom_mismatch": "the post-hoc check against live odometry rejected the poses that follow",
     "end_of_run": "the recording ended",
     "gap": "a gap of over 1 s in the GT stream",
+    "wheel_gap": "the wheels drove further across a gap in the GT stream than the GT pose moved",
     "teleport": "an implied speed over 4 m/s (GT jump)",
     "fix_lost": "the GNSS fix was lost",
 }

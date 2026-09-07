@@ -222,6 +222,34 @@ def test_a_split_segment_keeps_its_pose_rate(tmp_path):
         assert abs(w.pose_rate - whole.pose_rate) < 0.15 * whole.pose_rate
 
 
+def test_neighbour_windows_walk_a_scene_in_frame_order():
+    """The panel's < / > page through a scene one window at a time, and stop
+    at both ends rather than wrapping."""
+    ts = np.arange(100, dtype=np.float64)
+    segs = [loaders.Segment(0, 0.0, 39.0, 40, "a"), loaders.Segment(1, 60.0, 99.0, 40, "b")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=True)
+
+    assert windows.neighbour_windows(ws, ws[0]) == (None, ws[1])
+    assert windows.neighbour_windows(ws, ws[1]) == (ws[0], None)
+
+
+def test_a_single_frame_window_pages_into_the_segment_holding_it():
+    """A ``frame00042`` window is addressable but never enumerated, so its
+    neighbours come from where its frame sits, not from a position in the list:
+    paging back from a frame inside a segment opens that whole segment."""
+    ts = np.arange(100, dtype=np.float64)
+    segs = [loaders.Segment(0, 0.0, 39.0, 40, "a"), loaders.Segment(1, 60.0, 99.0, 40, "b")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=True)
+
+    inside = windows.single_frame_window(ts, segs, len(ts), 70)
+    assert windows.neighbour_windows(ws, inside) == (ws[1], None)
+
+    # A frame in the gap between two segments belongs to neither, and pages to
+    # the one either side of it.
+    between = windows.single_frame_window(ts, segs, len(ts), 50)
+    assert windows.neighbour_windows(ws, between) == (ws[0], ws[1])
+
+
 def test_the_windows_table_states_the_ground_truth_pose_rate(client):
     body = client.get("/scene/0000?tab=windows").text
     assert "GT poses" in body

@@ -30,6 +30,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -43,7 +44,7 @@ from .index_page import THUMB_SLOTS, build_index, thumb_index
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, DatasetRoot
 from .scene_page import build_scene_page
-from .windows import describe_reason, frame_window_key
+from .windows import describe_reason, frame_window_key, neighbour_windows
 from .wire import render_viewer_page, scene_document, write_static_bundle
 
 
@@ -361,6 +362,10 @@ def create_app(
 
         opts = _options_from_query(request.query_params)
         bundle_key = _bundle_key(scene_id, window_key, opts)
+        # The windows either side of this one, so the panel can page through a
+        # scene's segments without going back to the scene page each time.
+        windows = await run_in_threadpool(access.windows, state.max_frames)
+        prev_window, next_window = neighbour_windows(windows, window)
         # ?frame=N -- arrived here from that frame's page, so open the playhead
         # on it instead of at the start of the window.
         try:
@@ -370,6 +375,12 @@ def create_app(
         overlay = templates.get_template("overlay.html").render(
             scene_id=scene_id,
             window=window,
+            prev_window=prev_window,
+            next_window=next_window,
+            # Build options are carried across, so paging to the next segment
+            # keeps the cloud/terrain settings the current view was opened
+            # with; ?frame= is not -- it names a frame of *this* window.
+            view_query=_view_query(request.query_params),
             probe=access.probe,
             data_base=f"/api/data/{bundle_key}/{stamp}",
             meta_url=f"/api/data/{bundle_key}/{stamp}/meta.json",
@@ -759,6 +770,16 @@ def _options_from_query(params) -> BuildOptions:
         max_terrain_cells=get_int("terrain_cells", BuildOptions.max_terrain_cells),
         cloud_color=params.get("cloud_color", BuildOptions.cloud_color),
     ).sanitized()
+
+
+def _view_query(params) -> str:
+    """This view's query string, minus ``frame``, ready to append to a URL.
+
+    Empty when nothing is left to carry, so the common link has no trailing
+    "?" on it.
+    """
+    kept = [(k, v) for k, v in params.multi_items() if k != "frame"]
+    return f"?{urlencode(kept)}" if kept else ""
 
 
 def _bundle_key(scene_id: str, window_key: str, opts: BuildOptions) -> str:

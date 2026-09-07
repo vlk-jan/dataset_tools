@@ -22,6 +22,28 @@
         <a href="/">index</a>
       </div>
     </div>
+    {# Paging through the scene's segments without going back to the scene
+       page. An end of the scene is a disabled span, not a dead link. #}
+    <nav class="dt-winnav" aria-label="segment navigation">
+      {% if prev_window %}
+      <a class="dt-winstep" id="dt-prev-window"
+         href="/view/{{ scene_id }}/{{ prev_window.key }}{{ view_query }}"
+         title="{{ prev_window.label }} ([)"
+         aria-label="Previous: {{ prev_window.label }}">&lsaquo;</a>
+      {% else %}
+      <span class="dt-winstep dt-winstep-off" aria-disabled="true"
+            title="This is the first window of the scene">&lsaquo;</span>
+      {% endif %}
+      {% if next_window %}
+      <a class="dt-winstep" id="dt-next-window"
+         href="/view/{{ scene_id }}/{{ next_window.key }}{{ view_query }}"
+         title="{{ next_window.label }} (])"
+         aria-label="Next: {{ next_window.label }}">&rsaquo;</a>
+      {% else %}
+      <span class="dt-winstep dt-winstep-off" aria-disabled="true"
+            title="This is the last window of the scene">&rsaquo;</span>
+      {% endif %}
+    </nav>
   </div>
 
   <div class="dt-readout">

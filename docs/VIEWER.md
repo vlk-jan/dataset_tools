@@ -308,6 +308,22 @@ decided the height were driving past it and extrapolating behind themselves — 
 a straight traverse that describes roughly two covered cells in five. The
 per-frame Validity tile still shows the three states unmixed.
 
+### Paging through a scene's segments
+
+The panel's header carries **&lsaquo;** and **&rsaquo;** beside the window's
+name, and <kbd>[</kbd> / <kbd>]</kbd> do the same: they open the window before
+or after this one, so a scene is reviewed segment by segment without going back
+to the scene page between each. They are ordered by frame, so a single-frame
+view (`frame00042`) pages back into the segment holding it, and stop at either
+end of the scene rather than wrapping. The build options in the URL travel
+along -- page to the next segment and it is built with the same cloud and
+terrain settings -- while `?frame=` does not, since it names a frame of the
+window you are leaving.
+
+The two keys are SimView's own episode shortcuts, which do nothing here: a
+dataset scene declares no episodes. A key pressed into a note field is left to
+the field.
+
 ### The 3D view toggles
 
 Two things in the scene are diagnostics rather than the robot, and both are off
