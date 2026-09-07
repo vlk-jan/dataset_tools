@@ -22,6 +22,50 @@ def test_clean_scene_passes(scene: Path):
     assert report.extras == ["source_bag.txt"]
 
 
+def _write_gps(scene: Path, rows: np.ndarray) -> None:
+    np.save(scene / "gps.npy", rows)
+
+
+def _gps_rows(scene: Path, n: int = 8) -> np.ndarray:
+    ts = np.loadtxt(scene / "data_ts.txt")
+    rows = np.zeros((n, 8))
+    rows[:, 0] = np.linspace(ts[0], ts[-1], n)
+    rows[:, 1] = 50.1 + 1e-5 * np.arange(n)
+    rows[:, 2] = 14.4 + 2e-5 * np.arange(n)
+    rows[:, 3] = 227.0
+    rows[:, 4] = 2
+    rows[:, 5:8] = 0.2
+    return rows
+
+
+def test_a_well_formed_gps_file_is_an_extra_not_a_problem(scene: Path):
+    _write_gps(scene, _gps_rows(scene))
+    report = vs.validate_scene(scene)
+    assert report.status() == "OK"
+    assert "gps.npy" in report.extras
+    assert report.stats["gps_fixes"] == 8
+
+
+def test_gps_problems_are_warnings_not_errors(scene: Path):
+    rows = _gps_rows(scene)
+    rows[3, 1] = 120.0  # off the globe
+    rows[[4, 5]] = rows[[5, 4]]  # and out of order
+    _write_gps(scene, rows)
+    report = vs.validate_scene(scene)
+    assert report.errors == []
+    assert any("coordinates outside" in w for w in report.warnings)
+    assert any("not sorted" in w for w in report.warnings)
+
+
+def test_gps_from_another_recording_is_flagged(scene: Path):
+    rows = _gps_rows(scene)
+    rows[:, 0] += 86_400.0  # a day later: this is not this scene's track
+    _write_gps(scene, rows)
+    report = vs.validate_scene(scene)
+    assert report.errors == []
+    assert any("does not overlap" in w for w in report.warnings)
+
+
 def test_missing_required_file_is_an_error(scene: Path):
     (scene / "gravity_align.npy").unlink()
     report = vs.validate_scene(scene)

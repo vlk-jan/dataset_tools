@@ -46,6 +46,7 @@ OPTIONAL_FILES = (
     "joint_states.npy",
     "joint_setpoints.npy",
     "cmd_vel.npy",
+    "gps.npy",
     "source_bag.txt",
     "camera_info.yaml",
     "T_cam_to_base.txt",
@@ -296,6 +297,46 @@ def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6)
         report.warn(f"odometry.txt: {outside} poses lie outside every segment")
 
 
+def check_gps(report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None) -> None:
+    """``gps.npy`` is well-formed, when the scene has one.
+
+    Everything here is a warning. GPS is an optional extra: it is not part of
+    the scene contract, nothing else is computed from it, and it is not
+    frame-aligned. What is worth saying is that a file which *is* there cannot
+    be used -- too few columns, an unsorted clock, coordinates off the globe,
+    or a track that does not overlap the frames it is supposed to describe.
+    """
+    path = scene_dir / "gps.npy"
+    if not path.is_file():
+        return
+    try:
+        gps = np.load(path)
+    except Exception as exc:  # noqa: BLE001
+        report.warn(f"gps.npy: unreadable ({type(exc).__name__}: {exc})")
+        return
+    if gps.ndim != 2 or gps.shape[0] == 0 or gps.shape[1] < 4:
+        report.warn(f"gps.npy: expected (M, >=4) [t, lat, lon, alt, ...], got {gps.shape}")
+        return
+
+    report.stats["gps_fixes"] = int(gps.shape[0])
+    ts, lat, lon = gps[:, 0], gps[:, 1], gps[:, 2]
+    if not np.all(np.diff(ts) >= 0):
+        report.warn("gps.npy: timestamps are not sorted")
+    if not (np.isfinite(lat).all() and np.isfinite(lon).all()):
+        report.warn("gps.npy: contains non-finite coordinates")
+    elif np.abs(lat).max() > 90.0 or np.abs(lon).max() > 180.0:
+        report.warn("gps.npy: coordinates outside [-90, 90] / [-180, 180] degrees")
+    if gps.shape[1] >= 5:
+        no_fix = float((gps[:, 4] < 0).mean())
+        report.stats["gps_no_fix_frac"] = no_fix
+        if no_fix > 0.5:
+            report.warn(f"gps.npy: {no_fix:.0%} of the fixes report no fix at all")
+    if data_ts is not None and data_ts.size and np.isfinite(ts).all():
+        overlap = min(ts[-1], data_ts[-1]) - max(ts[0], data_ts[0])
+        if overlap <= 0:
+            report.warn("gps.npy: its time span does not overlap data_ts.txt")
+
+
 # ---------------------------------------------------------------------------
 # Scene validation
 # ---------------------------------------------------------------------------
@@ -423,6 +464,7 @@ def validate_scene(
         if (scene_dir / name).is_file():
             check_extrinsic(report, scene_dir / name)
 
+    check_gps(report, scene_dir, timestamps.get("data_ts.txt"))
     check_ground_truth(report, scene_dir)
 
     if counts:

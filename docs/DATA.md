@@ -400,8 +400,25 @@ unit (organised 256 × 192 clouds at ~14 Hz, cloudini-compressed; 1600 × 1296
 camera at ~29 Hz; onboard SLAM odometry) and a **Fixposition** GNSS/INS
 (georeferenced ENU poses at 10 Hz), with the same wheel/IMU proprioception.
 The extraction tool in this repository handles both generations and writes the
-same scene layout (plus `joint_setpoints.npy` and `cmd_vel.npy` when
-available). The first recordings with the new stack
+same scene layout (plus `joint_setpoints.npy`, `cmd_vel.npy` and `gps.npy` when
+available).
+
+**`gps.npy`** is new with this generation: `(M, 8)` `float64` rows of
+`[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]` at the receiver's own rate
+(10 Hz on this rig), taken from `/fixposition/odometry_llh` — the same fusion
+solution as `/fixposition/odometry_enu`, on the same stamps, expressed
+geodetically. It is not frame-aligned and it is not ground truth: `odometry.txt`
+is anchored per segment and carries no georeference. The fixes are the fusion
+point's position, a few tens of centimetres from `base_link` and well inside
+the ~0.5 m sigma the receiver reports. On the old generation the extractor takes
+whatever `sensor_msgs/NavSatFix` a bag carries; the published v1.3 scenes
+predate this and have none.
+
+A georeferenced track is a disclosure the anchored poses were not. The dataset
+is **internal for now**, and anonymisation before any public release is a
+prerequisite — GNSS included.
+
+The first recordings with the new stack
 (`subtdata:/data/helhest/26-08-01-dobyvani_hradu`, `26-08-21-stromovka-roads`)
 exposed integration bugs — missing LiDAR-to-base extrinsic, empty wheel
 velocities, an unreferenced IMU — and are not part of the dataset; see the

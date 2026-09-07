@@ -80,6 +80,7 @@ SCENE_OUTPUT_FILES = (
     "joint_states.npy",
     "joint_setpoints.npy",
     "cmd_vel.npy",
+    "gps.npy",
     SENTINEL_FILE,
 )
 #: Written only when the odometry source is its own ground truth (``--gt``).
@@ -172,6 +173,70 @@ def drop_invalid_returns(xyzi: np.ndarray) -> np.ndarray:
     """
     xyzi = xyzi[~np.isnan(xyzi).any(axis=1)]
     return xyzi[np.any(xyzi[:, :3] != 0, axis=1)]
+
+
+# ---------------------------------------------------------------------------
+# GNSS
+# ---------------------------------------------------------------------------
+#: The only message type ``gps.npy`` is ever built from. Both rig generations
+#: publish one -- Fixposition on the new stack, Septentrio on the old -- under
+#: names that have nothing in common, which is why the topic is found by type.
+GPS_MSGTYPE = "sensor_msgs/msg/NavSatFix"
+
+#: Ordered substrings preferred when ``--gps auto`` has several NavSatFix
+#: topics to choose between. A fused solution (Fixposition's ``odometry_llh``,
+#: which is its ENU odometry expressed geodetically) says more about where the
+#: robot was than one antenna's raw fix, and a receiver's own ``navsatfix`` /
+#: ``fix`` outranks whatever else a rig happens to publish.
+GPS_TOPIC_PREFERENCE = ("odometry_llh", "navsatfix", "fix", "gnss", "gps")
+
+
+def pick_gps_topic(connections, requested: str) -> str | None:
+    """Which topic ``gps.npy`` comes from: the one asked for, or the best fix.
+
+    ``off`` writes no GPS; an explicit topic is taken as given (and simply
+    finds nothing if the bag does not carry it); ``auto`` searches by message
+    type, so it needs no knowledge of a rig's naming. Topics recorded with
+    zero messages are never chosen -- the new bags declare an empty
+    ``/fixposition/gnss1`` next to the fix that is actually populated.
+    """
+    if requested == "off":
+        return None
+    if requested != "auto":
+        return requested
+    counts: dict[str, int] = {}
+    for conn in connections:
+        if conn.msgtype != GPS_MSGTYPE:
+            continue
+        counts[conn.topic] = counts.get(conn.topic, 0) + int(getattr(conn, "msgcount", 1) or 0)
+    populated = {topic: n for topic, n in counts.items() if n}
+    if not populated:
+        return None
+
+    def rank(topic: str) -> tuple[int, int, str]:
+        for i, token in enumerate(GPS_TOPIC_PREFERENCE):
+            if token in topic:
+                return (i, -populated[topic], topic)
+        return (len(GPS_TOPIC_PREFERENCE), -populated[topic], topic)
+
+    return min(populated, key=rank)
+
+
+def gps_row(t: float, msg) -> np.ndarray | None:
+    """One ``gps.npy`` row from a ``NavSatFix``, or None for a fix with no position.
+
+    ``[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]``. The covariance is
+    the diagonal of the message's row-major 3x3, in m^2, and is NaN when the
+    message declares ``COVARIANCE_TYPE_UNKNOWN`` -- the numbers mean nothing
+    then, and NaN says so without spending a column on the type constant.
+    """
+    lat, lon = float(msg.latitude), float(msg.longitude)
+    if not (math.isfinite(lat) and math.isfinite(lon)):
+        return None
+    cov = np.asarray(msg.position_covariance, dtype=np.float64).ravel()
+    unknown = int(getattr(msg, "position_covariance_type", 0)) == 0
+    diag = np.full(3, np.nan) if unknown or cov.size < 9 else cov[[0, 4, 8]]
+    return np.r_[t, lat, lon, float(msg.altitude), float(msg.status.status), diag]
 
 
 # ---------------------------------------------------------------------------
@@ -504,6 +569,11 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     joint_states = []
     joint_setpoints = []
     cmd_vels = []
+    gps_rows = []  # (t, lat, lon, alt, status, cov diagonal) of a NavSatFix
+
+    # Found by message type rather than by name, so the same run works on both
+    # rig generations; None when the bag carries no fix at all.
+    gps_topic = pick_gps_topic(reader.connections, args.gps)
 
     relevant_conns = [
         cam_conn,
@@ -513,6 +583,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         conns.get("/joint_states"),
         conns.get("/joint_setpoints"),
         conns.get("/cmd_vel"),
+        conns.get(gps_topic),
         conns.get("/tf_static"),
     ]
     # Deduplicate (e.g. when --odom and --imu are the same topic)
@@ -576,6 +647,10 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
                     tw.angular.z,
                 ]
             )
+        elif conn.topic == gps_topic:
+            row = gps_row(t, msg)
+            if row is not None:
+                gps_rows.append(row)
         elif conn.topic == "/tf_static":
             tf_msgs.extend(msg.transforms)
 
@@ -614,6 +689,17 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             np.save(scene_dir / f"{name}.npy", arr[np.argsort(arr[:, 0])])
         else:
             LOG.info("%s: no messages on /%s; %s.npy not written", bag_path.name, name, name)
+
+    # GPS is an optional extra, not part of the scene contract: a bag without a
+    # fix is a scene without gps.npy, exactly as one without /cmd_vel is.
+    if gps_rows:
+        arr = np.vstack(gps_rows)
+        np.save(scene_dir / "gps.npy", arr[np.argsort(arr[:, 0])])
+        LOG.info("%s: %d GNSS fixes from '%s'", bag_path.name, len(gps_rows), gps_topic)
+    elif gps_topic:
+        LOG.info("%s: no usable fixes on '%s'; gps.npy not written", bag_path.name, gps_topic)
+    else:
+        LOG.info("%s: no %s topic in the bag; gps.npy not written", bag_path.name, GPS_MSGTYPE)
 
     # Process TF Static
     tf_graph = build_tf_graph(tf_msgs) if tf_msgs else nx.DiGraph()
@@ -933,6 +1019,16 @@ def build_parser() -> argparse.ArgumentParser:
         "or nav_msgs/Odometry topics (old bags: /ekf/imu/data). Note: the new "
         "bags' /imu/data is mounted tilted (~5 deg roll, ~11 deg pitch) with "
         "no TF to base_link, so the Fixposition orientation is used instead.",
+    )
+    parser.add_argument(
+        "--gps",
+        type=str,
+        default="auto",
+        metavar="TOPIC",
+        help="GNSS fix topic (sensor_msgs/NavSatFix) written to gps.npy. "
+        "'auto' takes the NavSatFix topic that carries messages, preferring a "
+        "fused solution (/fixposition/odometry_llh) over a single antenna's "
+        "raw fix; 'off' writes no GPS.",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
     parser.add_argument(

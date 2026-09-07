@@ -122,6 +122,18 @@ def _joint_msg(t: float, k: int):
     )
 
 
+def _navsatfix_msg(t: float, lat: float, lon: float, cov_type: int = 3):
+    return _t("sensor_msgs/msg/NavSatFix")(
+        header=_header(t, "FP_POI"),
+        status=_t("sensor_msgs/msg/NavSatStatus")(status=2, service=15),
+        latitude=lat,
+        longitude=lon,
+        altitude=227.0,
+        position_covariance=np.array([0.11, 0, 0, 0, 0.22, 0, 0, 0, 0.33]),
+        position_covariance_type=cov_type,
+    )
+
+
 def _tf_static_msg():
     def tf(parent, child, xyz, quat):
         return _t("geometry_msgs/msg/TransformStamped")(
@@ -155,6 +167,11 @@ def write_bag(bag_dir: Path, frames: int = FRAMES, dropped_camera: set[int] = fr
                 ("/imu", "sensor_msgs/msg/Imu"),
                 ("/joint_states", "sensor_msgs/msg/JointState"),
                 ("/cmd_vel", "geometry_msgs/msg/Twist"),
+                # Two NavSatFix topics, as the real bags have: the fused
+                # solution, and a raw antenna that was declared but never
+                # published. --gps auto has to pick the first.
+                ("/fixposition/odometry_llh", "sensor_msgs/msg/NavSatFix"),
+                ("/fixposition/gnss1", "sensor_msgs/msg/NavSatFix"),
                 ("/tf_static", "tf2_msgs/msg/TFMessage"),
             )
         }
@@ -178,6 +195,13 @@ def write_bag(bag_dir: Path, frames: int = FRAMES, dropped_camera: set[int] = fr
             put("/imu", t, _imu_msg(t, math.radians(10.0)))
             put("/joint_states", t, _joint_msg(t, k))
             put("/cmd_vel", t, _t("geometry_msgs/msg/Twist")(linear=_vec(x=0.4), angular=_vec(z=0.1)))
+            # A short eastward track; the last fix declares an unknown
+            # covariance, which must reach gps.npy as NaN rather than as 0.
+            put(
+                "/fixposition/odometry_llh",
+                t,
+                _navsatfix_msg(t, 50.1 + 1e-5 * k, 14.4 + 2e-5 * k, cov_type=0 if k == frames - 1 else 3),
+            )
     return bag_dir
 
 
@@ -243,6 +267,57 @@ def test_a_synthetic_bag_extracts_to_a_complete_scene(bags: Path, tmp_path: Path
 
     assert (scene / "source_bag.txt").read_text().strip() == "bag_a"
     assert (out / "scenes.csv").read_text().splitlines()[1].startswith("0000,bag_a,")
+
+
+def test_gps_is_extracted_from_the_fused_navsatfix_topic(bags: Path, tmp_path: Path):
+    """--gps auto finds the fix by message type, and writes what it says.
+
+    The columns are ``[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]``,
+    full rate and sorted by time -- the cmd_vel.npy convention, not a
+    frame-aligned array.
+    """
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    gps = np.load(out / "0000" / "gps.npy")
+
+    assert gps.shape == (FRAMES, 8)
+    assert np.all(np.diff(gps[:, 0]) > 0)
+    assert np.allclose(gps[:, 1], 50.1 + 1e-5 * np.arange(FRAMES))
+    assert np.allclose(gps[:, 2], 14.4 + 2e-5 * np.arange(FRAMES))
+    assert np.allclose(gps[:, 3], 227.0) and np.all(gps[:, 4] == 2)
+    assert np.allclose(gps[:-1, 5:8], [0.11, 0.22, 0.33])
+    # COVARIANCE_TYPE_UNKNOWN: the numbers are meaningless, so they are NaN.
+    assert np.isnan(gps[-1, 5:8]).all()
+
+
+def test_gps_off_writes_no_file(bags: Path, tmp_path: Path):
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON, "--gps", "off"]) == 0
+    assert not (out / "0000" / "gps.npy").exists()
+    assert (out / "0000" / "source_bag.txt").is_file()  # the scene is otherwise complete
+
+
+def test_gps_topic_selection_prefers_a_fused_fix_that_carries_messages():
+    """Auto-detection is by message type, so it works on either rig's naming."""
+
+    class Conn:
+        def __init__(self, topic, msgtype, msgcount):
+            self.topic, self.msgtype, self.msgcount = topic, msgtype, msgcount
+
+    fix = "sensor_msgs/msg/NavSatFix"
+    conns = [
+        Conn("/odom", "nav_msgs/msg/Odometry", 100),
+        Conn("/fixposition/gnss1", fix, 0),  # declared, never published
+        Conn("/fixposition/gnss2", fix, 400),
+        Conn("/fixposition/odometry_llh", fix, 800),
+    ]
+    assert ed.pick_gps_topic(conns, "auto") == "/fixposition/odometry_llh"
+    # An old-rig bag, whose receiver names the topic differently.
+    septentrio = [Conn("/septentrio/navsatfix", fix, 500), Conn("/odom", "nav_msgs/msg/Odometry", 100)]
+    assert ed.pick_gps_topic(septentrio, "auto") == "/septentrio/navsatfix"
+    assert ed.pick_gps_topic(conns, "off") is None
+    assert ed.pick_gps_topic(conns, "/some/topic") == "/some/topic"
+    assert ed.pick_gps_topic([Conn("/odom", "nav_msgs/msg/Odometry", 100)], "auto") is None
 
 
 def test_a_second_run_skips_the_complete_scene(bags: Path, tmp_path: Path):

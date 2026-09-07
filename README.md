@@ -28,6 +28,7 @@ topics. Everything else about the extraction is identical.
 | Odometry | `/odom` (live robot odometry; the published GT was FAST-LIO run offline) | `/fixposition/odometry_enu` (Fixposition GNSS/INS) |
 | Orientation (gravity) | `/ekf/imu/data` | `/fixposition/odometry_enu` |
 | Proprioception | `/joint_states`, `/cmd_vel` | `/joint_states`, `/joint_setpoints`, `/cmd_vel` |
+| GNSS position | Septentrio receiver (any `sensor_msgs/NavSatFix` topic) | `/fixposition/odometry_llh` (the ENU odometry, geodetically) |
 
 The command-line defaults target the **new** stack; see
 [Usage](#usage) for the old-stack invocation.
@@ -102,7 +103,7 @@ which is equivalent to spelling out the defaults:
 
 ```
 --cam /odin1/image/compressed --lidar /odin1/cloud_filtered/cloudini \
---odom /fixposition/odometry_enu --imu /fixposition/odometry_enu
+--odom /fixposition/odometry_enu --imu /fixposition/odometry_enu --gps auto
 ```
 
 When `--odom` is a Fixposition topic, the extractor also writes the
@@ -140,6 +141,7 @@ lidar works.
 | `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so only for Fixposition topics |
 | `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories |
 | `--start_index N` | number the first scene `N` instead of `0000` |
+| `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `-v` | debug logging |
@@ -158,6 +160,15 @@ Behaviour worth knowing:
 - **Failures are collected**, not fatal: a bag that raises is logged with its
   traceback, the run continues, and the summary at the end lists every failed
   and every empty scene. The exit code is `1` if any bag failed.
+- **GNSS is found by message type, not by name.** `--gps auto` picks the
+  `sensor_msgs/NavSatFix` topic that actually carries messages, preferring a
+  fused solution (`/fixposition/odometry_llh`) over one antenna's raw fix, so
+  the same run works on the Fixposition and the Septentrio generation. The
+  fixes are the receiver's own position — on the new rig the fusion point,
+  a few tens of centimetres from `base_link` and well inside its own sigma —
+  and they are **not** ground truth: `odometry.txt` is anchored per segment
+  and says nothing about the Earth. A fix whose covariance the receiver called
+  unknown carries `NaN` in the three covariance columns rather than zeros.
 - **`scenes.csv`** at the dataset root maps `scene,bag,start_time,frames`. Each
   worker writes its own line into `.scenes_parts/`, and the parent merges them
   when the run ends (safe under multiprocessing).
@@ -183,6 +194,7 @@ index-aligned.
 | `joint_states.npy` | (M, 1 + 3J) | `float64` | `[t, positions..., velocities..., efforts...]` | full rate, sorted by `t`; not frame-aligned |
 | `joint_setpoints.npy` | (M, 1 + 3J) | `float64` | same layout | only if `/joint_setpoints` exists |
 | `cmd_vel.npy` | (M, 7) | `float64` | `[t, vx, vy, vz, wx, wy, wz]`, m/s and rad/s, base frame | only if `/cmd_vel` exists |
+| `gps.npy` | (M, 8) | `float64` | `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]`, degrees, m and m² | full rate, sorted by `t`, not frame-aligned; only if the bag carries a `NavSatFix` |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
 | `../scenes.csv` | — | text | — | dataset-level index: `scene,bag,start_time,frames` |
 
@@ -208,6 +220,11 @@ matrices, camera/lidar sync offset, frame-to-frame odometry jumps and tilt
 statistics. When a scene carries ground truth, `odometry.txt` and
 `odometry_segments.txt` are checked against each other: segment pose counts,
 no overlaps, each segment anchored at the identity.
+
+`gps.npy`, where a scene has one, is checked as an optional extra: column
+count, a sorted clock, coordinates on the globe, and a time span that overlaps
+`data_ts.txt`. Every finding there is a warning — nothing in the scene contract
+is computed from it.
 
 Structural problems are **errors** (exit code `1`); data-quality observations
 (NaNs, jumps, extreme tilt) are **warnings** — `--strict` makes them fail too.
@@ -266,9 +283,10 @@ No bags are needed; everything runs on synthetic data.
 Covered: nearest-neighbour synchronisation against a brute-force reference,
 `PointCloud2` field parsing, static-TF graph composition, rotation helper
 round-trips, bag discovery / scene selection / `scenes.csv` merging, a full
-extraction of a synthetic bag written with `rosbags`, the scene validator, and
-the viewer (probing, window enumeration, pose interpolation, rendering and every
-route, against synthetic scene directories). `.github/workflows/ci.yml` runs
+extraction of a synthetic bag written with `rosbags` (GNSS fixes included), the
+scene validator, and the viewer (probing, window enumeration, pose
+interpolation, the map's geodesy, the segment page, rendering and every route,
+against synthetic scene directories). `.github/workflows/ci.yml` runs
 the same on Python 3.10 (extraction) and 3.12 (with the viewer), plus `black`
 and `ruff`.
 
