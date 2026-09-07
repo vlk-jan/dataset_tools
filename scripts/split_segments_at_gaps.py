@@ -57,8 +57,18 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
         ref = ReferencePath.from_trajectory(*read_trajectory(regen / "odom_ref.txt"))
 
     kept_ts, kept_T, rows = [], [], []
-    stats = dict(segments_in=len(segs), poses_in=len(t), span_in=0.0, span_out=0.0, poses_out=0,
-                 seams_wheel_gap=0, seams_gap=0, hole_s=0.0, ref_m_in_holes=0.0, dropped_short=0)
+    stats = dict(
+        segments_in=len(segs),
+        poses_in=len(t),
+        span_in=0.0,
+        span_out=0.0,
+        poses_out=0,
+        seams_wheel_gap=0,
+        seams_gap=0,
+        hole_s=0.0,
+        ref_m_in_holes=0.0,
+        dropped_short=0,
+    )
     for seg in segs:
         idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
         if len(idx) == 0:
@@ -117,18 +127,24 @@ def main() -> int:
 
     scenes = a.scenes or sorted(p.name for p in a.root.iterdir() if p.is_dir() and p.name.isdigit())
     tot: dict[str, float] = {}
-    print(f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s}")
+    print(
+        f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s}"
+    )
     for sc in scenes:
         s = split_scene(a.root / sc, a.max_gap, a.max_err, a.min_poses, a.check)
         for k, v in s.items():
             tot[k] = tot.get(k, 0) + v
-        print(f"{sc:5s} {s['segments_in']:3d}->{s['segments_out']:<4d} {s['poses_in']:6d}->{s['poses_out']:<6d} "
-              f"{s['span_in']:6.0f}->{s['span_out']:<7.0f} {s['seams_wheel_gap']:5d} {s['seams_gap']:4d} "
-              f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d}")
-    print(f"TOTAL {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} {int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} "
-          f"{tot['span_in']:6.0f}->{tot['span_out']:<7.0f} {int(tot['seams_wheel_gap']):5d} {int(tot['seams_gap']):4d} "
-          f"{tot['hole_s']:7.0f} {tot['ref_m_in_holes']:6.0f} {int(tot['dropped_short']):5d}"
-          + ("  (check only, nothing written)" if a.check else ""))
+        print(
+            f"{sc:5s} {s['segments_in']:3d}->{s['segments_out']:<4d} {s['poses_in']:6d}->{s['poses_out']:<6d} "
+            f"{s['span_in']:6.0f}->{s['span_out']:<7.0f} {s['seams_wheel_gap']:5d} {s['seams_gap']:4d} "
+            f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d}"
+        )
+    print(
+        f"TOTAL {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} {int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} "
+        f"{tot['span_in']:6.0f}->{tot['span_out']:<7.0f} {int(tot['seams_wheel_gap']):5d} {int(tot['seams_gap']):4d} "
+        f"{tot['hole_s']:7.0f} {tot['ref_m_in_holes']:6.0f} {int(tot['dropped_short']):5d}"
+        + ("  (check only, nothing written)" if a.check else "")
+    )
     return 0
 
 

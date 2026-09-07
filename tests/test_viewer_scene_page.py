@@ -270,9 +270,9 @@ def test_a_scene_page_on_a_root_with_almost_nothing_still_renders(tmp_path):
 
 def test_the_index_and_the_scene_page_share_one_palette():
     """The index may restyle its *type*; its colours are the viewer's colours."""
-    from dataset_tools.viewer import app as viewer_app
+    import dataset_tools.viewer as viewer  # the package, not the FastAPI app
 
-    css = (Path(viewer_app.__file__).parent / "static" / "style.css").read_text()
+    css = (Path(viewer.__file__).parent / "static" / "style.css").read_text()
     index_scope = css[css.index("body.atlas {") :].split("}", 1)[0]
     for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line"):
         assert token not in index_scope, f"{token} is redefined for the index"
