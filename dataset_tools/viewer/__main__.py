@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--cache-dir", type=Path, default=None, help="where built scenes are cached")
     parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="delete this root's cached probes and built scenes before starting, so everything is rebuilt",
+    )
+    parser.add_argument(
         "--notes-dir",
         type=Path,
         default=None,
@@ -78,6 +83,7 @@ def main(argv: list[str] | None = None) -> int:
         notes_dir=args.notes_dir,
         notes=args.notes,
         author=args.author,
+        clear_cache=args.clear_cache,
     )
     url = f"http://{args.host}:{args.port}/"
     print(f"dataset viewer for {args.root}\n  {url}")

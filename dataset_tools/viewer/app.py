@@ -42,7 +42,7 @@ from . import render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
 from .notes import NoteStore, NotesUnavailable
-from .probe import ARTEFACTS, DatasetRoot
+from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot
 from .scene_page import build_scene_page
 from .windows import describe_reason, frame_window_key, neighbour_windows
 from .wire import render_viewer_page, scene_document, write_static_bundle
@@ -140,7 +140,7 @@ class ViewerState:
         self._access_order: list[str] = []
         self._cache_scenes = cache_scenes
         self._locks: dict[str, asyncio.Lock] = {}
-        self.bundle_dir = root.cache_dir / "bundles"
+        self.bundle_dir = root.cache_dir / BUNDLE_DIR_NAME
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
 
     def access(self, scene_id: str) -> SceneAccess:
@@ -168,8 +168,9 @@ def create_app(
     notes_dir: str | Path | None = None,
     notes: bool = True,
     author: str = "",
+    clear_cache: bool = False,
 ) -> FastAPI:
-    root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None)
+    root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
     state = ViewerState(root, max_frames=max_frames)
     # Resolved once: the pages report where notes go and why they cannot be
     # written when they cannot, and probing that per request would put a write

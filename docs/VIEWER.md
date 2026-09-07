@@ -31,6 +31,7 @@ python3.12 -m venv .venv-viewer
 | `--port` | port (default `8080`) |
 | `--max-frames N` | frames per viewing window; longer segments are split into equal parts (default `1500`) |
 | `--cache-dir DIR` | where built scenes are cached (default: a per-root directory under `$XDG_CACHE_HOME/dataset_tools_viewer/`) |
+| `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
@@ -485,5 +486,11 @@ switch the feature off. `/healthz` reports the same state under `notes`.
 
 **A scene changed on disk and the index still shows the old numbers.** The
 probe cache is keyed by each scene directory's mtime and refreshes itself; to
-force a full rebuild, delete the cache directory (`--cache-dir`, or the default
-under `$XDG_CACHE_HOME/dataset_tools_viewer/`).
+force a full rebuild, start once with `--clear-cache`. That removes only what
+the viewer wrote -- `probe_cache.json` and `bundles/` -- so it is safe even
+when `--cache-dir` points at a directory holding something else. To clear every
+root at once, delete the whole default cache instead:
+
+```bash
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/dataset_tools_viewer"
+```

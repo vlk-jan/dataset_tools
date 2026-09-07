@@ -43,6 +43,33 @@ def test_probe_cache_is_reused_and_invalidated_by_an_mtime_change(tmp_path):
     assert again.probe("0000").n_frames == first.n_frames
 
 
+def test_clear_cache_removes_the_probe_and_bundles_but_nothing_else(tmp_path):
+    root_path = make_root(tmp_path)
+    cache = tmp_path / "cache"
+    root = probe.DatasetRoot(root_path, cache_dir=cache)
+    root.probe("0000")
+    (cache / "bundles" / "0000").mkdir(parents=True)
+    (cache / "bundles" / "0000" / "states.json").write_text("{}")
+    keep = cache / "notes.txt"  # --cache-dir can point at a directory of one's own
+    keep.write_text("mine")
+
+    files, freed = probe.clear_cache_dir(cache)
+    assert files == 2 and freed > 0
+    assert not (cache / "probe_cache.json").exists()
+    assert not (cache / "bundles").exists()
+    assert keep.read_text() == "mine"
+
+
+def test_clear_cache_on_a_root_forces_a_fresh_probe(tmp_path):
+    root_path = make_root(tmp_path)
+    cache = tmp_path / "cache"
+    probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
+    again = probe.DatasetRoot(root_path, cache_dir=cache, clear_cache=True)
+    assert again._probe_cache == {}
+    assert not (cache / "probe_cache.json").exists()
+    assert again.probe("0000").n_frames  # re-probed from disk
+
+
 def test_probe_warns_when_per_frame_counts_disagree(tmp_path):
     root_path = make_root(tmp_path)
     (root_path / "0000" / "clouds" / "00011.npy").unlink()

@@ -248,12 +248,15 @@ def _first_last_float(path: Path) -> tuple[float, float] | None:
 class DatasetRoot:
     """A dataset root directory plus a cached probe of each scene in it."""
 
-    def __init__(self, path: str | Path, cache_dir: Path | None = None) -> None:
+    def __init__(self, path: str | Path, cache_dir: Path | None = None, clear_cache: bool = False) -> None:
         self.path = Path(path).expanduser().resolve()
         if not self.path.is_dir():
             raise NotADirectoryError(f"dataset root does not exist: {self.path}")
         self.cache_dir = Path(cache_dir) if cache_dir else default_cache_dir(self.path)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        if clear_cache:
+            files, freed = clear_cache_dir(self.cache_dir)
+            logger.info("cleared %s: %d file(s), %.1f MB", self.cache_dir, files, freed / 1e6)
         self._probe_cache: dict[str, SceneProbe] = {}
         self._scene_ids: list[str] | None = None
         self._csv_rows: dict[str, dict] | None = None
@@ -403,7 +406,7 @@ class DatasetRoot:
 
     @property
     def _probe_cache_path(self) -> Path:
-        return self.cache_dir / "probe_cache.json"
+        return self.cache_dir / PROBE_CACHE_NAME
 
     def _load_probe_cache(self) -> None:
         try:
@@ -438,6 +441,41 @@ class DatasetRoot:
             self._probe_dirty = False
         except OSError as exc:
             logger.debug("cannot persist probe cache: %s", exc)
+
+
+#: Everything the viewer writes under a cache directory -- and so everything
+#: :func:`clear_cache_dir` removes. ``--cache-dir`` can point anywhere, so
+#: clearing names what it deletes instead of emptying the directory.
+PROBE_CACHE_NAME = "probe_cache.json"
+BUNDLE_DIR_NAME = "bundles"
+
+
+def clear_cache_dir(cache_dir: Path) -> tuple[int, int]:
+    """Delete the viewer's own files under ``cache_dir``, leaving the rest.
+
+    Returns how many files went and how many bytes that freed, so a caller can
+    say so.
+    """
+    import shutil
+
+    stem = Path(PROBE_CACHE_NAME).stem
+    targets = [cache_dir / PROBE_CACHE_NAME, cache_dir / f"{stem}.tmp", cache_dir / BUNDLE_DIR_NAME]
+    files = freed = 0
+    for target in targets:
+        try:
+            if target.is_dir():
+                for path in target.rglob("*"):
+                    if path.is_file():
+                        files += 1
+                        freed += path.stat().st_size
+                shutil.rmtree(target)
+            elif target.exists():
+                files += 1
+                freed += target.stat().st_size
+                target.unlink()
+        except OSError as exc:
+            logger.warning("cannot clear %s: %s", target, exc)
+    return files, freed
 
 
 def default_cache_dir(root: Path) -> Path:
