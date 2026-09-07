@@ -37,7 +37,25 @@ __all__ = ["Segment"]
 HM_RES = 0.1
 HM_EXTENT = (-6.4, 6.4)
 
-VALIDITY_LABELS = {0: "extrapolated", 1: "interpolated", 2: "measured"}
+VALIDITY_LABELS = {
+    0: "extrapolated",
+    1: "interpolated",
+    2: "measured",
+    3: "anchored",
+}
+
+#: "How founded in lidar returns is this cell", indexed by validity code.
+#:
+#: The codes are a provenance, not a scale: state 3 (a cell decided by a
+#: wheel-contact anchor, in a root built with DRIFT's
+#: ``build_heightmaps.py --anchors``) is invention with a kinematic basis, not
+#: a better measurement, so it ranks with the extrapolation. Anything that
+#: averages or thresholds validity has to go through this first -- taking the
+#: raw code would read the anchors as the best-founded cells in the map. The
+#: lookup is the identity on the three states every published root ships, so
+#: it changes nothing for existing data. Mirrors ``utils.pcd.VALIDITY_RANK``
+#: in DRIFT, which is where the masks are written.
+VALIDITY_RANK = np.array([0, 1, 2, 0], dtype=np.uint8)
 
 
 # --------------------------------------------------------------------------

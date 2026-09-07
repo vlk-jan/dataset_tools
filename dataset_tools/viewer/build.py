@@ -115,8 +115,9 @@ TERRAIN_COLOR_MODE_HELP = {
         "height-map samples behind it, weighted exactly as the height was. 0 is "
         "extrapolated throughout, 1 interpolated (inside the hull, no return), "
         "2 a lidar return every time; dozens of samples land in a cell, so the "
-        "values in between are real mixtures. The Validity tile shows the same "
-        "three states unmixed, for one frame."
+        "values in between are real mixtures. Cells filled from the robot's own "
+        "wheel contacts count as 0 here -- the lidar never saw them. The "
+        "Validity tile shows the states unmixed, for one frame."
     ),
     "cloud_points": (
         "Number of aggregated raw lidar points that fell in the cell. Near "
@@ -646,7 +647,14 @@ def splat_height_maps(
         stats["used"] += 1
 
         if mask is not None and mask.shape == hm.shape:
-            flat = np.asarray(mask, dtype=np.float64).ravel()[finite][inside]
+            # Rank, not the raw code. A root built with wheel-contact anchors
+            # codes those cells 3, and averaging the codes would paint the one
+            # region the lidar never saw as the best-measured in the scene.
+            # The lookup is the identity on the three states every published
+            # root ships (loaders.VALIDITY_RANK).
+            code = np.clip(np.asarray(mask, dtype=np.intp), 0, len(L.VALIDITY_RANK) - 1)
+            ranked = L.VALIDITY_RANK[code]
+            flat = ranked.astype(np.float64).ravel()[finite][inside]
             grid.sum_wv += grid.binned(r, c, flat * w)
             grid.sum_w_v += grid.binned(r, c, w)
             stats["with_masks"] += 1

@@ -50,7 +50,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("images", "images", "dir", "Camera images", "RGB frame per sync'd frame", ".png"),
     Artefact("clouds", "clouds", "dir", "Point clouds", "(N, >=3) lidar scan in the robot base frame", ".npy"),
     Artefact("height_maps", "height_maps", "dir", "Height maps", "per-frame BEV height grid", ".npz"),
-    Artefact("height_masks", "height_masks", "dir", "Height-map validity", "measured / interpolated / extrapolated per cell", ".npz"),
+    Artefact("height_masks", "height_masks", "dir", "Height-map validity", "measured / interpolated / extrapolated / wheel-anchored per cell", ".npz"),
     Artefact("data_ts", "data_ts.txt", "file", "Frame timestamps", "one timestamp per frame"),
     Artefact("pcd_ts", "pcd_ts.txt", "file", "Lidar timestamps", "one lidar timestamp per frame"),
     Artefact("odometry", "odometry.txt", "file", "Ground-truth odometry", "timestamped 4x4 poses"),

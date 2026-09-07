@@ -54,12 +54,18 @@ _VIRIDIS_ANCHORS = np.array(
 )
 _GREY_ANCHORS = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.float64)
 
-#: Fixed, meaningful colours for the three height-map validity states.
+#: Fixed, meaningful colours for the height-map validity states.
+#:
+#: Anchored reads as a cousin of extrapolated rather than of measured, because
+#: that is what it is: a cell the lidar never saw, filled from the robot's own
+#: wheel contacts instead of from a distant return. Warm = invented, green =
+#: measured; see :data:`loaders.VALIDITY_RANK`.
 VALIDITY_COLORS = np.array(
     [
         [200, 60, 60],  # 0 extrapolated -- invented
         [230, 190, 70],  # 1 interpolated -- inside the hull, no return
         [60, 170, 90],  # 2 measured -- a lidar return landed here
+        [150, 90, 190],  # 3 anchored -- the robot's own wheel contacts
     ],
     dtype=np.uint8,
 )

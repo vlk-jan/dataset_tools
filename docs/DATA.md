@@ -61,7 +61,7 @@ HELHEST/
 │   ├── odometry.txt              [optional] offline FAST-LIO trajectory (the ground truth used by DRIFT), see below
 │   ├── trajectory.txt            [some scenes] identical copy of odometry.txt
 │   ├── height_maps/00000.npz …   [derived] per-frame BEV height map, key `height_map` (128,128) float64, 0.1 m cells, ±6.4 m
-│   ├── height_masks/00000.npz …  [derived] key `validity` (128,128) uint8 (measured/extrapolated), `height_threshold`
+│   ├── height_masks/00000.npz …  [derived] key `validity` (128,128) uint8 (0 extrapolated / 1 interpolated / 2 measured / 3 wheel-anchored), `height_threshold`
 │   └── <scene>_full.npz          [derived, 31 scenes] scene-wide aggregated height map: `height_map`, `side_range`, `fwd_range`, `res`
 ├── maps_full/<scene>.pcd         [derived, 31 scenes] scene-wide aggregated point cloud
 ├── keyframes.lst                 [derived] "scene/clouds/f.npy scene/images/f.png" pairs used for training
@@ -319,6 +319,35 @@ published root for anything that consumes odometry or raw clouds.
   (e.g. the `height_maps` cells outside the returns' convex hull) is
   extrapolation — `height_masks/validity` marks which cells were measured.
   About 20 % of the driving is in reverse, i.e. into unobserved terrain.
+- **The height maps carry an invented wall under the rear wheel (found
+  2026-09-07).** The blind region is not merely unmeasured, it is filled with
+  a step. There are *zero* returns at x < −0.25 m in `base_link` (126 frames
+  over 14 scenes), and `min_radius = 0.5` strips what lands near the origin,
+  so the generator's sample set has a metres-wide hole under the robot. Its
+  linear pass then triangulates *across* that hole — a rear cell is a
+  barycentric blend of two rim cells metres apart, one of them typically on
+  vegetation — and its nearest-neighbour pass floods the rest from one
+  arbitrary rim cell. The seam lands at x ≈ −0.35…−0.55 m, i.e. under the
+  leading edge of the rear wheel (centre x = −0.697, r = 0.36). Measured over
+  182 frames spanning all 43 scenes, the peak rise in x ∈ [−1.6, 0], |y| < 1
+  against the local measured ground is **median +0.19 m, p90 +0.42, max
+  +0.64**; 70 % of frames carry more than 10 cm, 41 % more than 25 cm. The
+  rear-wheel footprint itself averages +0.03 m and reaches +0.35. Note the
+  cells are marked `interpolated`, not `extrapolated`, so a validity gate does
+  not catch them. Fix: rebuild with DRIFT's
+  `scripts/data/build_heightmaps.py --anchors --max_edge 1.0 --anchor_radius 1.0`,
+  which seeds the interpolation with the ground under the robot's own wheels
+  and refuses triangles that span the hole (median wall +0.19 → +0.02 m; full
+  runbook in `HEIGHTMAP_REGEN.md`). Repaired roots mark anchor-fed cells
+  `validity == 3`; rank codes with `VALIDITY_RANK`
+  (`dataset_tools/viewer/loaders.py`, `utils/pcd.py`) rather than `>= k`,
+  because 3 is a provenance, not a better 2. **`--anchor_radius` is not
+  optional.** Unbounded, the anchors are the rearmost samples in the
+  interpolation set, so the nearest-neighbour pass hands them the entire blind
+  rear sector and the map grows a wake astern of the robot labelled
+  `anchored` — a kinematic prior that exists only under the wheels. If a BEV
+  validity tile shows `anchored` anywhere but the robot's own footprint, the
+  bound is missing.
 - **Camera artefacts:** persistent dark smudge/droplet blobs on the lens in
   0000, 0018, 0019; strong flare in 0005/0007; overexposure in 0004; heavy
   rotational motion blur on rough scenes (0006, 0008, 0022–0024, early 0029);
