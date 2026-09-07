@@ -84,6 +84,41 @@ def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path)
     assert client.post("/api/scene/9999/notes", json={"frame": 0, "text": "x"}).status_code == 404
 
 
+def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path):
+    """Every field of a note is typed by hand and so is gettable wrong: a range
+    pinned a segment too early, a topic picked before the window was read. All
+    three move under one PATCH, and the note stays the one that person wrote --
+    id, author and created date do not move with them."""
+    _, client = _notes_client(tmp_path)
+    note = client.post(
+        "/api/scene/0000/notes",
+        json={"frames": [3, 7], "topic": "camera", "text": "dropped out"},
+    ).json()
+
+    moved = client.patch(
+        f"/api/scene/0000/notes/{note['id']}",
+        json={"frames": [1, 4], "topic": "odometry", "text": "GT jumps sideways"},
+    ).json()
+    assert (moved["frame_start"], moved["frame_end"]) == (1, 4)
+    assert moved["topic"] == "odometry"
+    assert moved["label"] == "frames 1–4"
+    assert (moved["id"], moved["author"], moved["created"]) == (
+        note["id"],
+        note["author"],
+        note["created"],
+    )
+
+    # One end on its own moves; everything left out of the request stays put.
+    one_end = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"frame_end": 9}).json()
+    assert (one_end["frame_start"], one_end["frame_end"]) == (1, 9)
+    assert one_end["topic"] == "odometry"
+    assert one_end["text"] == "GT jumps sideways"
+
+    # An edited range is ordered and clamped exactly as a new note's is.
+    fixed = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"frames": [900, 2]}).json()
+    assert (fixed["frame_start"], fixed["frame_end"]) == (2, 11)  # the scene has 12 frames
+
+
 def test_a_note_is_marked_on_every_window_its_frames_touch():
     """A note is an inclusive frame range and a window a half-open one; a note
     spanning a boundary belongs to both windows, since opening either is a
@@ -109,6 +144,23 @@ def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):
     assert "frames 0–2" in page
     assert "1 note" in page  # the windows table marks the window it falls in
     assert 'id="noteform"' in page
+
+
+def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
+    """The inline editor opens on a note's own range and topic, so both are on
+    the element as stored: re-parsing them back out of the rendered label
+    ("frames 3–7") would break the first time the label read differently. The
+    topics the picker offers come from the card, so an editor can be opened on
+    a note whether or not the compose form is on the page."""
+    _, client = _notes_client(tmp_path)
+    client.post(
+        "/api/scene/0000/notes",
+        json={"frames": [3, 7], "topic": "camera", "text": "dropped out"},
+    )
+    page = client.get("/scene/0000").text
+    assert 'data-frame-start="3"' in page and 'data-frame-end="7"' in page
+    assert 'data-topic="camera"' in page
+    assert 'data-topics="odometry,camera,event,other"' in page
 
 
 def test_the_view_page_hands_the_overlay_its_notes_endpoint_and_range(client):

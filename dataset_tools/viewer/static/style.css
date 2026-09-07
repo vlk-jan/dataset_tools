@@ -341,7 +341,18 @@ details.matrix pre { margin: 6px 0 0; background: var(--shade); }
   width: 100%; margin-top: 8px; font-size: 14.5px; resize: vertical;
 }
 .noteform .btn { margin-left: auto; }
-.noteedit { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 8px; }
+/* The inline editor is the compose form again, over one note: the same range,
+   topic and text, so correcting any of them is the same gesture as writing
+   them was. */
+.noteedit { margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
+.noteedit .noterow { gap: 8px; }
+.noteedit input, .noteedit select {
+  padding: 4px 8px; border-radius: 6px; background: var(--bg);
+  border: 1px solid var(--line); color: var(--fg); font: inherit;
+}
+.noteedit input { width: 7em; font-variant-numeric: tabular-nums; }
+.noteedit textarea { margin-top: 0; }
+.noteeditactions { display: flex; gap: 8px; }
 .noteedit .btn { margin-top: 0; }
 .notemsg { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .notemsg.bad { color: var(--bad); }

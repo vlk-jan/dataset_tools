@@ -226,16 +226,31 @@ two frame-number fields: type either end, or press its *now* button to take the
 frame showing, so marking a stretch is two clicks and a sentence. Ends typed
 the other way round are ordered rather than refused. It lists the notes that
 touch the open window, and clicking one seeks the playhead to its first frame.
+Each of those carries two buttons down its right edge — an amber pen to edit
+above a red bin to delete. Icons and not words, stacked and not in a row,
+because the panel is only as wide as the sidebar and anything on the note's
+head row is width taken off its range and topic. Editing opens the same
+controls the note was written with, over that note: a range corrected by
+scrubbing to the frame the bad stretch really starts on and pressing *now* is
+the reason to fix it from here rather than from the scene page. A saved range that no longer
+touches the open window takes the note off this list — it belongs to the
+driving it names, not to the window it was typed in.
 
 While a field there has focus it owns the keyboard. SimView binds space, the
 arrows and `p` to `document` and `window` with no useful focus check —
 `PlaybackControls` has none at all, and `Controls` tests for an `INPUT`, which
 a textarea is not — so a space typed into a note used to toggle playback
 instead. Both listen in the bubble phase, so the panel stops key events coming
-from a field it holds before they get that far. The scene page carries the same notes as a card, where
-they can also be written, edited and deleted; its window table marks every
-window a note's frames land in, so a scene shows at a glance where the flagged
-stretches are.
+from a field it holds before they get that far.
+
+The scene page carries the same notes as a card, where they can equally be
+written, edited and deleted; its window table marks every window a note's
+frames land in, so a scene shows at a glance where the flagged stretches are.
+An edit in either place reaches **every** field a note has — both ends of the
+range, the topic and the text — because all four are typed by hand and so are
+gettable wrong, and correcting one by deleting the note and writing it again
+would throw away its author and its date, which are the parts nobody can
+retype. The `id` and `created` never move; `updated` is stamped instead.
 
 **When the root will not take them.** Roots are routinely read-only or shared
 copies. The viewer probes the location once at startup — an actual write, since

@@ -149,7 +149,18 @@
    range buttons read as the values they hold (the frame each end is pinned
    to), so the form states what it will save without a legend. */
 .dt-notes .dt-notelist { margin: 6px 0 0; display: flex; flex-direction: column; gap: 6px; }
-.dt-note { border-left: 2px solid #2b6d9c; padding-left: 8px; }
+/* A note is what it says, then the buttons that change it in a column down its
+   right edge -- the panel is only as wide as the sidebar, so anything on the
+   head row is width taken off the range and the topic.
+
+   Scoped to the section: `.dt-note` unqualified also names the grey half of a
+   tile's heading further down, so this rule was giving those a blue bar and a
+   left indent they were never meant to have. */
+.dt-notes .dt-note {
+  border-left: 2px solid #2b6d9c; padding-left: 8px;
+  display: flex; align-items: flex-start; gap: 6px;
+}
+.dt-notemain { flex: 1; min-width: 0; }
 .dt-notehead { display: flex; align-items: baseline; gap: 6px; }
 .dt-notetopic {
   color: #7ec2f0; font-size: 10px; letter-spacing: .04em;
@@ -161,7 +172,28 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .dt-noterangebtn:hover { color: #7ec2f0; text-decoration: underline; }
+/* Edit above delete, each one glyph wide. Amber for the one that opens a form,
+   red for the one that throws the note away -- but the pen and the bin carry
+   that themselves, so the colour is confirmation and not the only signal. */
+.dt-notetools { display: flex; flex-direction: column; gap: 3px; flex: none; }
+.dt-notebtn {
+  width: 20px; height: 18px; padding: 0; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid; border-radius: 4px; font-size: 10px; line-height: 1;
+}
+.dt-notebtn-edit { background: #38301c; border-color: #7a6320; }
+.dt-notebtn-edit:hover { background: #4a3f24; border-color: #c9a227; }
+.dt-notebtn-del { background: #3a2222; border-color: #8a3b3b; }
+.dt-notebtn-del:hover { background: #4c2b2b; border-color: #c25050; }
 .dt-notebody { color: #939aa8; font-size: 10.5px; line-height: 1.4; white-space: pre-wrap; }
+/* A note opened for editing. Its range row is a .dt-noterange, so the fields,
+   the `now` buttons and the topic are already the compose form's -- all this
+   adds is the column and the textarea, which the form styles by its own id. */
+.dt-notes .dt-noteediting {
+  /* Overrides the row above: an editor is a stack, and its fields fill the
+     width rather than shrinking to their content. */
+  flex-direction: column; align-items: stretch;
+}
 .dt-noteform { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .dt-noterange { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 /* Each end of the range is a field with a `now` button beside it: type a frame
@@ -194,7 +226,7 @@
   background: #23272f; border: 1px solid #454b58; border-radius: 4px;
   color: #c9cedb; font: inherit; font-size: 10.5px; padding: 2px 4px; margin-left: auto;
 }
-.dt-noteform textarea {
+.dt-noteform textarea, .dt-noteediting textarea {
   background: #14161a; border: 1px solid #333844; border-radius: 4px;
   color: #e6e8ec; font: inherit; font-size: 11px; padding: 5px 6px; resize: vertical;
 }
@@ -224,7 +256,11 @@
   font-size: 12px; font-weight: 600; margin: 0 0 4px;
   display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
 }
-.dt-note { color: #939aa8; font-weight: 400; font-size: 10.5px; display: flex; align-items: center; gap: 3px; }
+/* The grey half of a tile's heading ("BEV, forward up", the validity swatches).
+   Scoped to the tile: `.dt-note` unqualified also names a reviewer note in the
+   notes list above, and this rule, being the later of the two, was quietly
+   restyling those as well. */
+.dt-tile .dt-note { color: #939aa8; font-weight: 400; font-size: 10.5px; display: flex; align-items: center; gap: 3px; }
 .dt-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 4px; }
 .dt-sw-m { background: #3caa5a; }
 .dt-sw-i { background: #e6be46; }

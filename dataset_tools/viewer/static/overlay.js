@@ -351,32 +351,81 @@ function seekToFrame(frame) {
   update(true);
 }
 
+/** One note mutation. Throws carrying the server's own reason, which is the
+ *  useful half of a refusal ("this root is not writable", not "403"). */
+async function noteRequest(url, method, body) {
+  const init = { method, headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    let detail = `${response.status}`;
+    try {
+      const parsed = await response.json();
+      if (parsed && parsed.detail) detail = parsed.detail;
+    } catch (e) { /* the status alone is enough */ }
+    throw new Error(detail);
+  }
+  return response;
+}
+
 /**
- * The range the form will save, both ends inclusive.
+ * The range a pair of fields names, both ends inclusive.
  *
- * Read out of the two fields rather than kept in a variable beside them, so a
+ * Read out of the fields rather than kept in a variable beside them, so a
  * number typed by hand and one pinned with `now` are the same thing. A blank
- * or unparseable field falls back to the window's own edge -- a half-filled
- * form still means something -- and the ends are ordered, so typing them the
- * other way round is not an error.
+ * or unparseable field falls back to the given default -- a half-filled form
+ * still means something -- and the ends are ordered, so typing them the other
+ * way round is not an error.
  */
-function readNoteRange() {
-  const from = parseInt(els.noteFrom.value, 10);
-  const to = parseInt(els.noteTo.value, 10);
-  let lo = Number.isFinite(from) ? from : cfg.frameStart;
-  let hi = Number.isFinite(to) ? to : cfg.frameEnd;
+function rangeOf(fromEl, toEl, fallbackLo, fallbackHi) {
+  const from = parseInt(fromEl.value, 10);
+  const to = parseInt(toEl.value, 10);
+  let lo = Number.isFinite(from) ? from : fallbackLo;
+  let hi = Number.isFinite(to) ? to : fallbackHi;
   if (lo > hi) [lo, hi] = [hi, lo];
   return [Math.max(0, lo), Math.max(0, hi)];
 }
 
-function noteRangeText() {
-  const [lo, hi] = readNoteRange();
+/** The compose form's range, falling back to the window's own edges. */
+function readNoteRange() {
+  return rangeOf(els.noteFrom, els.noteTo, cfg.frameStart, cfg.frameEnd);
+}
+
+function rangeText(lo, hi) {
   return lo === hi ? `frame ${lo}` : `frames ${lo}–${hi}`;
+}
+
+function noteRangeText() {
+  return rangeText(...readNoteRange());
 }
 
 function setNoteRange(lo, hi) {
   els.noteFrom.value = lo;
   els.noteTo.value = hi;
+}
+
+/** The dataset frame the playhead is on, or null before the first update. */
+function frameShowingNow() {
+  if (!meta || !meta.frames) return null;
+  const frame = meta.frames[lastFrame];
+  return frame === undefined ? null : frame;
+}
+
+/**
+ * Wire a `now` button to one end of a range.
+ *
+ * Pinning one end past the other means the two were meant the other way round,
+ * so both are written back ordered rather than the click being refused.
+ */
+function wireNowButton(button, field, fromEl, toEl, fallbackLo, fallbackHi) {
+  button.addEventListener("click", () => {
+    const frame = frameShowingNow();
+    if (frame === null) return;
+    field.value = frame;
+    const [lo, hi] = rangeOf(fromEl, toEl, fallbackLo, fallbackHi);
+    fromEl.value = lo;
+    toEl.value = hi;
+  });
 }
 
 /** Only the notes touching this window: the rest are about other driving. */
@@ -392,27 +441,204 @@ function renderNotes(all) {
     ? `${here.length} on this window`
     : (all.length ? `none here, ${all.length} in the scene` : "");
   els.noteList.textContent = "";
-  for (const note of here) {
-    const item = document.createElement("div");
-    item.className = "dt-note";
-    const head = document.createElement("div");
-    head.className = "dt-notehead";
-    const range = document.createElement("button");
-    range.type = "button";
-    range.className = "dt-noterangebtn";
-    range.textContent = note.label;
-    range.title = "Seek to the first frame of this note";
-    range.addEventListener("click", () => seekToFrame(note.frame_start));
-    const topic = document.createElement("span");
-    topic.className = "dt-notetopic";
-    topic.textContent = note.topic;
-    head.append(range, topic);
-    const body = document.createElement("div");
-    body.className = "dt-notebody";
-    body.textContent = note.text;
-    item.append(head, body);
-    els.noteList.appendChild(item);
+  for (const note of here) els.noteList.appendChild(renderNote(note));
+}
+
+/**
+ * One note as it reads: its range (which seeks), its topic, its text.
+ *
+ * The note is a row -- what it says, then the buttons that change it in a
+ * column down its right edge. Spelled `edit` and `delete` on the head they
+ * took a third of a panel that is only as wide as the sidebar, and the range
+ * and topic were squeezed into wrapping; two icons stacked beside the note
+ * cost the text nothing.
+ */
+function renderNote(note) {
+  const item = document.createElement("div");
+  item.className = "dt-note";
+  const main = document.createElement("div");
+  main.className = "dt-notemain";
+  const head = document.createElement("div");
+  head.className = "dt-notehead";
+  const range = document.createElement("button");
+  range.type = "button";
+  range.className = "dt-noterangebtn";
+  range.textContent = note.label;
+  range.title = "Seek to the first frame of this note";
+  range.addEventListener("click", () => seekToFrame(note.frame_start));
+  const topic = document.createElement("span");
+  topic.className = "dt-notetopic";
+  topic.textContent = note.topic;
+  head.append(range, topic);
+  const body = document.createElement("div");
+  body.className = "dt-notebody";
+  body.textContent = note.text;
+  main.append(head, body);
+  item.append(main);
+  // A read-only root shows its notes and no way to change them, the same way
+  // it shows the compose form's reason instead of the form.
+  if ((cfg.notes || {}).writable) item.append(noteTools(item, note));
+  return item;
+}
+
+/**
+ * The edit / delete pair, stacked down the note's right edge.
+ *
+ * Icons, so each is one glyph wide, and coloured to say which is which without
+ * being read: amber for the one that opens a form, red for the one that throws
+ * the note away. Neither is only its colour -- the pen and the bin carry the
+ * meaning, and both carry a title and an aria-label besides.
+ */
+function noteTools(item, note) {
+  const tools = document.createElement("span");
+  tools.className = "dt-notetools";
+  const edit = noteToolButton("✏️", "dt-notebtn-edit", "Edit this note's range, topic or text");
+  edit.addEventListener("click", () => {
+    const editor = noteEditor(note);
+    item.replaceWith(editor);
+    // After it is in the document: focus() on a detached element does nothing.
+    editor.querySelector("textarea").focus();
+  });
+  const remove = noteToolButton("🗑️", "dt-notebtn-del", "Delete this note");
+  remove.addEventListener("click", async () => {
+    if (!window.confirm(`Delete the note on ${note.label}?`)) return;
+    try {
+      await noteRequest(`${cfg.notesUrl}/${note.id}`, "DELETE");
+      await loadNotes();
+    } catch (error) {
+      els.noteMsg.textContent = `could not delete: ${error.message}`;
+    }
+  });
+  tools.append(edit, remove);
+  return tools;
+}
+
+function noteToolButton(glyph, className, label) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `dt-notebtn ${className}`;
+  button.textContent = glyph;
+  button.title = label;
+  // The glyph is decoration to a screen reader, which reads the label instead.
+  button.setAttribute("aria-label", label);
+  return button;
+}
+
+/**
+ * A note opened for editing, in place, over every field it has.
+ *
+ * The same shape as the compose form -- two range fields with a `now` button
+ * each, a topic and the text -- because a note is corrected where and how it
+ * was written: scrubbing to the frame the bad stretch really starts on and
+ * pinning that end to it is the whole point of writing notes from here.
+ *
+ * Its own range falls back to the note's stored ends rather than the window's,
+ * so clearing a field and saving leaves that end where it was.
+ */
+function noteEditor(note) {
+  const wrap = document.createElement("div");
+  wrap.className = "dt-note dt-noteediting";
+
+  const row = document.createElement("div");
+  row.className = "dt-noterange";
+  const from = rangeField(note.frame_start, "first frame of the range");
+  const to = rangeField(note.frame_end, "last frame of the range");
+  const fromField = document.createElement("label");
+  fromField.className = "dt-rangefield";
+  const fromNow = nowButton();
+  fromField.append("from ", from, fromNow);
+  const toField = document.createElement("label");
+  toField.className = "dt-rangefield";
+  const toNow = nowButton();
+  toField.append("to ", to, toNow);
+  wireNowButton(fromNow, from, from, to, note.frame_start, note.frame_end);
+  wireNowButton(toNow, to, from, to, note.frame_start, note.frame_end);
+
+  const topic = document.createElement("select");
+  topic.setAttribute("aria-label", "topic");
+  const topics = ((cfg.notes || {}).topics || []).slice();
+  // A topic the server no longer offers stays on the note: the store renders
+  // an unknown one verbatim, so editing the text must not quietly retag it.
+  if (note.topic && !topics.includes(note.topic)) topics.unshift(note.topic);
+  for (const name of topics) {
+    const option = document.createElement("option");
+    option.value = option.textContent = name;
+    option.selected = name === note.topic;
+    topic.appendChild(option);
   }
+  row.append(fromField, toField, topic);
+
+  const text = document.createElement("textarea");
+  text.rows = 2;
+  text.value = note.text;
+  text.setAttribute("aria-label", "note text");
+
+  const actions = document.createElement("div");
+  actions.className = "dt-noteactions";
+  const msg = document.createElement("span");
+  msg.className = "dt-hint";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "dt-rangebtn dt-save";
+  save.textContent = "Save";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "dt-rangebtn";
+  cancel.textContent = "Cancel";
+  actions.append(msg, save, cancel);
+
+  cancel.addEventListener("click", () => wrap.replaceWith(renderNote(note)));
+  save.addEventListener("click", async () => {
+    const body = text.value.trim();
+    if (!body) {
+      msg.textContent = "a note needs some text";
+      return;
+    }
+    msg.textContent = "saving…";
+    const [lo, hi] = rangeOf(from, to, note.frame_start, note.frame_end);
+    try {
+      await noteRequest(`${cfg.notesUrl}/${note.id}`, "PATCH", {
+        frames: [lo, hi],
+        topic: topic.value,
+        text: body,
+      });
+      // Reload rather than patch this one row: a range moved off this window
+      // takes the note off the list with it, and the list is the only thing
+      // that knows whether it still belongs here. Which is also why the
+      // confirmation goes to the section's own line and not to `msg` -- the
+      // editor holding `msg` is about to be replaced, possibly by nothing.
+      els.noteMsg.textContent = `saved on ${rangeText(lo, hi)}`;
+      await loadNotes();
+    } catch (error) {
+      msg.textContent = `could not save: ${error.message}`;
+    }
+  });
+
+  wrap.append(row, text, actions);
+  return wrap;
+}
+
+function rangeField(value, label) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  // The scene's last frame, borrowed from the compose form rather than
+  // restated: the server renders it there from the probe, and one bound that
+  // is wrong in one place only is worse than none.
+  if (els.noteFrom && els.noteFrom.max) input.max = els.noteFrom.max;
+  input.inputMode = "numeric";
+  input.value = String(value);
+  input.setAttribute("aria-label", label);
+  return input;
+}
+
+function nowButton() {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "dt-nowbtn";
+  button.textContent = "now";
+  button.title = "Set this end to the frame showing now";
+  return button;
 }
 
 async function loadNotes() {
@@ -462,16 +688,8 @@ async function setupNotes() {
   els.noteForm.hidden = false;
 
   for (const button of els.noteForm.querySelectorAll(".dt-nowbtn[data-act]")) {
-    button.addEventListener("click", () => {
-      const frame = meta && meta.frames ? meta.frames[lastFrame] : null;
-      if (frame === null || frame === undefined) return;
-      const field = button.dataset.act === "from" ? els.noteFrom : els.noteTo;
-      field.value = frame;
-      // Pinning one end past the other means the two were meant the other way
-      // round, so write both back ordered rather than refusing the click.
-      const [lo, hi] = readNoteRange();
-      setNoteRange(lo, hi);
-    });
+    const field = button.dataset.act === "from" ? els.noteFrom : els.noteTo;
+    wireNowButton(button, field, els.noteFrom, els.noteTo, cfg.frameStart, cfg.frameEnd);
   }
 
   els.noteForm.addEventListener("submit", async (event) => {
@@ -483,23 +701,11 @@ async function setupNotes() {
     }
     els.noteMsg.textContent = "saving…";
     try {
-      const response = await fetch(cfg.notesUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          frames: readNoteRange(),
-          topic: els.noteTopic.value,
-          text,
-        }),
+      await noteRequest(cfg.notesUrl, "POST", {
+        frames: readNoteRange(),
+        topic: els.noteTopic.value,
+        text,
       });
-      if (!response.ok) {
-        let detail = `${response.status}`;
-        try {
-          const body = await response.json();
-          if (body && body.detail) detail = body.detail;
-        } catch (e) { /* the status alone is enough */ }
-        throw new Error(detail);
-      }
       const saved = noteRangeText();
       els.noteText.value = "";
       els.noteMsg.textContent = `saved on ${saved}`;
