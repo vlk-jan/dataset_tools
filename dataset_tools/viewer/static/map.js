@@ -20,6 +20,8 @@ const OSM_ATTRIBUTION =
 const MAX_TILE_ERRORS = 4;
 /* Zoom used when a recording never moved: bounds of zero extent cannot be fitted. */
 const STANDING_STILL_ZOOM = 18;
+/* The deepest OpenStreetMap raster zoom; a short outing is fitted to it. */
+const MAX_TILE_ZOOM = 19;
 /* Metres of bounding box under which a track counts as standing still. */
 const STANDING_STILL_M = 5;
 
@@ -99,14 +101,14 @@ async function draw(el) {
   if (hasExtent(data.bounds)) {
     /* A short stretch inside a long outing is fitted less tightly: zoomed to a
        ten-metre segment, the backdrop says nothing about where it happened. */
-    const maxZoom = context.length ? 17 : STANDING_STILL_ZOOM;
+    const maxZoom = context.length ? 17 : MAX_TILE_ZOOM;
     map.fitBounds(L.latLngBounds(data.bounds), { padding: [24, 24], maxZoom });
   } else if (focus.length) {
     map.setView(data.marker || focus[0], STANDING_STILL_ZOOM);
   }
-  /* A recording that never moved fits into a box a few metres across; zoomed
-     to that, the backdrop says nothing. Keep the view readable instead. */
-  if (map.getZoom() > STANDING_STILL_ZOOM) map.setZoom(STANDING_STILL_ZOOM);
+  /* Never past what the tile server actually has: beyond its deepest zoom the
+     backdrop is blank and the track floats on nothing. */
+  if (map.getZoom() > MAX_TILE_ZOOM) map.setZoom(MAX_TILE_ZOOM);
 }
 
 document.querySelectorAll("[data-map]").forEach(draw);

@@ -117,8 +117,12 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
     rate = seg.n_poses / seg.duration if seg.duration > 0 and seg.n_poses else None
     stats.append(stat("GT poses", fmt_count(seg.n_poses), f"{rate:.1f} Hz" if rate else None))
     stats.append(stat("frames", f"{lo} – {hi - 1}" if hi > lo else "—", f"{hi - lo} of {p.n_frames}"))
-    if p.duration:
-        stats.append(stat("of the scene", f"{seg.duration / p.duration * 100:.0f}%", "by time"))
+    # The *overlap* with the frame clock, not the raw ratio of durations: the
+    # ground-truth stream routinely runs a second or two past the last synced
+    # frame, and "105% of the scene" is not a thing a segment can be.
+    if p.duration and p.start_ts is not None and p.end_ts is not None:
+        overlap = max(0.0, min(seg.end_ts, p.end_ts) - max(seg.start_ts, p.start_ts))
+        stats.append(stat("of the scene", f"{min(1.0, overlap / p.duration) * 100:.0f}%", "by time"))
 
     # The silence either side. A segment does not end because the recording
     # did; it ends because the ground truth stopped being trustworthy, and how

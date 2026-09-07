@@ -86,6 +86,20 @@ def test_the_segment_card_states_the_range_the_rate_and_the_gaps(tmp_path):
     assert "the recording ended" in card["note"]
 
 
+def test_a_segment_never_covers_more_than_the_whole_scene(tmp_path):
+    """Ground truth outlives the synced frames; a share of it cannot exceed 100 %."""
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    (scene / "odometry_segments.txt").write_text(
+        f"# id start_ts end_ts n_poses reason\n0 {ts[0] - 3.0:.6f} {ts[-1] + 3.0:.6f} 12 filtered:end_of_run\n"
+    )
+    access = access_for(tmp_path, root_path)
+    position, seg = segment_page.find(access, 0)
+    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    assert value_of(card_of(page, "Segment"), "of the scene") == "100%"
+
+
 def test_a_thinly_anchored_segment_says_so(tmp_path):
     """Below 2 Hz the trajectory between poses is a straight guess."""
     root_path = make_root(tmp_path)
