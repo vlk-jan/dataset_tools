@@ -15,11 +15,22 @@
           aria-label="Hide this panel" aria-expanded="true"><span>&rsaquo;</span></button>
   <div class="dt-panel-head">
     <div>
-      <div class="dt-title">Scene {{ scene_id }} &middot; {{ window.label }}</div>
+      {# The window's own name, plus how many segments the scene has: "Segment
+         3/17" answers where in the scene this is without a trip back to the
+         scene page. Non-segment windows keep the label they were built with. #}
+      <div class="dt-title">Scene {{ scene_id }} &middot;
+        {%- if window.kind == "segment" %} Segment {{ window.segment_index }}
+          {%- if n_segments %}/{{ n_segments }}{% endif %}
+          {%- if window.n_chunks > 1 %} (part {{ window.chunk + 1 }}/{{ window.n_chunks }}){% endif %}
+        {%- else %} {{ window.label }}{% endif %}</div>
+      {# Widest to narrowest, so the links read as the path down to this view. #}
       <div class="dt-sub">
         <span>{{ window.n_frames }} frames</span>
-        <a href="{{ scene_url }}">scene</a>
         <a href="/">index</a>
+        <a href="{{ scene_url }}">scene</a>
+        {% if window.segment_index is not none %}
+        <a href="{{ scene_url }}/segment/{{ window.segment_index }}">segment</a>
+        {% endif %}
       </div>
     </div>
     {# Paging through the scene's segments without going back to the scene
