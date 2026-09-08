@@ -9,8 +9,12 @@
 # through to a node only while you hold a job there.
 set -uo pipefail
 
-LOGIN=${VIEWER_LOGIN:-login3.rci.cvut.cz}
-REPO=${VIEWER_REPO:-/home/vlkjan6/projects/dataset_tools}
+# The RCI account name, which need not match the local one. Neither hop can pick
+# it up from ~/.ssh/config: the login host is named in full here rather than by
+# a Host alias, and the compute node's name changes from job to job.
+RCI_USER=${VIEWER_USER:-vlkjan6}
+LOGIN=$RCI_USER@${VIEWER_LOGIN:-login3.rci.cvut.cz}
+REPO=${VIEWER_REPO:-/home/$RCI_USER/projects/dataset_tools}
 NODE_HOSTS=${VIEWER_KNOWN_HOSTS:-$HOME/.ssh/known_hosts_rci_nodes}
 LOCAL_PORT=${1:-8080}
 JOB=${2:-}
@@ -53,7 +57,7 @@ if [ -z "$conn" ]; then
     [ -n "$node" ] || { echo "job $JOB has not published a node/port yet -- still starting?"; exit 1; }
     # One viewer per job, but a node can host several jobs; the first listener
     # is the right guess only when it is yours, hence the port in the banner.
-    port=$(ssh "${NODE_SSH[@]}" -J "$LOGIN" "$node" \
+    port=$(ssh "${NODE_SSH[@]}" -J "$LOGIN" "$RCI_USER@$node" \
         'pid=$(pgrep -u "$USER" -f helhest-viewer | head -1)
          [ -n "$pid" ] && ss -ltnpH 2>/dev/null | grep -o "127.0.0.1:[0-9]*.*pid=$pid," |
              head -1 | cut -d: -f2 | cut -d" " -f1' 2>/dev/null)
@@ -68,4 +72,4 @@ echo "job $JOB on $node:$port -> http://127.0.0.1:$LOCAL_PORT/"
 echo "ctrl-c closes the tunnel; the viewer keeps running until the job ends."
 exec ssh -N "${NODE_SSH[@]}" -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-    -J "$LOGIN" -L "$LOCAL_PORT:127.0.0.1:$port" "$node"
+    -J "$LOGIN" -L "$LOCAL_PORT:127.0.0.1:$port" "$RCI_USER@$node"
