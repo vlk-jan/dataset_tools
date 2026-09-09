@@ -43,15 +43,20 @@ BACKUP_TRAJ = "odometry_premapcut.txt"
 BACKUP_SEGS = "odometry_segments_premapcut.txt"
 
 
+USE_BACKUPS = True  # set False (--live) to score the files as published, ignoring regen/ backups
+
+
 def _sources(scene: Path):
     regen = scene / "regen"
-    src_traj = regen / BACKUP_TRAJ if (regen / BACKUP_TRAJ).exists() else scene / "odometry.txt"
-    src_segs = regen / BACKUP_SEGS if (regen / BACKUP_SEGS).exists() else scene / "odometry_segments.txt"
-    return src_traj, src_segs
+    if USE_BACKUPS and (regen / BACKUP_TRAJ).exists() and (regen / BACKUP_SEGS).exists():
+        return regen / BACKUP_TRAJ, regen / BACKUP_SEGS
+    return scene / "odometry.txt", scene / "odometry_segments.txt"
 
 
 def scan_scene(args):
-    scene, horizon, max_off = args
+    scene, horizon, max_off, use_backups = args
+    global USE_BACKUPS
+    USE_BACKUPS = use_backups
     scene = Path(scene)
     src_traj, src_segs = _sources(scene)
     t, T = read_trajectory(src_traj)
@@ -128,7 +133,7 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
     st["segments_out"] = len(rows)
     if not check:
         regen = scene / "regen"
-        if src_traj == scene / "odometry.txt":
+        if src_traj == scene / "odometry.txt" and not regen.is_symlink():
             regen.mkdir(exist_ok=True)
             shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)
             shutil.copy2(scene / "odometry_segments.txt", regen / BACKUP_SEGS)
@@ -152,10 +157,14 @@ def main() -> int:
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--report", type=Path, default=None, help="JSON of every flagged window")
     ap.add_argument("--check", action="store_true", help="report only, write nothing")
+    ap.add_argument("--live", action="store_true", help="score/cut the published files even if regen/ holds a pre-cut backup "
+                    "(a root whose regen/ is a symlink to another root's must use this)")
     a = ap.parse_args()
+    global USE_BACKUPS
+    USE_BACKUPS = not a.live
     scenes = a.scenes or sorted(p.name for p in a.root.iterdir() if p.is_dir() and p.name.isdigit())
     with Pool(a.jobs) as pool:
-        scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off) for sc in scenes])
+        scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off, USE_BACKUPS) for sc in scenes])
     report, tot = {}, {}
     print(f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s}")
     for sc, n_win, hits in scanned:
