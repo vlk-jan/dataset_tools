@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+import os
+
 import numpy as np
 
 GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
@@ -78,13 +80,31 @@ def format_pose_line(t: float, T: np.ndarray) -> str:
     return " ".join(f"{v:.6f}" for v in (t, *np.asarray(T).ravel()))
 
 
+def _replace_atomically(dest, writer) -> None:
+    """Write through a temp file in the same directory and ``os.replace`` it in.
+
+    A root that is being read by a training job at the time of an in-place edit
+    must never expose a half-written file: a DataLoader worker that opened
+    ``odometry.txt`` mid-truncate on 2026-09-09 got zero bytes and killed a
+    nine-epoch arm. ``os.replace`` is atomic on POSIX, so a reader sees the old
+    file or the new one, never a partial.
+    """
+    dest = Path(dest)
+    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+    with open(tmp, "w") as fh:
+        writer(fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, dest)
+
+
 def write_trajectory(dest: Path | str | TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
     """Write header + one line per pose to a path or an open text handle."""
     if hasattr(dest, "write"):
         _write_trajectory(dest, ts, poses)  # type: ignore[arg-type]
         return
-    with open(dest, "w") as fh:
-        _write_trajectory(fh, ts, poses)
+    ts, poses = list(ts), list(poses)
+    _replace_atomically(dest, lambda fh: _write_trajectory(fh, ts, poses))
 
 
 def _write_trajectory(fh: TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
@@ -147,8 +167,8 @@ def write_segments(dest: Path | str | TextIO, rows: Iterable[SegmentRow]) -> Non
     if hasattr(dest, "write"):
         _write_segments(dest, rows)  # type: ignore[arg-type]
         return
-    with open(dest, "w") as fh:
-        _write_segments(fh, rows)
+    rows = list(rows)
+    _replace_atomically(dest, lambda fh: _write_segments(fh, rows))
 
 
 def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
