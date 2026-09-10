@@ -45,18 +45,32 @@
         {% endif %}
       </header>
 
+      {# Where ground truth exists inside the scene. When the segment file could
+         be read every block is one segment and opens it; a curated-only scene
+         has flat spans that name no segment, and those stay plain marks. #}
       {% if card.timeline %}
       <div class="bar">
         <div class="track" title="where ground truth exists inside the scene">
-          {% for span in card.timeline.spans %}
-          <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-          {% endfor %}
-          {% for span in card.timeline.fill %}
-          <i class="fill" title="segment borrowed from an earlier root"
-             style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-          {% endfor %}
+          {% if card.timeline.marks %}
+            {% for m in card.timeline.marks %}
+            <a class="seg{{ ' fill' if m.fill }}" href="{{ m.href }}"
+               title="{{ m.title }}" aria-label="{{ m.title }}"
+               style="left:{{ "%.3f"|format(m.left) }}%;width:{{ "%.3f"|format(m.width) }}%"></a>
+            {% endfor %}
+          {% else %}
+            {% for span in card.timeline.spans %}
+            <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+            {% endfor %}
+            {% for span in card.timeline.fill %}
+            <i class="fill" title="segment borrowed from an earlier root"
+               style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+            {% endfor %}
+          {% endif %}
         </div>
         <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>
+        {% if card.timeline.marks %}
+        <p class="barhint">Each block is one ground-truth segment &mdash; click it to open that segment.</p>
+        {% endif %}
       </div>
       {% endif %}
 
@@ -91,23 +105,41 @@
      has always been. #}
   {% if page.map %}<div class="pair">{% endif %}
 
+  {# Every entry opens: what the file holds and what the dataset does with it,
+     shown in place under the strip. Without JavaScript the chips are still
+     buttons that do nothing and every panel stays where it is -- readable, in
+     order, at the bottom of the card. #}
   <div class="card files">
     <header>
       <h2>Files present</h2>
       <span class="scount">{{ probe.present.values() | select | list | length }} of {{ artefacts | length }}</span>
     </header>
-    <div class="chips">
-    {% for a in artefacts %}
-      {% set count = probe.counts.get(a.key) %}
-      <span class="chip {{ 'yes' if probe.present.get(a.key) else 'no' }}"
-            title="{{ a.relpath }} &mdash; {{ a.description }}">
-        {{ a.relpath }}{% if count %} ({{ count }}){% endif %}
-      </span>
+    <div class="chips" id="filechips">
+    {% for f in page.files %}
+      <button type="button" class="chip {{ 'yes' if f.present else 'no' }}"
+              data-file="{{ f.key }}" aria-expanded="false" aria-controls="fileinfo-{{ f.key }}">
+        {{ f.relpath }}{% if f.count %} ({{ f.count }}){% endif %}
+      </button>
     {% endfor %}
     </div>
+    {% for f in page.files %}
+    <div class="fileinfo" id="fileinfo-{{ f.key }}" data-fileinfo>
+      <h3>{{ f.label }} <code>{{ f.relpath }}</code></h3>
+      <p>{{ f.purpose or f.shape }}</p>
+      <dl class="kv">
+        <dt>in this scene</dt>
+        <dd>
+          {%- if f.present %}present{% if f.count %}, {{ "{:,}".format(f.count) }} {{ f.count_unit }}{% endif %}
+          {%- else %}absent &mdash; the viewer omits whatever it would have contributed{% endif %}
+        </dd>
+        <dt>holds</dt><dd>{{ f.shape }}</dd>
+        <dt>on disk</dt><dd><code>{{ scene_id }}/{{ f.relpath }}</code> ({{ f.kind }})</dd>
+      </dl>
+    </div>
+    {% endfor %}
     <p class="cardnote">
       Struck-through entries are absent from this scene; the viewer simply omits
-      whatever they would have contributed.
+      whatever they would have contributed. Click any entry to read what it holds.
     </p>
   </div>
 
@@ -199,6 +231,7 @@
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>
+<script type="module" src="/viewer-static/files.js"></script>
 {% if page.map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>

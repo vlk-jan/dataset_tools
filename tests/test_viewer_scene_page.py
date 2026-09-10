@@ -158,6 +158,89 @@ def test_a_filled_segment_is_marked_on_the_scene_timeline(tmp_path):
     assert "filled from v1.1" in card["note"]
 
 
+def test_the_fill_note_names_the_fill_this_root_actually_holds(tmp_path):
+    """v1.3's holes were replayed from their bags, not borrowed from v1.1."""
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[5]:.6f} 6 regen_fill:t194+refined\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[-1]:.6f} 6 regen_fill:t400\n")
+    note = card_of(scene_page(tmp_path, root_path), "Ground truth")["note"]
+    assert "filled by replaying" in note and "v1.1" not in note
+    # The tail is counted, not repeated as a second identical sentence.
+    assert note.count("filled by replaying") == 1
+    assert "1 of them refined against the wheel odometry" in note
+    # And a fill is not a reason a segment ended.
+    assert "end because" not in note
+
+
+def test_every_timeline_block_opens_its_own_segment(tmp_path):
+    """A block on the ground-truth timeline is a link to the segment it draws."""
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        # Numbered 3 and 7, not 0 and 1: segments are addressed by the number in
+        # their own file, which is not their position in it once a table has
+        # been re-filtered.
+        fh.write(f"3 {ts[0]:.6f} {ts[5]:.6f} 6 filtered:pose_jump\n")
+        fh.write(f"7 {ts[6]:.6f} {ts[-1]:.6f} 6 v11_fill:end_of_run\n")
+    marks = card_of(scene_page(tmp_path, root_path), "Ground truth")["timeline"]["marks"]
+    assert [m["index"] for m in marks] == [3, 7]
+    assert [m["href"] for m in marks] == ["/scene/0000/segment/3", "/scene/0000/segment/7"]
+    assert [m["fill"] for m in marks] == [False, True]
+    # The tooltip says what the block is before it is clicked -- but never why
+    # the segment ended, which is a property of its boundary and reads the same
+    # on block after block.
+    assert "segment 3" in marks[0]["title"] and "6 GT poses" in marks[0]["title"]
+    assert "ends because" not in marks[0]["title"]
+    # Where the poses came from stays: it is what makes an amber block amber.
+    assert "filled from v1.1" in marks[1]["title"]
+    # ... and a fill that also records why it ended keeps only the first half.
+    assert "ends because" not in marks[1]["title"]
+
+
+def test_a_segment_too_short_to_see_is_still_wide_enough_to_click(tmp_path):
+    from dataset_tools.viewer.scene_page import MIN_MARK_FRAC
+
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    ts = np.loadtxt(scene / "data_ts.txt")
+    with open(scene / "odometry_segments.txt", "w") as fh:
+        fh.write(f"0 {ts[0]:.6f} {ts[0] + 0.001:.6f} 2 filtered:gap\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[-1]:.6f} 6 filtered:end_of_run\n")
+    marks = card_of(scene_page(tmp_path, root_path), "Ground truth")["timeline"]["marks"]
+    assert marks[0]["width"] == pytest.approx(MIN_MARK_FRAC * 100)
+    assert marks[-1]["left"] + marks[-1]["width"] <= 100.0
+
+
+def test_a_scene_with_no_segment_file_still_draws_its_curated_timeline(tmp_path):
+    """No segments to link to is not a reason to lose the timeline."""
+    root_path = make_root(tmp_path)
+    (root_path / "0000" / "odometry_segments.txt").unlink()
+    atlas = write_atlas(root_path) / "atlas.json"
+    data = json.loads(atlas.read_text())
+    data["scenes"]["0000"]["seg_spans"] = [[0.0, 0.4], [0.6, 1.0]]
+    atlas.write_text(json.dumps(data))
+    timeline = card_of(scene_page(tmp_path, root_path), "Ground truth")["timeline"]
+    assert timeline["marks"] == []
+    assert len(timeline["spans"]) == 2
+
+
+def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
+    page = scene_page(tmp_path, make_root(tmp_path, with_cmd_vel=False))
+    entries = {f["key"]: f for f in page["files"]}
+    assert entries["odometry"]["present"] and "ground truth" in entries["odometry"]["purpose"].lower()
+    assert entries["odometry"]["relpath"] == "odometry.txt"
+    # An absent file keeps its entry: the page says what the scene is missing.
+    assert entries["cmd_vel"]["present"] is False and entries["cmd_vel"]["purpose"]
+    # Counted things carry a unit, so a bare number is never shown alone.
+    assert entries["images"]["count"] and entries["images"]["count_unit"] == "files"
+    assert entries["data_ts"]["count_unit"] == "lines"
+    assert entries["transforms"]["count_unit"] == "rows"
+
+
 def test_the_card_never_claims_more_raw_poses_than_the_scene_has(tmp_path):
     """A filled scene has more poses than this root's own run produced."""
     root_path = make_root(tmp_path)
@@ -242,6 +325,25 @@ def test_the_scene_page_leads_with_its_thumbnails_and_the_four_cards(atlas_clien
     assert body.index('class="hero"') < body.index('class="grid cards"') < body.index('class="tabs"')
     # And the absent-artefact chips survived the rework.
     assert 'class="chip no"' in body and "joint_setpoints.npy" in body
+
+
+def test_the_rendered_timeline_links_into_the_segment_pages(atlas_client):
+    body = atlas_client.get("/scene/0000").text
+    bar = body[body.index('class="bar"') : body.index('class="barcap"')]
+    assert bar.count('class="seg') == 2  # the fixture's two segments
+    assert '/scene/0000/segment/0' in bar and '/scene/0000/segment/1' in bar
+
+
+def test_the_rendered_file_strip_opens_each_artefact_in_place(atlas_client):
+    body = atlas_client.get("/scene/0000").text
+    # Each chip is a button wired to the panel that describes it, and the panel
+    # is rendered by the server, so the prose is there with JavaScript off.
+    assert 'data-file="odometry"' in body and 'aria-controls="fileinfo-odometry"' in body
+    assert 'id="fileinfo-odometry"' in body
+    assert "re-anchored to the identity at its own first pose" in body
+    # Absent files keep their entry and say so.
+    assert 'data-file="gps"' in body and 'class="chip no"' in body
+    assert "/viewer-static/files.js" in body
 
 
 def test_a_scene_page_on_a_root_with_almost_nothing_still_renders(tmp_path):

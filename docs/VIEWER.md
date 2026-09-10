@@ -140,13 +140,48 @@ driving. Below 2 Hz the rate is flagged.
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
 | `gps.npy` | the map, on the scene, segment and frame pages |
 
+## The scene page's two strips
+
+Both strips on a scene page are read the same way -- point at a thing, get the
+thing itself -- because a tooltip is not an answer on a touch device and not a
+place anyone looks on a desktop.
+
+The **ground-truth timeline** draws one block per segment over the scene's own
+time span, and each block is a link to that segment's page. Amber blocks are
+filled ground truth, green is this root's own run; the tooltip names the
+segment, how long it is, how many poses it carries and where it came from or
+why it ended. A segment a second or two long is under two pixels wide on a
+card-width track, so the block keeps its honest width and only its hit area is
+widened, by two pixels either side; the tooltip says which one the pointer
+found. A scene whose segment file cannot be read (a curated-only root) falls
+back to the flat spans it always had, which name no segment and do not link.
+
+The **file inventory** is a set of toggles. Opening one says what the file
+holds and what the dataset does with it -- prose written per artefact in
+`probe.ARTEFACT_PURPOSE`, not the one-line shape that used to live in the
+`title` attribute -- along with whether this scene has it, how many rows,
+lines or files, and where it sits on disk. One is open at a time, because the
+card sits beside the map and stacking panels would push the map's height around
+on every click. The server renders every panel expanded and `static/files.js`
+collapses them, so with JavaScript off the card is a readable list of what each
+artefact is rather than a dead strip.
+
+Segment reasons are translated before they are shown anywhere -- in these
+tooltips, in the window table, on the segment page. A reason accumulates tags
+(`regen_fill:t194+refined`): the part before the first `+` says where the
+segment came from or why it ended, each `+` tail says what was then done to its
+poses, and both halves are turned into plain language by
+`windows.describe_reason`. Nothing that reads as a tag the tooling invented for
+itself should reach a page.
+
 ## The segment page
 
 A segment is the unit the ground truth is actually anchored in, and until it
 had a page of its own there was nowhere to *read* about one: the scene page
 lists segments and the 3D view plays one. `/scene/{scene}/segment/{n}` is the
 page in between, and it is reachable from everywhere a segment is named — the
-window table, a frame's ground-truth card, the 3D view's panel.
+window table, the ground-truth timeline above it, a frame's ground-truth card,
+the 3D view's panel.
 
 It carries three frames from inside the segment, what the segment is (when,
 how long, how densely anchored, how many frames, the silence either side, why

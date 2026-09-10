@@ -43,6 +43,18 @@ class Artefact:
     description: str
     suffix: str = ""
 
+    @property
+    def purpose(self) -> str:
+        """What the file is *for*, in prose. Empty for one nothing is written for."""
+        return ARTEFACT_PURPOSE.get(self.key, "")
+
+    @property
+    def count_unit(self) -> str:
+        """What this artefact's count counts, so a number can be read aloud."""
+        if self.kind == "dir":
+            return "files"
+        return "rows" if self.relpath.endswith(".npy") else "lines"
+
 
 #: Everything the viewer knows how to show. Order is the order shown in the UI.
 # fmt: off
@@ -68,6 +80,104 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("source_bag", "source_bag.txt", "file", "Source bag", "provenance of the recording"),
 )
 # fmt: on
+
+#: What each artefact is *for*, one paragraph per file, shown when its entry on
+#: a scene page is opened. Kept out of the table above so that stays one
+#: readable line per file; keyed by ``Artefact.key``, and a key with nothing
+#: written for it simply shows its one-line shape instead.
+ARTEFACT_PURPOSE: dict[str, str] = {
+    "images": (
+        "One camera frame per synced frame, numbered by frame index. The viewer shows them as the "
+        "scene's thumbnails, in the frame strip and as the image panel beside a 3D view; nothing "
+        "else in the pipeline reads them."
+    ),
+    "clouds": (
+        "The lidar scan belonging to each frame, already rotated into the robot's base frame. Drawn "
+        "as points in the 3D view, and used to build the terrain under the robot when the scene has "
+        "no height maps."
+    ),
+    "height_maps": (
+        "A bird's-eye grid of ground height around the robot, one per frame, accumulated from the "
+        "lidar in the gravity-levelled frame. The 3D view's terrain is built from these, and the "
+        "learning target a model is trained on is read straight out of them."
+    ),
+    "height_masks": (
+        "How each height-map cell got its value: measured by the lidar, interpolated between "
+        "measurements, extrapolated beyond them, or anchored to a wheel contact. Only measured "
+        "cells are a real observation, so both the viewer's colouring and any supervision drawn "
+        "from a map are gated on this."
+    ),
+    "data_ts": (
+        "The frame clock: one timestamp per frame, in seconds. Everything per-frame lines up by "
+        "index against this file, and the scene's start, end and duration are its first and last "
+        "line."
+    ),
+    "pcd_ts": (
+        "The instant each frame's lidar scan was taken, which is a little before the frame's own "
+        "timestamp. Poses and height maps are sampled on this clock, so a frame's 3D content and "
+        "its image can differ by a few tens of milliseconds."
+    ),
+    "odometry": (
+        "The ground truth: timestamped 4x4 base-link poses from the offline lidar-inertial run. "
+        "Every segment is re-anchored to the identity at its own first pose, so two poses only "
+        "mean something together when they come from the same segment."
+    ),
+    "odometry_segments": (
+        "Which stretches of odometry.txt were tracked continuously: number, start, end, pose count "
+        "and why the stretch ended. It is what makes the ground truth usable -- the viewer never "
+        "builds a trajectory, terrain or cloud across a boundary."
+    ),
+    "transforms": (
+        "The robot's own wheel-and-IMU odometry, one pose per frame. Continuous and always present "
+        "but drifting, so it is never ground truth: it stands in for a view where there is no GT, "
+        "and it is the reference the ground truth is checked against."
+    ),
+    "gravity_align": (
+        "A per-frame rotation that takes roll and pitch out of the base frame. Height maps are "
+        "built in that levelled frame, and the frame page reads the robot's attitude back out of "
+        "this array."
+    ),
+    "joint_states": (
+        "What the wheels actually did: timestamp plus each wheel's position, velocity and effort, "
+        "on their own clock rather than the frame clock. Wheel speed on the proprioception card "
+        "comes from here, and wheel travel is how far the robot moved across a gap in the GT."
+    ),
+    "joint_setpoints": (
+        "What the wheels were commanded to do, in the same layout as joint_states. The difference "
+        "between the two is where slip and load show up."
+    ),
+    "cmd_vel": (
+        "The twist commanded to the base -- the driver's intent, before the wheel controllers act "
+        "on it. Commanded speed on the proprioception card is read from here."
+    ),
+    "gps": (
+        "Raw GNSS fixes: timestamp, latitude, longitude, altitude, fix status and covariance. Used "
+        "for the map on this page and as an independent check on the odometry; never ground truth, "
+        "and in some scenes the fix is too poor to be worth reading."
+    ),
+    "camera_intrinsics": (
+        "The 3x3 camera matrix K. It is what lets a point in the robot frame be projected into the "
+        "image, so a cloud and a picture can be compared."
+    ),
+    "camera_info": (
+        "The full camera_info message the camera published: image size, distortion model and "
+        "coefficients, and the projection matrix. The calibration card reads it; K itself comes "
+        "from camera_intrinsics.txt."
+    ),
+    "T_cam_to_base": (
+        "The 4x4 that takes a point from the camera-optical frame to the robot base -- where the "
+        "camera sat on the robot. Every overlay of image on geometry depends on it."
+    ),
+    "T_cam_to_lidar": (
+        "Camera to lidar, written by older extractions in place of T_cam_to_base. A scene that has "
+        "this one and not the other is from an earlier tooling generation."
+    ),
+    "source_bag": (
+        "Which recording this scene was extracted from. Provenance only, but it is the only link "
+        "back to the raw bag the scene came out of."
+    ),
+}
+
 
 ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 

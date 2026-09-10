@@ -272,17 +272,61 @@ _REASON_TEXT = {
 }
 
 
+#: Where a segment's poses came from, when they did not come out of this root's
+#: own odometry run. Every one of these reads as a sentence starting "filled",
+#: which is what the pages branch on to say "filled ..." instead of "ends
+#: because ...".
+_FILL_TEXT = {
+    "v11_fill": "filled from v1.1 ground truth, through the same quality gate",
+    "regen_fill": "filled by replaying that stretch of the bag through the estimator, "
+    "through the same quality gate",
+}
+
+#: Tags a reason accumulates after a ``+``: what was done to the poses after
+#: the stretch was cut, rather than why it was cut.
+_MARK_TEXT = {
+    "refined": "refined against the wheel odometry",
+    "coverage_guard": "spliced from the earlier root, which covered this stretch",
+}
+
+
 def describe_reason(reason: str) -> str:
-    """A concrete sentence fragment for a segment-reason tag."""
+    """A concrete sentence fragment for a segment-reason tag.
+
+    Tags accumulate: a stretch can be filled from elsewhere, then refined, and
+    is written ``regen_fill:t194+refined``. The part before the first ``+`` says
+    where the segment came from or why it ended; each ``+`` tail says what was
+    then done to its poses, and those are appended in parentheses rather than
+    left as raw tags -- a reader of the ground-truth panel should never be shown
+    a tag the tooling invented for itself.
+    """
     if not reason:
         return ""
-    if reason.startswith("v11_fill"):
-        rest = reason.split(":", 1)[1] if ":" in reason else ""
-        tail = _REASON_TEXT.get(rest.split(":")[-1], "")
-        out = "filled from v1.1 ground truth (same quality gate)"
-        return f"{out}; ends because {tail}" if tail else out
-    key = reason.split(":")[-1]
-    return _REASON_TEXT.get(key, reason)
+    described = _describe_body(reason.split("+")[0])
+    extra = "; ".join(describe_marks(reason))
+    return f"{described} ({extra})" if described and extra else (described or reason)
+
+
+def describe_marks(reason: str) -> list[str]:
+    """The ``+`` tails of a reason, translated; ``[]`` when it carries none.
+
+    Separate from :func:`describe_reason` so a page can count them across a
+    scene ("10 of them refined ...") instead of repeating a sentence that is
+    identical but for its tail.
+    """
+    return [_MARK_TEXT.get(m, m) for m in reason.split("+")[1:] if m]
+
+
+def _describe_body(body: str) -> str:
+    for prefix, text in _FILL_TEXT.items():
+        if body.startswith(prefix):
+            rest = body.split(":", 1)[1] if ":" in body else ""
+            # A filled stretch may carry the reason it *ends* as well; where it
+            # carries something else (the hole it filled), there is nothing to
+            # translate and the fill sentence stands alone.
+            tail = _REASON_TEXT.get(rest.split(":")[-1], "")
+            return f"{text}; ends because {tail}" if tail else text
+    return _REASON_TEXT.get(body.split(":")[-1], body)
 
 
 #: Key prefix for the synthetic one-frame window (``frame00042``). These are

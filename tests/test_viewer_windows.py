@@ -254,3 +254,22 @@ def test_the_windows_table_states_the_ground_truth_pose_rate(client):
     body = client.get("/scene/0000?tab=windows").text
     assert "GT poses" in body
     assert "Hz" in body
+
+
+def test_a_reason_tag_is_translated_tag_by_tag():
+    """Reasons accumulate tags; none of them may reach a page as raw jargon."""
+    d = windows.describe_reason
+    assert d("filtered:pose_jump").startswith("the GT pose jumped")
+    # Where the poses came from reads as "filled ...", which is what the pages
+    # branch on to avoid saying "ends because filled".
+    assert d("v11_fill").startswith("filled from v1.1 ground truth")
+    assert d("regen_fill:t194").startswith("filled by replaying")
+    # A "+" tail says what was done to the poses afterwards.
+    assert d("regen_fill:t194+refined").endswith("(refined against the wheel odometry)")
+    assert "spliced from the earlier root" in d("filtered:gap+coverage_guard")
+    assert d("filtered:gap+coverage_guard").startswith("a gap of over 1 s")
+    # A filled stretch that also carries why it ended says both.
+    assert "ends because the recording ended" in d("v11_fill:end_of_run")
+    # An unknown tag is shown as it is rather than dropped.
+    assert d("something_new") == "something_new"
+    assert d("") == ""

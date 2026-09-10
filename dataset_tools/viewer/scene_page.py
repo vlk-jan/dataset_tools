@@ -40,12 +40,18 @@ from .index_page import (
     thumb_slots,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
-from .probe import DatasetRoot
+from .probe import ARTEFACTS, DatasetRoot
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
 
 #: A card with fewer entries than this is not worth a panel of its own.
 MIN_CARD_STATS = 2
+
+#: A timeline block narrower than this fraction of the scene cannot be hit with
+#: a pointer, so a very short segment is drawn -- and clicked -- at this width
+#: rather than at its own. It overstates nothing else: the tooltip and the
+#: segment page both carry the real duration.
+MIN_MARK_FRAC = 0.006
 
 #: Rows read out of a proprioception array. The array is memory-mapped and
 #: strided, so this bounds the work rather than the bytes the kernel faults in.
@@ -299,6 +305,49 @@ def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | Non
     return total, moving / count
 
 
+def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
+    """One clickable block per ground-truth segment, in scene-time fractions.
+
+    Built from the segment file rather than from the probe's flat span pairs,
+    because a block is only worth clicking if it knows *which* segment it is:
+    the number carried here is the one in ``odometry_segments.txt``, which is
+    what the segment page resolves and what the window keys already name.
+
+    Empty when the scene has no readable segments or no time span to scale them
+    against; the timeline then falls back to the plain spans, which is all a
+    curated-only scene ever had.
+    """
+    from .windows import describe_reason
+
+    p, segments = access.probe, access.segments
+    if not segments or p.start_ts is None or not p.duration or p.duration <= 0:
+        return []
+    base, span = p.start_ts, p.duration
+    marks: list[dict[str, Any]] = []
+    for seg in segments:
+        lo = min(1.0, max(0.0, (seg.start_ts - base) / span))
+        hi = min(1.0, max(0.0, (seg.end_ts - base) / span))
+        width = min(max(hi - lo, MIN_MARK_FRAC), 1.0 - lo)
+        # Why a segment *ended* is not what a reader wants off a hover: it is a
+        # property of the boundary, it is the same sentence on block after
+        # block, and the segment page states it anyway. Where the poses came
+        # from stays -- that is what makes an amber block different.
+        described = describe_reason(seg.reason)
+        why = described.split("; ends because", 1)[0] if described.startswith("filled") else ""
+        title = f"segment {seg.index} \u2014 {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses"
+        marks.append(
+            {
+                "index": seg.index,
+                "left": round(lo * 100, 3),
+                "width": round(width * 100, 3),
+                "fill": "fill" in (seg.reason or "").lower(),
+                "href": f"/scene/{p.scene_id}/segment/{seg.index}",
+                "title": f"{title}; {why}" if why else title,
+            }
+        )
+    return marks
+
+
 def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
     """Where trustworthy poses exist inside the scene, and how good they are.
 
@@ -336,11 +385,16 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             raw = a.get("poses_unf") or a.get("poses_raw")
             sub = f"of {fmt_count(raw)} raw" if raw and raw >= poses else None
             stats.append(stat("poses", fmt_count(poses), sub))
-        reasons = sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])
-        if reasons:
-            from .windows import describe_reason
+        from .windows import describe_reason
 
-            parts = [f"{describe_reason(r)} ({n}×)" for r, n in reasons[:3]]
+        reasons = sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])
+        # A filled stretch is not a reason a segment *ended*; it is where its
+        # poses came from, and the fill note below says so. Mixing the two read
+        # as "segments end because filled by replaying the bag".
+        ends = [(describe_reason(r), n) for r, n in reasons]
+        ends = [(d, n) for d, n in ends if d and not d.startswith("filled")]
+        if ends:
+            parts = [f"{d} ({n}×)" for d, n in ends[:3]]
             notes.append("Segments end because " + "; ".join(parts) + ".")
     elif p.has("odometry"):
         notes.append("odometry.txt is present but unsegmented: the whole scene is one stretch.")
@@ -368,11 +422,26 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         notes.append("Wheel odometry only (transforms.npy): continuous, drifty, not ground truth.")
 
     spans, fill = segment_timeline(p, a)
+    marks = timeline_marks(access)
     if fill:
-        notes.append(
-            f"{len(fill)} segment{'s' if len(fill) != 1 else ''} (amber) filled from v1.1 "
-            "ground truth through the same quality gate."
-        )
+        # Say which fill this root actually holds rather than naming one: v1.3's
+        # holes were filled by replaying their bags, v1.2's from v1.1, and a
+        # root can carry both.
+        from .windows import describe_marks, describe_reason
+
+        filled = [s for s in segments if "fill" in (s.reason or "").lower()]
+        # The fill sentence, then what was done to the poses afterwards as a
+        # count -- a scene whose fills were refined one at a time would
+        # otherwise read the same sentence twice, once per tail.
+        sources = sorted({describe_reason((s.reason or "").split("+")[0]) for s in filled})
+        mark_counts: dict[str, int] = {}
+        for s in filled:
+            for m in describe_marks(s.reason or ""):
+                mark_counts[m] = mark_counts.get(m, 0) + 1
+        detail = "; ".join(sources) if sources else "filled from another root through the same quality gate"
+        for text, n in sorted(mark_counts.items(), key=lambda kv: -kv[1]):
+            detail += f"; {n} of them {text}"
+        notes.append(f"{len(fill)} segment{'s' if len(fill) != 1 else ''} (amber): {detail}.")
 
     return {
         "kind": "gt",
@@ -385,6 +454,11 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             {
                 "spans": spans,
                 "fill": fill,
+                # One block per segment, each knowing which segment it is. The
+                # flat spans above stay: they are what a scene with no readable
+                # segment file (a curated-only root) has to be drawn from, and
+                # they are what the index card draws.
+                "marks": marks,
                 "label": fmt_duration(p.duration or a.get("dur_s")),
             }
             if spans
@@ -616,6 +690,35 @@ def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
     return out
 
 
+def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
+    """The file inventory, each entry carrying what it is and what it is for.
+
+    The chips used to say only a path and a count, with the rest in a tooltip
+    that a touch device never shows at all. Everything a reader needs about one
+    artefact is assembled here instead, so the page can open it in place: no
+    extra request, and nothing read off disk that the probe did not already
+    have.
+    """
+    p = access.probe
+    entries: list[dict[str, Any]] = []
+    for art in ARTEFACTS:
+        count = p.counts.get(art.key)
+        entries.append(
+            {
+                "key": art.key,
+                "label": art.label,
+                "relpath": art.relpath,
+                "kind": "directory" if art.kind == "dir" else "file",
+                "present": p.has(art.key),
+                "count": count,
+                "count_unit": art.count_unit,
+                "shape": art.description,
+                "purpose": art.purpose,
+            }
+        )
+    return entries
+
+
 def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
     """Thumbnails and the four cards, cached on the scene handle.
 
@@ -639,6 +742,9 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # Not one of the four: it sits beside the file inventory, and it is
             # absent -- not empty -- on a scene without GNSS.
             "map": map_card(access),
+            # The inventory strip: one entry per artefact the viewer knows,
+            # present or not, each with the prose the page opens under it.
+            "files": file_entries(access),
         }
 
     return access.cached("scene_page", work)

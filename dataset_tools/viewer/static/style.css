@@ -158,14 +158,32 @@ section { margin-top: 34px; }
 .cov.lo { background: var(--track); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .env { font-size: 14.5px; margin: 6px 0 12px; max-width: 74ch; }
 
-/* The GT timeline: blocks scaled over the scene's own time span. */
+/* The GT timeline: blocks scaled over the scene's own time span. On a scene
+   page each block is a link to its own segment (`a.seg`); on the index card,
+   and on a scene whose segment file could not be read, they are plain marks
+   (`i`) that name no segment. Both draw identically. */
 .bar .track { position: relative; height: 14px; background: var(--track); overflow: hidden; }
-.bar i { position: absolute; top: 0; bottom: 0; background: var(--ok); }
-.bar i.fill { background: var(--warn); }
+.bar i, .bar a.seg { position: absolute; top: 0; bottom: 0; background: var(--ok); }
+.bar i.fill, .bar a.seg.fill { background: var(--warn); }
+.bar a.seg { cursor: pointer; }
+/* A segment a second or two long is barely a pixel wide on a card-width track.
+   The block stays that width -- the timeline must not overstate how much of the
+   scene it covers -- and only the hit area is widened, by two pixels either
+   side. Blocks that close together are all plausible targets of the same
+   click, and the tooltip says which one the pointer found. */
+.bar a.seg::after { content: ""; position: absolute; top: 0; bottom: 0; left: -2px; right: -2px; }
+/* The hit target is often a couple of pixels wide, so the hover state has to
+   be unmissable: the block brightens and the whole track dims behind it. */
+.bar a.seg:hover, .bar a.seg:focus-visible {
+  background: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--fg);
+  z-index: 1;
+}
+.bar .track:hover a.seg:not(:hover) { opacity: .55; }
 .barcap {
   display: flex; justify-content: space-between;
   font: 400 11px var(--mono); color: var(--muted); margin-top: 2px;
 }
+.barhint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 
 dl.stats {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
@@ -247,6 +265,33 @@ details.matrix summary {
 details.matrix summary:hover { color: var(--fg); }
 details.matrix pre { margin: 6px 0 0; background: var(--shade); }
 .files .chips { margin-top: 0; }
+
+/* The inventory strip is a set of toggles, and the entry that is open reads
+   out below it: what the file holds, what the dataset does with it, and
+   whether this scene has it. Only one is open at a time (see files.js), so the
+   card's height moves by one panel at most -- it sits beside the map. */
+button.chip {
+  background: none; color: inherit; cursor: pointer;
+  font: 400 11.5px var(--mono); line-height: 1.5;
+}
+button.chip:hover { color: var(--fg); border-color: var(--accent); }
+button.chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+button.chip[aria-expanded="true"] {
+  border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--fg);
+}
+.fileinfo {
+  margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--shade);
+}
+.fileinfo h3 {
+  margin: 0; font-size: 14px; font-weight: 600;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+}
+.fileinfo h3 code { font-size: 12px; color: var(--muted); }
+.fileinfo p { margin: 6px 0 0; font-size: 13.5px; max-width: 78ch; }
+.fileinfo .kv { margin: 10px 0 0; font-size: 12.5px; row-gap: 2px; }
+.fileinfo .kv dt { font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+.fileinfo .kv dd { font-variant-numeric: normal; overflow-wrap: anywhere; }
 
 /* ------------------------------------------------- scene tabs & frame pages */
 .tabs { display: flex; gap: 2px; margin: 26px 0 0; border-bottom: 1px solid var(--line); }
@@ -387,7 +432,10 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   align-items: stretch;
 }
 .pair > .card { display: flex; flex-direction: column; }
-.pair > .card > .chips { flex: 1; align-content: flex-start; }
+/* The strip no longer runs to the bottom of the card: an opened file panel
+   follows it, and the note is what holds the card's foot instead. */
+.pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }
+.pair > .card.files > .cardnote { margin-top: auto; padding-top: 12px; }
 
 .mapbox {
   flex: 1;

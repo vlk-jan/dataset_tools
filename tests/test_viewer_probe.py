@@ -32,6 +32,14 @@ def test_probe_reports_what_a_scene_has_and_lacks(tmp_path):
     assert p.n_segments == 2
 
 
+def test_every_artefact_says_what_it_is_for(tmp_path):
+    """The scene page shows this prose in place of a tooltip, so none may be blank."""
+    for art in probe.ARTEFACTS:
+        assert art.purpose, f"{art.relpath} has no purpose written for it"
+        assert art.purpose[0].isupper() and art.purpose.rstrip().endswith(".")
+        assert art.count_unit in ("files", "rows", "lines")
+
+
 def test_gps_is_probed_like_any_other_optional_file(tmp_path):
     """Absent on most roots, counted like the rest of them where it exists."""
     root_path = make_root(tmp_path)
