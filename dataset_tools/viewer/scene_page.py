@@ -255,12 +255,17 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
     }
 
 
-def path_and_motion(access: SceneAccess) -> tuple[float, float] | None:
+def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | None = None) -> tuple[float, float] | None:
     """``(path metres, moving fraction)`` from this scene's own odometry.
 
     Only ever called when the atlas did not supply the numbers. Distances are
     accumulated **inside** a segment and never across one: consecutive segments
     are separately anchored, so the jump between them is not motion.
+
+    ``bounds`` overrides the segment list with explicit ``(start, end)`` pairs.
+    The caller uses it to clip to the frame window: ground truth recorded before
+    the camera and lidar came up is real odometry, but it is not distance this
+    dataset covers, and counting it makes the total disagree with the frames.
     """
     path = access.dir / "odometry.txt"
     try:
@@ -274,7 +279,8 @@ def path_and_motion(access: SceneAccess) -> tuple[float, float] | None:
     ts, poses = odom
     if len(ts) < 2:
         return None
-    bounds = [(s.start_ts, s.end_ts) for s in access.segments] or [(ts[0], ts[-1])]
+    if bounds is None:
+        bounds = [(s.start_ts, s.end_ts) for s in access.segments] or [(ts[0], ts[-1])]
     total, moving, count = 0.0, 0, 0
     for lo, hi in bounds:
         take = (ts >= lo) & (ts <= hi)

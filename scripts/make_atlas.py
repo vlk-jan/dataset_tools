@@ -213,6 +213,20 @@ def scene_date(probe: SceneProbe, csv_row: dict) -> str | None:
         return None
 
 
+def frame_window(probe: SceneProbe) -> tuple[float, float] | None:
+    """The scene's first and last frame stamp, or None if it has no clock."""
+    if probe.start_ts is None or probe.end_ts is None or probe.end_ts <= probe.start_ts:
+        return None
+    return float(probe.start_ts), float(probe.end_ts)
+
+
+def clip(span: tuple[float, float], win: tuple[float, float] | None) -> float:
+    """How much of ``span`` lies inside ``win``; the whole of it when unwindowed."""
+    if win is None:
+        return max(0.0, span[1] - span[0])
+    return max(0.0, min(span[1], win[1]) - max(span[0], win[0]))
+
+
 def scene_entry(
     root: DatasetRoot,
     access: SceneAccess,
@@ -246,10 +260,18 @@ def scene_entry(
     if points:
         entry["pts_mean"] = points
 
+    # Every ground-truth statistic below is clipped to the frame window. The
+    # Odin comes up later than the Fixposition in several 2026-09 bags -- 141 s
+    # later in scene 0000 -- so the odometry file legitimately covers time that
+    # has no image and no cloud. Counting it made "with GT" exceed the scene
+    # duration, which cannot be true of a subset.
+    win = frame_window(probe)
     segments = access.segments
     odom = access.odometry
     if odom is not None:
-        entry["poses"] = int(len(odom[0]))
+        ts = odom[0]
+        inside = ts if win is None else ts[(ts >= win[0]) & (ts <= win[1])]
+        entry["poses"] = int(len(inside))
     poses_unf = as_int(filter_stats.get("poses_in"))
     if poses_unf:
         entry["poses_unf"] = poses_unf
@@ -259,7 +281,9 @@ def scene_entry(
 
     entry["segments"] = len(segments) or probe.n_segments
     if segments:
-        lens = sorted((s.duration for s in segments), reverse=True)
+        lens = sorted((clip((s.start_ts, s.end_ts), win) for s in segments), reverse=True)
+        lens = [v for v in lens if v > 0.0]
+    if segments and lens:
         entry["seg_lens"] = [round(v, 1) for v in lens]
         entry["seg_med_s"] = round(float(statistics.median(lens)), 1)
         entry["gt_span_s"] = round(float(sum(lens)), 1)
@@ -268,7 +292,10 @@ def scene_entry(
     if flags is not None:
         entry["flags"] = flags
 
-    motion = path_and_motion(access)
+    clipped_bounds = [(max(s.start_ts, win[0]), min(s.end_ts, win[1])) for s in segments] if win and segments else None
+    if clipped_bounds is not None:
+        clipped_bounds = [(a, b) for a, b in clipped_bounds if b > a]
+    motion = path_and_motion(access, clipped_bounds)
     if motion:
         entry["path_m"] = round(motion[0], 1)
         entry["moving_frac"] = round(motion[1], 3)
