@@ -18,13 +18,12 @@ go through these functions, so the format is spelled out exactly once.
 
 from __future__ import annotations
 
+import os
 import warnings
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
-
-import os
 
 import numpy as np
 

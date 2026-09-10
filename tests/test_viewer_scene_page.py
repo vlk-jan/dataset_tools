@@ -331,7 +331,7 @@ def test_the_rendered_timeline_links_into_the_segment_pages(atlas_client):
     body = atlas_client.get("/scene/0000").text
     bar = body[body.index('class="bar"') : body.index('class="barcap"')]
     assert bar.count('class="seg') == 2  # the fixture's two segments
-    assert '/scene/0000/segment/0' in bar and '/scene/0000/segment/1' in bar
+    assert "/scene/0000/segment/0" in bar and "/scene/0000/segment/1" in bar
 
 
 def test_the_rendered_file_strip_opens_each_artefact_in_place(atlas_client):

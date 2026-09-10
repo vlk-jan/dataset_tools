@@ -92,8 +92,14 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
     cuts = mismatch_intervals(hits, horizon, margin)
     kept_ts, kept_T, rows = [], [], []
     st = dict(
-        segments_in=len(segs), poses_in=len(t), span_in=0.0, span_out=0.0, poses_out=0,
-        cut_s=0.0, dropped_short=0, cuts=len(cuts),
+        segments_in=len(segs),
+        poses_in=len(t),
+        span_in=0.0,
+        span_out=0.0,
+        poses_out=0,
+        cut_s=0.0,
+        dropped_short=0,
+        cuts=len(cuts),
     )
     for seg in segs:
         idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
@@ -157,14 +163,20 @@ def main() -> int:
     ap.add_argument("root", type=Path)
     ap.add_argument("--scenes", nargs="*", default=None)
     ap.add_argument("--horizon", type=float, default=4.0, help="s of path scored per keyframe (DRIFT's label horizon)")
-    ap.add_argument("--max-off", type=float, default=0.3, help="m; median wheel-bottom minus map beyond this is a mismatch")
+    ap.add_argument(
+        "--max-off", type=float, default=0.3, help="m; median wheel-bottom minus map beyond this is a mismatch"
+    )
     ap.add_argument("--margin", type=float, default=0.5, help="s cut either side of a flagged window")
     ap.add_argument("--min-poses", type=int, default=20)
     ap.add_argument("--jobs", type=int, default=8)
     ap.add_argument("--report", type=Path, default=None, help="JSON of every flagged window")
     ap.add_argument("--check", action="store_true", help="report only, write nothing")
-    ap.add_argument("--live", action="store_true", help="score/cut the published files even if regen/ holds a pre-cut backup "
-                    "(a root whose regen/ is a symlink to another root's must use this)")
+    ap.add_argument(
+        "--live",
+        action="store_true",
+        help="score/cut the published files even if regen/ holds a pre-cut backup "
+        "(a root whose regen/ is a symlink to another root's must use this)",
+    )
     a = ap.parse_args()
     global USE_BACKUPS
     USE_BACKUPS = not a.live
@@ -172,7 +184,9 @@ def main() -> int:
     with Pool(a.jobs) as pool:
         scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off, USE_BACKUPS) for sc in scenes])
     report, tot = {}, {}
-    print(f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s}")
+    print(
+        f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s}"
+    )
     for sc, n_win, hits in scanned:
         st = cut_scene(a.root / sc, hits, a.horizon, a.margin, a.min_poses, a.check)
         report[sc] = [dict(frame=h.frame, t0=h.t0, offset=round(h.offset, 3), n=h.n) for h in hits]
@@ -192,7 +206,8 @@ def main() -> int:
         f"{tot['cut_s']:6.0f} {int(tot['dropped_short']):5d}" + ("  (check only, nothing written)" if a.check else "")
     )
     if a.report:
-        json.dump(report, open(a.report, "w"), indent=1)
+        with open(a.report, "w") as fh:
+            json.dump(report, fh, indent=1)
     return 0
 
 

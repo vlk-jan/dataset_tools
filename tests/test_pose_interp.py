@@ -57,7 +57,7 @@ def test_interpolation_beats_nearest_on_a_ramp():
 
     assert n == 3
     assert np.allclose(out[:, 0, 3], query, atol=1e-12)
-    for T, q in zip(out, query):
+    for T, q in zip(out, query, strict=True):  # the assert above already pins the lengths
         assert np.allclose(T[:3, :3], ed.euler_matrix(0, 0, q)[:3, :3], atol=1e-9)
     # what nearest-neighbour would have produced, for the same queries
     nearest = poses[ed.nearest_idx(query, ts)]

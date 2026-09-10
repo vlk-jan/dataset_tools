@@ -970,7 +970,9 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames, max_seconds=state.max_seconds)
+            scene, meta = build_scene(
+                state.root, scene_id, window_key, opts, max_frames=state.max_frames, max_seconds=state.max_seconds
+            )
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
