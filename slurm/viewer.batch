@@ -37,8 +37,14 @@ VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 # Built windows are cached per (scene, window, options), so a cache that
 # outlives the job means each window is built once and every later session
 # opens it instantly. Keep it off $HOME (quota) and off node-local disk (which
-# is wiped between jobs). VIEWER_CACHE overrides.
-CACHE=${VIEWER_CACHE:-/mnt/personal/vlkjan6/viewer_cache}
+# is wiped between jobs). VIEWER_CACHE overrides the base directory.
+#
+# One subdirectory per dataset under it, named after the root's last component
+# -- viewer_cache/HELHEST_v1_3, viewer_cache/HELHEST_v2_beta, ... Neither the
+# probe cache nor the bundle names are keyed by root, so two datasets sharing
+# one directory would read each other's entries.
+CACHE_BASE=${VIEWER_CACHE:-/mnt/personal/vlkjan6/viewer_cache}
+CACHE="$CACHE_BASE/$(basename "$ROOT")"
 
 [ -d "$ROOT" ] || { echo "no dataset root at $ROOT"; exit 1; }
 [ -x "$VIEWER" ] || { echo "no viewer venv at $VIEWER -- build it with:
