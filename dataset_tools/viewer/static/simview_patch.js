@@ -142,6 +142,7 @@ export function installSimviewPatches(app, simviewVersion) {
     hideHousekeepingBodies(app);
     styleGhost(app);
     defaultPointCloudsOff(app);
+    defaultPanelState(app);
 
     const desired = { cloud: false, ghost: false };
 
@@ -225,6 +226,62 @@ export function installSimviewPatches(app, simviewVersion) {
 function defaultPointCloudsOff(app) {
     const ctrl = app.uiControls && app.uiControls.findController("showPointClouds");
     if (ctrl && ctrl.getValue() !== false) ctrl.setValue(false);
+}
+
+/**
+ * PERMANENT. Open the control panel on what this viewer is actually for.
+ *
+ * SimView opens Body and Terrain Options and closes Camera Options, which fits
+ * a physics scene where the terrain's properties are the subject. Here the
+ * terrain is scenery -- reconstructed ground the robot drove over -- and its
+ * colour layers are explained by the overlay's own legend, while framing the
+ * run (track body, FOV, split screen) is the thing people reach for. The Body
+ * States window is likewise a readout to open on demand, not a panel that
+ * should cover the scene on every window open.
+ *
+ * All three are set through SimView's public objects, so a viewer can undo any
+ * of them with one click and nothing is removed from the UI.
+ */
+function defaultPanelState(app) {
+    collapseBodyStates(app);
+    applyFolderDefaults(app);
+}
+
+/** Start the Body States window collapsed; its header still expands it. */
+function collapseBodyStates(app) {
+    const bsw = app.bodyStateWindow;
+    if (!bsw || !bsw.window) return;
+    // `toggleCollapse` rather than the class directly: it also flips the
+    // header's caret, which a bare classList write would leave pointing down.
+    if (!bsw.window.classList.contains("collapsed")) bsw.toggleCollapse();
+}
+
+/** Which of SimView's lil-gui folders start open, by their title. Folders not
+ *  named here (Body Options, Scene Info) keep SimView's own default. */
+const FOLDER_DEFAULTS = {
+    "Terrain Options": false,
+    "Camera Options": true,
+};
+
+function applyFolderDefaults(app) {
+    const gui = app.uiControls && app.uiControls.gui;
+    const folders = (gui && gui.folders) || [];
+    const seen = new Set();
+    for (const folder of folders) {
+        // `$title` is lil-gui's title element; the folder's own `_title` is
+        // private, and matching on text is what survives a lil-gui bump.
+        const title = folder.$title ? folder.$title.textContent.trim() : "";
+        if (!(title in FOLDER_DEFAULTS)) continue;
+        seen.add(title);
+        folder.open(FOLDER_DEFAULTS[title]);
+    }
+    for (const title of Object.keys(FOLDER_DEFAULTS)) {
+        if (!seen.has(title)) {
+            // A rename upstream, not a bug here: say so rather than silently
+            // leaving the panel in SimView's default state.
+            console.info(`no lil-gui folder titled "${title}"; leaving it as SimView left it.`);
+        }
+    }
 }
 
 /**
