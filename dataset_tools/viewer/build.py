@@ -15,7 +15,7 @@ import logging
 import math
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +24,8 @@ from . import loaders as L
 from .probe import DatasetRoot, SceneProbe
 from .render import unit_colors
 from .windows import (
+    DEFAULT_MAX_FRAMES,
+    DEFAULT_MAX_SECONDS,
     Window,
     frame_slack,
     parse_frame_window_key,
@@ -180,6 +182,44 @@ class BuildOptions:
         )
 
 
+#: Window length the budgets in :class:`BuildOptions` were chosen against. A
+#: window of this many frames gets exactly what the options ask for.
+BUDGET_REFERENCE_FRAMES = 1500
+#: Ceiling on that scaling. The budgets buy samples, and a window four times
+#: the reference already reaches the sanitized ceilings on most of them.
+MAX_BUDGET_SCALE = 4.0
+#: The terrain budget scales more slowly than the sampling ones: it buys cells,
+#: and cells are what the bundle is mostly made of (~36 bytes each across the
+#: layers), so doubling it is the difference between a 9 MB and a 24 MB window.
+MAX_TERRAIN_SCALE = 2.0
+
+
+def budgets_for_window(opts: BuildOptions, n_frames: int) -> BuildOptions:
+    """``opts`` with the sampling budgets scaled to a window's length.
+
+    The budgets are fixed counts -- 80 height maps, 40 clouds, 160k points --
+    so a window twice as long samples the same ground half as densely, and a
+    long window would otherwise be visibly poorer than the parts it replaced.
+    They are scaled with the frame count to hold that density roughly constant,
+    and ``sanitized`` clips the result, so a very long window stops at the same
+    ceilings the UI offers rather than at whatever the arithmetic produced.
+
+    Short windows -- most windows, the median segment of v1.3 is 43 frames --
+    are left exactly as asked for; this only ever scales up.
+    """
+    scale = min(max(1.0, n_frames / BUDGET_REFERENCE_FRAMES), MAX_BUDGET_SCALE)
+    if scale <= 1.0:
+        return opts
+    terrain_scale = min(scale, MAX_TERRAIN_SCALE)
+    return replace(
+        opts,
+        max_hm_frames=int(round(opts.max_hm_frames * scale)),
+        max_cloud_frames=int(round(opts.max_cloud_frames * scale)),
+        max_cloud_points=int(round(opts.max_cloud_points * scale)),
+        max_terrain_cells=int(round(opts.max_terrain_cells * terrain_scale)),
+    ).sanitized()
+
+
 class SceneAccess:
     """Lazily-loaded, cached handle on one scene's *small* per-scene files.
 
@@ -307,20 +347,21 @@ class SceneAccess:
 
     # -- windows -----------------------------------------------------------
 
-    def windows(self, max_frames: int) -> list[Window]:
+    def windows(self, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS) -> list[Window]:
         return self._get(
-            f"windows_{max_frames}",
+            f"windows_{max_frames}_{max_seconds}",
             lambda: windows_for_scene(
                 self.frame_ts,
                 self.segments,
                 self.probe.n_frames,
                 self.probe.has("transforms"),
                 max_frames=max_frames,
+                max_seconds=max_seconds,
             ),
         )  # type: ignore[return-value]
 
-    def window(self, key: str, max_frames: int) -> Window | None:
-        for w in self.windows(max_frames):
+    def window(self, key: str, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS) -> Window | None:
+        for w in self.windows(max_frames, max_seconds):
             if w.key == key:
                 return w
         # One-frame windows are addressable but not enumerated (see
@@ -1022,7 +1063,8 @@ def build_scene(
     scene_id: str,
     window_key: str,
     opts: BuildOptions | None = None,
-    max_frames: int = 1500,
+    max_frames: int = DEFAULT_MAX_FRAMES,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
 ):
     """Build (but do not save) the SimView scene for one window.
 
@@ -1034,7 +1076,7 @@ def build_scene(
 
     opts = (opts or BuildOptions()).sanitized()
     access = SceneAccess(root, scene_id)
-    window = access.window(window_key, max_frames)
+    window = access.window(window_key, max_frames, max_seconds)
     if window is None:
         raise KeyError(f"scene {scene_id} has no window {window_key!r}")
 
@@ -1054,6 +1096,9 @@ def build_scene(
         )
     abs_times = frame_ts[frames]
     times = abs_times - abs_times[0]
+    # After the frame range is final: what the window costs to sample is set by
+    # how much of it there is, not by what the key asked for.
+    opts = budgets_for_window(opts, len(frames))
 
     gt = resolve_poses(access, window, abs_times)
     ghost = _ghost_track(access, window, gt)

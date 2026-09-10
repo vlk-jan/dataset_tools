@@ -6,10 +6,23 @@ Two hard constraints shape this module:
    of ground truth that were each re-anchored to identity at their own first
    pose, so a trajectory, an aggregated cloud or a splatted terrain may never
    cross a segment boundary. One window therefore never spans two segments.
-2. **Scenes are long.** Up to ~20k frames, on contended network storage. A
-   window is capped at a few thousand frames so a build reads a bounded number
-   of files; longer segments are cut into consecutive chunks the UI can page
+2. **Scenes are long.** Up to ~20k frames, and one segment of HELHEST v1.3 runs
+   half an hour. Long segments are cut into consecutive chunks the UI can page
    through.
+
+   The cut is measured in *seconds*, not frames. A build already reads a
+   bounded number of per-frame files whatever the window's length
+   (``BuildOptions.max_hm_frames`` and ``max_cloud_frames`` pick a fixed subset
+   of it), and the bytes a window ships barely move with it: measured on that
+   half-hour segment, twelve times the frames cost 1.9x the bundle and no extra
+   build time. What a longer window really costs is sampling density -- the
+   same number of height maps and clouds spread over more ground -- which is a
+   cost per second driven, so seconds are what the cap counts.
+
+   Counting frames made the cap mean two different things in one root: v1.3
+   holds scenes recorded at 3.2 Hz and at 10 Hz, so a 1500-frame cap left a
+   462 s window whole in one scene while halving a 180 s segment in the next.
+   The frame ceiling survives underneath as a backstop.
 
 A window also records where its poses come from, which changes what the view
 means: ``odometry`` is ground truth, ``transforms`` the drifty wheel-odometry
@@ -18,14 +31,20 @@ fallback, ``none`` no pose at all (per-frame data only).
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 
 import numpy as np
 
 from .loaders import Segment
 
-#: Frames per window. Bounds the number of per-frame files one build touches.
-DEFAULT_MAX_FRAMES = 1500
+#: Seconds per window: the cap that actually bites. Long enough that across
+#: HELHEST v1.3 exactly one segment (0019/0, 29 min) is cut at all.
+DEFAULT_MAX_SECONDS = 600.0
+#: Frames per window, a backstop under the seconds cap rather than the rule: it
+#: bites only on a root recorded above ~20 Hz, where a window of
+#: ``DEFAULT_MAX_SECONDS`` would carry more frames than a trajectory should.
+DEFAULT_MAX_FRAMES = 12000
 #: A window with fewer frames than this is not worth building.
 MIN_WINDOW_FRAMES = 2
 
@@ -85,18 +104,69 @@ class Window:
         return d
 
 
-def _chunk_ranges(start: int, end: int, max_frames: int) -> list[tuple[int, int]]:
-    """Split ``[start, end)`` into consecutive chunks of at most ``max_frames``.
+def _chunk_edges(start: int, end: int, n: int, frame_ts: np.ndarray | None) -> list[int]:
+    """The ``n + 1`` frame indices that cut ``[start, end)`` into ``n`` chunks.
 
-    The number of chunks is chosen first, then the range is divided evenly, so
-    a 1600-frame segment becomes two 800-frame windows rather than 1500 + 100.
+    Cut at equal *times* when there is a clock to read, so the pieces are the
+    equal parts of a stretch of driving rather than equal counts of frames --
+    the cap is in seconds, and the division should be in the same unit. Only a
+    non-uniform frame clock tells the two apart, but that is exactly when it
+    matters: frames dropped in the first half would otherwise push the cut
+    late and hand the second window more seconds than the cap allows.
+
+    Each edge is then held at least one frame past the one before it and far
+    enough from the end to leave every later chunk a frame of its own, so a
+    time slice that happens to contain no frame at all -- a hole in the clock
+    wider than the slice -- yields a thin window rather than an empty one.
+    """
+    if n <= 1:
+        return [start, end]
+    if frame_ts is None:
+        return [int(x) for x in np.linspace(start, end, n + 1).round()]
+    cuts = np.linspace(float(frame_ts[start]), float(frame_ts[end - 1]), n + 1)[1:-1]
+    edges = [start]
+    for i, cut in enumerate(np.searchsorted(frame_ts, cuts, side="left")):
+        edges.append(int(min(max(int(cut), edges[-1] + 1), end - (n - 1 - i))))
+    edges.append(end)
+    return edges
+
+
+def _chunk_ranges(
+    start: int,
+    end: int,
+    max_frames: int,
+    frame_ts: np.ndarray | None = None,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
+) -> list[tuple[int, int]]:
+    """Split ``[start, end)`` into consecutive chunks the caps allow.
+
+    Both caps are honoured -- whichever asks for more pieces wins -- and the
+    seconds cap is the one that normally does. It needs ``frame_ts`` to know
+    how long the range is; without timestamps only the frame ceiling applies.
+
+    The number of chunks is chosen first, then the range is divided into that
+    many equal parts (see :func:`_chunk_edges`), so a segment 10% over the cap
+    becomes two even halves rather than one full window and a stub. Dividing by
+    time can leave a chunk over the frame ceiling where the clock is uneven --
+    the same seconds hold more frames in one part than another -- so the count
+    is raised until neither cap is exceeded.
     """
     total = end - start
-    if total <= max_frames:
+    if total <= 0:
         return [(start, end)]
-    n = -(-total // max_frames)  # ceil
-    edges = np.linspace(start, end, n + 1).round().astype(int)
-    return [(int(edges[i]), int(edges[i + 1])) for i in range(n)]
+    have_clock = frame_ts is not None and max_seconds > 0 and end - 1 < len(frame_ts)
+    n = -(-total // max_frames) if max_frames > 0 else 1  # ceil
+    if have_clock:
+        span = float(frame_ts[end - 1]) - float(frame_ts[start])
+        n = max(n, int(math.ceil(span / max_seconds)) if span > 0 else 1)
+    n = min(max(n, 1), total)  # never more chunks than frames
+    while True:
+        edges = _chunk_edges(start, end, n, frame_ts if have_clock else None)
+        widest = max(b - a for a, b in zip(edges, edges[1:], strict=False))
+        if max_frames <= 0 or widest <= max_frames or n >= total:
+            break
+        n += 1
+    return [(edges[i], edges[i + 1]) for i in range(n)]
 
 
 def _poses_in_chunk(seg: Segment, n_chunks: int) -> int:
@@ -157,12 +227,14 @@ def windows_for_scene(
     n_frames: int,
     has_transforms: bool,
     max_frames: int = DEFAULT_MAX_FRAMES,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
 ) -> list[Window]:
     """Enumerate every window a scene offers, ground truth first.
 
     ``frame_ts`` is the per-frame timestamp array (``data_ts.txt``). Without it
     frames cannot be matched to segments at all, so only the whole-scene
-    fallback windows are produced.
+    fallback windows are produced -- and, having no clock, they are cut on the
+    frame ceiling alone.
     """
     windows: list[Window] = []
 
@@ -172,7 +244,7 @@ def windows_for_scene(
             hi = int(np.searchsorted(frame_ts, hi_ts, side="right"))
             if hi - lo < MIN_WINDOW_FRAMES:
                 continue
-            chunks = _chunk_ranges(lo, hi, max_frames)
+            chunks = _chunk_ranges(lo, hi, max_frames, frame_ts, max_seconds)
             for ci, (cs, ce) in enumerate(chunks):
                 suffix = f".{ci}" if len(chunks) > 1 else ""
                 label = f"Segment {seg.index}"
@@ -208,7 +280,7 @@ def windows_for_scene(
     playable = _playable_frames(frame_ts, n_frames)
     if not windows and playable >= MIN_WINDOW_FRAMES:
         source = "transforms" if has_transforms else "none"
-        chunks = _chunk_ranges(0, playable, max_frames)
+        chunks = _chunk_ranges(0, playable, max_frames, frame_ts, max_seconds)
         for ci, (cs, ce) in enumerate(chunks):
             suffix = f".{ci}" if len(chunks) > 1 else ""
             label = "Whole scene, wheel odometry" if source == "transforms" else "Whole scene, no pose"

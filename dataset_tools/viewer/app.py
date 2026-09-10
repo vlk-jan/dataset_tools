@@ -46,7 +46,14 @@ from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot
 from .scene_page import build_scene_page, map_card
 from .segment_page import build_segment_page
 from .segment_page import find as find_segment
-from .windows import describe_reason, frame_window_key, neighbour_windows
+from .windows import (
+    DEFAULT_MAX_FRAMES,
+    DEFAULT_MAX_SECONDS,
+    Window,
+    describe_reason,
+    frame_window_key,
+    neighbour_windows,
+)
 from .wire import render_viewer_page, scene_document, write_static_bundle
 
 
@@ -135,9 +142,16 @@ def _simview_version() -> str:
 class ViewerState:
     """Shared, per-process state: the dataset root, caches and build locks."""
 
-    def __init__(self, root: DatasetRoot, max_frames: int, cache_scenes: int = 4) -> None:
+    def __init__(
+        self,
+        root: DatasetRoot,
+        max_frames: int,
+        max_seconds: float = DEFAULT_MAX_SECONDS,
+        cache_scenes: int = 4,
+    ) -> None:
         self.root = root
         self.max_frames = max_frames
+        self.max_seconds = max_seconds
         self._access: dict[str, SceneAccess] = {}
         self._access_order: list[str] = []
         self._cache_scenes = cache_scenes
@@ -165,7 +179,8 @@ class ViewerState:
 
 def create_app(
     root_path: str | Path,
-    max_frames: int = 1500,
+    max_frames: int = DEFAULT_MAX_FRAMES,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
     cache_dir: str | Path | None = None,
     notes_dir: str | Path | None = None,
     notes: bool = True,
@@ -173,7 +188,7 @@ def create_app(
     clear_cache: bool = False,
 ) -> FastAPI:
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
-    state = ViewerState(root, max_frames=max_frames)
+    state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds)
     # Resolved once: the pages report where notes go and why they cannot be
     # written when they cannot, and probing that per request would put a write
     # on the hot path of an otherwise read-only server.
@@ -285,7 +300,7 @@ def create_app(
         page: int = Query(0, ge=0),
     ):
         access = _access_or_404(state, scene_id)
-        windows = await run_in_threadpool(access.windows, state.max_frames)
+        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
         # `_scene_details` is deliberately NOT computed here: the page renders
         # none of it (the four cards below carry the same facts, read through a
         # memory map instead), and asking for it loaded joint_states.npy,
@@ -338,7 +353,7 @@ def create_app(
         if found is None:
             raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
         position, seg = found
-        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames)
+        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames, state.max_seconds)
         lo, hi = detail["frames"]
         frames = await run_in_threadpool(_frame_page, access, page, (lo, hi))
         scene_notes = await run_in_threadpool(notes_store.list, scene_id)
@@ -375,11 +390,11 @@ def create_app(
         n_frames = access.probe.n_frames
         if index < 0 or (n_frames and index >= n_frames):
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
-        details = await run_in_threadpool(_frame_details, access, index, state.max_frames)
+        details = await run_in_threadpool(_frame_details, access, index, state.max_frames, state.max_seconds)
         # A frame past the end of data_ts.txt has no clock to sit on, so there
         # is no single-frame window to build for it; offering the button anyway
         # led straight to a 500.
-        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames)
+        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames, state.max_seconds)
         # Where this frame was, when the recording says: the scene's track with
         # a marker on it. None without gps.npy, and the page then has no map.
         frame_map = await run_in_threadpool(map_card, access, None, index)
@@ -401,7 +416,7 @@ def create_app(
     @app.get("/view/{scene_id}/{window_key}", response_class=HTMLResponse)
     async def viewer_page(request: Request, scene_id: str, window_key: str):
         access = _access_or_404(state, scene_id)
-        window = await run_in_threadpool(access.window, window_key, state.max_frames)
+        window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
         if window is None:
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
         if not simview_ok:
@@ -411,7 +426,7 @@ def create_app(
         bundle_key = _bundle_key(scene_id, window_key, opts)
         # The windows either side of this one, so the panel can page through a
         # scene's segments without going back to the scene page each time.
-        windows = await run_in_threadpool(access.windows, state.max_frames)
+        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
         prev_window, next_window = neighbour_windows(windows, window)
         # ?frame=N -- arrived here from that frame's page, so open the playhead
         # on it instead of at the start of the window.
@@ -493,7 +508,7 @@ def create_app(
     @app.get("/api/scene/{scene_id}")
     async def api_scene(scene_id: str):
         access = _access_or_404(state, scene_id)
-        windows = await run_in_threadpool(access.windows, state.max_frames)
+        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
         details = await run_in_threadpool(_scene_details, access)
         return {
             "scene": scene_id,
@@ -509,7 +524,7 @@ def create_app(
         if found is None:
             raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
         position, seg = found
-        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames)
+        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames, state.max_seconds)
         return {
             "scene": scene_id,
             "segment": {
@@ -702,7 +717,9 @@ def create_app(
         # The same test _ensure_bundle uses. Reporting "ready" for a bundle
         # written by an older viewer would promise a fetch that in fact blocks
         # on a full rebuild.
-        return {"ready": _bundle_is_current(path), "path": str(path)}
+        access = _access_or_404(state, scene_id)
+        window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
+        return {"ready": _bundle_is_current(path, window), "path": str(path)}
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
     async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
@@ -899,8 +916,9 @@ def _options_from_key(opts_key: str) -> BuildOptions:
         return BuildOptions()
 
 
-def _bundle_is_current(dest: Path) -> bool:
-    """Is this cached bundle complete *and* built by today's code?
+def _bundle_is_current(dest: Path, window: Window | None) -> bool:
+    """Is this cached bundle complete, built by today's code, and still this
+    window?
 
     The cache is keyed by what was asked for (scene, window, build options),
     none of which changes when the builder does -- so a bundle written before a
@@ -908,14 +926,28 @@ def _bundle_is_current(dest: Path) -> bool:
     ``meta.json`` happened to have at the time. The payload carries its own
     version (``build.META_VERSION``); anything older is rebuilt rather than
     served. Rebuilding a window costs a couple of seconds, once.
+
+    A window *key* outlives its frame range, which is the other way a cached
+    bundle goes stale: ``seg000.0`` is the first part of segment 0 however many
+    parts there are, so a cache filled under one ``--max-seconds`` holds an
+    entry that a run with another would otherwise serve for a different stretch
+    of the scene. So the range is checked against the window as it is cut now,
+    and ``window=None`` -- a key this scene no longer offers, such as a part of
+    a segment that is no longer split that far -- is never current: there is
+    nothing left for that bundle to be a build of.
     """
+    if window is None:
+        return False
     if not ((dest / "model.json").is_file() and (dest / "meta.json").is_file()):
         return False
     try:
         meta = json.loads((dest / "meta.json").read_text())
     except (OSError, ValueError):
         return False
-    return meta.get("meta_version") == META_VERSION
+    if meta.get("meta_version") != META_VERSION:
+        return False
+    cached = meta.get("window") or {}
+    return (cached.get("frame_start"), cached.get("frame_end")) == (window.frame_start, window.frame_end)
 
 
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
@@ -926,17 +958,19 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
     kick off their own build of the same thing.
     """
     dest = _bundle_path(state, scene_id, window_key, opts_key)
-    if _bundle_is_current(dest):
+    access = _access_or_404(state, scene_id)
+    window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
+    if _bundle_is_current(dest, window):
         return dest
 
     async with state.lock(f"{scene_id}/{window_key}/{opts_key}"):
-        if _bundle_is_current(dest):
+        if _bundle_is_current(dest, window):
             return dest
         opts = _options_from_key(opts_key)
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames)
+            scene, meta = build_scene(state.root, scene_id, window_key, opts, max_frames=state.max_frames, max_seconds=state.max_seconds)
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
@@ -1152,7 +1186,9 @@ def _frame_page(access: SceneAccess, page: int, frame_range: tuple[int, int] | N
     }
 
 
-def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str, Any]:
+def _frame_details(
+    access: SceneAccess, index: int, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS
+) -> dict[str, Any]:
     """Everything the per-frame page states about one frame.
 
     Cheap by construction: two timestamp lookups in arrays already in memory,
@@ -1223,7 +1259,7 @@ def _frame_details(access: SceneAccess, index: int, max_frames: int) -> dict[str
     # The enumerated window this frame sits in: a ground-truth one if there is
     # one, otherwise the whole-scene fallback. This is the "show me the motion
     # around this frame" link, as opposed to the static single-frame view.
-    containing = [w for w in access.windows(max_frames) if w.frame_start <= index < w.frame_end]
+    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
     best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
     if best is not None:
         details["window"] = {

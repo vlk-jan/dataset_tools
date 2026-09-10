@@ -359,3 +359,63 @@ def test_the_attitude_comparison_catches_ground_truth_that_rolls_away(tmp_path):
 
 def test_a_scene_without_gravity_alignment_has_nothing_to_compare_against(tmp_path):
     assert _attitude_of(make_root(tmp_path, frames=12, with_gravity=False)) is None
+
+
+# --------------------------------------------------------------------------
+# sampling budgets against window length
+# --------------------------------------------------------------------------
+
+
+def test_a_short_window_gets_exactly_the_budgets_it_asked_for():
+    """Most windows are short -- the median segment of HELHEST v1.3 is 43
+    frames -- and nothing about them should change."""
+    from dataset_tools.viewer.build import BuildOptions, budgets_for_window
+
+    opts = BuildOptions()
+    assert budgets_for_window(opts, 43) is opts
+    assert budgets_for_window(opts, 1500) is opts
+
+
+def test_a_long_window_samples_it_as_densely_as_a_short_one():
+    """The budgets are fixed counts, so a window twice as long would otherwise
+    splat half as many height maps per second driven and show a visibly poorer
+    terrain than the two windows it replaced."""
+    from dataset_tools.viewer.build import BuildOptions, budgets_for_window
+
+    opts = BuildOptions()
+    long = budgets_for_window(opts, 3000)
+    assert long.max_hm_frames == 2 * opts.max_hm_frames
+    assert long.max_cloud_frames == 2 * opts.max_cloud_frames
+    assert long.max_cloud_points == 2 * opts.max_cloud_points
+
+
+def test_the_budgets_stop_at_the_ceilings_the_ui_offers():
+    """A half-hour segment is twelve times the reference length; the scaling is
+    bounded so its window stops where the option sliders do rather than at
+    whatever the arithmetic produced."""
+    from dataset_tools.viewer.build import BuildOptions, budgets_for_window
+
+    huge = budgets_for_window(BuildOptions(), 17_443)
+    assert huge == budgets_for_window(BuildOptions(), 6000)
+    assert huge.sanitized() == huge
+    # Cells are what the bundle is mostly made of, so they scale more slowly
+    # than the samples do.
+    assert huge.max_terrain_cells == 2 * BuildOptions().max_terrain_cells
+    assert huge.max_hm_frames == 4 * BuildOptions().max_hm_frames
+
+
+def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
+    """The one thing merging two windows really costs: a longer traverse needs
+    more cells at the same resolution, and without a bigger budget ``_make_grid``
+    coarsens instead (0.1 m to 0.2 m across a 163 m drive of v1.3's 0020/0)."""
+    from dataset_tools.viewer.build import BuildOptions, _make_grid, budgets_for_window
+
+    # A 160 m x 30 m traverse: 766k cells at 0.1 m, over the default budget and
+    # inside the scaled one, which is where v1.3's merged windows land.
+    positions = np.stack(
+        [np.linspace(0, 160, 400), np.linspace(0, 30, 400), np.zeros(400)],
+        axis=1,
+    )
+    opts = BuildOptions()
+    assert _make_grid(positions, opts.sanitized()).res > opts.terrain_res
+    assert _make_grid(positions, budgets_for_window(opts, 3000)).res == opts.terrain_res

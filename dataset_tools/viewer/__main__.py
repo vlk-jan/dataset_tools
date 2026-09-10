@@ -7,6 +7,8 @@ import logging
 import sys
 from pathlib import Path
 
+from .windows import DEFAULT_MAX_FRAMES, DEFAULT_MAX_SECONDS
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -21,10 +23,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="bind address (default: %(default)s)")
     parser.add_argument("--port", type=int, default=8080, help="port (default: %(default)s)")
     parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=DEFAULT_MAX_SECONDS,
+        help="seconds per viewing window; longer segments are split into equal parts (default: %(default)s)",
+    )
+    parser.add_argument(
         "--max-frames",
         type=int,
-        default=1500,
-        help="frames per viewing window; longer segments are split (default: %(default)s)",
+        default=DEFAULT_MAX_FRAMES,
+        help=(
+            "frames per viewing window: a backstop under --max-seconds, which is "
+            "the cap that normally decides (default: %(default)s)"
+        ),
     )
     parser.add_argument("--cache-dir", type=Path, default=None, help="where built scenes are cached")
     parser.add_argument(
@@ -79,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app(
         args.root,
         max_frames=args.max_frames,
+        max_seconds=args.max_seconds,
         cache_dir=args.cache_dir,
         notes_dir=args.notes_dir,
         notes=args.notes,

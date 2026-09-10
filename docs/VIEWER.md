@@ -31,7 +31,8 @@ python3.12 -m venv .venv-viewer
 | `root` | the dataset root: the directory holding `0000/`, `0001/`, ... |
 | `--host` | bind address (default `127.0.0.1`; `0.0.0.0` to reach it from another machine) |
 | `--port` | port (default `8080`) |
-| `--max-frames N` | frames per viewing window; longer segments are split into equal parts (default `1500`) |
+| `--max-seconds S` | seconds per viewing window; longer segments are split into parts of equal duration (default `600`) |
+| `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
 | `--cache-dir DIR` | where built scenes are cached (default: a per-root directory under `$XDG_CACHE_HOME/dataset_tools_viewer/`) |
 | `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
@@ -104,9 +105,28 @@ So the unit of viewing is a *window*:
 | `raw` | `transforms.npy` | the whole scene by wheel odometry — continuous, but it drifts |
 | `raw` (no transforms) | none | frames only; the robot stays at the origin |
 
-Segments longer than `--max-frames` (default 1500) are split into consecutive
-parts, so building one window reads a bounded number of files no matter how long
-the scene is.
+Segments longer than `--max-seconds` (default 600) are split into consecutive
+parts, with `--max-frames` (default 12000) as a backstop for a root recorded
+fast enough that 600 s is still too many frames. The parts are equal in
+*duration*, not in frame count: the number of parts is chosen first, so a
+segment 10% over the cap becomes two even halves rather than one full window
+and a stub, and the boundaries are then placed at equal times. Only a
+non-uniform frame clock tells the two apart -- but that is when it matters,
+since frames dropped early in a segment would otherwise push the cut late and
+hand the last part more seconds than the cap allows. Where cutting by time puts
+more frames in one part than the ceiling permits, the part count is raised until
+both caps hold for every part.
+
+The cap counts seconds rather than frames because that is what a longer window
+actually costs. Building one window reads a bounded number of per-frame files
+whatever its length -- `hm_frames` and `cloud_frames` pick a fixed subset -- and
+the bundle grows barely at all: on v1.3's longest segment (0019/0, 29 minutes),
+twelve times the frames cost 1.9x the bytes and no extra build time. What does
+scale is how thinly those fixed samples are spread over the ground driven, which
+is a cost per second, and the budgets are scaled with the window to hold it
+roughly constant (below). Counting frames also meant one cap with two meanings:
+v1.3 holds scenes at 3.2 Hz and at 10 Hz, so the old 1500-frame cap left a 462 s
+window whole in one scene while halving a 180 s segment in the next.
 
 No window reaches past the last line of `data_ts.txt`. A scene's frame count is
 the largest of several counts that can disagree — a directory built in flight
@@ -493,8 +513,11 @@ Dataset roots usually live on contended network storage, so:
 - One window aggregates a bounded number of clouds and height maps -- chosen
   evenly across the window rather than from its start -- and the terrain is
   coarsened rather than clipped when a long traverse would exceed the cell
-  budget. Append a query parameter to the view URL to override a budget for
-  that window:
+  budget. The defaults below are what a ~1500-frame window gets; a longer one
+  scales them up with its frame count (samples up to 4x, terrain cells up to
+  2x) so that it splats as densely per second driven, and stops at the same
+  ceilings the query parameters do. Append a query parameter to the view URL to
+  override a budget for that window:
 
   | Query parameter | Default | Accepted range |
   | --- | --- | --- |

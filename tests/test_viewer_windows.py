@@ -35,9 +35,11 @@ def test_windows_never_span_two_segments():
 
 
 def test_long_segments_are_split_into_even_chunks():
+    """On a uniform clock the two divisions coincide: even in time is even in
+    frames, and the boundary lands in the same place either way."""
     ts = np.arange(1000, dtype=np.float64)
     segs = [loaders.Segment(0, 0.0, 999.0, 1000, "x")]
-    result = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=300)
+    result = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=300, max_seconds=1e9)
     chunks = [w for w in result if w.kind == "segment"]
     assert len(chunks) == 4
     assert all(w.n_frames <= 300 for w in chunks)
@@ -45,6 +47,99 @@ def test_long_segments_are_split_into_even_chunks():
     assert chunks[0].frame_start == 0
     for a, b in zip(chunks, chunks[1:], strict=False):
         assert a.frame_end == b.frame_start
+
+
+def test_the_parts_of_a_split_segment_are_equal_in_time_not_in_frame_count():
+    """The cap is in seconds, so the division is too.
+
+    A clock with frames dropped from its first half: cutting the index range in
+    half would put the boundary late and hand the second window more seconds
+    than the cap allows, which is the thing the cap exists to prevent.
+    """
+    # 200 s at 10 Hz, but only every fourth frame survives the first 100 s.
+    ts = np.concatenate([np.arange(0, 100, 0.4), np.arange(100, 200, 0.1)])
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_seconds=100.0)
+
+    assert len(ws) == 2
+    assert all(w.duration <= 100.0 for w in ws)
+    assert abs(ws[0].duration - ws[1].duration) < 1.0
+    # Which is emphatically not an even split of the frames.
+    assert ws[0].n_frames * 3 < ws[1].n_frames
+
+
+def test_a_hole_in_the_clock_never_makes_an_empty_window():
+    """A time slice can contain no frame at all when the clock has a hole wider
+    than the slice. Every part still has to be something the viewer can build."""
+    ts = np.concatenate([np.arange(0, 10, 0.1), np.arange(600, 610, 0.1)])
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_seconds=100.0)
+
+    assert len(ws) == 7
+    assert all(w.n_frames >= 1 for w in ws)
+    assert sum(w.n_frames for w in ws) == len(ts)
+
+
+def test_the_frame_ceiling_survives_a_division_by_time():
+    """Cutting by time hands each part the frames that fall in its slice, and a
+    burst puts more of them in one part than another -- so the piece count is
+    raised until the ceiling holds for every part, not just on average."""
+    # 300 s: sparse for the first 200, then 100 s of 100 Hz.
+    ts = np.concatenate([np.arange(0, 200, 1.0), np.arange(200, 300, 0.01)])
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_seconds=150.0, max_frames=4000)
+
+    assert len(ws) > 2  # the seconds cap alone asked for two
+    assert all(w.n_frames <= 4000 for w in ws)
+    assert all(w.duration <= 150.0 for w in ws)
+
+
+def test_two_scenes_at_different_frame_rates_are_cut_at_the_same_length():
+    """The cap counts seconds, not frames.
+
+    HELHEST v1.3 holds scenes recorded at 3.2 Hz and at 10 Hz. Counting frames
+    made one cap mean two lengths -- a 462 s window stayed whole in a slow
+    scene while a 180 s segment was halved in a fast one -- which is exactly
+    what a reviewer paging through the windows table sees.
+    """
+    cut = []
+    for hz in (3.2, 10.0):
+        n = int(round(400 * hz))  # 400 s of recording, either way
+        ts = np.arange(n, dtype=np.float64) / hz
+        segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), n, "x")]
+        ws = windows.windows_for_scene(ts, segs, n, has_transforms=False, max_seconds=150.0)
+        assert all(w.duration <= 150.0 + 1.0 for w in ws)
+        cut.append([round(w.duration) for w in ws])
+    assert cut[0] == cut[1] == [133, 133, 133]
+
+
+def test_a_segment_inside_the_cap_is_never_cut():
+    """A 462 s segment at 3.2 Hz -- 1479 frames, over the old 1500-frame cap
+    once the boundary slack is counted -- stays one window."""
+    ts = np.arange(1479, dtype=np.float64) / 3.2
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), 1479, "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False)
+    assert len(ws) == 1 and ws[0].n_chunks == 1
+    assert ws[0].n_frames == 1479
+
+
+def test_the_frame_ceiling_still_bites_on_a_fast_clock():
+    """The seconds cap is the rule, the frame count a backstop under it: a root
+    recorded fast enough puts more frames in one capped window than a
+    trajectory should carry, and that window is cut anyway."""
+    ts = np.arange(20_000, dtype=np.float64) / 200.0  # 200 Hz, 100 s in total
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), 20_000, "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=6000)
+    assert len(ws) == 4  # the seconds cap alone would have left it whole
+    assert all(w.n_frames <= 6000 for w in ws)
+
+
+def test_a_scene_with_no_clock_is_cut_on_frames_alone():
+    """No ``data_ts.txt`` means a synthesised clock upstream, and here no clock
+    at all -- there is nothing for a seconds cap to measure, so the fallback
+    window falls back to the frame ceiling."""
+    ws = windows.windows_for_scene(None, [], 900, has_transforms=True, max_frames=300)
+    assert [w.n_frames for w in ws] == [300, 300, 300]
 
 
 def test_a_frame_just_before_a_segment_starts_still_belongs_to_it():
@@ -191,6 +286,34 @@ def test_every_offered_window_actually_builds(tmp_path):
         assert c.get(f"/view/0000/{w['key']}").status_code == 200, w["key"]
 
 
+def test_a_cached_bundle_is_not_served_for_a_window_that_has_been_recut(tmp_path):
+    """A window *key* outlives its frame range.
+
+    ``raw.0`` is the first part of the scene however many parts there are, so a
+    cache filled under one cap holds an entry that a run with another cap would
+    otherwise serve for a different stretch of the scene -- the view would play
+    frames the panel does not think it is showing.
+    """
+    pytest.importorskip("simview")
+    pytest.importorskip("torch")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+    from dataset_tools.viewer.build import BuildOptions
+
+    root_path = make_root(tmp_path, frames=8, segments=False, with_transforms=True)
+    cache = tmp_path / "cache"
+    url = f"/api/data/0000/raw.0/{BuildOptions().cache_key()}/stamp/meta.json"
+
+    first = TestClient(create_app(root_path, max_frames=2, cache_dir=cache)).get(url)
+    assert first.json()["window"]["frame_end"] == 2
+
+    # Same key, same cache, a cap that cuts the scene differently.
+    second = TestClient(create_app(root_path, max_frames=3, cache_dir=cache)).get(url)
+    assert second.json()["window"]["frame_end"] == 3
+    assert second.json()["frames"] == [0, 1, 2]
+
+
 # --------------------------------------------------------------------------
 # how densely a segment is anchored, and saying so
 # --------------------------------------------------------------------------
@@ -215,7 +338,7 @@ def test_a_split_segment_keeps_its_pose_rate(tmp_path):
     """Chunking a long segment must not make it look sparser than it is."""
     ts = np.arange(100, dtype=np.float64) * 0.1
     segs = [loaders.Segment(0, ts[0], ts[-1], n_poses=100, reason="x")]
-    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=30)
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=30, max_seconds=1e9)
     assert len(ws) == 4
     whole = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False)[0]
     for w in ws:

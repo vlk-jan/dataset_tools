@@ -28,7 +28,7 @@ from .build import SceneAccess
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
 from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
-from .windows import Window, describe_reason, segment_bounds
+from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, segment_bounds
 
 logger = logging.getLogger("dataset_tools.viewer.segment_page")
 
@@ -250,12 +250,20 @@ def hero_thumbs(access: SceneAccess, frames: tuple[int, int]) -> list[dict[str, 
     return out
 
 
-def segment_windows(access: SceneAccess, seg: Segment, max_frames: int) -> list[Window]:
+def segment_windows(
+    access: SceneAccess, seg: Segment, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS
+) -> list[Window]:
     """The buildable windows this segment offers -- its chunks, in order."""
-    return [w for w in access.windows(max_frames) if w.kind == "segment" and w.segment_index == seg.index]
+    return [w for w in access.windows(max_frames, max_seconds) if w.kind == "segment" and w.segment_index == seg.index]
 
 
-def build_segment_page(access: SceneAccess, position: int, seg: Segment, max_frames: int) -> dict[str, Any]:
+def build_segment_page(
+    access: SceneAccess,
+    position: int,
+    seg: Segment,
+    max_frames: int,
+    max_seconds: float = DEFAULT_MAX_SECONDS,
+) -> dict[str, Any]:
     """Everything the segment page renders, cached on the scene handle."""
 
     def work() -> dict[str, Any]:
@@ -268,11 +276,11 @@ def build_segment_page(access: SceneAccess, position: int, seg: Segment, max_fra
             "cards": [c for c in cards if c],
             # Narrowed to this segment: the drawn track, and the numbers beside it.
             "map": map_card(access, segment=seg),
-            "windows": segment_windows(access, seg, max_frames),
+            "windows": segment_windows(access, seg, max_frames, max_seconds),
             "prev": segments[position - 1] if position > 0 else None,
             "next": segments[position + 1] if position + 1 < len(segments) else None,
             "position": position,
             "n_segments": len(segments),
         }
 
-    return access.cached(f"segment_page_{seg.index}_{max_frames}", work)
+    return access.cached(f"segment_page_{seg.index}_{max_frames}_{max_seconds}", work)
