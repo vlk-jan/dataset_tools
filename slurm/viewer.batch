@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=8:00:00
-#SBATCH --partition=cpu
+#SBATCH --partition=cpu,amd
 #SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/viewer_%j.out
 
 # Run the dataset viewer on a compute node instead of the login node, and reach
@@ -21,9 +21,10 @@
 #
 # and the forward's endpoint is resolved on the node, inside the ssh channel --
 # nothing has to be reachable between login3 and the node by plain TCP. This
-# works on any cpu* partition (they share nodes n01-n33); pick by walltime:
-# cpufast 4 h, cpu 1 d, cpulong 3 d, cpuextralong 42 d. Override on the command
-# line, e.g. `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`.
+# works on any cpu* or amd* partition; the default names both, so the job
+# starts on whichever has a node free. Pick by walltime: cpufast 4 h, cpu 1 d,
+# cpulong 3 d, cpuextralong 42 d. Override on the command line, e.g.
+# `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`.
 #
 # The viewer binds 127.0.0.1 deliberately: the cluster network is shared, and
 # the tunnel does not need the port exposed on it.
