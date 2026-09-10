@@ -135,6 +135,12 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
         regen = scene / "regen"
         if src_traj == scene / "odometry.txt" and not regen.is_symlink():
             regen.mkdir(exist_ok=True)
+            for name in (BACKUP_TRAJ, BACKUP_SEGS):
+                # A derived root links its parent's regen/ files; copying THROUGH
+                # such a link would overwrite the parent's history. Unlink first
+                # so the backup is this root's own file.
+                if (regen / name).is_symlink():
+                    (regen / name).unlink()
             shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)
             shutil.copy2(scene / "odometry_segments.txt", regen / BACKUP_SEGS)
         write_trajectory(
