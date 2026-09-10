@@ -12,6 +12,10 @@ root on RCI.
 > call, is not committed on any branch; it lived only in that checkout. Main
 > carries the post-processing (`scripts/filter_segments.py`,
 > `merge_v11_fill.py`, `relabel_segments.py`) and the extraction.
+>
+> Replaying a single hole rather than a whole scene is a separate pipeline with
+> its own driver and acceptance step: see
+> [GT_HOLE_REPLAY.md](GT_HOLE_REPLAY.md).
 
 ## Why
 

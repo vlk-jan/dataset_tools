@@ -364,7 +364,10 @@ the viewer's own virtualenv:
 ## Dataset
 
 See [docs/DATA.md](docs/DATA.md) for the dataset itself — recordings, contents
-and statistics.
+and statistics. [docs/ODOMETRY_REGEN.md](docs/ODOMETRY_REGEN.md) covers
+regenerating the ground truth and
+[docs/GT_HOLE_REPLAY.md](docs/GT_HOLE_REPLAY.md) recovering the stretches where
+the estimator published nothing.
 
 ## License
 
