@@ -143,6 +143,7 @@ lidar works.
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
+| `--cam_time_offset S` | seconds added to every camera header stamp, a per-rig calibration of the camera's stamping; negative when the camera stamps late (default `0.0`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `-v` | debug logging |
 
@@ -186,8 +187,8 @@ index-aligned.
 | `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows and all-zero points dropped, so `N` varies |
 | `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair |
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps |
-| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity) |
-| `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at each lidar stamp, yaw dropped |
+| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
+| `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
 | `camera_intrinsics.txt` | 3 x 3 | text `float64` | pixels | `K` from the matching `camera_info` topic |
 | `camera_info.yaml` | — | YAML | — | the full `CameraInfo` (size, distortion model + coefficients, `K`, `R`, `P`); v1 scenes have only `camera_intrinsics.txt` |
 | `T_cam_to_base.txt` | 4 x 4 | text `float64` | m, SE(3) | `p_base = T @ p_cam_optical`, from the static TF; v1 scenes instead carry `T_cam_to_lidar.txt` in the raw lidar frame |
@@ -330,6 +331,32 @@ the viewer's own virtualenv:
   `/joint_setpoints` (`joint_setpoints.npy`).
 - **Cloud dtype.** The extractor writes `float32`; the previously published
   HELHEST dataset stores `float64` clouds. The validator accepts both.
+- **One clock per frame (fixed 2026-09-09).** `transforms.npy` and
+  `gravity_align.npy` are now sampled at `data_ts` -- the camera/lidar midpoint
+  the frame index actually stands for. They used to be sampled at the camera and
+  the lidar stamps respectively, so a consumer reading frame `k` from the three
+  files got three slightly different instants (a median 3.9 ms apart on the
+  2026-09 recordings, up to 67 ms).
+- **Poses are interpolated, not snapped (fixed 2026-09-09).** Nearest-neighbour
+  lookup onto a 10 Hz stream quantised every frame by up to 50 ms, which is 5 cm
+  at 1 m/s. `interpolate_poses()` now lerps the translation and SLERPs the
+  rotation, falling back to the nearest sample outside the sample range, across
+  a gap over 0.5 s, or across a bracket implying more than 4 m/s -- a GNSS
+  teleport, where blending the two sides would fabricate a pose the robot never
+  held. The speed gate matches the one `write_ground_truth()` breaks segments
+  on, so the two files agree about which steps are real motion. The count of
+  interpolated versus fallen-back frames is logged per scene.
+- **The camera may stamp late.** On the 2026-09 Odin1 recordings the poses run
+  ahead of the imagery by roughly 0.1 s (measured -86 ms and -211 ms in the two
+  scenes where a visual-yaw correlation passed its own injected-delay
+  self-test). The camera's header sits ~50 ms upstream of the bag receive time
+  with a 30-52 ms spread, against ~18 ms for the lidar and -4..-8 ms for the
+  Fixposition, whose header is an epoch of validity. `--cam_time_offset` applies
+  a per-rig correction but **defaults to 0.0**: the magnitude is uncertain to
+  well within its own size, and whether the lidar shares the offset is
+  unresolved -- 2D scan matching against the poses could not measure it, because
+  these clouds are dominated by ground and low vegetation and point-to-point ICP
+  slides to zero rotation.
 - **Out-of-order bags.** Timestamps are sorted before synchronisation. If a bag
   is badly out of order for other reasons, `sort_bag.py` rewrites it sorted by
   header stamp.

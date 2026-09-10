@@ -290,6 +290,65 @@ def test_gps_is_extracted_from_the_fused_navsatfix_topic(bags: Path, tmp_path: P
     assert np.isnan(gps[-1, 5:8]).all()
 
 
+def test_cam_time_offset_shifts_the_frame_clock(bags: Path, tmp_path: Path):
+    """The offset is applied in both passes, so no frame is lost to it.
+
+    Pass 2 recomputes the camera stamps from the raw bytes and looks them up in
+    a set built in pass 1; if the two passes disagreed by the offset, every
+    image lookup would miss and the scene would come out with no images at all.
+    0.01 s is small enough not to re-pair any camera frame with a different
+    sweep, so the only visible change is the frame clock, which moves by half
+    the offset because data_ts.txt is the camera/lidar midpoint.
+    """
+    plain, shifted = tmp_path / "plain", tmp_path / "shifted"
+    assert ed.main([str(bags), str(plain), *COMMON]) == 0
+    assert ed.main([str(bags), str(shifted), *COMMON, "--cam_time_offset", "0.01"]) == 0
+
+    a = np.loadtxt(plain / "0000" / "data_ts.txt")
+    b = np.loadtxt(shifted / "0000" / "data_ts.txt")
+    assert len(a) == len(b)
+    # atol: one ulp of float64 at a 1.7e9 epoch is ~4e-7, well above the
+    # default relative tolerance on a 0.005 difference.
+    assert np.allclose(b - a, 0.005, atol=1e-6)
+
+    # every frame still has its image and its cloud: the pass-2 lookups hit
+    assert ed.scene_frame_counts(shifted / "0000") == ed.scene_frame_counts(plain / "0000")
+    assert np.allclose(np.loadtxt(shifted / "0000" / "pcd_ts.txt"), np.loadtxt(plain / "0000" / "pcd_ts.txt"))
+
+
+def test_the_default_run_is_unchanged_by_the_offset_flag(bags: Path, tmp_path: Path):
+    """0.0 must be the identity on the float, not merely close to it."""
+    plain, zero = tmp_path / "plain", tmp_path / "zero"
+    assert ed.main([str(bags), str(plain), *COMMON]) == 0
+    assert ed.main([str(bags), str(zero), *COMMON, "--cam_time_offset", "0"]) == 0
+    for name in ("data_ts.txt", "pcd_ts.txt"):
+        assert (zero / "0000" / name).read_bytes() == (plain / "0000" / name).read_bytes()
+
+
+def test_a_null_island_fix_is_dropped():
+    """lat = lon = 0 is never a fix, and the status field cannot say so.
+
+    A Fixposition that has lost its solution publishes zeros with
+    ``position_covariance_type`` UNKNOWN while ``status`` still reads
+    ``GBAS_FIX``, so the row has to be rejected on the position itself.
+    """
+
+    class _Status:
+        status = 2  # GBAS_FIX, exactly as the broken messages claim
+
+    class _Fix:
+        status = _Status()
+        position_covariance = [0.0] * 9
+        position_covariance_type = 0
+
+        def __init__(self, lat, lon, alt=0.0):
+            self.latitude, self.longitude, self.altitude = lat, lon, alt
+
+    assert ed.gps_row(1.0, _Fix(0.0, 0.0)) is None
+    row = ed.gps_row(1.0, _Fix(50.109, 14.417, 227.0))
+    assert row is not None and row[1] == 50.109
+
+
 def test_gps_off_writes_no_file(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
     assert ed.main([str(bags), str(out), *COMMON, "--gps", "off"]) == 0

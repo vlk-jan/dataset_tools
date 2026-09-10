@@ -233,6 +233,15 @@ def gps_row(t: float, msg) -> np.ndarray | None:
     lat, lon = float(msg.latitude), float(msg.longitude)
     if not (math.isfinite(lat) and math.isfinite(lon)):
         return None
+    # A Fixposition that has lost its solution publishes lat = lon = alt = 0
+    # with position_covariance_type UNKNOWN -- while status still claims
+    # GBAS_FIX, so the status field cannot be the filter. Exact null island is
+    # never a fix a ground robot holds. Seen in the 2026-09-08 recordings:
+    # 466 such rows in scene 0010 and 29 in 0014, each run spanning exactly one
+    # ground-truth segment (the solution resets, the ENU pose teleports and the
+    # attitude flips at the same moment).
+    if lat == 0.0 and lon == 0.0:
+        return None
     cov = np.asarray(msg.position_covariance, dtype=np.float64).ravel()
     unknown = int(getattr(msg, "position_covariance_type", 0)) == 0
     diag = np.full(3, np.nan) if unknown or cov.size < 9 else cov[[0, 4, 8]]
@@ -294,6 +303,95 @@ def nearest_idx(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return np.zeros(len(a), dtype=int)
     pos = np.clip(np.searchsorted(b, a), 1, len(b) - 1)
     return np.where(a - b[pos - 1] <= b[pos] - a, pos - 1, pos)
+
+
+def quaternion_from_matrix(R) -> np.ndarray:
+    """Unit quaternion ``(x, y, z, w)`` of a 3x3 rotation (Shepperd's method).
+
+    The inverse of :func:`quaternion_matrix`. Branching on the largest diagonal
+    term keeps the divisor away from zero for every rotation, including the
+    180-degree cases where the naive trace formula loses all precision.
+    """
+    m = np.asarray(R, dtype=float)[:3, :3]
+    tr = m[0, 0] + m[1, 1] + m[2, 2]
+    if tr > 0.0:
+        d = math.sqrt(tr + 1.0) * 2.0
+        return np.array([(m[2, 1] - m[1, 2]) / d, (m[0, 2] - m[2, 0]) / d, (m[1, 0] - m[0, 1]) / d, 0.25 * d])
+    if m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
+        d = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2.0
+        return np.array([0.25 * d, (m[0, 1] + m[1, 0]) / d, (m[0, 2] + m[2, 0]) / d, (m[2, 1] - m[1, 2]) / d])
+    if m[1, 1] > m[2, 2]:
+        d = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2.0
+        return np.array([(m[0, 1] + m[1, 0]) / d, 0.25 * d, (m[1, 2] + m[2, 1]) / d, (m[0, 2] - m[2, 0]) / d])
+    d = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
+    return np.array([(m[0, 2] + m[2, 0]) / d, (m[1, 2] + m[2, 1]) / d, 0.25 * d, (m[1, 0] - m[0, 1]) / d])
+
+
+def slerp(q0: np.ndarray, q1: np.ndarray, u: float) -> np.ndarray:
+    """Spherical linear interpolation between two ``(x, y, z, w)`` quaternions."""
+    q0 = np.asarray(q0, dtype=float)
+    q1 = np.asarray(q1, dtype=float)
+    dot = float(np.dot(q0, q1))
+    if dot < 0.0:  # same rotation, opposite hemisphere: take the short way round
+        q1, dot = -q1, -dot
+    if dot > 0.9995:  # nearly parallel; slerp is ill-conditioned, lerp is exact enough
+        q = q0 + u * (q1 - q0)
+        return q / np.linalg.norm(q)
+    theta = math.acos(max(-1.0, min(1.0, dot))) * u
+    q2 = q1 - q0 * dot
+    q2 /= np.linalg.norm(q2)
+    return q0 * math.cos(theta) + q2 * math.sin(theta)
+
+
+def interpolate_poses(
+    query_ts: np.ndarray,
+    sample_ts: np.ndarray,
+    poses: np.ndarray,
+    max_gap: float = 0.5,
+    max_speed: float = 4.0,
+) -> tuple[np.ndarray, int]:
+    """Pose at each query time: linear in translation, SLERP in rotation.
+
+    Nearest-neighbour lookup onto a 10 Hz stream quantises every frame by up to
+    half a sample period -- 50 ms, which is 5 cm at 1 m/s. Interpolating removes
+    that, but only where interpolating means something. The nearest sample is
+    used instead when the query is outside the sample range, when the bracketing
+    samples are more than ``max_gap`` apart, or when the bracket implies a speed
+    above ``max_speed`` -- a GNSS teleport, where blending the two sides would
+    fabricate a pose the robot never held. ``max_speed`` matches the gate
+    :func:`write_ground_truth` breaks segments on, so the two agree about which
+    steps are real motion.
+
+    Returns the poses and how many of them were interpolated rather than copied.
+    """
+    query = np.asarray(query_ts, dtype=float)
+    ts = np.asarray(sample_ts, dtype=float)
+    poses = np.asarray(poses, dtype=float)
+    out = np.empty((len(query), 4, 4))
+    nearest = nearest_idx(query, ts)
+    if len(ts) < 2:
+        out[:] = poses[nearest]
+        return out, 0
+
+    hi = np.clip(np.searchsorted(ts, query), 1, len(ts) - 1)
+    n_interp = 0
+    for k, q in enumerate(query):
+        j = int(hi[k])
+        i = j - 1
+        dt = ts[j] - ts[i]
+        step = float(np.linalg.norm(poses[j][:3, 3] - poses[i][:3, 3]))
+        if not (ts[i] <= q <= ts[j]) or not (0.0 < dt <= max_gap) or step > max_speed * dt:
+            out[k] = poses[nearest[k]]
+            continue
+        u = (q - ts[i]) / dt
+        T = np.eye(4)
+        T[:3, 3] = poses[i][:3, 3] + u * (poses[j][:3, 3] - poses[i][:3, 3])
+        qi = quaternion_from_matrix(poses[i])
+        qj = quaternion_from_matrix(poses[j])
+        T[:3, :3] = quaternion_matrix(slerp(qi, qj, u))[:3, :3]
+        out[k] = T
+        n_interp += 1
+    return out, n_interp
 
 
 def sync_timestamps(
@@ -539,6 +637,9 @@ def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
 
 def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     camera_topic, lidar_topic = args.cam, args.lidar
+    # Added to every camera header stamp, in both passes. 0.0 is the identity on
+    # the float, so the default run is bit-for-bit what it was before the flag.
+    cam_offset = float(getattr(args, "cam_time_offset", 0.0) or 0.0)
     result = SceneResult(index=-1, bag=bag_path.name, status=STATUS_OK)
 
     # Pre-cache connections
@@ -613,7 +714,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
                     stamp_only.discard(id(conn))
 
         if conn.topic == camera_topic:
-            cam_timestamps.append(t)
+            cam_timestamps.append(t + cam_offset)
         elif conn.topic == lidar_topic:
             lidar_timestamps.append(t)
         elif conn.topic in (args.odom, args.imu):
@@ -675,8 +776,14 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
     pcd_ts_to_idx = {ts: i for i, ts in enumerate(valid_pcd_ts)}
 
+    # One clock per frame. transforms.npy and gravity_align.npy used to be
+    # sampled at the camera and the lidar stamps respectively, while data_ts.txt
+    # was their midpoint -- three clocks behind one frame index, which is not
+    # what a consumer reading "frame k" from all three expects.
+    frame_ts = (valid_cam_ts + valid_pcd_ts) / 2
+
     # Save metadata
-    np.savetxt(scene_dir / "data_ts.txt", (valid_cam_ts + valid_pcd_ts) / 2)
+    np.savetxt(scene_dir / "data_ts.txt", frame_ts)
     np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts)
 
     for name, rows in [
@@ -756,13 +863,17 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     for conn, _, raw in reader.messages([cam_conn, lidar_conn]):
         # Same stamp arithmetic as pass 1, so the set lookups below hit exactly.
+        # cam_offset is added on both sides; at its 0.0 default that is the
+        # identity on the float, so the lookups are bit-for-bit as before.
+        is_cam = conn.topic == camera_topic
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, float("nan"))
-        elif t not in (cam_set if conn.topic == camera_topic else pcd_set):
-            continue  # not a synchronised frame: never decoded at all
+            t = header_stamp(msg, float("nan")) + (cam_offset if is_cam else 0.0)
         else:
+            t += cam_offset if is_cam else 0.0
+            if t not in (cam_set if is_cam else pcd_set):
+                continue  # not a synchronised frame: never decoded at all
             msg = reader.deserialize(raw, conn.msgtype)
 
         if conn.topic == camera_topic and t in cam_set:
@@ -801,11 +912,18 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             LOG.warning("%s: too few odometry samples for ground truth", bag_path.name)
 
     if odom_data:
-        # The odometry sample nearest each camera stamp, relative to frame 0.
+        # The odometry interpolated onto the frame clock, relative to frame 0.
         odom_data.sort(key=lambda x: x[0])
         odom_ts = np.array([x[0] for x in odom_data])
         odom_poses = np.array([x[1] for x in odom_data])
-        matched = odom_poses[nearest_idx(valid_cam_ts, odom_ts)]
+        matched, n_interp = interpolate_poses(frame_ts, odom_ts, odom_poses)
+        LOG.info(
+            "%s: transforms.npy -- %d/%d interpolated, %d fell back to the nearest pose (gap or teleport)",
+            bag_path.name,
+            n_interp,
+            len(frame_ts),
+            len(frame_ts) - n_interp,
+        )
         rel_transforms = anchor_to_first(matched)
         rel_transforms[0] = np.eye(4)
         np.save(scene_dir / "transforms.npy", rel_transforms)
@@ -818,12 +936,14 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Process gravity alignment
     if imu_data:
-        # The orientation sample nearest each lidar stamp; yaw is dropped.
+        # The orientation interpolated onto the frame clock; yaw is dropped.
         imu_data.sort(key=lambda x: x[0])
         imu_ts = np.array([x[0] for x in imu_data])
-        gravity_aligns = np.empty((len(valid_pcd_ts), 3, 3))
-        for k, i in enumerate(nearest_idx(valid_pcd_ts, imu_ts)):
-            roll, pitch = roll_pitch_from_matrix(imu_data[i][1])
+        imu_mats = np.array([x[1] for x in imu_data])
+        oriented, _ = interpolate_poses(frame_ts, imu_ts, imu_mats)
+        gravity_aligns = np.empty((len(frame_ts), 3, 3))
+        for k, M in enumerate(oriented):
+            roll, pitch = roll_pitch_from_matrix(M)
             gravity_aligns[k] = euler_matrix(roll, pitch, 0.0)[:3, :3]
         np.save(scene_dir / "gravity_align.npy", gravity_aligns)
     else:
@@ -837,7 +957,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     (scene_dir / SENTINEL_FILE).write_text(f"{bag_path.name}\n")
 
     result.frames = int(len(valid_cam_ts))
-    result.start_time = float((valid_cam_ts[0] + valid_pcd_ts[0]) / 2)
+    result.start_time = float(frame_ts[0])
     return result
 
 
@@ -1029,6 +1149,20 @@ def build_parser() -> argparse.ArgumentParser:
         "'auto' takes the NavSatFix topic that carries messages, preferring a "
         "fused solution (/fixposition/odometry_llh) over a single antenna's "
         "raw fix; 'off' writes no GPS.",
+    )
+    parser.add_argument(
+        "--cam_time_offset",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="Added to every camera header stamp before synchronisation, as a "
+        "per-rig calibration of the camera's stamping. Use a NEGATIVE value "
+        "when the camera stamps late (its header refers to a moment after the "
+        "one the pixels show), which makes the poses appear to run ahead of the "
+        "imagery. Measured at roughly -0.1 s on the 2026-09 Odin1 recordings, "
+        "but left at 0.0: the magnitude is uncertain to well within its own "
+        "size, and whether the lidar shares the offset is unresolved. Shifts "
+        "data_ts.txt and the camera/lidar pairing, so it changes every file",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
     parser.add_argument(
