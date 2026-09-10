@@ -278,8 +278,7 @@ _REASON_TEXT = {
 #: because ...".
 _FILL_TEXT = {
     "v11_fill": "filled from v1.1 ground truth, through the same quality gate",
-    "regen_fill": "filled by replaying that stretch of the bag through the estimator, "
-    "through the same quality gate",
+    "regen_fill": "filled by replaying that stretch of the bag through the estimator, through the same quality gate",
 }
 
 #: Tags a reason accumulates after a ``+``: what was done to the poses after
@@ -287,6 +286,14 @@ _FILL_TEXT = {
 _MARK_TEXT = {
     "refined": "refined against the wheel odometry",
     "coverage_guard": "spliced from the earlier root, which covered this stretch",
+    "joined": "joined across a standstill",
+}
+
+#: Where the pieces of a joined segment came from (``+joined:native,v11_fill``).
+_SOURCE_TEXT = {
+    "native": "this root's own estimator run",
+    "v11_fill": "the v1.1 fill",
+    "regen_fill": "a replay of the bag",
 }
 
 
@@ -307,14 +314,28 @@ def describe_reason(reason: str) -> str:
     return f"{described} ({extra})" if described and extra else (described or reason)
 
 
-def describe_marks(reason: str) -> list[str]:
+def describe_marks(reason: str, brief: bool = False) -> list[str]:
     """The ``+`` tails of a reason, translated; ``[]`` when it carries none.
 
     Separate from :func:`describe_reason` so a page can count them across a
     scene ("10 of them refined ...") instead of repeating a sentence that is
-    identical but for its tail.
+    identical but for its tail. ``brief`` drops the detail that varies from one
+    segment to the next, so those counts group instead of splintering.
     """
-    return [_MARK_TEXT.get(m, m) for m in reason.split("+")[1:] if m]
+    return [_mark_text(m, brief) for m in reason.split("+")[1:] if m]
+
+
+def _mark_text(mark: str, brief: bool = False) -> str:
+    """One ``+`` tail, translated. ``joined`` also carries the sources it joined."""
+    if mark.startswith("joined"):
+        if brief:
+            return _MARK_TEXT["joined"]
+        text = f"{_MARK_TEXT['joined']} the wheels, the live odometry and the IMU all confirm"
+        if ":" not in mark:
+            return text
+        pieces = [_SOURCE_TEXT.get(x, x) for x in mark.split(":", 1)[1].split(",") if x]
+        return f"{text}, out of pieces from {' and '.join(pieces)}"
+    return _MARK_TEXT.get(mark, mark)
 
 
 def _describe_body(body: str) -> str:

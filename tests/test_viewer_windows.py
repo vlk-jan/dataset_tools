@@ -273,3 +273,21 @@ def test_a_reason_tag_is_translated_tag_by_tag():
     # An unknown tag is shown as it is rather than dropped.
     assert d("something_new") == "something_new"
     assert d("") == ""
+
+
+def test_a_joined_segment_says_what_was_joined_and_out_of_what():
+    """v1.5 joins pieces across a proven standstill; the tag names the sources."""
+    d = windows.describe_reason
+    assert "joined across a standstill" in d("filtered:gap+joined")
+    # Pieces from different estimators: the reason keeps only the last piece's
+    # body, so the mark is where a reader learns the segment is a composite.
+    both = d("filtered:pose_jump+joined:native,v11_fill")
+    assert "this root's own estimator run and the v1.1 fill" in both
+    assert "native" not in both and "v11_fill" not in both
+    assert windows.describe_marks("regen_fill:t194+refined+joined") == [
+        "refined against the wheel odometry",
+        "joined across a standstill the wheels, the live odometry and the IMU all confirm",
+    ]
+    # The scene card counts marks across a scene, so it asks for the short form:
+    # the sources vary segment to segment and would splinter every count.
+    assert windows.describe_marks("filtered:gap+joined:native,v11_fill", brief=True) == ["joined across a standstill"]

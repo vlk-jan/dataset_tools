@@ -436,7 +436,7 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         sources = sorted({describe_reason((s.reason or "").split("+")[0]) for s in filled})
         mark_counts: dict[str, int] = {}
         for s in filled:
-            for m in describe_marks(s.reason or ""):
+            for m in describe_marks(s.reason or "", brief=True):
                 mark_counts[m] = mark_counts.get(m, 0) + 1
         detail = "; ".join(sources) if sources else "filled from another root through the same quality gate"
         for text, n in sorted(mark_counts.items(), key=lambda kv: -kv[1]):
