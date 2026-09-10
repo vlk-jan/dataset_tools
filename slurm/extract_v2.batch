@@ -1,0 +1,101 @@
+#!/bin/bash
+#SBATCH --job-name=helhest_v2
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=6:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/v2_%A_%a.out
+#
+# HELHEST v2 (new rig: Odin1 + Fixposition) extraction, ONE BAG PER ARRAY TASK,
+# staged entirely on node-local NVMe so the shared NFS is touched only for the
+# sif, the repo, and one final rsync of the finished scene. Same shape as
+# slurm/regen_scene.batch, minus the FAST-LIO stage: the new rig ships its own
+# ground truth (/fixposition/odometry_enu), so the extractor's defaults are
+# already right and no --lidar_extrinsic is needed - the Odin mount extrinsic
+# is in tf_static from 2026-09-02 onwards (docs/NEW_RIG_READINESS.md §4).
+#
+#   sbatch --array=0-8%4  slurm/extract_v2.batch [out_root]     # 26-09-02
+#   sbatch --array=9-16%4 slurm/extract_v2.batch [out_root]     # 26-09-08
+#
+# Array index = row number in docs/v2_bags.csv (0-based) = scene number. A
+# scene whose <out_root>/<scene>/source_bag.txt exists exits immediately, so
+# re-submitting resumes. %4 limits concurrent fetches - subtdata sustains
+# ~50 MB/s aggregate; more jobs only starve each other.
+#
+# FORCE=1 re-extracts a scene that is already complete (--overwrite), and
+# deletes its height_maps/ and height_masks/ on the way out. Those are clouds
+# rotated by gravity_align.npy, so a change to the extractor's timing invalidates
+# them: leaving them in place would pair new poses with maps built from the old
+# ones. Rebuild with DRIFT slurm/build_heightmaps_v2_beta.batch afterwards.
+#
+#   FORCE=1 sbatch --array=0-16%4 slurm/extract_v2.batch
+#
+# Excluded from the CSV by hand, all three from 26-09-08:
+#   - helhest_2026_09_08-14_18_12_merged publishes no Odin camera or lidar at
+#     all (1 image, 0 clouds in 1063 s), so it has no frames to extract;
+#   - robotour_2026_09_08-10_34_49_merged and -10_55_30_merged were recorded
+#     with the robotour stack: no /joint_states, /joint_setpoints or /cmd_vel
+#     and only the minimal 9-edge tf_static, so no proprioception at all.
+set -uo pipefail
+
+OUT=${1:-/mnt/personal/vlkjan6/HELHEST_v2_beta}
+REPO=/home/vlkjan6/projects/dataset_tools
+CSV=$REPO/docs/v2_bags.csv
+SIF=/mnt/data/vras/data/helhest-jazzy.sif
+SUBTDATA=vlkjan6@subtdata.felk.cvut.cz
+PY="$REPO/.venv/bin/python"
+
+row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
+[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+scene=$(echo "$row" | cut -d, -f1)
+bagdir=$(echo "$row" | cut -d, -f3)
+FORCE=${FORCE:-0}
+if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
+    echo "$scene already complete"; exit 0
+fi
+EXTRA=""
+[ "$FORCE" = "1" ] && EXTRA="--overwrite"
+
+# Node-local scratch: /data (NVMe) preferred, /tmp fallback. Needs room for the
+# bag (<= 44 GB) and the extracted scene (<= 90 GB).
+SCRATCH=""
+for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
+    mkdir -p "$c/v2_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/v2_${SLURM_JOB_ID}" && break
+done
+[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
+trap 'rm -rf "$SCRATCH"' EXIT
+stage="$SCRATCH/stage"; local_out="$SCRATCH/out"
+mkdir -p "$stage" "$local_out"
+bag="$stage/$(basename "$bagdir")"
+BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
+
+echo "[$(date '+%F %T')] $scene fetch $bagdir -> $SCRATCH"
+rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$scene: fetch failed"; exit 10; }
+echo "[$(date '+%F %T')] $scene fetched $(du -sh "$bag" | cut -f1)"
+
+echo "[$(date '+%F %T')] $scene extract"
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.extract_data \
+    "$stage" "$local_out" --start_index "$((10#$scene))" --jobs 1 $EXTRA
+rc=$?
+echo "[$(date '+%F %T')] $scene extract rc=$rc"
+[ -e "$local_out/$scene/source_bag.txt" ] || { echo "$scene: no scene produced"; exit 11; }
+
+mkdir -p "$OUT/.validation"
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
+    "$local_out/$scene" --csv "$SCRATCH/validation.csv" \
+    || echo "$scene: validation reported problems"
+
+echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene ($(du -sh "$local_out/$scene" | cut -f1))"
+mkdir -p "$OUT"
+rsync -a "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 12; }
+cp -f "$SCRATCH/validation.csv" "$OUT/.validation/$scene.csv" 2>/dev/null
+if [ "$FORCE" = "1" ]; then
+    # gravity_align.npy has just been rewritten; any map built from the old one
+    # is now wrong. Drop them rather than leave a mixed scene behind.
+    rm -rf "$OUT/$scene/height_maps" "$OUT/$scene/height_masks"
+    echo "[$(date '+%F %T')] $scene height maps dropped -- rebuild them"
+fi
+echo "[$(date '+%F %T')] $scene finished rc=$rc"
+exit $rc
