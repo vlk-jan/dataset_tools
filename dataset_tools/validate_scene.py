@@ -199,7 +199,13 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
     report.stats["clouds_sampled"] = int(len(idx))
 
 
-def check_odometry(report: SceneReport, transforms: np.ndarray, max_jump: float) -> None:
+def check_odometry(
+    report: SceneReport,
+    transforms: np.ndarray,
+    max_jump: float,
+    ts: np.ndarray | None = None,
+    max_speed: float = 4.0,
+) -> None:
     positions = transforms[:, :3, 3]
     if len(positions) < 2:
         return
@@ -209,6 +215,24 @@ def check_odometry(report: SceneReport, transforms: np.ndarray, max_jump: float)
     n_jumps = int(np.sum(steps > max_jump))
     if n_jumps:
         report.warn(f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m " f"(max {np.max(steps):.2f} m)")
+
+    # Distance alone lets a short step past that no robot could have taken: at a
+    # 16 Hz frame rate 0.9 m is 14 m/s. Divide by the interval the frames
+    # actually claim and the question becomes the one that matters -- is this
+    # motion, or is it a pose that belongs to a different moment
+    # (dataset_tools.gnss_guard). The gate is the one write_ground_truth breaks
+    # segments on, so the two agree about which steps are real.
+    if ts is None or len(ts) != len(positions) or not np.isfinite(ts).all():
+        return
+    dt = np.diff(ts)
+    speed = steps / np.maximum(dt, 1e-6)
+    report.stats["max_speed_mps"] = float(np.max(speed))
+    n_fast = int(np.sum((dt > 0) & (speed > max_speed)))
+    if n_fast:
+        report.warn(
+            f"transforms.npy: {n_fast} frame-to-frame steps imply > {max_speed} m/s "
+            f"(max {np.max(speed):.1f} m/s) -- a pose from another moment, not motion"
+        )
 
 
 def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) -> None:
@@ -475,7 +499,7 @@ def validate_scene(
 
     check_clouds(report, clouds, n_sample)
     if transforms is not None:
-        check_odometry(report, transforms, max_jump)
+        check_odometry(report, transforms, max_jump, timestamps.get("data_ts.txt"))
     if gravity is not None:
         check_tilt(report, gravity, max_tilt_deg)
 
@@ -498,6 +522,7 @@ CSV_COLUMNS = [
     "cloud_dtype",
     "nan_frac",
     "max_step_m",
+    "max_speed_mps",
     "path_len_m",
     "tilt_mean_deg",
     "tilt_max_deg",
@@ -536,7 +561,10 @@ def print_report(report: SceneReport, strict: bool, verbose: bool) -> None:
     if "nan_frac" in stats:
         bits.append(f"nan {stats['nan_frac']:.2%}")
     if "max_step_m" in stats:
-        bits.append(f"max step {stats['max_step_m']:.2f} m")
+        step = f"max step {stats['max_step_m']:.2f} m"
+        if "max_speed_mps" in stats:
+            step += f" ({stats['max_speed_mps']:.1f} m/s)"
+        bits.append(step)
     if "tilt_max_deg" in stats:
         bits.append(f"tilt <= {stats['tilt_max_deg']:.1f} deg")
     if "gt_poses" in stats:

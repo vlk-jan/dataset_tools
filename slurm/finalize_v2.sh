@@ -1,7 +1,13 @@
 #!/bin/bash
 # Dataset-root bookkeeping after slurm/extract_v2.batch: rebuild scenes.csv
-# from the published scenes (extract_v2 runs one bag per task, so no single
-# run ever sees them all) and validate the whole root.
+# from the published scenes (extract_v2 runs one bag per task, so no single run
+# ever sees them all), validate the whole root, and regenerate the atlas.
+#
+# The atlas has to be last and it has to be here rather than by hand: every
+# number on the index page is rendered from the root, and the pose guard can
+# change a scene's frame count, so an atlas from before a re-extraction shows
+# the previous run's figures under the current title. v1.3 already shipped once
+# with a stale atlas.
 #
 #   slurm/finalize_v2.sh [out_root]
 set -uo pipefail
@@ -20,3 +26,8 @@ column -s, -t "$OUT/scenes.csv"
 
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$OUT" --csv "$OUT/validation.csv"
+vrc=$?
+
+singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/make_atlas.py" "$OUT" || echo "atlas generation reported problems"
+
+exit $vrc

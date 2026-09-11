@@ -110,9 +110,14 @@ When `--odom` is a Fixposition topic, the extractor also writes the
 ground-truth files (`--gt auto`): `odometry.txt` (base_link pose at full
 rate, split into segments each re-anchored to the identity) and
 `odometry_segments.txt` (never interpolate across segment boundaries).
-Segments break at >1 s gaps and at GNSS teleports; one-sample spikes are
-discarded. This matches the HELHEST v1.2 contract, so segment-aware
-consumers need no changes.
+Segments break at >1 s gaps, at GNSS teleports, and at the holes
+`--gnss_guard` leaves where the receiver had no solution (`fix_lost`);
+one-sample spikes are discarded. This matches the HELHEST v1.2 contract, so
+segment-aware consumers need no changes, with one difference: segments in a
+freshly written table are **numbered from 1**, so "segment 3 of 4" is the
+third one. Roots written before this (v1.2 through v1.5) are numbered from 0
+and are read as they stand -- a segment is addressed by the number in its own
+file, never by its position.
 
 The Odin1 mount extrinsic is not in the bags' TF tree; pass it once known:
 
@@ -143,7 +148,9 @@ lidar works.
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
-| `--cam_time_offset S` | seconds added to every camera header stamp, a per-rig calibration of the camera's stamping; negative when the camera stamps late (default `0.0`) |
+| `--gnss_guard auto\|on\|off` | drop stretches where the GNSS/INS published a reset solution instead of a pose, and every frame left without a real one -- both the frames those stretches strand and the frames the pose stream never covered. `auto` turns it on for an absolute source (Fixposition) and off for wheel odometry. Recorded per scene in `gnss_guard.txt` |
+| `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt` |
+| `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `-v` | debug logging |
 
@@ -185,8 +192,10 @@ index-aligned.
 | --- | --- | --- | --- | --- |
 | `images/NNNNN.png` | H x W x 3 | `uint8` | BGR pixels, camera frame | decoded from the compressed image topic |
 | `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows and all-zero points dropped, so `N` varies |
-| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair |
-| `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps |
+| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`) |
+| `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
+| `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
+| `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, and how many further frames went for having no pose under them at all; absent when the guard did not run |
 | `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
 | `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
 | `camera_intrinsics.txt` | 3 x 3 | text `float64` | pixels | `K` from the matching `camera_info` topic |
@@ -285,7 +294,9 @@ Covered: nearest-neighbour synchronisation against a brute-force reference,
 `PointCloud2` field parsing, static-TF graph composition, rotation helper
 round-trips, bag discovery / scene selection / `scenes.csv` merging, a full
 extraction of a synthetic bag written with `rosbags` (GNSS fixes included), the
-scene validator, and the viewer (probing, window enumeration, pose
+frame-clock estimator against a synthetic drive whose latency is known by
+construction (constant, and changing halfway), the scene validator, and the
+viewer (probing, window enumeration, pose
 interpolation, the map's geodesy, the segment page, rendering and every route,
 against synthetic scene directories). `.github/workflows/ci.yml` runs
 the same on Python 3.10 (extraction) and 3.12 (with the viewer), plus `black`
@@ -346,17 +357,106 @@ the viewer's own virtualenv:
   held. The speed gate matches the one `write_ground_truth()` breaks segments
   on, so the two files agree about which steps are real motion. The count of
   interpolated versus fallen-back frames is logged per scene.
-- **The camera may stamp late.** On the 2026-09 Odin1 recordings the poses run
-  ahead of the imagery by roughly 0.1 s (measured -86 ms and -211 ms in the two
-  scenes where a visual-yaw correlation passed its own injected-delay
-  self-test). The camera's header sits ~50 ms upstream of the bag receive time
-  with a 30-52 ms spread, against ~18 ms for the lidar and -4..-8 ms for the
-  Fixposition, whose header is an epoch of validity. `--cam_time_offset` applies
-  a per-rig correction but **defaults to 0.0**: the magnitude is uncertain to
-  well within its own size, and whether the lidar shares the offset is
-  unresolved -- 2D scan matching against the poses could not measure it, because
-  these clouds are dominated by ground and low vegetation and point-to-point ICP
-  slides to zero rotation.
+- **The sensor unit may stamp at publish, not at capture.** On the 2026-09
+  Odin1 recordings the poses run ahead of the imagery *and* of the clouds by
+  **~0.69 s** -- 0.5 m of smear at walking pace, and the reason the viewer
+  showed the odometry arriving somewhere before the camera did.
+
+  It is not a clock error, and no clock on the robot is wrong:
+  `scripts/probe_clock_skew.py` reads `recv - header` for every message and
+  gets +0.049 s for the camera, +0.020 s for the lidar, -0.004 s for the
+  Fixposition and +0.001 s for `/joint_states`, none of them stepping anywhere
+  in the bag. What that difference cannot see is the pipeline *behind* the
+  stamp: the unit stamps when it publishes, and its pixels and points are older
+  than that by however long its own processing took.
+
+  A latency follows load, so it does not hold still -- scene 0000 of v2 beta
+  spends 80 of its 290 s at ~0.05 s and the rest at ~0.69 s, and 0006-0008 have
+  none at all. There is no per-rig or even per-bag number to configure, so
+  `--time_align auto` measures it **during extraction**, as a curve, and takes
+  it off. Every scene carries the measurement it was corrected by in
+  `time_align.txt`.
+
+  What measures it is the sharpness of the aggregated cloud, not scan matching:
+  ICP could not do it, because these clouds are dominated by ground and low
+  vegetation and point-to-point slides to zero rotation. Counting the voxels a
+  window's clouds fill fits no transform at all, so it cannot slide, and the
+  answer it gives does not change between a 0.3 m/s window and a 1.7 m/s one --
+  which is what separates a latency from a spatial error such as a wrong lidar
+  mount. A window is believed on the depth of its minimum against its own
+  shoulders rather than on how far that minimum beats zero, so a stretch that
+  is *already* right counts as evidence for zero instead of falling silent and
+  inheriting its neighbour's offset. On HELHEST v1.3, whose ground truth comes
+  off the same lidar, the profile comes back flat at zero, as it must.
+- **A GNSS/INS with no fix keeps publishing poses.** When the Fixposition loses
+  its solution -- and rolling the robot over is exactly how it loses it, with
+  the antennas pointing at the ground -- the odometry topic does not stop. It
+  fills with the reset state: a position hundreds of metres from where the
+  robot is, held perfectly still, attitude snapped back to identity, and no
+  flag on any of it. Scene 0010 of v2 beta reported a **1249 m step between two
+  frames 64 ms apart** that way, and 0014 a pair of 1130 m round trips.
+
+  `--gnss_guard auto` removes those stretches during extraction, before an
+  image or a cloud is written, so the frames that survive are the frames the
+  dataset can put a pose on and the indices stay contiguous. What marks the
+  fabricated side is that the translation stops moving *at all* -- the reset
+  state is one position repeated, held for 2.9 s and 46.5 s in the two v2 beta
+  cases. That is never enough on its own, because a robot can be genuinely
+  stopped and a Fixposition quantises to a micrometre, so a stopped robot
+  publishes the same number for seconds too: scene 0009 does it three times
+  while the driver leans on a robot that will not move, with a continuous fix,
+  the scene's best covariance and a GNSS latitude and longitude every bit as
+  still as the odometry. A freeze is therefore believed only where something
+  independent agrees -- a jump implying four figures of metres per second into
+  or out of it, or a hole in the stream of fixes that carried a position. A
+  short island fenced in by a jump at both ends is an excursion rather than a
+  visit, and stands on its own. So does an outage with a jump inside it: an
+  outage alone is a solution coasting, a lone jump says one of its two sides is
+  wrong without saying which, but together they are conclusive. That last rule
+  has no catch of its own across v2 beta -- 0014's span is already convicted by
+  its island -- but it is the only one that would reach a fabricated stretch
+  which neither held still long enough nor came back.
+
+  The outage is read as a *hole*, not as a flag, because the receiver reports
+  losing its fix two different ways and 0014 uses both: 3 s of null-island
+  `NavSatFix` around one jump, and 12.7 s of publishing nothing at all around
+  the other. Only holes between fixes count -- a stream that starts late or
+  stops early is the ordinary shape of a recording (0009 waits 11.7 s for its
+  first fix, 0016 spends its last 57 s without one), and coasting is degraded,
+  not fabricated.
+
+  The guard fails towards keeping data: a fabricated stretch that arrives
+  without a jump and that the receiver never admits to would not be found. A
+  position cannot reach a reset origin hundreds of metres away without jumping
+  there, so that combination does not arise in practice, and the alternative is
+  deleting the frames of a robot that was merely stuck.
+
+  What the guard deliberately does *not* read is the attitude. The 180 deg flip
+  is the tempting signature and it is a trap: the robot really does roll over,
+  and when it does, the flip is the measurement. Scene 0010 spends 56 s upside
+  down **before** its solution resets, and that stretch is good data.
+
+  Each scene records what it lost in `gnss_guard.txt`, and the hole reads as
+  `fix_lost` in `odometry_segments.txt`.
+- **Frames with no pose under them.** A fabricated pose does not need a
+  fabricating receiver. `interpolate_poses` falls back to the nearest sample
+  wherever it cannot interpolate -- before the pose stream starts, after it
+  ends, or across a hole wider than its 0.5 s bracket -- and what comes out is a
+  stationary pose under a frame the robot was driving through, written into
+  `transforms.npy` looking exactly like a measurement. Scene 0014 of v2 beta
+  exported a **3.29 m step between two frames 62 ms apart, 53 m/s**, with no
+  fabricated pose anywhere near it: both frames sat in a 12 s hole in the
+  odometry and borrowed the same distant sample.
+
+  The same `--gnss_guard` stage drops them, on the same principle that governs
+  a span -- a frame the dataset cannot put a real pose on has nothing to offer
+  a consumer of a pose-annotated dataset. The margin is spent the other way
+  round from a span, though: a span drops a frame that *might* fall inside it,
+  support keeps a frame that *might* sit on a pose, so a hole has to exceed
+  2.5 s before it costs anything. Across v2 beta this is 1,127 frames, 1.1%,
+  two thirds of them 0016's last 57 s, where the receiver stops publishing while
+  the camera runs on. With it, no scene in the root exports a step above
+  3.2 m/s, and every one of those is driving.
 - **Out-of-order bags.** Timestamps are sorted before synchronisation. If a bag
   is badly out of order for other reasons, `sort_bag.py` rewrites it sorted by
   header stamp.

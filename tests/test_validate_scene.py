@@ -140,6 +140,20 @@ def test_odometry_jump_is_a_warning(scene: Path):
     assert report.stats["max_step_m"] == pytest.approx(5.2, abs=1e-6)
 
 
+def test_a_step_no_robot_could_take_is_a_warning_even_when_it_is_short(scene: Path):
+    """0.5 m is under max_jump, but 0.5 m in a frame period is not motion --
+    it is a pose from another moment. See dataset_tools.gnss_guard."""
+    transforms = np.load(scene / "transforms.npy")
+    transforms[2, 0, 3] += 0.5
+    np.save(scene / "transforms.npy", transforms)
+    report = vs.validate_scene(scene, max_jump=1.0)
+
+    assert report.errors == []
+    assert not any("jumps >" in w for w in report.warnings)
+    assert any("m/s" in w for w in report.warnings)
+    assert report.stats["max_speed_mps"] > 4.0
+
+
 def test_non_orthonormal_transform_is_an_error(scene: Path):
     transforms = np.load(scene / "transforms.npy")
     transforms[1, :3, :3] *= 2.0

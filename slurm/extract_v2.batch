@@ -2,19 +2,42 @@
 #SBATCH --job-name=helhest_v2
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --time=6:00:00
 #SBATCH --partition=cpu
 #SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/v2_%A_%a.out
 #
 # HELHEST v2 (new rig: Odin1 + Fixposition) extraction, ONE BAG PER ARRAY TASK,
-# staged entirely on node-local NVMe so the shared NFS is touched only for the
+# through to the height maps -- a finished scene leaves this script, not a scene
+# that still needs a second job run over it. 16 CPUs because of that last stage:
+# the extraction itself is --jobs 1 and IO-bound, the map build is not.
+#
+# Staged entirely on node-local NVMe so the shared NFS is touched only for the
 # sif, the repo, and one final rsync of the finished scene. Same shape as
 # slurm/regen_scene.batch, minus the FAST-LIO stage: the new rig ships its own
-# ground truth (/fixposition/odometry_enu), so the extractor's defaults are
-# already right and no --lidar_extrinsic is needed - the Odin mount extrinsic
-# is in tf_static from 2026-09-02 onwards (docs/NEW_RIG_READINESS.md §4).
+# ground truth (/fixposition/odometry_enu), so no --lidar_extrinsic is needed -
+# the Odin mount extrinsic is in tf_static from 2026-09-02 onwards
+# (docs/NEW_RIG_READINESS.md §4).
+#
+# Nothing about timing is set here. The Odin1 stamps at publish rather than at
+# capture, so its headers are late by its own pipeline latency - ~0.69 s, and
+# not even constant within one bag - and the extractor measures that against
+# the clouds it has just written and takes it off the frame clock itself
+# (--time_align auto, the default). Each scene carries the measurement it was
+# corrected by in time_align.txt. Background: docs/NEW_RIG_READINESS.md §6,
+# "The Odin1 stamps late".
+#
+# Nothing about the GNSS is set here either. When the Fixposition loses its fix
+# - which is what rolling the robot over does - it keeps publishing odometry at
+# full rate, filled with a position hundreds of metres away held perfectly
+# still, and nothing in the recording flags it. --gnss_guard auto finds those
+# stretches and removes them, along with the frames they leave without a pose,
+# so a scene may come out shorter than its bag. The same stage drops frames the
+# pose stream never covered - before it starts, after it ends, or inside a hole
+# too wide to interpolate across - which would otherwise be exported carrying
+# the nearest sample: a stationary pose under a moving image. Recorded per scene
+# in gnss_guard.txt; the holes read as 'fix_lost' in odometry_segments.txt.
 #
 #   sbatch --array=0-8%4  slurm/extract_v2.batch [out_root]     # 26-09-02
 #   sbatch --array=9-16%4 slurm/extract_v2.batch [out_root]     # 26-09-08
@@ -24,11 +47,10 @@
 # re-submitting resumes. %4 limits concurrent fetches - subtdata sustains
 # ~50 MB/s aggregate; more jobs only starve each other.
 #
-# FORCE=1 re-extracts a scene that is already complete (--overwrite), and
-# deletes its height_maps/ and height_masks/ on the way out. Those are clouds
-# rotated by gravity_align.npy, so a change to the extractor's timing invalidates
-# them: leaving them in place would pair new poses with maps built from the old
-# ones. Rebuild with DRIFT slurm/build_heightmaps_v2_beta.batch afterwards.
+# FORCE=1 re-extracts a scene that is already complete (--overwrite). Height
+# maps are rebuilt in the same task, from the clouds and the gravity_align.npy
+# this run just wrote, so a re-extraction can no longer leave a scene whose maps
+# belong to the run before it.
 #
 #   FORCE=1 sbatch --array=0-16%4 slurm/extract_v2.batch
 #
@@ -87,15 +109,40 @@ singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$local_out/$scene" --csv "$SCRATCH/validation.csv" \
     || echo "$scene: validation reported problems"
 
+# Height maps + validity masks, in this task, against the clouds and the
+# gravity_align.npy this task just wrote. They used to be a separate submission
+# in DRIFT, which meant every re-extraction left a root whose maps belonged to
+# the run before it -- maps are clouds rotated by gravity_align.npy, so a change
+# in timing or in which frames exist silently invalidates them.
+#
+# DRIFT still owns the generator: it defines the map format, the parameters
+# every published map was built with, and the known-answer gate that refuses to
+# run if it cannot reproduce existing maps from existing clouds. So this calls
+# DRIFT's own batch as a plain script rather than restating its settings here --
+# there is one definition of what a height map is, and it is not in this repo.
+# It takes the root as $1 and the scene from SLURM_ARRAY_TASK_ID, the same index
+# this script uses, and publishes into $local_out/$scene, so the maps travel out
+# on the publish rsync below with everything else.
+DRIFT=${DRIFT:-/home/vlkjan6/projects/DRIFT}
+HM=$DRIFT/slurm/build_heightmaps_v2_beta.batch
+if [ -x "$HM" ] || [ -f "$HM" ]; then
+    echo "[$(date '+%F %T')] $scene height maps"
+    bash "$HM" "$local_out"
+    hmrc=$?
+    nmaps=$(find "$local_out/$scene/height_maps" -name '*.npz' 2>/dev/null | wc -l)
+    echo "[$(date '+%F %T')] $scene height maps rc=$hmrc, $nmaps built"
+    [ $hmrc -eq 0 ] || { echo "$scene: HEIGHT MAPS FAILED (rc=$hmrc) -- scene published without them"; }
+else
+    echo "$scene: WARNING no height-map builder at $HM; scene published without maps"
+fi
+
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene ($(du -sh "$local_out/$scene" | cut -f1))"
 mkdir -p "$OUT"
-rsync -a "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 12; }
+# --delete, because the node-local scene is the whole truth about this scene.
+# The pose guard can remove frames (dataset_tools.gnss_guard), so a re-extraction
+# may produce FEWER frames than the run before it; merging would leave the tail
+# of the old run behind, under indices that now mean different moments.
+rsync -a --delete "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 12; }
 cp -f "$SCRATCH/validation.csv" "$OUT/.validation/$scene.csv" 2>/dev/null
-if [ "$FORCE" = "1" ]; then
-    # gravity_align.npy has just been rewritten; any map built from the old one
-    # is now wrong. Drop them rather than leave a mixed scene behind.
-    rm -rf "$OUT/$scene/height_maps" "$OUT/$scene/height_masks"
-    echo "[$(date '+%F %T')] $scene height maps dropped -- rebuild them"
-fi
 echo "[$(date '+%F %T')] $scene finished rc=$rc"
 exit $rc

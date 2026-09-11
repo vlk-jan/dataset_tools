@@ -30,7 +30,7 @@ from rosbags.highlevel import AnyReader
 from tqdm import tqdm
 
 try:
-    from dataset_tools import cloudini, rosbags_compat  # noqa: F401  (patches rosbags)
+    from dataset_tools import cloudini, gnss_guard, rosbags_compat, time_align  # noqa: F401  (patches rosbags)
     from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
     from dataset_tools.transforms import (  # noqa: F401  (re-exported: the transform helpers used to live here)
         euler_matrix,
@@ -41,7 +41,9 @@ try:
     )
 except ImportError:  # when the file is run directly from dataset_tools/
     import cloudini
+    import gnss_guard
     import rosbags_compat  # noqa: F401
+    import time_align
     from gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
     from transforms import (  # noqa: F401
         euler_matrix,
@@ -69,6 +71,10 @@ STATUS_FAILED = "failed"
 #: (``--overwrite``, or resuming a scene that never finished) removes these
 #: first, so frames of a previous run cannot outlive it and skew the counts.
 SCENE_OUTPUT_DIRS = ("images", "clouds")
+#: The record of what the frame clock was corrected by, and on what evidence.
+TIME_ALIGN_FILE = "time_align.txt"
+#: The record of what the pose guard threw away, and why (gnss_guard).
+GNSS_GUARD_FILE = "gnss_guard.txt"
 SCENE_OUTPUT_FILES = (
     "data_ts.txt",
     "pcd_ts.txt",
@@ -81,6 +87,8 @@ SCENE_OUTPUT_FILES = (
     "joint_setpoints.npy",
     "cmd_vel.npy",
     "gps.npy",
+    TIME_ALIGN_FILE,
+    GNSS_GUARD_FILE,
     SENTINEL_FILE,
 )
 #: Written only when the odometry source is its own ground truth (``--gt``).
@@ -635,11 +643,58 @@ def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
     return result
 
 
+def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, bag: str):
+    """Take the sensor unit's capture-to-publish latency off the frame clock.
+
+    ``--time_align auto`` measures it against the clouds just written (see
+    :mod:`dataset_tools.time_align`); a number applies that constant instead,
+    for a rig already characterised or a scene too poor in geometry to measure;
+    ``off`` leaves the stamps alone. Returns the corrected clock and the profile
+    to record, or ``(frame_ts, None)`` when nothing was applied.
+    """
+    mode = str(getattr(args, "time_align", "auto") or "auto").lower()
+    if mode == "off":
+        return frame_ts, None
+
+    if mode != "auto":
+        try:
+            constant = float(mode)
+        except ValueError:
+            raise SystemExit(f"--time_align expects 'auto', 'off' or seconds, not {mode!r}") from None
+        LOG.info("%s: frame clock shifted by %+.3f s (--time_align %s)", bag, constant, mode)
+        profile = time_align.Profile([], np.array([frame_ts[0]]), np.array([constant]), "given on the command line")
+        shifted, _ = time_align.apply_to_clock(frame_ts, profile)
+        return shifted, profile
+
+    if not odom_data:
+        LOG.info("%s: no odometry to align the frame clock against; stamps left as recorded", bag)
+        return frame_ts, None
+
+    odom = sorted(odom_data, key=lambda x: x[0])
+    profile = time_align.estimate(
+        scene_dir,
+        frame_ts,
+        np.array([x[0] for x in odom]),
+        np.array([x[1] for x in odom]),
+    )
+    LOG.info("%s: frame clock -- %s", bag, profile.summary)
+    if profile.is_identity:
+        return frame_ts, profile
+    shifted, forced = time_align.apply_to_clock(frame_ts, profile)
+    if forced:
+        LOG.warning("%s: the measured offset ran backwards faster than the clock; forced monotonic", bag)
+    return shifted, profile
+
+
 def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     camera_topic, lidar_topic = args.cam, args.lidar
-    # Added to every camera header stamp, in both passes. 0.0 is the identity on
-    # the float, so the default run is bit-for-bit what it was before the flag.
-    cam_offset = float(getattr(args, "cam_time_offset", 0.0) or 0.0)
+    # Added to the camera stamp in both passes, in one expression, so the two
+    # produce bit-identical floats and pass 2's set lookups hit. This is the
+    # camera's stamping against the LIDAR's, and nothing else: the offset both
+    # of them share against the pose clock is a latency, not a stamp error, and
+    # is measured after the clouds exist (see --time_align).
+    shift_cam = float(getattr(args, "cam_time_offset", 0.0) or 0.0)
+    shift_lidar = 0.0
     result = SceneResult(index=-1, bag=bag_path.name, status=STATUS_OK)
 
     # Pre-cache connections
@@ -714,9 +769,9 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
                     stamp_only.discard(id(conn))
 
         if conn.topic == camera_topic:
-            cam_timestamps.append(t + cam_offset)
+            cam_timestamps.append(t + shift_cam)
         elif conn.topic == lidar_topic:
-            lidar_timestamps.append(t)
+            lidar_timestamps.append(t + shift_lidar)
         elif conn.topic in (args.odom, args.imu):
             # The same topic may serve as both odometry and orientation source
             if conn.topic == args.odom:
@@ -769,22 +824,51 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         result.message = f"no synced pairs ({len(cam_timestamps)} cam, {len(lidar_timestamps)} lidar)"
         return result
 
+    # One clock per frame. transforms.npy and gravity_align.npy used to be
+    # sampled at the camera and the lidar stamps respectively, while data_ts.txt
+    # was their midpoint -- three clocks behind one frame index, which is not
+    # what a consumer reading "frame k" from all three expects.
+    #
+    # This is the clock as the sensors stamped it. Where the unit stamps at
+    # publish rather than at capture it is late by the pipeline's latency, which
+    # is measured and taken off below, once there are clouds to measure with.
+    frame_ts = (valid_cam_ts + valid_pcd_ts) / 2
+
+    # Whatever the GNSS/INS fabricated goes now, before a single image or cloud
+    # is written, so the frames that survive are exactly the frames the dataset
+    # can put a pose on and the indices below stay contiguous. The poses are
+    # still the receiver's own output here, not yet re-expressed at the base
+    # frame: a fabricated stretch is a property of what the receiver published,
+    # and moving it down a lever arm only lets a fast rotation masquerade as a
+    # jump. The same stage drops frames the pose stream never covered at all,
+    # before it starts, after it ends or inside a hole too wide to interpolate
+    # across: those would be exported carrying the nearest sample, which is a
+    # fabricated pose with a different author. See dataset_tools.gnss_guard.
+    guard_verdict = None
+    if guard_enabled(args) and odom_data:
+        odom_data.sort(key=lambda x: x[0])
+        # The stamps of the fixes that carried a position. The gaps in them are
+        # when the receiver had no solution, whether it said so by publishing
+        # null island (gps_row drops those) or by publishing nothing at all.
+        fix_ts = [float(r[0]) for r in gps_rows]
+        odom_data, keep, guard_verdict = gnss_guard.guard(odom_data, frame_ts, fix_ts or None)
+        if not guard_verdict.clean:
+            LOG.warning("%s: %s", bag_path.name, guard_verdict.summary(float(frame_ts[0])))
+            valid_cam_ts, valid_pcd_ts, frame_ts = valid_cam_ts[keep], valid_pcd_ts[keep], frame_ts[keep]
+            if len(valid_cam_ts) == 0:
+                LOG.warning("%s: no frame of this bag has a trustworthy pose; scene left empty", bag_path.name)
+                result.status = STATUS_EMPTY
+                result.message = "no frame of this bag has a pose the dataset can stand behind"
+                return result
+        else:
+            LOG.info("%s: pose guard -- %s", bag_path.name, guard_verdict.summary(float(frame_ts[0])))
+
     (scene_dir / "images").mkdir(parents=True, exist_ok=True)
     (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
 
     # Map timestamps to their chronological frame indices
     cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
     pcd_ts_to_idx = {ts: i for i, ts in enumerate(valid_pcd_ts)}
-
-    # One clock per frame. transforms.npy and gravity_align.npy used to be
-    # sampled at the camera and the lidar stamps respectively, while data_ts.txt
-    # was their midpoint -- three clocks behind one frame index, which is not
-    # what a consumer reading "frame k" from all three expects.
-    frame_ts = (valid_cam_ts + valid_pcd_ts) / 2
-
-    # Save metadata
-    np.savetxt(scene_dir / "data_ts.txt", frame_ts)
-    np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts)
 
     for name, rows in [
         ("joint_states", joint_states),
@@ -863,15 +947,14 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     for conn, _, raw in reader.messages([cam_conn, lidar_conn]):
         # Same stamp arithmetic as pass 1, so the set lookups below hit exactly.
-        # cam_offset is added on both sides; at its 0.0 default that is the
-        # identity on the float, so the lookups are bit-for-bit as before.
         is_cam = conn.topic == camera_topic
+        shift = shift_cam if is_cam else shift_lidar
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, float("nan")) + (cam_offset if is_cam else 0.0)
+            t = header_stamp(msg, float("nan")) + shift
         else:
-            t += cam_offset if is_cam else 0.0
+            t += shift
             if t not in (cam_set if is_cam else pcd_set):
                 continue  # not a synchronised frame: never decoded at all
             msg = reader.deserialize(raw, conn.msgtype)
@@ -904,9 +987,25 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             )
             pcd_set.remove(t)
 
+    # The frame clock, corrected now that there are clouds to measure against.
+    # The lidar's own clock takes the same correction -- it is the same unit's
+    # latency, and pcd_ts.txt has to stay comparable with data_ts.txt -- so the
+    # camera/lidar offset within a frame survives it untouched. Everything
+    # sampled onto the clock below follows from here.
+    corrected, align = align_frame_clock(scene_dir, frame_ts, odom_data, args, bag_path.name)
+    applied = corrected - frame_ts
+    frame_ts = corrected
+    np.savetxt(scene_dir / "data_ts.txt", frame_ts)
+    np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts + applied)
+    if align is not None:
+        time_align.write_report(scene_dir / TIME_ALIGN_FILE, align, float(frame_ts[0]))
+
+    if guard_verdict is not None:
+        gnss_guard.write_report(scene_dir / GNSS_GUARD_FILE, guard_verdict, float(frame_ts[0]))
+
     # Process Odom Transforms (relative to first frame)
     if gt_enabled(args) and odom_data:
-        if write_ground_truth(odom_data, scene_dir):
+        if write_ground_truth(odom_data, scene_dir, spans=guard_verdict.spans if guard_verdict else None):
             LOG.info("%s: ground truth written (odometry.txt + segments)", bag_path.name)
         else:
             LOG.warning("%s: too few odometry samples for ground truth", bag_path.name)
@@ -1047,7 +1146,23 @@ def gt_enabled(args) -> bool:
     return "fixposition" in args.odom
 
 
-def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, min_poses=20) -> bool:
+def guard_enabled(args) -> bool:
+    """--gnss_guard auto: screen the poses for a reset solution only where a
+    reset is a thing that happens. An absolute GNSS/INS source (Fixposition)
+    answers with a fabricated position when it loses its fix; wheel-IMU /odom
+    has nothing to lose and, being an integration, legitimately holds a
+    bit-identical pose for as long as the robot stands still -- which is the
+    guard's own signature for a fabricated stretch, so running it there would
+    delete exactly the frames where the robot was parked."""
+    mode = str(getattr(args, "gnss_guard", "auto") or "auto").lower()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return "fixposition" in args.odom
+
+
+def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, min_poses=20, spans=None) -> bool:
     """Write odometry.txt + odometry_segments.txt in the HELHEST v1.2 contract.
 
     For rigs whose odometry source is trustworthy on its own (Fixposition
@@ -1059,7 +1174,9 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, m
     spike samples end up in tiny segments that ``min_poses`` discards.
 
     Each segment's ``reason`` names why *that* segment ended: ``gap``,
-    ``teleport``, or ``end_of_run`` for the last one.
+    ``teleport``, ``fix_lost`` for a hole :mod:`dataset_tools.gnss_guard` left
+    behind when it removed a fabricated stretch, or ``end_of_run`` for the last
+    one.
     """
     if len(odom_data) < min_poses:
         return False
@@ -1069,7 +1186,17 @@ def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, m
     dt = np.diff(ts)
     step = np.linalg.norm(np.diff(Ts[:, :3, 3], axis=0), axis=1)
     breaks = np.where((dt > max_gap) | (step > max_speed * np.maximum(dt, 1e-3)))[0] + 1
-    reasons = ["gap" if dt[b - 1] > max_gap else "teleport" for b in breaks]
+    spans = list(spans or [])
+
+    def _reason(b: int) -> str:
+        # A hole the guard opened is named for what opened it, not for the fact
+        # that it is a hole: "gap" would say the recording stopped, which is
+        # not what happened.
+        if any(ts[b - 1] <= sp.end and sp.start <= ts[b] for sp in spans):
+            return "fix_lost"
+        return "gap" if dt[b - 1] > max_gap else "teleport"
+
+    reasons = [_reason(int(b)) for b in breaks]
     starts = [0, *breaks]
     ends = [*breaks, len(ts)]
     kept_ts: list[np.ndarray] = []
@@ -1151,18 +1278,51 @@ def build_parser() -> argparse.ArgumentParser:
         "raw fix; 'off' writes no GPS.",
     )
     parser.add_argument(
+        "--time_align",
+        type=str,
+        default="auto",
+        metavar="auto|off|SECONDS",
+        help="How to put the frame clock on the same clock as the poses. A "
+        "unit that stamps at publish rather than at capture hands out headers "
+        "that are late by its own pipeline latency, which makes the poses run "
+        "ahead of the imagery and the clouds; nothing in the bag records it, "
+        "because recv-minus-header measures publish-to-receive. 'auto' (the "
+        "default) measures it against the clouds this run just wrote, as a "
+        "curve over the scene -- a latency moves with load, and on the 2026-09 "
+        "Odin1 rig one scene spends 80 of its 290 s at 0.05 s and the rest at "
+        "0.69 s. A number applies that constant instead; 'off' leaves the "
+        "stamps as recorded. What it changes is data_ts.txt, pcd_ts.txt and "
+        "every pose sampled onto them; the camera/lidar pairing and the clouds "
+        "themselves are untouched. Recorded per scene in time_align.txt",
+    )
+    parser.add_argument(
+        "--gnss_guard",
+        type=str,
+        default="auto",
+        metavar="auto|on|off",
+        help="Drop stretches where the GNSS/INS published a reset solution "
+        "instead of a pose. A Fixposition that has lost its fix -- which is "
+        "what rolling the robot over does -- keeps publishing odometry at full "
+        "rate, filled with a position hundreds of metres away, held perfectly "
+        "still, with the attitude snapped to identity, and nothing in the "
+        "recording flags it. Those samples are removed, and so are the frames "
+        "they leave without a pose -- along with any frame the pose stream "
+        "never covered, which would otherwise be exported carrying the nearest "
+        "sample -- before any image or cloud is written. "
+        "'auto' (the default) turns it on for an absolute source and off for "
+        "wheel odometry, which legitimately holds still. Recorded per scene in "
+        "gnss_guard.txt; the holes read as 'fix_lost' in odometry_segments.txt",
+    )
+    parser.add_argument(
         "--cam_time_offset",
         type=float,
         default=0.0,
         metavar="SECONDS",
-        help="Added to every camera header stamp before synchronisation, as a "
-        "per-rig calibration of the camera's stamping. Use a NEGATIVE value "
-        "when the camera stamps late (its header refers to a moment after the "
-        "one the pixels show), which makes the poses appear to run ahead of the "
-        "imagery. Measured at roughly -0.1 s on the 2026-09 Odin1 recordings, "
-        "but left at 0.0: the magnitude is uncertain to well within its own "
-        "size, and whether the lidar shares the offset is unresolved. Shifts "
-        "data_ts.txt and the camera/lidar pairing, so it changes every file",
+        help="Added to the camera header stamp before synchronisation, for a "
+        "camera that stamps differently from the lidar beside it. On the "
+        "2026-09 Odin1 rig the two agree to a median 4 ms, so this stays 0.0 "
+        "there. Unlike --time_align this one re-pairs camera frames with "
+        "sweeps, since it moves only one side of the match",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
     parser.add_argument(

@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import warnings
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TextIO
 
@@ -29,6 +29,14 @@ import numpy as np
 
 GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
 SEGMENTS_HEADER = "# segment start_ts end_ts n_poses reason"
+
+#: Number of the first segment in a freshly written table. Segments are
+#: counted the way a reader counts them -- "segment 3 of 4" should be the
+#: third, not the last -- so tables this module writes are numbered from one.
+#: Reading stays faithful to whatever the file says: roots written before
+#: this (HELHEST v1.2 through v1.5) are numbered from zero, and a segment is
+#: addressed everywhere by the number in its own file, never by its position.
+FIRST_SEGMENT = 1
 
 
 @dataclass
@@ -171,6 +179,10 @@ def write_segments(dest: Path | str | TextIO, rows: Iterable[SegmentRow]) -> Non
 
 
 def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
+    """Renumbers as it writes, so every table this repo produces is
+    contiguous and starts at :data:`FIRST_SEGMENT` whatever the callers
+    filled in -- they all count positions, and none of them has a number
+    worth preserving."""
     fh.write(SEGMENTS_HEADER + "\n")
-    for row in rows:
-        fh.write(format_segment_line(row) + "\n")
+    for k, row in enumerate(rows):
+        fh.write(format_segment_line(replace(row, index=FIRST_SEGMENT + k)) + "\n")

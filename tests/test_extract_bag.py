@@ -150,11 +150,18 @@ def _tf_static_msg():
     )
 
 
-def write_bag(bag_dir: Path, frames: int = FRAMES, dropped_camera: set[int] = frozenset()) -> Path:
+def write_bag(
+    bag_dir: Path,
+    frames: int = FRAMES,
+    dropped_camera: set[int] = frozenset(),
+    reset_from: int | None = None,
+) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
     Camera frames come 30 ms after their sweep; ``dropped_camera`` sweeps have
-    no image at all and must therefore not become frames.
+    no image at all and must therefore not become frames. From ``reset_from``
+    the odometry publishes what a GNSS/INS with no solution publishes -- one
+    position far away, held still -- and the fix goes to null island.
     """
     with Writer(bag_dir, version=8) as writer:
         conns = {
@@ -191,7 +198,8 @@ def write_bag(bag_dir: Path, frames: int = FRAMES, dropped_camera: set[int] = fr
             if k not in dropped_camera:
                 put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k))
                 put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03))
-            put("/odom", t, _odom_msg(t, 0.1 * k))  # 1 m/s: under the ground-truth teleport gate
+            lost = reset_from is not None and k >= reset_from
+            put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
             put("/imu", t, _imu_msg(t, math.radians(10.0)))
             put("/joint_states", t, _joint_msg(t, k))
             put("/cmd_vel", t, _t("geometry_msgs/msg/Twist")(linear=_vec(x=0.4), angular=_vec(z=0.1)))
@@ -200,7 +208,12 @@ def write_bag(bag_dir: Path, frames: int = FRAMES, dropped_camera: set[int] = fr
             put(
                 "/fixposition/odometry_llh",
                 t,
-                _navsatfix_msg(t, 50.1 + 1e-5 * k, 14.4 + 2e-5 * k, cov_type=0 if k == frames - 1 else 3),
+                _navsatfix_msg(
+                    t,
+                    0.0 if lost else 50.1 + 1e-5 * k,
+                    0.0 if lost else 14.4 + 2e-5 * k,
+                    cov_type=0 if lost or k == frames - 1 else 3,
+                ),
             )
     return bag_dir
 
@@ -419,3 +432,100 @@ def test_header_stamp_read_from_cdr_matches_the_deserialised_one():
         TS.deserialize_cdr(raw, "sensor_msgs/msg/CompressedImage"), 0.0
     )
     assert ed.header_stamp_from_cdr(b"\x00\x01\x00") is None
+
+
+def test_time_align_off_leaves_the_stamps_as_recorded(bags: Path, tmp_path: Path):
+    """The escape hatch has to be exactly the identity, not merely close."""
+    auto, off = tmp_path / "auto", tmp_path / "off"
+    assert ed.main([str(bags), str(auto), *COMMON]) == 0
+    assert ed.main([str(bags), str(off), *COMMON, "--time_align", "off"]) == 0
+    # This bag is 30 frames, too few for a window, so auto measures nothing and
+    # the two runs must agree byte for byte.
+    for name in ("data_ts.txt", "pcd_ts.txt", "transforms.npy", "gravity_align.npy"):
+        assert (off / "0000" / name).read_bytes() == (auto / "0000" / name).read_bytes(), name
+
+
+def test_a_given_offset_moves_both_sensor_clocks(bags: Path, tmp_path: Path):
+    """``--time_align SECONDS`` moves the frame clock, and nothing else.
+
+    Both sensor clocks move by the whole offset and the pairing is untouched --
+    unlike ``--cam_time_offset``, which moves one side of the match. The
+    streams that carry the reference clock do not move at all: that is the
+    point, since what is being corrected is the sensors' latency against them.
+    """
+    plain, shifted = tmp_path / "plain", tmp_path / "shifted"
+    assert ed.main([str(bags), str(plain), *COMMON, "--gt", "on"]) == 0
+    assert ed.main([str(bags), str(shifted), *COMMON, "--gt", "on", "--time_align", "-0.05"]) == 0
+    a, b = plain / "0000", shifted / "0000"
+
+    for name in ("data_ts.txt", "pcd_ts.txt"):
+        before, after = np.loadtxt(a / name), np.loadtxt(b / name)
+        assert len(before) == len(after)
+        # atol: one ulp of float64 at a 1.7e9 epoch is ~4e-7.
+        assert np.allclose(after - before, -0.05, atol=1e-6), name
+
+    assert ed.scene_frame_counts(b) == ed.scene_frame_counts(a)
+    assert (b / "images" / "00003.png").read_bytes() == (a / "images" / "00003.png").read_bytes()
+    assert (b / "odometry.txt").read_bytes() == (a / "odometry.txt").read_bytes()
+    assert np.array_equal(np.load(b / "joint_states.npy"), np.load(a / "joint_states.npy"))
+
+
+def test_the_camera_offset_still_re_pairs(bags: Path, tmp_path: Path):
+    """The two knobs are different things and compose as different things."""
+    plain, both = tmp_path / "plain", tmp_path / "both"
+    assert ed.main([str(bags), str(plain), *COMMON]) == 0
+    assert ed.main([str(bags), str(both), *COMMON, "--time_align", "-0.05", "--cam_time_offset", "0.01"]) == 0
+    a, b = plain / "0000", both / "0000"
+
+    assert np.allclose(np.loadtxt(b / "pcd_ts.txt") - np.loadtxt(a / "pcd_ts.txt"), -0.05, atol=1e-6)
+    # data_ts is the camera/lidar midpoint, so it takes the whole frame-clock
+    # shift plus half of the camera's own.
+    assert np.allclose(np.loadtxt(b / "data_ts.txt") - np.loadtxt(a / "data_ts.txt"), -0.045, atol=1e-6)
+
+
+def test_a_scene_too_short_to_measure_is_left_alone(bags: Path, tmp_path: Path):
+    """Auto never invents a correction it could not measure."""
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    scene = out / "0000"
+
+    # 30 frames is under one window, so there is nothing to measure with.
+    data_ts = np.loadtxt(scene / "data_ts.txt")
+    pcd_ts = np.loadtxt(scene / "pcd_ts.txt")
+    assert np.allclose(data_ts - pcd_ts, 0.015, atol=1e-6)  # the raw 30 ms pairing, unshifted
+
+    # It still says so, rather than saying nothing: a scene that was left alone
+    # and a scene nobody looked at are not the same thing.
+    report = (scene / ed.TIME_ALIGN_FILE).read_text()
+    assert "no correction" in report and "too little to measure against" in report
+
+
+def test_a_reset_gnss_solution_never_reaches_the_scene(tmp_path: Path):
+    """The receiver loses its fix and keeps publishing: one position 900 m away,
+    held perfectly still. Those frames must not be exported at all -- the
+    alternative is an image with a pose that is a kilometre wrong."""
+    root = tmp_path / "bags"
+    write_bag(root / "bag_a", frames=60, reset_from=40)
+    out = tmp_path / "out"
+    assert ed.main([str(root), str(out), *COMMON, "--gt", "on", "--gnss_guard", "on"]) == 0
+
+    scene = out / "0000"
+    counts = ed.scene_frame_counts(scene)
+    assert counts["images"] == counts["clouds"] == counts["data_ts.txt"]
+    assert counts["images"] < 60  # the reset cost frames
+
+    # No exported pose is anywhere near the fabricated position.
+    transforms = np.load(scene / "transforms.npy")
+    assert np.abs(transforms[:, :3, 3]).max() < 100.0
+    assert len(transforms) == counts["images"]
+
+    report = (scene / "gnss_guard.txt").read_text()
+    assert "frozen" in report
+
+
+def test_the_guard_stays_off_for_wheel_odometry(bags: Path, tmp_path: Path):
+    """A wheel-IMU pose legitimately holds still while the robot is parked,
+    which is the guard's own signature for a fabricated stretch."""
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
+    assert not (out / "0000" / "gnss_guard.txt").exists()

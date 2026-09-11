@@ -149,7 +149,142 @@ at the teleports**, which is exactly what `write_ground_truth()`'s existing
 odometry and it is 6-DoF, which `/odom_2d` is not (`z_ptp = 0.00`). No FAST-LIO
 stage is needed on this rig.
 
+### The Fixposition fabricates poses when it loses its fix
+
+Segmenting at the teleports is the right shape but not the whole answer, because
+the teleport is not the only thing the receiver does. When it loses its solution
+it keeps publishing `/fixposition/odometry_enu` at full rate and fills it with
+the reset state: a position hundreds of metres away, **held perfectly still**,
+attitude snapped back to identity, and nothing in the message saying so. Scene
+0010 of v2 beta reported a 1249 m step between two frames 64 ms apart that way,
+and 0014 a pair of 1130 m round trips.
+
+Losing the fix is not exotic on this rig: rolling the robot over puts the
+antennas against the ground, and the robot does roll over. So `--gnss_guard
+auto` removes those stretches during extraction, before an image or a cloud is
+written, and the frames left without a pose go with them.
+
+What marks the fabricated side of a jump is that the translation stops moving
+*at all* — the reset state is one position repeated, held for 2.9 s and 46.5 s
+in the two cases here.
+
+That signature is never trusted alone. A robot can be genuinely stopped, and the
+Fixposition quantises to a micrometre, so a stopped robot publishes the same
+number for seconds as well. Scene 0009 does exactly that for three runs of 1.3
+to 2.5 s while the driver is commanding 1.3 m/s into a robot that is not moving:
+the fix is continuous, the covariance is the scene's best (0.0002 m², against a
+scene median well above it) and the GNSS latitude and longitude are just as still
+as the odometry. Nothing was fabricated; the robot was stuck, and deleting those
+105 frames would have been the guard inventing a defect.
+
+So a freeze counts only where something independent says the reported position
+is not where the robot is: a jump implying four figures of metres per second
+into or out of it, or a hole in the stream of fixes that carried a position.
+Both hold for 0010 and 0014 — 0010's freeze opens with a 1249 m jump, 0014's is
+fenced by a pair of 1130 m jumps, and the fix stream has a hole through both. An
+outage on its own is not a span either: an inertial solution coasts through a
+short one perfectly well, and throwing away a merely-drifting stretch would cost
+good data for nothing. It becomes one when the position *also* jumped during it
+— the receiver saying it had nothing, and the position moving further than
+anything can move, are conclusive together where neither is alone. It has no
+catch of its own in v2 beta — 0014's span is already convicted by its island,
+and the rule only adds `no_fix+teleport` to the reason and widens the span to
+the full 3 s the receiver admits it missed — but it is the only rule that would
+reach a fabricated stretch that neither held still long enough nor came back,
+and it costs nothing to carry.
+
+The outage is read as a hole in the fix stream rather than as a flag, because
+the receiver reports the loss two different ways and 0014 uses both: 3 s of
+null-island `NavSatFix` around one jump and 12.7 s of publishing nothing at all
+around the other. Only holes *between* fixes count — 0009 waits 11.7 s for its
+first fix and 0016 spends its last 57 s without one, and neither is a defect.
+
+Nothing in the guard reads the attitude, and that is deliberate. The 180° flip
+is the tempting signature and it is a trap: scene 0010 spends 56 s upside down
+**before** its solution resets, and that stretch is good data. See
+`dataset_tools/gnss_guard.py`.
+
+### A fabricated pose does not need a fabricating receiver
+
+Removing the reset stretches left one step in the root that still could not be
+driving: **3.29 m between two frames 62 ms apart in 0014's `transforms.npy`,
+53 m/s**, with no span anywhere near it. It is not a receiver artefact at all.
+`interpolate_poses` copies the nearest sample wherever it cannot interpolate —
+outside the pose stream's range, or across a bracket wider than 0.5 s — and
+both of those frames sit in a 12 s hole in the odometry and borrow the same
+distant sample. The fabrication is ours, and it reaches `transforms.npy` in the
+same shape and with the same plausibility as the receiver's.
+
+So the guard applies its own principle to the whole frame clock: a frame is
+exported only where real samples bracket it closely enough to interpolate
+between (`gnss_guard.frame_support`). The margin runs the opposite way from a
+span — a span drops a frame that *might* fall inside it, support keeps a frame
+that *might* sit on a pose — so a hole has to exceed 2.5 s before it costs
+anything.
+
+It costs **1,127 frames of v2 beta, 1.1%**, two thirds of them 0016's last
+57 s, where the Fixposition stops publishing while the camera runs on; the rest
+is a scene's first second or two and 0014's 12 s hole. Those frames were never annotated,
+only plausibly annotated. With them gone the worst step anywhere in the root is
+3.2 m/s, and every one of those is a robot driving.
+
 ## 6. Open items before the real outing
+
+**The Odin1 stamps at publish, not at capture — corrected automatically.** Its
+images and clouds carry headers ~0.69 s later than the moment they show, so
+reading a pose at `data_ts[k]` returned where the robot was 0.7 s *after* frame
+`k` — 0.5 m at walking pace, which is what made the viewer show the odometry
+arriving somewhere before the camera, and what smeared every aggregated cloud
+into arcs (`img/v2_time_offset_0013.png`).
+
+**No clock on the robot is wrong.** `scripts/probe_clock_skew.py` reads
+`recv - header` for every message in a bag, which is the direct reading a
+stepped clock cannot hide from:
+
+| topic | recv − header | steps in the bag |
+|---|---|---|
+| `/odin1/image/compressed` | +0.049 s (0.024 … 0.066) | none |
+| `/odin1/cloud_filtered/cloudini` | +0.020 s (0.014 … 0.028) | none |
+| `/fixposition/odometry_enu` | −0.004 s | none |
+| `/joint_states` | +0.001 s | none |
+
+Every publisher agrees with the recorder to within 50 ms and none of them
+moves. The poses are sound too: GT yaw rate tracks the wheel differential to
+±0.1 s (|r| = 0.82–0.97) across all of scene 0000, with no drift. What
+`recv - header` cannot see is the pipeline *behind* the stamp — publish to
+receive is not capture to publish — and that is where the 0.69 s is.
+
+**It does not hold still.** A latency follows load, so unlike a clock offset it
+moves during a recording. Scene 0000 measured window by window, every window
+driven at ~0.85 m/s:
+
+| t into scene | latency |
+|---|---|
+| 0–45 s | ~0 |
+| 45–52 s | 0.62 s |
+| 57–134 s | ~0 |
+| 140–216 s | 0.65 s |
+| 222–290 s | ~0 |
+
+Two independent modalities agree on that shape: the cloud objective, and visual
+yaw rate from the camera cross-correlated against GT yaw rate (lag ≈ 0.00,
+r = 0.82–0.86 in the flat stretches; −0.64, r = 0.945 across 157–216 s). The
+alternatives are ruled out — GNSS covariance is at its *best* in the offset
+stretch (0.010 vs 0.42 m² elsewhere), the frame intervals there are clean, and
+the robot is moving throughout.
+
+So there is no number to configure, per rig or per bag. `--time_align auto`
+(the default) measures the curve during extraction against the clouds the run
+has just written, and takes it off `data_ts.txt` and `pcd_ts.txt`; the pairing
+and the clouds themselves are untouched. Each scene carries the measurement it
+was corrected by in `time_align.txt`, one row per window, so the correction can
+be audited after the fact — and `scripts/measure_time_offset.py` re-asks the
+question of a root already on disk. See `dataset_tools/time_align.py` for what
+the objective is and why a window is judged on the depth of its minimum rather
+than on how far that minimum beats zero.
+
+**To do:** find out what the Odin1 buffers and why 0006–0008 came back with no
+latency at all; if it can be made to stamp at capture, all of this goes away.
 
 **Robot model — blocks `proprio_labels/`.** No `/robot_description` was recorded
 and `tf_static` has only nine edges, none of them the chassis. v1.3 sourced

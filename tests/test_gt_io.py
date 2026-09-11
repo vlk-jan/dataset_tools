@@ -50,11 +50,30 @@ def test_segments_round_trip_and_fold_trailing_columns_into_the_reason(tmp_path)
     gt_io.write_segments(tmp_path / "seg.txt", rows)
     text = (tmp_path / "seg.txt").read_text()
     assert text.startswith(gt_io.SEGMENTS_HEADER + "\n")
-    assert gt_io.read_segments(tmp_path / "seg.txt") == rows
+    # Everything but the number survives the round trip; the number is assigned
+    # by the writer (see test_segments_are_numbered_from_one).
+    got = gt_io.read_segments(tmp_path / "seg.txt")
+    assert [(r.start_ts, r.end_ts, r.n_poses, r.reason) for r in got] == [
+        (r.start_ts, r.end_ts, r.n_poses, r.reason) for r in rows
+    ]
 
     (tmp_path / "odd.txt").write_text("# header\n0 1.0 2.0 5 two words\n1 2.0 3.0 notanumber\nbad line\n2 4.0\n")
     got = gt_io.read_segments(tmp_path / "odd.txt")
     assert [(r.index, r.n_poses, r.reason) for r in got] == [(0, 5, "two words"), (1, 0, "notanumber")]
+
+
+def test_segments_are_numbered_from_one(tmp_path):
+    """ "Segment 3 of 4" should be the third, not the last."""
+    rows = [gt_io.SegmentRow(9, 1.0, 2.0, 5, "gap"), gt_io.SegmentRow(9, 3.0, 4.0, 5, "end_of_run")]
+    gt_io.write_segments(tmp_path / "seg.txt", rows)
+    assert [r.index for r in gt_io.read_segments(tmp_path / "seg.txt")] == [1, 2]
+
+
+def test_a_table_written_before_the_renumbering_still_reads_as_written(tmp_path):
+    """Reading stays faithful: HELHEST v1.2 through v1.5 are numbered from zero
+    and a segment is addressed by the number in its own file."""
+    (tmp_path / "seg.txt").write_text(gt_io.SEGMENTS_HEADER + "\n0 1.0 2.0 5 gap\n1 3.0 4.0 5 end_of_run\n")
+    assert [r.index for r in gt_io.read_segments(tmp_path / "seg.txt")] == [0, 1]
 
 
 def test_anchor_to_first_puts_the_identity_first():
