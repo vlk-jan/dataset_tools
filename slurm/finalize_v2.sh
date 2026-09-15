@@ -28,6 +28,9 @@ singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$OUT" --csv "$OUT/validation.csv"
 vrc=$?
 
-singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/make_atlas.py" "$OUT" || echo "atlas generation reported problems"
+# --bags: make_atlas defaults to the v1 bag list, which numbers its scenes the
+# same way and so silently lends every v2 card a v1 bag size and session.
+singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/make_atlas.py" "$OUT" --bags "$REPO/docs/v2_bags.csv" \
+    || echo "atlas generation reported problems"
 
 exit $vrc
