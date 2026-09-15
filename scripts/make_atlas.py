@@ -40,6 +40,7 @@ import csv
 import json
 import logging
 import os
+import shutil
 import statistics
 import sys
 import time
@@ -668,6 +669,33 @@ def write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+def resolve_thumbs_dir(atlas_dir: Path, materialize: bool) -> None:
+    """The same refusal one level down, for a real ``atlas/`` with linked ``thumbs/``.
+
+    HELHEST v1.5 was assembled that way: its own ``atlas/`` holding a
+    ``thumbs`` link into v1.4's, so a thumbnail rewritten here would land in
+    v1.4. ``--materialize`` copies the files across rather than dropping them:
+    the frames behind them are shared too, so they are still right, and
+    `write_thumbs` only re-renders the ones that are not.
+    """
+    thumbs = atlas_dir / "thumbs"
+    if not thumbs.is_symlink():
+        return
+    target = thumbs.resolve()
+    if not materialize:
+        raise SystemExit(
+            f"{thumbs} is a symlink to {target}\n"
+            "Generating here would overwrite that root's thumbnails. Re-run with --materialize "
+            "to replace the link with a real directory (the thumbnails are copied across)."
+        )
+    thumbs.unlink()
+    if target.is_dir():
+        shutil.copytree(target, thumbs)
+    else:
+        thumbs.mkdir()
+    logger.info("materialised %s (was a symlink to %s)", thumbs, target)
+
+
 def resolve_atlas_dir(root: DatasetRoot, materialize: bool) -> None:
     """Refuse to write through a symlinked ``atlas/``; ``--materialize`` breaks it.
 
@@ -677,6 +705,7 @@ def resolve_atlas_dir(root: DatasetRoot, materialize: bool) -> None:
     """
     atlas_dir = root.atlas_dir
     if not atlas_dir.is_symlink():
+        resolve_thumbs_dir(atlas_dir, materialize)
         return
     target = atlas_dir.resolve()
     if not materialize:
