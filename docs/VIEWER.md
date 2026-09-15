@@ -294,6 +294,76 @@ hero caption and the frame it links to all resolve through one
 whose atlas predates this names no frames, and the slots fall back to 10/50/90 %
 of the scene — which is where those files were cut.
 
+## The train/val split: which scenes a model is scored on
+
+A root may carry a `splits.json` naming the scenes held out from training. When
+it does, every index card gets a labelled band down its left edge — solid violet
+`VAL` for held out, quiet slate `TRAIN` for trained on — and the scene page's
+header a tag in the same colours. Under the masthead a panel names the fold,
+counts each side in scenes and in windows (or labels), draws the window shares
+as a bar, and filters the index to one side: *All scenes*, *Validation* or
+*Training*. The filter is kept in the address (`/?split=val`), so a filtered
+index can be linked; the fold's caveat note sits behind *What this split
+measures*. Without the file nothing is coloured and the pages render exactly as
+they did before; the viewer has no opinion of its own about which scenes are
+validation data, because that is a modelling decision and not something a
+directory listing can answer.
+
+**Only a whole-scene split can be drawn.** DRIFT's default fold is a *stride*
+over keyframes (`i % 4`), which cuts inside every scene: under it no scene is a
+training scene and none is a validation scene, so there is nothing to colour.
+`scene_strat` is the fold that holds out whole scenes, and it is the one this
+reads.
+
+**It is declared, never derived.** The lists are decided in DRIFT
+(`datasets/helhest.py`, `SCENE_STRAT_VAL`) and *serialised* by its exporter —
+never retyped here. A hand-copied duplicate is how DRIFT's own `train.py` came
+to reject the mode name it had just gained, and mirroring the constant into this
+repo would set up the same failure across two projects:
+
+```sh
+# in the DRIFT checkout
+python3 scripts/data/dump_split.py --rootdir <root> --out <root>/splits.json
+python3 scripts/data/dump_split.py --rootdir <root> --out <root>/splits.json --no_windows   # ~2 s, no window counts
+```
+
+| key | what the viewer does with it |
+| --- | --- |
+| `split_mode` | names the fold in the panel and in every band's and tag's tooltip |
+| `root`, `dataset_version` | checked against this root — see below |
+| `val_scenes`, `train_scenes` | the card band, the scene-page tag and the filter |
+| `excluded_scenes` | a third, grey state: in neither split (empty today) |
+| `labels_per_scene`, `windows_per_scene` | each side's share in the panel, and its bar |
+| `source` | shown under *What this split measures*, so the page says where the lists came from |
+
+A hand-written file may use the short key names `val`, `train`, `excluded` and
+`name` instead, and may write scene ids as integers (`[0, 9, 15]`).
+
+**Scene ids are only meaningful inside one tree.** They survive root *versions*
+— v1.2 through v1.5 renumbered segments, never scenes — but not *trees*: the
+ScaLR copy of HELHEST carries rear-camera scenes DRIFT's does not, and the two
+part company from `0030` on. A file exported against one tree therefore labels
+the other correctly up to that scene and wrongly after it, plausibly and with
+nothing else on the page to reveal it. So the index says so above the masthead
+when the file names a different root, when it says nothing about a scene this
+root has, or when its `dataset_version` has gone stale. A scene the file does
+not mention is left **unmarked** rather than assumed to be training data.
+
+**The held-out share always names its unit.** The same fold is 23.7 % of the
+proprio labels and 25.8 % of the loader windows, and one scene (`0019`, fallow
+meadow) is 30 % of the held-out labels but 56 % of the held-out windows. A bare
+percentage would be read as whichever the reader had in mind, so the panel
+quotes windows when the file carries them, labels otherwise, and says which.
+
+**What this fold can and cannot measure.** It tests "new patch, known site", not
+unseen terrain: scenes repeat ground — `0018`/`0019` are the same meadow,
+`0024`–`0027` the same drained reservoir, `0012`–`0015` the same farmyard,
+`0020`/`0028`/`0029` the same gravel network, and all of `0030`–`0042` are one
+forest on one day. With three sites no fold is both terrain-new and trainable.
+Put that in the file's `note` and the panel will carry it, behind *What this
+split measures*. The full reasoning is
+in the comment block above `SCENE_STRAT_VAL` in DRIFT's `datasets/helhest.py`.
+
 ## Notes: what only a person can say
 
 Everything else on a page is probed or computed. A note is the one thing that

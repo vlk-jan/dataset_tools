@@ -1,8 +1,9 @@
 """Synthetic dataset roots for the viewer tests.
 
 ``make_root`` writes a scene with a controllable set of optional files;
-``write_atlas`` adds the optional curated ``atlas/`` half. Shared by every
-``test_viewer_*`` module; the fixtures built on them live in ``conftest.py``.
+``write_atlas`` adds the optional curated ``atlas/`` half and ``write_splits``
+the optional train/val declaration. Shared by every ``test_viewer_*`` module;
+the fixtures built on them live in ``conftest.py``.
 """
 
 from __future__ import annotations
@@ -144,6 +145,48 @@ binning_x: 0
 #: fractions of a 12-frame scene (1, 6, 10), so a test can tell which one the
 #: viewer used.
 CURATED_THUMBS = {"a": 2, "b": 7, "c": 11}
+
+
+def write_splits(
+    root_path: Path,
+    *,
+    val=("0000",),
+    train=None,
+    excluded=None,
+    name: str | None = "scene_strat",
+    note: str | None = None,
+    root: str | None = None,
+    dataset_version: str | None = None,
+    labels: dict | None = None,
+    windows: dict | None = None,
+) -> Path:
+    """The root-level ``splits.json``, in the spelling DRIFT's exporter writes.
+
+    ``scripts/data/dump_split.py`` in DRIFT is the real producer; this writes the
+    same keys so the tests exercise the schema that will actually arrive.
+    ``train=None`` writes no ``train_scenes`` key at all, which is the
+    bare-holdout spelling -- every scene the file does not name trains.
+    """
+    data: dict = {"val_scenes": list(val)}
+    if name is not None:
+        data["split_mode"] = name
+    if note is not None:
+        data["note"] = note
+    if train is not None:
+        data["train_scenes"] = list(train)
+    if excluded is not None:
+        data["excluded_scenes"] = list(excluded)
+    if root is not None:
+        data["root"] = root
+    if dataset_version is not None:
+        data["dataset_version"] = dataset_version
+    if labels is not None:
+        data["labels_per_scene"] = dict(labels)
+    if windows is not None:
+        data["windows_per_scene"] = {k: dict(v) for k, v in windows.items()}
+    path = root_path / "splits.json"
+    path.write_text(json.dumps(data))
+    return path
 
 
 def write_atlas(

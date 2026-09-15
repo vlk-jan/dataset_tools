@@ -35,6 +35,7 @@ from .index_page import (
     fmt_count,
     fmt_duration,
     segment_timeline,
+    split_mark,
     stat,
     thumb_index,
     thumb_slots,
@@ -738,6 +739,10 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
         return {
             "hero": hero_thumbs(access, a),
             "cards": [c for c in cards if c],
+            # Which side of the train/val split this scene is on. The same mark
+            # the index card is rimmed with, from the same function, so the two
+            # pages cannot disagree about a held-out scene.
+            "split": split_mark(root, access.scene_id),
             "camera_info": info,
             # Not one of the four: it sits beside the file inventory, and it is
             # absent -- not empty -- on a scene without GNSS.

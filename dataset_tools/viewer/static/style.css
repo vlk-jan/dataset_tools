@@ -16,6 +16,14 @@
   --track: #2a2f39;
   --ok-soft: #1c3a2b;
   --shade: #0d0f13;
+  /* Train/val. Deliberately not --ok/--warn/--bad: which side of a split a
+     scene is on is not a quality judgement, and a held-out scene reading as a
+     warning is exactly the wrong thing for it to say. Violet for held out,
+     slate-blue for trained on, grey for a scene in neither. */
+  --val: #a884e8;
+  --val-soft: #2b2140;
+  --train: #5f7fa8;
+  --train-soft: #1e2735;
   /* Type stacks. The index overrides these with web fonts; everything sizes
      off the same stacks either way. */
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -157,6 +165,83 @@ section { margin-top: 34px; }
 .cov.mid { background: var(--track); color: var(--muted); }
 .cov.lo { background: var(--track); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
 .env { font-size: 14.5px; margin: 6px 0 12px; max-width: 74ch; }
+
+/* ------------------------------------------------------- train / val split
+   Which side of the scene-level split a scene is on: a labelled band down the
+   edge of its index card, a tag on its scene page, and a panel under the
+   masthead that explains the bands and filters by them. Everything here is
+   scoped to markup the templates only emit on a root that declares a split, so
+   an unsplit root renders exactly as before. */
+.scene.split { grid-template-columns: 30px 224px 1fr; }
+/* Wide enough to read at a glance down a column of cards. Held out is solid,
+   because it is the short list a reader is looking for; trained on is the
+   quiet default. The label runs bottom to top, like a book spine. */
+.splitband {
+  display: flex; align-items: center; justify-content: center;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  font: 600 12px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase;
+}
+.splitband.val { background: var(--val); color: var(--bg); }
+.splitband.train { background: var(--train-soft); color: var(--train); }
+.splitband.excluded { background: var(--track); color: var(--muted); }
+/* Stacked cards put the strip above the body, so the band becomes a bar
+   across the top. Same 700px the card stacks at, and declared here because
+   `.scene.split` outranks the plain `.scene` rule that does the stacking. */
+@media (max-width: 700px) {
+  .scene.split { grid-template-columns: 1fr; }
+  .splitband { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: 6px 12px; }
+}
+/* The filter hides by attribute; both carry a display of their own. */
+.scene[hidden], main > section[hidden] { display: none; }
+
+/* The scene page's tag, in the site header, whose items are baseline aligned
+   against a 22px h1. */
+.split-tag {
+  font: 600 12px var(--mono); padding: 3px 9px; border-radius: 2px;
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.split-tag.val { background: var(--val); color: var(--bg); }
+.split-tag.train { background: var(--train-soft); color: var(--train); }
+.split-tag.excluded { background: var(--track); color: var(--muted); }
+header > .split-tag { align-self: center; }
+
+.splitpanel {
+  margin: 22px 0 0; padding: 14px 16px;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.splithead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.splithead h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.splitfilter { display: flex; flex-wrap: wrap; gap: 8px; }
+.sf {
+  display: inline-flex; align-items: baseline; gap: 7px; padding: 7px 12px;
+  font: 14.5px var(--sans); color: var(--muted); cursor: pointer;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.sf:hover { color: var(--fg); border-color: var(--muted); }
+.sf:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sf[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.sf.val[aria-pressed="true"] { border-color: var(--val); box-shadow: inset 0 0 0 1px var(--val); }
+.sf.train[aria-pressed="true"] { border-color: var(--train); box-shadow: inset 0 0 0 1px var(--train); }
+.sf b { font: 600 15px var(--display); color: var(--fg); font-variant-numeric: tabular-nums; }
+.sf small { font: 12px var(--mono); color: var(--muted); }
+.sf i { align-self: center; width: 11px; height: 11px; border-radius: 2px; }
+.sf.val i { background: var(--val); }
+.sf.train i { background: var(--train); }
+.sf.excluded i { background: var(--muted); }
+/* The same shares as the buttons, drawn: how lopsided the fold is. */
+.splitbar { display: flex; gap: 2px; height: 8px; margin: 12px 0 0; background: var(--track); }
+.splitbar i.val { background: var(--val); }
+.splitbar i.train { background: var(--train); }
+.splitbar i.excluded { background: var(--muted); }
+.splitabout { margin-top: 12px; font-size: 14px; color: var(--muted); }
+.splitabout summary {
+  cursor: pointer; width: fit-content;
+  font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+}
+.splitabout p { max-width: 90ch; margin: 8px 0 0; }
+.splitabout code { font: 13px var(--mono); }
+/* "4 of 12 shown" beside a section title while a filter is on. */
+.sshown { font: 500 12px var(--mono); color: var(--muted); margin-left: auto; }
 
 /* The GT timeline: blocks scaled over the scene's own time span. On a scene
    page each block is a link to its own segment (`a.seg`); on the index card,

@@ -12,6 +12,9 @@
 <header>
   <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}</h1>
   <span class="path">{{ root.path }}/{{ scene_id }}</span>
+  {% if page.split %}
+  <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.label }}</span>
+  {% endif %}
   {% if atlas and atlas.description %}<span class="muted">{{ atlas.description }}</span>{% endif %}
 </header>
 <main>

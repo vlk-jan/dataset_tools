@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from .probe import DatasetRoot, SceneProbe
+from .splits import SPLIT_LABELS, SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
 
 #: Thumbnail slots and where in a scene they sample it when the atlas does not
 #: say. A curated root names the frame each slot was cut from, so the picture,
@@ -188,6 +189,30 @@ def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[st
     ]
 
 
+def split_mark(root: DatasetRoot, scene_id: str) -> dict[str, str] | None:
+    """The train/val mark for one scene, or ``None`` when the root declares none.
+
+    One function for the index card's band and the scene-page tag, so a scene
+    cannot be banded as held out on the index and tagged as training on its own
+    page. The
+    tooltip names the fold and the tree, because a scene id only means something
+    inside one tree and the badge is the only place a reader of the scene page
+    would find out which fold put it there.
+    """
+    splits = root.splits()
+    which = splits.of(scene_id)
+    if which is None:
+        return None
+    where = ", ".join(
+        x for x in (splits.name, f"dataset {splits.dataset_version}" if splits.dataset_version else None) if x
+    )
+    return {
+        "which": which,
+        "label": SPLIT_LABELS[which],
+        "title": f"{SPLIT_TITLES[which]}{f' ({where})' if where else ''}",
+    }
+
+
 def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     """One scene card's worth of content."""
     a = root.atlas_scene(probe.scene_id)
@@ -197,6 +222,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
 
     return {
         "probe": probe,
+        "split": split_mark(root, probe.scene_id),
         "csv": root.csv_rows().get(probe.scene_id, {}),
         "atlas": a,
         "description": a.get("description"),
@@ -276,6 +302,60 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
         "atlas": atlas or None,
         "atlas_warning": atlas_warning(root, atlas),
         "totals": atlas.get("totals") or _derived_totals(rows),
+        # The split panel under the masthead: what the card bands mean, and the
+        # filter over them. Absent -- not empty -- on a root with no splits.json,
+        # so the index of an unsplit root gains nothing at all.
+        "split_panel": split_panel(root, rows),
+        "split_warning": split_warning(root.splits(), root.path, [r["probe"].scene_id for r in rows], root.manifest()),
+    }
+
+
+def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """What the card bands mean and the filter over them, for this root's scenes.
+
+    Counted over `rows` rather than over the file's own lists because the file
+    may name scenes this root does not have (it is written once and carried
+    between root versions), and a panel that claims ten held-out scenes where
+    the index shows eight is worse than no panel.
+    """
+    splits = root.splits()
+    if not splits:
+        return None
+    tally: dict[str, int] = {}
+    for row in rows:
+        mark = row.get("split")
+        if mark:
+            tally[mark["which"]] = tally.get(mark["which"], 0) + 1
+    if not tally:
+        return None
+    shares = splits.shares(r["probe"].scene_id for r in rows)
+    fractions, unit = shares if shares else ({}, None)
+    return {
+        "name": splits.name,
+        "dataset_version": splits.dataset_version,
+        "note": splits.note,
+        "source": splits.source,
+        "total": len(rows),
+        # Named unit, never a bare percentage: the same fold is 23.7 % of the
+        # labels and 25.8 % of the windows, and one scene is 30 % of the held-out
+        # labels but 56 % of the held-out windows. An unlabelled number here
+        # would be read as whichever the reader had in mind.
+        "unit": unit,
+        # "parts", not "items": Jinja resolves `panel.items` to dict.items and
+        # the template would iterate the bound method instead of the list.
+        "parts": [
+            {
+                "which": which,
+                "label": SPLIT_LABELS[which],
+                "name": SPLIT_NAMES[which],
+                "title": SPLIT_TITLES[which],
+                "count": tally[which],
+                "share": fractions.get(which),
+                "pct": f"{fractions[which] * 100:.0f}%" if which in fractions else None,
+            }
+            for which in SPLIT_ORDER
+            if which in tally
+        ],
     }
 
 

@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from .loaders import count_lines, read_segments, read_text
+from .splits import NO_SPLITS, SceneSplits, read_splits
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
@@ -372,6 +373,7 @@ class DatasetRoot:
         self._scene_ids: list[str] | None = None
         self._csv_rows: dict[str, dict] | None = None
         self._atlas: dict | None | object = _UNSET
+        self._splits: SceneSplits | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
         self._probe_dirty = False
@@ -409,6 +411,20 @@ class DatasetRoot:
 
     def readme(self) -> str | None:
         return read_text(self.path / "README.md", 40_000)
+
+    def splits(self) -> SceneSplits:
+        """``splits.json``: which scenes are held out from training, if any.
+
+        Read once per process, like the atlas: the file is a handful of scene
+        ids and only changes when someone re-decides the split. A root that does
+        not declare one gets `NO_SPLITS`, and every page renders as it always
+        did -- the viewer has no opinion of its own about which scenes are
+        validation data, because that is a modelling decision and not something
+        a directory listing can answer.
+        """
+        if self._splits is None:
+            self._splits = read_splits(self.path) or NO_SPLITS
+        return self._splits
 
     @property
     def atlas_dir(self) -> Path:
