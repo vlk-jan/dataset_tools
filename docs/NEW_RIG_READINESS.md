@@ -14,7 +14,7 @@ model**, not sensor data.
 
 ## 1. The recordings
 
-`/home/vlkjan6/Documents/setprop/new_rig_bags/` — nine `_merged` mcap bags,
+Nine `_merged` mcap bags (`subtdata:/data/helhest/26-09-02-stromovka-roads`),
 2026-09-02 13:29–15:30 UTC, one city-park outing (asphalt and gravel paths,
 lawns, mature trees, a viaduct). 106 topics per bag, rosbag2 metadata v9.
 

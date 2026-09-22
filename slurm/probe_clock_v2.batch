@@ -6,7 +6,7 @@
 #SBATCH --mem=16G
 #SBATCH --time=2:00:00
 #SBATCH --partition=cpu
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/skew_%A_%a.out
+#SBATCH --output=slurm/slurm_out/skew_%A_%a.out
 #
 # scripts/probe_clock_skew.py over a v2 bag: what each publisher's clock was
 # doing against the recorder's, and when it moved. Same fetch-to-node-local
@@ -19,11 +19,15 @@
 # writes <out>/<scene>_skew.csv plus the per-topic summary in the slurm log.
 set -uo pipefail
 
-OUT=${1:-/mnt/personal/vlkjan6/HELHEST_v2_beta/.clock_skew}
-REPO=/home/vlkjan6/projects/dataset_tools
+OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta/.clock_skew}
+# Submit from the repository root (see slurm/README.md): slurm runs a copy of
+# this file from its spool, so the checkout is found through the submit
+# directory rather than through $0, and --output above is relative to it too.
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 CSV=$REPO/docs/v2_bags.csv
-SIF=/mnt/data/vras/data/helhest-jazzy.sif
-SUBTDATA=vlkjan6@subtdata.felk.cvut.cz
+SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
+SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
 PY="$REPO/.venv/bin/python"
 
 row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")

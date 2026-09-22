@@ -31,14 +31,14 @@ CSV=${1:?scene_bags.csv}; OUT=${2:?out_root}; JOBS=${3:-8}; RATE=${4:-1.0}
 shift 4 2>/dev/null || shift $#
 ONLY=("$@")
 
-SIF=${SIF:-/mnt/personal/vlkjan6/sif/helhest-jazzy-2026-02-18.sif}
+SIF=${SIF:-/mnt/personal/$USER/sif/helhest-jazzy-2026-02-18.sif}
 EXTRACT_SIF=${EXTRACT_SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
 FLIO_WS=${FLIO_WS:-$HOME/flio_ws}
 REGEN_REPO=${REGEN_REPO:-$HOME/flio_ws/src/dataset_tools_regen}
 REPO=${REPO:-$(cd "$(dirname "$0")/.." && pwd)}
 CONFIG=${CONFIG:-mid360_v2.yaml}
-SUBTDATA=${SUBTDATA:-vlkjan6@subtdata.felk.cvut.cz}
-STAGE=${STAGE:-/mnt/personal/vlkjan6/regen_stage}
+SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
+STAGE=${STAGE:-/mnt/personal/$USER/regen_stage}
 BINDS="--bind /mnt/personal --bind /mnt/data --bind /tmp"
 # The FAST-LIO container is started with --pwd <scene>/regen: run_scene.sh runs
 # the recorder as `python3 -m dataset_tools.odom_node`, and the working directory

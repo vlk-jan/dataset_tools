@@ -10,8 +10,8 @@
 # its holes are done.
 set -u
 CSV=${1:?usage: fetch_hole_bags.sh <campaign.csv> [stage_dir]}
-ST=${2:-/mnt/personal/vlkjan6/regen_stage}
-REMOTE=${REMOTE:-vlkjan6@subtdata.felk.cvut.cz}
+ST=${2:-/mnt/personal/$USER/regen_stage}
+REMOTE=${REMOTE:-$USER@subtdata.felk.cvut.cz}
 mkdir -p "$ST"
 
 cut -d, -f2 "$CSV" | awk '!seen[$0]++' | while read -r bag; do

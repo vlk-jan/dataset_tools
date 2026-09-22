@@ -39,7 +39,12 @@ try:
         roll_pitch_from_matrix,
         roll_pitch_from_quat,
     )
-except ImportError:  # when the file is run directly from dataset_tools/
+except ImportError as exc:  # when the file is run directly from dataset_tools/
+    # Only the package itself being unimportable takes the fallback; an import
+    # failing *inside* one of these modules must surface as what it is rather
+    # than as "No module named 'cloudini'".
+    if exc.name != "dataset_tools":
+        raise
     import cloudini
     import gnss_guard
     import rosbags_compat  # noqa: F401
@@ -56,6 +61,8 @@ except ImportError:  # when the file is run directly from dataset_tools/
 LOG = logging.getLogger("helhest.extract")
 
 SCENE_DIR_RE = re.compile(r"^\d{4,}$")
+#: What ``--cam`` may point at: pass 2 decodes the payload with OpenCV.
+IMAGE_MSGTYPES = ("sensor_msgs/msg/CompressedImage",)
 #: Written as the very last step of a scene, so its presence marks completion.
 SENTINEL_FILE = "source_bag.txt"
 SCENES_CSV = "scenes.csv"
@@ -643,6 +650,23 @@ def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
     return result
 
 
+def time_align_mode(value: str) -> str:
+    """Normalise a ``--time_align`` value: ``auto``, ``off`` or a number as text.
+
+    Also the parser's ``type``, so a typo is refused with a usage message before
+    any bag is opened rather than inside a worker process, where a ``SystemExit``
+    would take the whole pool down.
+    """
+    mode = str(value or "auto").strip().lower()
+    if mode in ("auto", "off"):
+        return mode
+    try:
+        float(mode)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected 'auto', 'off' or seconds, not {value!r}") from None
+    return mode
+
+
 def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, bag: str):
     """Take the sensor unit's capture-to-publish latency off the frame clock.
 
@@ -652,15 +676,12 @@ def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, ba
     ``off`` leaves the stamps alone. Returns the corrected clock and the profile
     to record, or ``(frame_ts, None)`` when nothing was applied.
     """
-    mode = str(getattr(args, "time_align", "auto") or "auto").lower()
+    mode = time_align_mode(args.time_align)
     if mode == "off":
         return frame_ts, None
 
     if mode != "auto":
-        try:
-            constant = float(mode)
-        except ValueError:
-            raise SystemExit(f"--time_align expects 'auto', 'off' or seconds, not {mode!r}") from None
+        constant = float(mode)
         LOG.info("%s: frame clock shifted by %+.3f s (--time_align %s)", bag, constant, mode)
         profile = time_align.Profile([], np.array([frame_ts[0]]), np.array([constant]), "given on the command line")
         shifted, _ = time_align.apply_to_clock(frame_ts, profile)
@@ -693,7 +714,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     # camera's stamping against the LIDAR's, and nothing else: the offset both
     # of them share against the pose clock is a latency, not a stamp error, and
     # is measured after the clouds exist (see --time_align).
-    shift_cam = float(getattr(args, "cam_time_offset", 0.0) or 0.0)
+    shift_cam = float(args.cam_time_offset or 0.0)
     shift_lidar = 0.0
     result = SceneResult(index=-1, bag=bag_path.name, status=STATUS_OK)
 
@@ -708,6 +729,23 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         result.status = STATUS_EMPTY
         result.message = f"missing topic(s): {', '.join(missing)}"
         return result
+    # Pass 2 hands the payload to cv2.imdecode, which cannot read a raw
+    # sensor_msgs/Image; said here, once, instead of as an OpenCV assertion on
+    # the first frame.
+    if cam_conn.msgtype not in IMAGE_MSGTYPES:
+        raise ValueError(f"--cam {camera_topic} is {cam_conn.msgtype}; expected one of {', '.join(IMAGE_MSGTYPES)}")
+
+    # The two 'auto' modes are decided by the odometry topic, which is worth a
+    # line in the log: a rig this tool has not met gets neither ground truth
+    # nor the pose guard, and would otherwise not be told why.
+    if args.gt == "auto" or args.gnss_guard == "auto":
+        LOG.info(
+            "%s: from --odom %s: ground truth %s, GNSS guard %s",
+            bag_path.name,
+            args.odom,
+            "on" if gt_enabled(args) else "off (--gt on to force)",
+            "on" if guard_enabled(args) else "off (--gnss_guard on to force)",
+        )
 
     # A scene is extracted from scratch every time, so whatever an earlier run
     # left behind must go first (see clear_scene_outputs).
@@ -945,14 +983,16 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     intrinsics_saved = False
 
-    for conn, _, raw in reader.messages([cam_conn, lidar_conn]):
-        # Same stamp arithmetic as pass 1, so the set lookups below hit exactly.
+    for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
+        # Same stamp arithmetic as pass 1, so the set lookups below hit exactly
+        # -- including the fallback to the bag's own timestamp for a message
+        # type without a header.
         is_cam = conn.topic == camera_topic
         shift = shift_cam if is_cam else shift_lidar
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, float("nan")) + shift
+            t = header_stamp(msg, timestamp) + shift
         else:
             t += shift
             if t not in (cam_set if is_cam else pcd_set):
@@ -965,6 +1005,11 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             # Use OpenCV directly
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            if cv_img is None:
+                # A frame nothing can be written for leaves a hole in an
+                # index-aligned scene, so the scene fails -- but with the frame
+                # named, not with an OpenCV assertion from cv2.imwrite.
+                raise ValueError(f"image {img_idx} (stamp {t:.6f}, {len(np_arr)} bytes) could not be decoded")
             cv2.imwrite(str(scene_dir / "images" / f"{img_idx:05d}.png"), cv_img)
 
             # Extract Intrinsics once
@@ -1154,7 +1199,7 @@ def guard_enabled(args) -> bool:
     bit-identical pose for as long as the robot stands still -- which is the
     guard's own signature for a fabricated stretch, so running it there would
     delete exactly the frames where the robot was parked."""
-    mode = str(getattr(args, "gnss_guard", "auto") or "auto").lower()
+    mode = str(args.gnss_guard or "auto").lower()
     if mode == "on":
         return True
     if mode == "off":
@@ -1279,7 +1324,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--time_align",
-        type=str,
+        type=time_align_mode,
         default="auto",
         metavar="auto|off|SECONDS",
         help="How to put the frame clock on the same clock as the poses. A "

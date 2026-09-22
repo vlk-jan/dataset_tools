@@ -205,14 +205,14 @@ level in `gravity_align`.
 Two corrected versions of the dataset exist on RCI; prefer them over this
 published root for anything that consumes odometry or raw clouds.
 
-- **v1.1 — derived, no bags** (`/mnt/personal/vlkjan6/HELHEST_v1_1`, 43/43
+- **v1.1 — derived, no bags** (`/mnt/personal/<user>/HELHEST_v1_1`, 43/43
   scenes): clouds shifted +0.34 m in x, zero-returns stripped, `odometry.txt`
   conjugated to `base_link` by `X' = X @ L`, height maps/masks rebuilt,
   `manifest.json` with the applied corrections. Validated: yaw sign agrees
   with the vehicle kinematics (the published root is opposite); proprio
   valid-cell IoU against an exact-X' reference is 1.000 (plain X: 0.740; no
   conjugation: 0.344 — the historical 0.36). Inherits v1's odometry gaps.
-- **v1.2 — regenerated from the raw bags** (`/mnt/personal/vlkjan6/HELHEST_v1_2`,
+- **v1.2 — regenerated from the raw bags** (`/mnt/personal/<user>/HELHEST_v1_2`,
   complete 2026-09-02, 316 GB): FAST-LIO re-run per scene with fixed extrinsics and
   working per-point deskew, divergence-segmented, post-filtered against the
   live `/odom`, `base_link` odometry written directly (no `frame_fix`

@@ -635,6 +635,60 @@ def test_the_status_endpoint_agrees_with_what_a_fetch_would_do(client, tmp_path)
     assert client.get(f"{base}/status").json()["ready"] is False
 
 
+def test_a_bundle_key_that_is_not_canonical_is_refused(client):
+    """The options key names a cache directory. Only the spelling
+    ``BuildOptions.cache_key`` writes is accepted: ``..`` never becomes a path,
+    and a variant spelling of the same options cannot mint a fresh build."""
+    for opts in ("%2e%2e", "..", "40-160000-80-500000-0.10-height", "9999-160000-80-500000-0.1-height", "x"):
+        r = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
+        assert r.status_code == 404, (opts, r.status_code)
+    assert client.get("/api/data/0000/seg000/40-160000-80-500000-0.1-height/x/meta.json").status_code == 200
+
+
+def test_the_viewer_starts_and_says_so_when_simview_is_missing(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer import app as appmod
+
+    monkeypatch.setattr(appmod, "_simview_static_dir", lambda: None)
+    root_path = make_root(tmp_path, scenes=("0000",), frames=4)
+    client = TestClient(appmod.create_app(root_path, cache_dir=tmp_path / "cache"))
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "3D views unavailable" in r.text
+
+
+def test_an_empty_root_says_what_a_scene_is(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = tmp_path / "root"
+    (root_path / "run_2024_05_01").mkdir(parents=True)
+    r = TestClient(create_app(root_path, cache_dir=tmp_path / "cache")).get("/")
+    assert r.status_code == 200
+    assert "No scenes found" in r.text and "0000" in r.text
+
+
+def test_a_loopback_viewer_answers_only_to_loopback_hosts(tmp_path):
+    """DNS rebinding: a page elsewhere must not reach a 127.0.0.1 viewer through
+    a hostname it made resolve there."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=4)
+    app = create_app(root_path, cache_dir=tmp_path / "cache", allowed_hosts=["127.0.0.1", "localhost"])
+    assert TestClient(app, base_url="http://evil.example").get("/").status_code == 400
+    assert TestClient(app, base_url="http://127.0.0.1:8080").get("/").status_code == 200
+    assert TestClient(app, base_url="http://localhost").get("/healthz").status_code == 200
+
+
 def test_the_scene_page_does_not_read_arrays_it_never_renders(client, tmp_path):
     """`_scene_details` loads joint_states/cmd_vel whole (no memory map) and
     the scene template renders none of it -- the four cards carry the same

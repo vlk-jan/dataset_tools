@@ -290,7 +290,7 @@ def main():
     ap.add_argument("src")
     ap.add_argument("dst")
     ap.add_argument("v11")
-    ap.add_argument("--v12", default="/mnt/personal/vlkjan6/HELHEST_v1_2")
+    ap.add_argument("--v12", required=True, help="the HELHEST v1.2 root the coverage guard compares against")
     ap.add_argument("--regen", nargs="*", default=[], help="scene:pilot_dir:t0_rel:t1_rel")
     ap.add_argument("--no-v11", action="store_true")
     a = ap.parse_args()
@@ -390,7 +390,7 @@ def main():
         per_scene=per_scene,
         tags=["<reason>+coverage_guard", "regen_fill:t<hole start, s>", "v11_fill"],
         backups="source root untouched; regen/odometry_precoverageguard.txt where the guard fired; per-run detail in FILL_REPORT.json (odom_bad / seams / map_hits per fill, gps_witness = rigid 2-D fit vs gps_odom, comparison only)",
-        replay_outputs="/mnt/personal/vlkjan6/regen_pilot/<scene>_hole_t<t0>/ (raw run_scene.sh outputs, prefilter)",
+        replay_outputs="<pilot_dir>/<scene>_hole_t<t0>/ as passed in --regen (raw run_scene.sh outputs, prefilter)",
         merge_note="downstream guards (gen_proprio / validate batches) read odometry_map_cut.effect.segments_out; on merge point them at odometry_fill.effect.segments_out",
     )
     m.setdefault("corrections", []).append("odometry_fill")

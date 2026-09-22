@@ -29,7 +29,7 @@ python3.12 -m venv .venv-viewer
 | Flag | Meaning |
 | --- | --- |
 | `root` | the dataset root: the directory holding `0000/`, `0001/`, ... |
-| `--host` | bind address (default `127.0.0.1`; `0.0.0.0` to reach it from another machine) |
+| `--host` | bind address (default `127.0.0.1`; `0.0.0.0` to reach it from another machine -- see [Who can reach it](#who-can-reach-it)) |
 | `--port` | port (default `8080`) |
 | `--max-seconds S` | seconds per viewing window; longer segments are split into parts of equal duration (default `600`) |
 | `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
@@ -46,6 +46,22 @@ the viewer writes goes to the cache directory -- so it is safe to point at a
 read-only or shared copy. Notes are the one thing a person adds, and they are
 written into `<root>/notes/`; on a root that will not take them the viewer says
 so and keeps composing switched off rather than failing at the save.
+
+### Who can reach it
+
+The server has **no authentication**. Anyone who can open the port can read
+every scene, have windows built (which costs CPU and cache disk) and, with
+notes on, write into `<root>/notes/`. It is meant to run on the machine you sit
+at, or on a cluster node reached over an SSH tunnel (`slurm/viewer.batch` and
+`scripts/viewer_connect.sh` do exactly that), and the default bind of
+`127.0.0.1` keeps it there. A loopback bind also answers only to the `Host`
+names `127.0.0.1` and `localhost`, so a web page elsewhere cannot reach it
+through a hostname it arranged to resolve to your machine.
+
+`--host 0.0.0.0` hands the viewer to everyone on the network. Do that only on
+a network you would let write to the root, or pass `--no-notes` so nothing can
+be written; the viewer logs a warning at startup when it is bound beyond
+loopback with notes on.
 
 Start at the index, click a scene id for its inventory and window list, then a
 window to open the 3D view. Nothing else needs configuring.

@@ -409,9 +409,6 @@ class DatasetRoot:
         except json.JSONDecodeError:
             return None
 
-    def readme(self) -> str | None:
-        return read_text(self.path / "README.md", 40_000)
-
     def splits(self) -> SceneSplits:
         """``splits.json``: which scenes are held out from training, if any.
 
@@ -462,7 +459,10 @@ class DatasetRoot:
         the manifest in ``atlas.json`` rather than pasted into a path, so a
         request cannot walk out of the atlas directory. The manifest is either
         ``{"a": <frame index>}`` or the older bare ``["a", "b", "c"]``; only
-        membership matters here, and both spell it the same way.
+        membership matters here, and both spell it the same way. The file the
+        atlas names has to lie under ``atlas/`` too: the atlas is data, and a
+        root someone downloaded must not be able to point the viewer at a file
+        outside itself.
         """
         entry = self.atlas_scene(scene_id)
         thumbs = entry.get("thumbs") or ()
@@ -472,6 +472,13 @@ class DatasetRoot:
         pattern = spec.get("pattern") or "{scene}{slot}.jpg"
         subdir = spec.get("dir") or "thumbs"
         path = self.atlas_dir / subdir / pattern.format(scene=scene_id, slot=slot)
+        try:
+            inside = path.resolve().is_relative_to(self.atlas_dir.resolve())
+        except OSError:
+            return None
+        if not inside:
+            logger.warning("atlas thumbnail %s points outside %s; ignored", path, self.atlas_dir)
+            return None
         return path if path.is_file() else None
 
     def csv_rows(self) -> dict[str, dict]:

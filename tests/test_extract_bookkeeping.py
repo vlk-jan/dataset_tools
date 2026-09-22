@@ -18,6 +18,18 @@ def make_bag(root: Path, name: str) -> Path:
     return bag
 
 
+# ------------------------------------------------------------------ parser
+def test_a_bad_time_align_value_is_refused_by_the_parser(tmp_path: Path, capsys):
+    """Refused before any bag is opened: raised inside a worker it would take
+    the whole process pool down with a BrokenProcessPool nobody can read."""
+    with pytest.raises(SystemExit) as exc:
+        ed.build_parser().parse_args([str(tmp_path), str(tmp_path), "--time_align", "soon"])
+    assert exc.value.code == 2
+    assert "'soon'" in capsys.readouterr().err
+    assert ed.time_align_mode(" Auto ") == "auto"
+    assert ed.time_align_mode("-0.69") == "-0.69"
+
+
 # --------------------------------------------------------------------- bags
 def test_find_bags_requires_metadata_yaml(tmp_path: Path):
     make_bag(tmp_path, "bag_b")

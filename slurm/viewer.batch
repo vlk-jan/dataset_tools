@@ -6,7 +6,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=8:00:00
 #SBATCH --partition=cpu,amd
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/viewer_%j.out
+#SBATCH --output=slurm/slurm_out/viewer_%j.out
 
 # Run the dataset viewer on a compute node instead of the login node, and reach
 # it from a laptop over an SSH tunnel.
@@ -30,8 +30,12 @@
 # the tunnel does not need the port exposed on it.
 set -uo pipefail
 
-REPO=/home/vlkjan6/projects/dataset_tools
-ROOT=${1:-/mnt/personal/vlkjan6/HELHEST_v1_3}
+# Submit from the repository root (see slurm/README.md): slurm runs a copy of
+# this file from its spool, so the checkout is found through the submit
+# directory rather than through $0, and --output above is relative to it too.
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+ROOT=${1:-/mnt/personal/$USER/HELHEST_v1_3}
 VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 
 # Built windows are cached per (scene, window, options), so a cache that
@@ -43,7 +47,7 @@ VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 # -- viewer_cache/HELHEST_v1_3, viewer_cache/HELHEST_v2_beta, ... Neither the
 # probe cache nor the bundle names are keyed by root, so two datasets sharing
 # one directory would read each other's entries.
-CACHE_BASE=${VIEWER_CACHE:-/mnt/personal/vlkjan6/viewer_cache}
+CACHE_BASE=${VIEWER_CACHE:-/mnt/personal/$USER/viewer_cache}
 CACHE="$CACHE_BASE/$(basename "$ROOT")"
 
 [ -d "$ROOT" ] || { echo "no dataset root at $ROOT"; exit 1; }

@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -63,13 +62,20 @@ VALIDITY_RANK = np.array([0, 1, 2, 0], dtype=np.uint8)
 # --------------------------------------------------------------------------
 
 
+def _unreadable(what: str, path: Path, exc: Exception) -> None:
+    """Log a failed read. A file that is simply not there is the ordinary
+    shape of an optional artefact and gets debug; anything else is a warning."""
+    level = logger.debug if isinstance(exc, FileNotFoundError) else logger.warning
+    level("cannot %s %s: %s", what, path, exc)
+
+
 def read_timestamps(path: Path) -> np.ndarray | None:
     """Read a one-timestamp-per-line file (``data_ts.txt`` / ``pcd_ts.txt``)."""
     try:
         with open(path) as fh:
             vals = [float(line) for line in fh if line.strip() and not line.startswith("#")]
     except (OSError, ValueError) as exc:
-        logger.warning("cannot read timestamps %s: %s", path, exc)
+        _unreadable("read timestamps", path, exc)
         return None
     return np.asarray(vals, dtype=np.float64) if vals else None
 
@@ -88,7 +94,7 @@ def read_matrix(path: Path, shape: tuple[int, ...] | None = None) -> np.ndarray 
     try:
         arr = np.loadtxt(path, dtype=np.float64, comments="#")
     except (OSError, ValueError) as exc:
-        logger.warning("cannot read matrix %s: %s", path, exc)
+        _unreadable("read matrix", path, exc)
         return None
     if shape is not None:
         try:
@@ -104,7 +110,7 @@ def load_npy(path: Path, mmap: bool = False) -> np.ndarray | None:
     try:
         return np.load(path, mmap_mode="r" if mmap else None)
     except (OSError, ValueError) as exc:
-        logger.warning("cannot load %s: %s", path, exc)
+        _unreadable("load", path, exc)
         return None
 
 
@@ -121,7 +127,7 @@ def load_npz_key(path: Path, key: str) -> np.ndarray | None:
             logger.warning("%s has no key %r (has %s)", path, key, names)
             return None
     except (OSError, ValueError) as exc:
-        logger.warning("cannot load %s: %s", path, exc)
+        _unreadable("load", path, exc)
         return None
 
 
@@ -363,14 +369,6 @@ def height_map_cell_centers(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndar
     x = HM_EXTENT[0] + HM_RES * (np.arange(rows) + 0.5)
     y = HM_EXTENT[0] + HM_RES * (np.arange(cols) + 0.5)
     return x, y
-
-
-@dataclass
-class ProprioTrack:
-    """A resampled proprioception channel set, one value per requested time."""
-
-    names: list[str] = field(default_factory=list)
-    values: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarray, max_gap: float = 1.0) -> np.ndarray:

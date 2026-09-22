@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+type: software
+title: dataset_tools
+abstract: >-
+  Tools for turning HELHEST robot recordings (ROS 2 bags) into a flat,
+  learning-friendly dataset: synchronised camera frames, point clouds in the
+  robot base frame, odometry, gravity alignment and proprioception, with a
+  validator and a web viewer for the result.
+authors:
+  - family-names: Vlk
+    given-names: Jan
+    email: vlkjan6@fel.cvut.cz
+    affiliation: Czech Technical University in Prague
+version: 1.0.1
+license: BSD-3-Clause
+repository-code: https://github.com/vlk-jan/dataset_tools
+keywords:
+  - robotics
+  - ros2
+  - rosbag
+  - dataset
+  - lidar
+  - helhest

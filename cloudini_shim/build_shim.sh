@@ -5,16 +5,17 @@
 # Usage: ./build_shim.sh [path-to-cloudini-checkout]
 # Requires: cmake, g++ (C++20). libzstd-dev / liblz4-dev are used if present;
 # otherwise cloudini's vendored copies are built instead, so the script works
-# on a machine without those headers (e.g. dgx07).
+# on a machine without those headers.
 #
 # ABI FLOOR -- THE THING THAT ACTUALLY BITES. The .so records the glibc of the
 # machine that built it and will not load on anything older. A shim built in
-# helhest-jazzy.sif came out needing GLIBC_2.38 and loaded on NEITHER dgx07
-# (2.35) NOR the RCI login/compute nodes (2.28), which is silent until the
-# first decode() and then surfaces as a bare OSError from ctypes.
-# So BUILD ON THE OLDEST MACHINE YOU NEED TO SUPPORT. The committed binary was
-# built on dgx07 (Ubuntu 22.04, g++ 11.4, glibc 2.35) and needs GLIBC_2.32 /
-# GLIBCXX_3.4.30 -- fine on dgx07 and newer, still too new for RCI. Check with:
+# a ROS 2 Jazzy (Ubuntu 24.04) container came out needing GLIBC_2.38 and loaded
+# on NEITHER an Ubuntu 22.04 workstation (2.35) NOR a cluster's RHEL 8 nodes
+# (2.28), which is silent until the first decode() and then surfaces as a bare
+# OSError from ctypes. So BUILD ON THE OLDEST MACHINE YOU NEED TO SUPPORT. The
+# committed binary was built on Ubuntu 22.04 (g++ 11.4, glibc 2.35) and needs
+# GLIBC_2.32 / GLIBCXX_3.4.30 -- fine there and newer, too new for glibc 2.28.
+# Check with:
 #   objdump -T libcloudini_shim.so | grep -oE "GLIBC[A-Z_]*_[0-9.]+" | sort -uV | tail
 set -euo pipefail
 

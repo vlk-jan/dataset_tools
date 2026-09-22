@@ -30,6 +30,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[test]"
+      # The console scripts are what a user installs for; make sure they resolve.
+      - run: helhest-extract --help && helhest-validate --help && helhest-sort-bag --help
       # The viewer tests skip themselves when its extra is absent.
       - run: python -m pytest tests
 

@@ -11,9 +11,9 @@
 #
 #   slurm/finalize_v2.sh [out_root]
 set -uo pipefail
-OUT=${1:-/mnt/personal/vlkjan6/HELHEST_v2_beta}
-REPO=/home/vlkjan6/projects/dataset_tools
-SIF=/mnt/data/vras/data/helhest-jazzy.sif
+OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
 PY="$REPO/.venv/bin/python"
 BINDS="--bind /mnt/personal --bind /mnt/data"
 

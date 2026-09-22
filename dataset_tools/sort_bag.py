@@ -17,16 +17,27 @@ except ImportError:
     import rosbags_compat  # noqa: F401
 
 
-def sort_bag(input_path: Path, output_path: Path) -> int:
+def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> int:
     """Sort ROS2 bag messages by timestamp.
+
+    Every message is held in memory until the last one has been read, so the
+    machine needs RAM for the whole bag; the tool is meant for the odd
+    recording whose order is wrong, not for a pipeline.
 
     Args:
         input_path: Path to the input bag (directory or mcap file).
-        output_path: Path to the output bag directory.
+        output_path: Path to the output bag directory. Refused if it exists,
+            unless ``overwrite`` is set, in which case it is removed first.
 
     Returns:
         The number of messages written.
     """
+    if output_path.exists():
+        if not overwrite:
+            raise FileExistsError(f"{output_path} exists; pass --overwrite to replace it")
+        print(f"Removing existing {output_path}...")
+        shutil.rmtree(output_path)
+
     messages = []
 
     print(f"Reading messages from {input_path}...")
@@ -55,11 +66,6 @@ def sort_bag(input_path: Path, output_path: Path) -> int:
 
     print(f"Writing sorted messages to {output_path}...")
 
-    # Ensure output directory doesn't exist to avoid rosbags Writer errors
-    if output_path.exists():
-        print(f"Warning: Output path {output_path} exists. Removing it.")
-        shutil.rmtree(output_path)
-
     with Writer(output_path, version=8) as writer:
         # Create connections in the new bag
         topic_to_conn = {}
@@ -76,9 +82,13 @@ def sort_bag(input_path: Path, output_path: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Sort a ROS2 bag by header or bag timestamp.")
+    parser = argparse.ArgumentParser(
+        description="Sort a ROS2 bag by header or bag timestamp. "
+        "The whole bag is held in memory while it is sorted.",
+    )
     parser.add_argument("input", type=str, help="Path to input ROS2 bag")
     parser.add_argument("output", type=str, help="Path to output sorted bag (directory)")
+    parser.add_argument("--overwrite", action="store_true", help="replace the output directory if it exists")
 
     args = parser.parse_args(argv)
 
@@ -89,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: Input path {in_path} does not exist.", file=sys.stderr)
         return 2
 
-    sort_bag(in_path, out_path)
+    try:
+        sort_bag(in_path, out_path, overwrite=args.overwrite)
+    except FileExistsError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 

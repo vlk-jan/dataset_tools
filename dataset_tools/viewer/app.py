@@ -28,6 +28,7 @@ import logging
 import re
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -37,6 +38,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
@@ -107,10 +109,18 @@ OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 CURATED = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
-def _simview_static_dir() -> Path:
-    from importlib.resources import files
+def _simview_static_dir() -> Path | None:
+    """Where SimView's front-end lives, or ``None`` when the package is absent.
 
-    return Path(str(files("simview") / "static"))
+    The rest of the app degrades to "3D views unavailable" on ``None``; without
+    this catch, a missing extra would take the whole viewer down at startup.
+    """
+    try:
+        from importlib.resources import files
+
+        return Path(str(files("simview") / "static"))
+    except (ImportError, TypeError):
+        return None
 
 
 def _warm_build_imports() -> None:
@@ -186,7 +196,16 @@ def create_app(
     notes: bool = True,
     author: str = "",
     clear_cache: bool = False,
+    allowed_hosts: Sequence[str] | None = None,
 ) -> FastAPI:
+    """The viewer as an ASGI app.
+
+    ``allowed_hosts`` restricts the ``Host`` header the server answers to. The
+    server has no authentication -- notes are writes -- so a viewer bound to
+    the loopback interface passes the loopback names here, which stops a page
+    on another site from reaching it through a hostname that resolves to
+    127.0.0.1 (DNS rebinding). ``None`` answers every host.
+    """
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
     state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds)
     # Resolved once: the pages report where notes go and why they cannot be
@@ -204,6 +223,8 @@ def create_app(
 
     app = FastAPI(title="dataset_tools viewer", docs_url=None, redoc_url=None)
     app.state.viewer = state
+    if allowed_hosts is not None:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals["reason_text"] = describe_reason
@@ -214,7 +235,7 @@ def create_app(
     )
 
     simview_static = _simview_static_dir()
-    simview_ok = simview_static.is_dir()
+    simview_ok = simview_static is not None and simview_static.is_dir()
     simview_ver = _simview_version()
     if simview_ok:
         # Version-stamped path first (most specific): the entry point and every
@@ -238,10 +259,11 @@ def create_app(
             _RevalidatingStatic(directory=str(simview_static)),
             name="simview_static_root",
         )
-    else:  # pragma: no cover - only when simview is missing/broken
+    else:
         logger.error(
-            "simview static assets not found at %s; the 3D view will not work",
-            simview_static,
+            "simview static assets not found (%s); the 3D view will not work -- "
+            'install the viewer extra: pip install "dataset_tools[viewer]"',
+            simview_static or "simview is not installed",
         )
     threading.Thread(target=_warm_build_imports, name="warm-build-imports", daemon=True).start()
 
@@ -475,6 +497,9 @@ def create_app(
                 "simviewVersion": _simview_version(),
             }
         )
+        # json.dumps leaves "<" alone, and a "</script>" inside any value (the
+        # notes status carries an OS error string) would end the block early.
+        config = config.replace("<", "\\u003c")
         head = (
             '<link rel="stylesheet" href="/viewer-static/overlay.css">'
             f"<script>window.__dtViewer = {config};</script>"
@@ -586,12 +611,12 @@ def create_app(
         index does not have to know which kind of root it is showing.
         """
         access = _access_or_404(state, scene_id)
+        if slot not in THUMB_SLOTS:
+            raise HTTPException(404, f"no thumbnail slot {slot!r}")
         stored = root.atlas_thumb(scene_id, slot)
         if stored is not None:
             return FileResponse(stored, media_type="image/jpeg", headers=CURATED)
 
-        if slot not in THUMB_SLOTS:
-            raise HTTPException(404, f"no thumbnail slot {slot!r}")
         n_frames = access.probe.n_frames
         if not n_frames or not access.probe.has("images"):
             raise HTTPException(404, f"scene {scene_id} has no images to thumbnail")
@@ -712,7 +737,7 @@ def create_app(
     # ------------------------------------------------------------ scene data
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
-    async def api_status(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
+    async def api_status(scene_id: str, window_key: str, opts_key: str, stamp: str):
         path = _bundle_path(state, scene_id, window_key, opts_key)
         # The same test _ensure_bundle uses. Reporting "ready" for a bundle
         # written by an older viewer would promise a fetch that in fact blocks
@@ -722,7 +747,7 @@ def create_app(
         return {"ready": _bundle_is_current(path, window), "path": str(path)}
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
-    async def api_meta(request: Request, scene_id: str, window_key: str, opts_key: str, stamp: str):
+    async def api_meta(scene_id: str, window_key: str, opts_key: str, stamp: str):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
         return FileResponse(bundle / "meta.json", media_type="application/json")
 
@@ -834,8 +859,17 @@ def _notes_per_window(notes: list, windows: list) -> dict[str, list]:
 
 
 def _bundle_path(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
-    """The on-disk bundle directory for a request, after checking its parts."""
+    """The on-disk bundle directory for a request, after checking its parts.
+
+    The options key has to be the one ``BuildOptions.cache_key`` would write
+    for the options it names -- so ``..`` is refused before it becomes a path,
+    and so is every spelling of the same options but the canonical one, which
+    is what keeps a request from minting a fresh build (and a fresh directory)
+    per variant of an otherwise identical key.
+    """
     if not scene_id.isdigit() or not WINDOW_KEY_RE.match(window_key) or not OPTS_KEY_RE.match(opts_key):
+        raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
+    if _options_from_key(opts_key).cache_key() != opts_key:
         raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
     return state.bundle_dir / scene_id / window_key / opts_key
 
@@ -992,9 +1026,11 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             return await run_in_threadpool(work)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
-        except Exception as exc:  # noqa: BLE001 - surfaced to the browser
+        except Exception as exc:  # noqa: BLE001 - logged in full, named to the browser
+            # The traceback goes to the log; the browser gets the exception's
+            # type, not its text, which tends to carry file paths.
             logger.exception("build failed for %s/%s", scene_id, window_key)
-            raise HTTPException(500, f"build failed: {type(exc).__name__}: {exc}") from exc
+            raise HTTPException(500, f"build failed ({type(exc).__name__}); see the viewer's log") from exc
 
 
 async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:

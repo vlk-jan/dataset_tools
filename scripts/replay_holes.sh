@@ -14,9 +14,9 @@
 # run_scene.sh ignores both and replays the whole bag.
 set -u
 CSV=${1:?usage: replay_holes.sh <campaign.csv> [stage_dir] [out_dir]}
-ST=${2:-/mnt/personal/vlkjan6/regen_stage}
-PO=${3:-/mnt/personal/vlkjan6/regen_pilot}
-SIF=${SIF:-/mnt/personal/vlkjan6/sif/helhest-jazzy-2026-02-18.sif}
+ST=${2:-/mnt/personal/$USER/regen_stage}
+PO=${3:-/mnt/personal/$USER/regen_pilot}
+SIF=${SIF:-/mnt/personal/$USER/sif/helhest-jazzy-2026-02-18.sif}
 RUN_SCENE=${RUN_SCENE:-~/flio_ws/src/dataset_tools_regen/scripts/run_scene.sh}
 CONFIG=${CONFIG:-mid360_v2.yaml}
 RATE=${RATE:-0.5}

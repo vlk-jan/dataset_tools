@@ -12,6 +12,7 @@ build/
 dist/
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 
 # The prebuilt cloudini decoder is committed deliberately; see
 # cloudini_shim/build_shim.sh for its ABI floor and how to rebuild it.

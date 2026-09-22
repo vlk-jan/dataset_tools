@@ -103,13 +103,10 @@ not so much lost as revealed: they never had a pose, only a plausible one.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-
-LOG = logging.getLogger("helhest.gnss_guard")
 
 #: Speed, m/s, above which a step between two samples is not motion. Matches
 #: the gate :func:`~dataset_tools.extract_data.write_ground_truth` breaks

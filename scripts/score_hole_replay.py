@@ -46,7 +46,7 @@ def main():
     ap.add_argument("replay_dir")
     ap.add_argument("t0", type=float, help="hole start, seconds from the first frame")
     ap.add_argument("t1", type=float, help="hole end, seconds from the first frame")
-    ap.add_argument("--root", default="/mnt/personal/vlkjan6/HELHEST_v1_3", help="root the hole belongs to")
+    ap.add_argument("--root", required=True, help="root the hole belongs to")
     a = ap.parse_args()
 
     scene = f"{a.root}/{a.scene}"

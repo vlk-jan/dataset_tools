@@ -9,6 +9,10 @@ from pathlib import Path
 
 from .windows import DEFAULT_MAX_FRAMES, DEFAULT_MAX_SECONDS
 
+#: Bind addresses that mean "this machine only", and the Host names a browser
+#: sends when it reaches one.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -20,7 +24,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("root", type=Path, help="dataset root directory (the one holding 0000/, 0001/, ...)")
-    parser.add_argument("--host", default="127.0.0.1", help="bind address (default: %(default)s)")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="bind address (default: %(default)s). The server has no authentication, and notes "
+        "are writes: keep it on the loopback interface and reach it over an SSH tunnel, or "
+        "pass --no-notes before exposing it with 0.0.0.0",
+    )
     parser.add_argument("--port", type=int, default=8080, help="port (default: %(default)s)")
     parser.add_argument(
         "--max-seconds",
@@ -87,6 +97,16 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
+    # A loopback bind is the private case, and answers only to loopback names,
+    # so a hostname another site controls cannot be pointed at it. Any other
+    # bind is the operator's decision to share it, and is said so once.
+    loopback = args.host in LOOPBACK_HOSTS
+    if not loopback and args.notes:
+        logging.getLogger("dataset_tools.viewer").warning(
+            "binding %s with notes on: anyone who can reach the port can write notes into the root "
+            "(--no-notes turns that off)",
+            args.host,
+        )
     app = create_app(
         args.root,
         max_frames=args.max_frames,
@@ -96,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
         notes=args.notes,
         author=args.author,
         clear_cache=args.clear_cache,
+        allowed_hosts=sorted(LOOPBACK_HOSTS) if loopback else None,
     )
     url = f"http://{args.host}:{args.port}/"
     print(f"dataset viewer for {args.root}\n  {url}")

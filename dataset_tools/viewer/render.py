@@ -37,23 +37,6 @@ _TURBO_ANCHORS = np.array(
     ],
     dtype=np.float64,
 )
-_VIRIDIS_ANCHORS = np.array(
-    [
-        [68, 1, 84],
-        [72, 40, 120],
-        [62, 74, 137],
-        [49, 104, 142],
-        [38, 130, 142],
-        [31, 158, 137],
-        [53, 183, 121],
-        [110, 206, 88],
-        [181, 222, 43],
-        [253, 231, 37],
-    ],
-    dtype=np.float64,
-)
-_GREY_ANCHORS = np.array([[0, 0, 0], [255, 255, 255]], dtype=np.float64)
-
 #: Fixed, meaningful colours for the height-map validity states.
 #:
 #: Anchored reads as a cousin of extrapolated rather than of measured, because
@@ -91,11 +74,9 @@ def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
     return (anchors[lo] * (1 - frac) + anchors[hi] * frac).astype(np.uint8)
 
 
-LUTS = {
-    "turbo": _build_lut(_TURBO_ANCHORS),
-    "viridis": _build_lut(_VIRIDIS_ANCHORS),
-    "grey": _build_lut(_GREY_ANCHORS),
-}
+#: The one colour map every renderer here uses; ``colorize`` falls back to it
+#: for a name it does not know.
+LUTS = {"turbo": _build_lut(_TURBO_ANCHORS)}
 
 
 def colorize(
@@ -310,11 +291,3 @@ def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> byte
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=False)
     return buf.getvalue()
-
-
-def placeholder_png(text_hint: str = "") -> bytes:
-    """A small dark tile used when a per-frame artefact is absent."""
-    rgb = np.full((64, 64, 3), 24, dtype=np.uint8)
-    rgb[::8, :] = 40
-    rgb[:, ::8] = 40
-    return _to_png(rgb)

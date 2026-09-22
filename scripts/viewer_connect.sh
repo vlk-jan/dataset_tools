@@ -12,7 +12,7 @@ set -uo pipefail
 # The RCI account name, which need not match the local one. Neither hop can pick
 # it up from ~/.ssh/config: the login host is named in full here rather than by
 # a Host alias, and the compute node's name changes from job to job.
-RCI_USER=${VIEWER_USER:-vlkjan6}
+RCI_USER=${VIEWER_USER:-$USER}
 LOGIN=$RCI_USER@${VIEWER_LOGIN:-login3.rci.cvut.cz}
 REPO=${VIEWER_REPO:-/home/$RCI_USER/projects/dataset_tools}
 NODE_HOSTS=${VIEWER_KNOWN_HOSTS:-$HOME/.ssh/known_hosts_rci_nodes}

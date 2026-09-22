@@ -25,7 +25,7 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="vlkjan6",
+    maintainer="Jan Vlk",
     maintainer_email="vlkjan6@fel.cvut.cz",
     description="Tools for extracting the HELHEST robot dataset from ROS 2 bags.",
     license="BSD-3-Clause",

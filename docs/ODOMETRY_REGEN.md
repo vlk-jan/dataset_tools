@@ -240,7 +240,7 @@ that sif into a bind-mounted directory (`~/flio_ws`, shared home).
 **Option A — dgx07 (recommended).** 128 cores / 503 GB, singularity-ce 3.10,
 direct key-based ssh to `subtdata.felk.cvut.cz`, `/mnt/personal` and
 `/mnt/data` mounted, so outputs land where DRIFT reads them
-(`/mnt/personal/vlkjan6/HELHEST_v1_2`; the filesystem has ~54 TB free and the
+(`/mnt/personal/<user>/HELHEST_v1_2`; the filesystem has ~54 TB free and the
 per-user quota view is 10 TB with 2.9 TB used — even staging all 913 GB fits;
 stream-one-delete-one never needs more than ~150 GB). ROS pub/sub inside the sif works
 there (`ROS_LOCALHOST_ONLY=1`, verified). It is GPU-bound by training (load
@@ -356,7 +356,7 @@ combined — disregard; `/cmd_vel` and `/cmd_vel_nav` are empty, so
 
 ## Full-pass results (dgx07, finished 2026-09-02 04:44)
 
-Root: `/mnt/personal/vlkjan6/HELHEST_v1_2` (316 GB) — 43/43 scenes, every one
+Root: `/mnt/personal/<user>/HELHEST_v1_2` (316 GB) — 43/43 scenes, every one
 with `base_link` `odometry.txt` (filtered segments + `odometry_unfiltered.txt`,
 per-scene provenance under `<scene>/regen/`: raw IMU pose, flags, segments,
 `/odom` and wheel references, run stats and logs), re-extracted clouds
@@ -504,7 +504,7 @@ For each row of `docs/scene_bags.csv`:
    (`--start_index` gives the scene number; `--frame_fix` is NOT needed — the
    new odometry is already `base_link`);
 4. `validate_scene.py`;
-5. push the scene to RCI (`/mnt/personal/vlkjan6/HELHEST_v1_2/NNNN`), delete
+5. push the scene to RCI (`/mnt/personal/<user>/HELHEST_v1_2/NNNN`), delete
    the local bag.
 
 ## Acceptance

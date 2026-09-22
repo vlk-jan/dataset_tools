@@ -18,14 +18,17 @@ go through these functions, so the format is spelled out exactly once.
 
 from __future__ import annotations
 
+import logging
 import os
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TextIO
 
 import numpy as np
+
+LOG = logging.getLogger("helhest.gt_io")
 
 GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
 SEGMENTS_HEADER = "# segment start_ts end_ts n_poses reason"
@@ -105,18 +108,29 @@ def _replace_atomically(dest, writer) -> None:
     os.replace(tmp, dest)
 
 
-def write_trajectory(dest: Path | str | TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
-    """Write header + one line per pose to a path or an open text handle."""
+def _write(dest: Path | str | TextIO, writer: Callable[[TextIO], None]) -> None:
+    """Run ``writer`` on an open handle as it is, or atomically into a path."""
     if hasattr(dest, "write"):
-        _write_trajectory(dest, ts, poses)  # type: ignore[arg-type]
+        writer(dest)  # type: ignore[arg-type]
         return
+    _replace_atomically(dest, writer)
+
+
+def write_trajectory(dest: Path | str | TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
+    """Write header + one line per pose to a path or an open text handle.
+
+    ``ts`` and ``poses`` must be the same length: a mismatch is a caller's bug,
+    and a file silently short of its poses would only be found downstream.
+    """
     ts, poses = list(ts), list(poses)
-    _replace_atomically(dest, lambda fh: _write_trajectory(fh, ts, poses))
+    if len(ts) != len(poses):
+        raise ValueError(f"{len(ts)} timestamps for {len(poses)} poses")
+    _write(dest, lambda fh: _write_trajectory(fh, ts, poses))
 
 
 def _write_trajectory(fh: TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
     fh.write(GT_HEADER + "\n")
-    for t, T in zip(ts, poses, strict=False):
+    for t, T in zip(ts, poses, strict=True):
         fh.write(format_pose_line(t, T) + "\n")
 
 
@@ -155,13 +169,20 @@ def parse_segment_line(line: str) -> SegmentRow | None:
 
 
 def read_segments(path: Path | str) -> list[SegmentRow]:
-    """Every parseable row, in file order. Raises ``OSError`` if unreadable."""
+    """Every parseable row, in file order. Raises ``OSError`` if unreadable.
+
+    A line that is neither a comment nor a row is skipped with a warning
+    rather than silently: a hand-edited table with a typo should not read as
+    a table with one segment fewer.
+    """
     rows = []
     with open(path) as fh:
-        for line in fh:
+        for number, line in enumerate(fh, 1):
             row = parse_segment_line(line)
             if row is not None:
                 rows.append(row)
+            elif line.strip() and not line.lstrip().startswith("#"):
+                LOG.warning("%s:%d: not a segment row, skipped: %s", path, number, line.rstrip())
     return rows
 
 
@@ -171,11 +192,8 @@ def format_segment_line(row: SegmentRow) -> str:
 
 def write_segments(dest: Path | str | TextIO, rows: Iterable[SegmentRow]) -> None:
     """Write header + one line per segment to a path or an open text handle."""
-    if hasattr(dest, "write"):
-        _write_segments(dest, rows)  # type: ignore[arg-type]
-        return
     rows = list(rows)
-    _replace_atomically(dest, lambda fh: _write_segments(fh, rows))
+    _write(dest, lambda fh: _write_segments(fh, rows))
 
 
 def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:

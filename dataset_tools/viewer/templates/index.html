@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer &mdash; {{ root.path.name }}{% endif %}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
 {# Non-blocking: the page is fully readable in the system stack, and upgrades
    if the machine viewing it can reach Google Fonts. #}
@@ -106,6 +107,16 @@
     </details>
     {% endif %}
   </div>
+  {% endif %}
+
+  {# A root with nothing the viewer recognises as a scene would otherwise be a
+     masthead over nothing, with no word about why. #}
+  {% if not groups %}
+  <section>
+    <p class="stale">No scenes found under <code>{{ root.path }}</code>. A scene is a directory
+      named with digits only (<code>0000</code>, <code>0001</code>, ...), the layout
+      <code>helhest-extract</code> writes; nothing else in the root is read.</p>
+  </section>
   {% endif %}
 
   {% for group in groups %}

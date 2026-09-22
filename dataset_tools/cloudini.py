@@ -15,15 +15,16 @@ def _get_lib():
         if not _LIB_PATH.exists():
             raise RuntimeError(
                 f"{_LIB_PATH} not found. Build it with cloudini_shim/build_shim.sh "
-                "(inside helhest-jazzy.sif or any machine with cmake/g++/zstd/lz4)."
+                "(needs cmake and a C++20 g++; zstd/lz4 headers are used when present)."
             )
         try:
             lib = ctypes.CDLL(str(_LIB_PATH))
         except OSError as exc:
             # Almost always an ABI floor, not a missing file: the .so records
             # the glibc of its build machine and refuses to load on anything
-            # older. The committed binary is built on dgx07 (glibc 2.35) and
-            # needs GLIBC_2.32; RCI's nodes are 2.28 and cannot load it.
+            # older. The committed binary was built on Ubuntu 22.04 (glibc
+            # 2.35) and needs GLIBC_2.32 / GLIBCXX_3.4.30; a host on an older
+            # glibc (2.28, say) cannot load it and has to rebuild.
             raise RuntimeError(
                 f"could not load {_LIB_PATH}: {exc}\n"
                 "If this mentions a GLIBC/GLIBCXX version, the shim was built "

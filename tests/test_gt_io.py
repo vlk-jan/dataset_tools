@@ -39,6 +39,21 @@ def test_trajectory_accepts_the_13_column_form_and_rejects_others(tmp_path):
         gt_io.read_trajectory(tmp_path / "odd.txt")
 
 
+def test_a_trajectory_with_more_timestamps_than_poses_is_refused(tmp_path):
+    """A file silently short of its poses would only be found downstream."""
+    with pytest.raises(ValueError, match="3 timestamps for 1 poses"):
+        gt_io.write_trajectory(tmp_path / "odometry.txt", [1.0, 2.0, 3.0], _poses(1))
+    assert not (tmp_path / "odometry.txt").exists()
+
+
+def test_a_malformed_segment_row_is_skipped_with_a_warning(tmp_path, caplog):
+    (tmp_path / "seg.txt").write_text(gt_io.SEGMENTS_HEADER + "\n0 1.0 2.0 5 gap\nnot a row\n\n")
+    with caplog.at_level("WARNING", logger="helhest.gt_io"):
+        rows = gt_io.read_segments(tmp_path / "seg.txt")
+    assert len(rows) == 1
+    assert "seg.txt:3" in caplog.text and "not a row" in caplog.text
+
+
 def test_an_empty_trajectory_is_empty_arrays_not_an_error(tmp_path):
     (tmp_path / "odometry.txt").write_text(gt_io.GT_HEADER + "\n")
     ts, poses = gt_io.read_trajectory(tmp_path / "odometry.txt")

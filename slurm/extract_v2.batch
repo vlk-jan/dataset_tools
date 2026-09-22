@@ -6,7 +6,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=6:00:00
 #SBATCH --partition=cpu
-#SBATCH --output=/home/vlkjan6/projects/dataset_tools/slurm/slurm_out/v2_%A_%a.out
+#SBATCH --output=slurm/slurm_out/v2_%A_%a.out
 #
 # HELHEST v2 (new rig: Odin1 + Fixposition) extraction, ONE BAG PER ARRAY TASK,
 # through to the height maps -- a finished scene leaves this script, not a scene
@@ -62,11 +62,15 @@
 #     and only the minimal 9-edge tf_static, so no proprioception at all.
 set -uo pipefail
 
-OUT=${1:-/mnt/personal/vlkjan6/HELHEST_v2_beta}
-REPO=/home/vlkjan6/projects/dataset_tools
+OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
+# Submit from the repository root (see slurm/README.md): slurm runs a copy of
+# this file from its spool, so the checkout is found through the submit
+# directory rather than through $0, and --output above is relative to it too.
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 CSV=$REPO/docs/v2_bags.csv
-SIF=/mnt/data/vras/data/helhest-jazzy.sif
-SUBTDATA=vlkjan6@subtdata.felk.cvut.cz
+SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
+SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
 PY="$REPO/.venv/bin/python"
 
 row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
@@ -123,7 +127,7 @@ singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
 # It takes the root as $1 and the scene from SLURM_ARRAY_TASK_ID, the same index
 # this script uses, and publishes into $local_out/$scene, so the maps travel out
 # on the publish rsync below with everything else.
-DRIFT=${DRIFT:-/home/vlkjan6/projects/DRIFT}
+DRIFT=${DRIFT:-$HOME/projects/DRIFT}
 HM=$DRIFT/slurm/build_heightmaps_v2_beta.batch
 if [ -x "$HM" ] || [ -f "$HM" ]; then
     echo "[$(date '+%F %T')] $scene height maps"

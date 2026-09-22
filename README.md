@@ -16,6 +16,34 @@ optional `odom_recorder` node needs `rclpy`.
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
 | `dataset_tools/odom_node.py` | `ros2 run dataset_tools odom_recorder` | record odometry to a text trajectory |
 
+## Quickstart: from a recording to the viewer
+
+For a bag recorded on the current robot (Odin1 + Fixposition, 2026-08 onwards):
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e .                  # extraction: Python >= 3.10
+.venv/bin/helhest-extract  /path/to/bags /path/to/dataset --jobs 8   # one scene per bag: 0000/, 0001/, ...
+.venv/bin/helhest-validate /path/to/dataset --csv /path/to/dataset/validation.csv
+
+python3.12 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer]"   # viewer: Python >= 3.12
+.venv-viewer/bin/helhest-viewer /path/to/dataset                     # then open http://127.0.0.1:8080/
+```
+
+- The defaults are the current rig's topics; bags from the Livox + OAK-D robot
+  need the flags under [Old bags](#old-bags-livox--luxonis-oak).
+- The Odin1 clouds are cloudini-compressed. The decoder ships prebuilt
+  (`dataset_tools/libcloudini_shim.so`, glibc >= 2.32 -- Ubuntu 22.04 and
+  newer); on an older system run `cloudini_shim/build_shim.sh` once.
+- Extraction resumes: a bag whose scene is complete is skipped, so an
+  interrupted run can simply be started again. `--overwrite` redoes them.
+- The viewer needs nothing beyond the scene directories; the curated index
+  (`atlas/`) and the train/validation split are optional extras a root may
+  carry. It is unauthenticated -- keep it on `127.0.0.1` or behind an SSH
+  tunnel (see [docs/VIEWER.md](docs/VIEWER.md#who-can-reach-it)).
+
+The HELHEST dataset itself is not in this repository; [docs/DATA.md](docs/DATA.md)
+describes it and where it lives.
+
 ## The two HELHEST sensor generations
 
 The robot was re-equipped in 2026, and the two generations need different
@@ -272,14 +300,15 @@ See [docs/VIEWER.md](docs/VIEWER.md).
 part:
 
 ```bash
-singularity exec --bind /mnt/personal --bind /mnt/data \
-    /mnt/personal/vlkjan6/helhest_new/helhest-jazzy.sif \
-    /home/vlkjan6/projects/dataset_tools/.venv/bin/python \
+singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
+    "$REPO/.venv/bin/python" \
     -m dataset_tools.extract_data <bags> <output> --jobs 8
 ```
 
 Because complete scenes are skipped, a re-queued job resumes where the previous
-one stopped.
+one stopped. The job files in `slurm/` are the ones the HELHEST releases were
+built with on the CTU RCI cluster; [slurm/README.md](slurm/README.md) says what
+each does and which paths are site-specific.
 
 ## Tests
 
@@ -467,7 +496,11 @@ See [docs/DATA.md](docs/DATA.md) for the dataset itself — recordings, contents
 and statistics. [docs/ODOMETRY_REGEN.md](docs/ODOMETRY_REGEN.md) covers
 regenerating the ground truth and
 [docs/GT_HOLE_REPLAY.md](docs/GT_HOLE_REPLAY.md) recovering the stretches where
-the estimator published nothing.
+the estimator published nothing; [docs/README.md](docs/README.md) lists what
+else is there. Code comments and the campaign records refer to **DRIFT**: that
+is the downstream training code the roots are extracted for (a separate
+repository), which also owns the height-map generator and the train/validation
+split.
 
 ## License
 

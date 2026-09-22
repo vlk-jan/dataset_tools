@@ -75,7 +75,7 @@ def test_the_exporter_s_own_spelling_is_what_is_read():
     parsed = splits.parse_splits(
         {
             "split_mode": "scene_strat",
-            "root": "/mnt/personal/vlkjan6/HELHEST_v1_5",
+            "root": "/data/HELHEST_v1_5",
             "dataset_version": "1.5",
             "n_folds_note": "two-way train/val only; there is no test split",
             "val_scenes": ["0000", "0019"],

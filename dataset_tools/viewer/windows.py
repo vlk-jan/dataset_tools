@@ -499,13 +499,3 @@ def single_frame_window(
         t_start=t,
         t_end=t,
     )
-
-
-def frames_covered_by_segments(frame_ts: np.ndarray, segments: list[Segment]) -> np.ndarray:
-    """Boolean mask of frames that fall inside some ground-truth segment."""
-    covered = np.zeros(len(frame_ts), dtype=bool)
-    for lo_ts, hi_ts in segment_bounds(frame_ts, segments):
-        lo = np.searchsorted(frame_ts, lo_ts, side="left")
-        hi = np.searchsorted(frame_ts, hi_ts, side="right")
-        covered[lo:hi] = True
-    return covered

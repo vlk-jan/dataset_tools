@@ -29,8 +29,8 @@ so independent of any later refinement of the ground truth.
 
 Run it after anything that changes a scene's odometry, frames or clouds:
 
-    scripts/make_atlas.py /mnt/personal/vlkjan6/HELHEST_v1_3
-    scripts/make_atlas.py /mnt/personal/vlkjan6/HELHEST_v1_3 --check   # CI/pre-release
+    scripts/make_atlas.py /data/HELHEST_v1_3
+    scripts/make_atlas.py /data/HELHEST_v1_3 --check   # CI/pre-release
 """
 
 from __future__ import annotations

@@ -48,14 +48,11 @@ window localises anything is left alone rather than guessed at.
 
 from __future__ import annotations
 
-import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-
-LOG = logging.getLogger("helhest.time_align")
 
 #: Voxel edge, metres. Fine enough that a 0.1 s error at walking pace separates
 #: two surfaces, coarse enough that the lidar's own noise does not.
@@ -236,13 +233,12 @@ def measure_window(
     track: PoseTrack,
     frame_ts: np.ndarray,
     span: float = 1.5,
-    inject: float = 0.0,
 ) -> dict | None:
     """One window's offset: a coarse sweep, then a fine one around its minimum."""
     clouds = load_clouds(scene_dir, frames)
     if len(clouds) < len(frames) // 2:
         return None
-    query = frame_ts[frames] + inject
+    query = frame_ts[frames]
     coarse = np.arange(-span, span + 1e-9, 0.10)
     cc = sweep(clouds, track, query, coarse)
     centre = coarse[int(np.argmin(cc))]
