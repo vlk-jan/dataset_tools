@@ -178,27 +178,37 @@ the shift relevel, wheel radius 0.36), the same settings the beta was rebuilt
 with on 2026-09-25. `manifest.json`, `README.md` and `atlas/curation.json` are
 written by hand afterwards, as for the beta.
 
-## 6. Verify before submitting
+## 6. Verified before submitting (answers 2026-09-25, build = RCI job 11706726)
 
 1. **The keep list.** The core five, and which of the optional rows, if any.
+   *Answer: the core five, nothing else.*
 2. **09-08 out.** It is old firmware and has no wheel states, so it is out by
    the rule; say so if the terrain is worth a different rule (it would need
    `joint_setpoints` velocities to stand in for `joint_states`).
+   *Answer: keep it out.*
 3. **`robotour_finals_3`'s Odin mount** (0.071, 0.029, 0.135) / (+0.86, +0.39,
    +0.49)°: was the unit knocked or re-seated during the finals? If the
    published value is a genuine self-calibration the bag is fine; if not, its
    clouds are 1° off and it stays out.
+   *Answer: not knocked as far as anyone knows; moot, the bag is not in the core.*
 4. **The Fixposition pitch.** Measure the receiver's mounting pitch against
    base_link (or accept the plaza figure, −2.2°) and decide whether v2.0
    corrects `gravity_align.npy` for it. That is an extractor option I have not
    written; without it every levelled ground climbs ~2.5 cm per metre.
+   *Answer: keep the gravity alignment as the receiver's INS reports it, no correction.*
 5. **Wheel radius and the 7.6 cm.** The anchors use r = 0.36 and shift the
    contact plane onto the lidar ground; a measured radius (0.336?) or Odin
    mount z closes this. Not blocking, but it is a constant baked into every map.
+   *Answer: the URDF's 0.36 m is a previous HELHEST's wheel; the current wheels are
+   different and cannot be measured now (no access to the robot). The anchors stay at
+   0.36 with the shift relevel, which puts them on the lidar ground regardless.*
 6. **The Lipník front plate.** Confirm what it is and that it ends inside
    0.65 m of base_link (the clouds say 0.5 m); if the plate stays on the
    robot, it belongs in the robot model and in the occlusion note.
+   *Answer: a Bluetooth antenna, mounted for follow-me scenarios only.*
 7. **Storage.** `/mnt/personal` is at 87 % with 64 TB free; the core root is
    ~360 GB, the full optional set ~1.1 TB, alongside the beta's 995 GB.
+   *Answer: `/mnt/personal/vlkjan6/HELHEST_v2_0`.*
 8. **Numbering.** v2.0 scenes start at 0000 again and do not match the beta's
    ids; anything that names beta scenes must not be pointed at v2.0.
+   *Answer: yes, from 0000.*
