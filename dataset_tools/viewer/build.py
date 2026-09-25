@@ -36,14 +36,23 @@ from .windows import (
 
 logger = logging.getLogger("dataset_tools.viewer.build")
 
-# HELHEST geometry from DRIFT's kinematic model (models/simulator.py,
-# RobotModelConfig): three wheels of radius 0.3685 m, centres at z=0 (base_link
-# sits at axle height), front axles at x=+0.4, y=+-0.52, rear wheel at x=-0.5.
-# Visuals match DRIFT's own SimView rendering (add_helhest_visual_wheels): the
-# chassis box centred ON base_link, wheel cylinders turned +-90 deg about x.
-CHASSIS = dict(hx=0.5, hy=0.3, hz=0.15)
+# HELHEST geometry from DRIFT's robot model (simulator/utils.py,
+# helhest_robot_model, sourced from the robot URDF): base_link IS the front
+# axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
+# 0.36 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
+# axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
+# ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
+# middle of the box and every return looked 0.4 m too close.
+#
+# The chassis box is the body the view centres on and the wheels hang off, so
+# it carries base_link's trajectory; its visual centre is pushed back by
+# CHASSIS_CENTER (a body-frame offset) so the box spans the real chassis, from
+# behind the rear-wheel fork to the sensor face just ahead of the axle
+# (tf_static: front sensors at x = +0.10..+0.17, wheel holders at -0.477).
+CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
+CHASSIS_CENTER = (-0.15, 0.0, 0.0)
 CHASSIS_Z = 0.0
-WHEEL_RADIUS = 0.3685
+WHEEL_RADIUS = 0.36
 WHEEL_WIDTH = 0.142
 #: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
 #: being how far the sample sat from the robot that measured it. A window splats
@@ -56,9 +65,9 @@ HM_BLEND_SIGMA = 3.0
 
 #: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
 WHEELS = {
-    "wheel_left": (0.4, 0.52, 0.0, 0, -1.0),
-    "wheel_rear": (-0.5, 0.0, 0.0, 1, -1.0),
-    "wheel_right": (0.4, -0.52, 0.0, 2, 1.0),
+    "wheel_left": (0.0, 0.36, 0.0, 0, -1.0),
+    "wheel_rear": (-0.697, 0.0, 0.0, 1, -1.0),
+    "wheel_right": (0.0, -0.36, 0.0, 2, 1.0),
 }
 WHEEL_LABELS = ("left", "rear", "right")
 
@@ -1043,6 +1052,13 @@ def wheel_angles(access: SceneAccess, times: np.ndarray) -> np.ndarray | None:
 # --------------------------------------------------------------------------
 
 
+def _rotate(q: np.ndarray, v: np.ndarray) -> np.ndarray:
+    """Rotate one body-frame vector ``v`` (3,) by each [w,x,y,z] quaternion in ``q`` (T, 4)."""
+    w, u = q[:, :1], q[:, 1:]
+    uv = np.cross(u, v[None, :])
+    return v[None, :] + 2.0 * w * uv + 2.0 * np.cross(u, uv)
+
+
 def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Hamilton product of [w,x,y,z] quaternions, batched over the last axis."""
     aw, ax, ay, az = a[..., 0], a[..., 1], a[..., 2], a[..., 3]
@@ -1172,13 +1188,16 @@ def build_scene(
 
     # ---- trajectories --------------------------------------------------
     T = len(times)
-    chassis_pos = gt.positions.copy()
+    # The box is drawn about the body origin, so the body rides CHASSIS_CENTER
+    # ahead of/behind base_link, rotated with the pose; the wheels below undo it.
+    chassis_pos = gt.positions + _rotate(gt.quats, np.array(CHASSIS_CENTER, dtype=np.float64))
     chassis_pos[:, 2] += CHASSIS_Z
     trajectories = [BodyTrajectory("robot", positions=chassis_pos, orientations=gt.quats)]
 
     angles = wheel_angles(access, abs_times)
     for name, (wx, wy, wz, col, sign) in WHEELS.items():
-        offset = np.tile(np.array([wx, wy, wz - CHASSIS_Z], dtype=np.float64), (T, 1))
+        hub = np.array([wx, wy, wz - CHASSIS_Z], dtype=np.float64) - np.array(CHASSIS_CENTER, dtype=np.float64)
+        offset = np.tile(hub, (T, 1))
         # +-90 deg about x (sign mirrored per side, as in DRIFT's helper).
         q_align = np.array([math.cos(sign * math.pi / 4), math.sin(sign * math.pi / 4), 0.0, 0.0])
         if angles is not None:

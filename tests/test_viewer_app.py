@@ -316,19 +316,23 @@ def test_the_tile_robot_is_helhest_drawn_to_scale():
     rows, cols = np.nonzero(marked)
     assert marked.any(), "nothing was drawn on the tile"
 
-    # Extent: chassis is 1.0 m long, but the wheels reach further in both
-    # axes (front hubs at y=+-0.52 with a 0.142 m tread, rear wheel back to
-    # x=-0.8685) and the heading wedge sticks 0.3 m past the nose.
+    # Extent: the chassis box runs x = -0.5 .. +0.2, the rear wheel reaches
+    # back to x = -1.057 and the heading wedge sticks 0.3 m past the nose; the
+    # front tyres span y = +-0.431.
     height_m = (rows.max() - rows.min() + 1) / px_per_m
     width_m = (cols.max() - cols.min() + 1) / px_per_m
-    assert 1.6 < height_m < 1.9, height_m  # -0.8685 .. +0.8 forward
-    assert 1.0 < width_m < 1.3, width_m  # +-0.591 across the wheels
+    assert 1.45 < height_m < 1.7, height_m  # -1.057 .. +0.5 forward
+    assert 0.75 < width_m < 1.0, width_m  # +-0.431 across the wheels
 
-    # Centred on the robot, and pointing forward: the wedge puts more ink
-    # above the middle row than the rear wheel puts below it.
-    assert abs((rows.min() + rows.max()) / 2 - img.height / 2) < 0.12 * px_per_m
+    # The tile's centre is base_link, which is the FRONT AXLE: the front hubs
+    # sit on the middle row, so most of the robot is drawn behind it, and the
+    # ink is symmetric left-right.
+    front_m = (img.height / 2 - rows.min()) / px_per_m
+    rear_m = (rows.max() + 1 - img.height / 2) / px_per_m
+    assert 0.4 < front_m < 0.6, front_m  # nose + wedge
+    assert 0.95 < rear_m < 1.15, rear_m  # rear wheel
     assert abs((cols.min() + cols.max()) / 2 - img.width / 2) < 0.12 * px_per_m
-    assert marked[: img.height // 2].sum() > marked[img.height // 2 :].sum()
+    assert marked[img.height // 2, :].sum() > 0  # a front tyre crosses the middle row
 
     # Subtle: a marker that covered the map would defeat the point of the map.
     assert marked.mean() < 0.03, marked.mean()
@@ -370,9 +374,24 @@ def test_the_tile_robot_matches_the_3d_robot():
     from dataset_tools.viewer import build
 
     assert (build.CHASSIS["hx"], build.CHASSIS["hy"]) == render.ROBOT_CHASSIS_HALF
+    assert tuple(build.CHASSIS_CENTER[:2]) == render.ROBOT_CHASSIS_CENTER
     assert render.ROBOT_WHEEL_RADIUS == build.WHEEL_RADIUS
     assert render.ROBOT_WHEEL_WIDTH == build.WHEEL_WIDTH
     assert sorted(render.ROBOT_WHEEL_HUBS) == sorted((x, y) for x, y, _z, _col, _sign in build.WHEELS.values())
+
+
+def test_the_robot_model_is_drifts():
+    """base_link is HELHEST's front axle: the front hubs sit on the origin and
+    the box must not reach ahead of the sensors (x <= +0.2). A stale copy once
+    drew the axle at +0.4 and the chassis to +0.5, which put the lidar in the
+    middle of the robot."""
+    pytest.importorskip("torch")
+    from dataset_tools.viewer import build
+
+    hubs = {name: (x, y) for name, (x, y, _z, _c, _s) in build.WHEELS.items()}
+    assert hubs["wheel_left"] == (0.0, 0.36) and hubs["wheel_right"] == (0.0, -0.36)
+    assert hubs["wheel_rear"] == (-0.697, 0.0)
+    assert build.CHASSIS_CENTER[0] + build.CHASSIS["hx"] <= 0.2
 
 
 def test_every_terrain_colour_mode_is_explained():

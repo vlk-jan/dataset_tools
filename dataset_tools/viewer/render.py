@@ -59,11 +59,14 @@ VALIDITY_COLORS = np.array(
 #: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
 #: than imported: ``build`` imports *this* module, so importing back would be a
 #: cycle. ``tests/test_viewer_app.py`` asserts the two stay in agreement.
-ROBOT_CHASSIS_HALF = (0.5, 0.3)  # half length (x), half width (y)
-ROBOT_WHEEL_RADIUS = 0.3685
+#: base_link is the front axle (DRIFT's helhest_robot_model), so the chassis
+#: box sits mostly behind the origin.
+ROBOT_CHASSIS_HALF = (0.35, 0.25)  # half length (x), half width (y)
+ROBOT_CHASSIS_CENTER = (-0.15, 0.0)  # box centre in the base frame
+ROBOT_WHEEL_RADIUS = 0.36
 ROBOT_WHEEL_WIDTH = 0.142
-#: (x, y) of each wheel hub -- two front wheels and one rear centre wheel.
-ROBOT_WHEEL_HUBS = ((0.4, 0.52), (0.4, -0.52), (-0.5, 0.0))
+#: (x, y) of each wheel hub -- two front wheels on the axle, one rear centre wheel.
+ROBOT_WHEEL_HUBS = ((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0))
 
 
 def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
@@ -179,8 +182,8 @@ def draw_robot_silhouette(img, px_per_m: float):
 
     A single pixel says "the robot is here" but not how big it is or which way
     it faces -- which is what a BEV tile is read for. This draws the footprint
-    to scale (1.0 x 0.6 m chassis, two front wheels, one rear) so features can
-    be sized against it by eye.
+    to scale (0.7 x 0.5 m chassis, two front wheels on the axle at the tile's
+    centre, one rear) so features can be sized against it by eye.
 
     ``px_per_m`` is the tile's scale *after* upscaling, so this draws at display
     resolution rather than in chunky grid cells. Translucent with a thin opaque
@@ -208,11 +211,13 @@ def draw_robot_silhouette(img, px_per_m: float):
         box(wx - r, wx + r, wy - half_w, wy + half_w, (0, 0, 0, 150), (255, 255, 255, 210))
 
     hx, hy = ROBOT_CHASSIS_HALF
-    box(-hx, hx, -hy, hy, (255, 255, 255, 70), (255, 255, 255, 235))
+    cx0, cy0 = ROBOT_CHASSIS_CENTER
+    box(cx0 - hx, cx0 + hx, cy0 - hy, cy0 + hy, (255, 255, 255, 70), (255, 255, 255, 235))
 
     # Heading wedge just ahead of the chassis: which end is the front is not
     # inferable from a symmetric-looking box.
-    nose = [pt(hx + 0.30, 0.0), pt(hx + 0.02, 0.16), pt(hx + 0.02, -0.16)]
+    front = cx0 + hx
+    nose = [pt(front + 0.30, 0.0), pt(front + 0.02, 0.16), pt(front + 0.02, -0.16)]
     draw.polygon(nose, fill=(255, 255, 255, 235))
     return img
 
