@@ -25,3 +25,5 @@ scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msg
 0023,26-09-14-stromovka-robotour-prep,/data/helhest/26-09-14-stromovka-robotour-prep/robotour_2026_09_14-16_37_57_merged,59.8,2026-09-14T14:37:58Z,2259,31761,31754
 0024,26-09-14-stromovka-robotour-prep,/data/helhest/26-09-14-stromovka-robotour-prep/robotour_2026_09_14-17_16_34_merged,12.1,2026-09-14T15:16:34Z,430,6192,6192
 0025,26-09-14-stromovka-robotour-prep,/data/helhest/26-09-14-stromovka-robotour-prep/robotour_2026_09_14-17_23_46_merged,24.6,2026-09-14T15:23:47Z,863,12029,12035
+0026,26-09-22-lipnik,/data/helhest/26-09-22-lipnik/robotour_2026_09_22-14_16_30_merged,15.7,2026-09-22T12:16:20Z,1098,15879,10104
+0027,26-09-22-lipnik,/data/helhest/26-09-22-lipnik/robotour_2026_09_22-15_27_08_merged,21.4,2026-09-22T13:26:44Z,1766,21287,12413
