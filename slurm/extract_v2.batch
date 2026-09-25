@@ -41,8 +41,10 @@
 #
 #   sbatch --array=0-8%4  slurm/extract_v2.batch [out_root]     # 26-09-02
 #   sbatch --array=9-16%4 slurm/extract_v2.batch [out_root]     # 26-09-08
+#   CSV=docs/v2_0_bags.csv sbatch --array=0-N%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_0
 #
-# Array index = row number in docs/v2_bags.csv (0-based) = scene number. A
+# Array index = row number in the bag list ($CSV, docs/v2_bags.csv by default;
+# 0-based) = scene number. A
 # scene whose <out_root>/<scene>/source_bag.txt exists exits immediately, so
 # re-submitting resumes. %4 limits concurrent fetches - subtdata sustains
 # ~50 MB/s aggregate; more jobs only starve each other.
@@ -68,7 +70,9 @@ OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
 # directory rather than through $0, and --output above is relative to it too.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 [ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-CSV=$REPO/docs/v2_bags.csv
+# The bag list is what makes a root: row = scene number. v2 beta was built
+# from docs/v2_bags.csv; a root with a different selection passes its own.
+CSV=${CSV:-$REPO/docs/v2_bags.csv}
 SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
 SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
 PY="$REPO/.venv/bin/python"

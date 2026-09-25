@@ -1,0 +1,54 @@
+#!/bin/bash
+#SBATCH --job-name=helhest_survey
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=3:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=slurm/slurm_out/survey_%A_%a.out
+#
+# scripts/survey_v2_bag.py over one bag of docs/v2_inventory.csv: fetch it to
+# node-local scratch, summarise it (~1 MB: summary.json, track.npy, thumbnails)
+# into <out>/<session>/<bag>/, throw the bag away. The array index is the
+# 0-based row of the inventory, which is every v2-rig bag on subtdata in
+# recording order, extracted or not.
+#
+#   sbatch --array=20-23,33-51%4 slurm/survey_v2.batch      # the bags no root has seen
+set -uo pipefail
+
+OUT=${1:-/mnt/personal/$USER/HELHEST_v2_survey}
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+CSV=${CSV:-$REPO/docs/v2_inventory.csv}
+SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
+SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
+PY="$REPO/.venv/bin/python"
+
+row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
+[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+session=$(echo "$row" | cut -d, -f1)
+bagname=$(echo "$row" | cut -d, -f2)
+bagdir=$(echo "$row" | cut -d, -f3)
+dest="$OUT/$session/$bagname"
+[ -e "$dest/summary.json" ] && { echo "$bagname already surveyed"; exit 0; }
+
+SCRATCH=""
+for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
+    mkdir -p "$c/survey_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/survey_${SLURM_JOB_ID}" && break
+done
+[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
+trap 'rm -rf "$SCRATCH"' EXIT
+bag="$SCRATCH/$bagname"
+BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
+
+echo "[$(date '+%F %T')] $bagname fetch $bagdir"
+rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$bagname: fetch failed"; exit 10; }
+echo "[$(date '+%F %T')] $bagname fetched $(du -sh "$bag" | cut -f1)"
+
+mkdir -p "$SCRATCH/out"
+singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/survey_v2_bag.py" "$bag" "$SCRATCH/out"
+rc=$?
+echo "[$(date '+%F %T')] $bagname survey rc=$rc"
+[ $rc -eq 0 ] && { mkdir -p "$dest" && rsync -a "$SCRATCH/out/" "$dest/"; }
+exit $rc
