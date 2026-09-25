@@ -61,6 +61,14 @@ def quat_to_R(q):
     )
 
 
+def rpy_deg(R) -> list[float]:
+    """Roll, pitch, yaw in degrees of a rotation matrix (ZYX convention)."""
+    pitch = -np.arcsin(np.clip(R[2, 0], -1, 1))
+    roll = np.arctan2(R[2, 1], R[2, 2])
+    yaw = np.arctan2(R[1, 0], R[0, 0])
+    return [round(float(np.degrees(v)), 3) for v in (roll, pitch, yaw)]
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("bag", type=Path)
@@ -158,6 +166,9 @@ def main(argv=None) -> int:
         frames=sorted(G.nodes),
         cloud_frame=cloud_frame,
         odin_mount=None if X is None else [round(float(v), 4) for v in X[:3, 3]],
+        odin_mount_rpy_deg=None if X is None else rpy_deg(X[:3, :3]),
+        cam_in_base=None if caminfo is None or get_transform(G, caminfo["frame"], BASE) is None
+        else [round(float(v), 4) for v in get_transform(G, caminfo["frame"], BASE)[:3, 3]],
     )
     out["camera"] = dict(shape=list(img_shape) if img_shape else None, info=caminfo,
                          per_lidar=round(n_img / n_cloud, 3) if n_cloud else None)
