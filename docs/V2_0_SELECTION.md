@@ -137,8 +137,8 @@ zero, and it stays in the beta.
 
 Rule 2, from the purpose: made surfaces are kept as a *sample*, not in bulk.
 
-**Core (`docs/v2_0_bags.csv`, 5 scenes, ~89k frames, ~145 GB of bags,
-~360 GB extracted):**
+**Core (`docs/v2_0_bags.csv`, 5 scenes; built 2026-09-25/26 as RCI job 11706726:
+89,202 frames, 3,876 m, 1 h 48 min, 347 GB extracted, `validate_scene` 0 failed):**
 
 | Scene | Bag | Why |
 |---|---|---|
@@ -163,7 +163,7 @@ bags (09-14 `10_41_58`/`13_37_17`/`16_28_23`, 09-11 `16_20_36`, 09-18
 `12_56_00`/`16_11_48`/`16_23_23`, short 09-18 evening bags); the 09-08
 robotour-stack bags (no proprioception) and `14_18_12` (no Odin), as before.
 
-## 5. Build
+## 5. Build (done: `/mnt/personal/vlkjan6/HELHEST_v2_0`, finalized 2026-09-26)
 
 ```bash
 cd ~/projects/dataset_tools && mkdir -p slurm/slurm_out
