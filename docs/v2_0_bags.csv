@@ -13,5 +13,3 @@ scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msg
 0011,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_52_16,2.9,2026-09-28T14:52:17Z,147,2069,2070
 0012,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_59_55,5.4,2026-09-28T14:59:55Z,254,3646,3646
 0013,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-17_10_48,2.3,2026-09-28T15:10:48Z,103,1483,1482
-0014,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_02_56,0.2,2026-09-28T16:02:56Z,18,181,182
-0015,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_03_45,0.6,2026-09-28T16:03:45Z,33,477,477
