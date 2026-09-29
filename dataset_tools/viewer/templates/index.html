@@ -58,6 +58,18 @@
       {% endfor %}
     </dl>
 
+    {# Where the bytes go, from disk_usage.json. #}
+    {% if disk_panel %}
+    {% set dp = disk_panel %}
+    <div class="diskpanel">
+      {% with parts = dp.parts %}{% include "_diskbar.html" %}{% endwith %}
+      <p class="diskcap">
+        Measured by <code>helhest-disk-usage</code>{% if dp.generated %} on {{ dp.generated[:10] }}{% endif %}.
+        {%- if dp.missing %} <span class="warn">Not scanned: {{ dp.missing | join(", ") }} &mdash; left out of the sum.</span>{% endif %}
+      </p>
+    </div>
+    {% endif %}
+
     {# The curated note already names the root and says what matters about it;
        only when there is none do we assemble one from the manifest. #}
     <p class="note">

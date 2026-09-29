@@ -740,7 +740,7 @@ def test_a_root_without_gps_has_no_map_anywhere(client):
     for path in ("/scene/0000", "/scene/0000/segment/0", "/scene/0000/frame/3"):
         page = client.get(path).text
         assert "leaflet" not in page.lower()
-        assert "data-map" not in page and 'class="pair"' not in page
+        assert "data-map" not in page and 'class="pair' not in page
     assert client.get("/api/scene/0000/gps.json").status_code == 404
 
 
@@ -778,7 +778,7 @@ def test_a_frames_position_is_marked_on_the_track(gps_client):
 
 def test_the_map_sits_beside_the_files_card_when_there_is_a_track(gps_client):
     page = gps_client.get("/scene/0000").text
-    assert 'class="pair"' in page
+    assert 'class="pair withmap"' in page
     assert 'data-src="/api/scene/0000/gps.json"' in page
     assert "/viewer-static/vendor/leaflet.js" in page
     # The file inventory now lists gps.npy as present, like any other artefact.

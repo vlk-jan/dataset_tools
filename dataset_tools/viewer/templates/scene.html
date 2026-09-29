@@ -103,11 +103,13 @@
     {% endfor %}
   </div>
 
-  {# The file inventory, and -- only on a scene that carries gps.npy -- the map
-     beside it, the two of them a pair of equal squares. Without GNSS neither
-     the wrapper nor the map exists, so the inventory is the full-width strip it
-     has always been. #}
-  {% if page.map %}<div class="pair">{% endif %}
+  {# The file inventory, then what those files weigh (only on a root with a
+     disk_usage.json) and the map (only on a scene that carries gps.npy), side
+     by side: a quarter, a quarter and a half with all three. With neither the
+     wrapper does not exist, so the inventory is the full-width strip it has
+     always been. #}
+  {% set wrapped = page.map or page.disk %}
+  {% if wrapped %}<div class="pair{{ ' withmap' if page.map }}{{ ' withdisk' if page.disk }}">{% endif %}
 
   {# Every entry opens: what the file holds and what the dataset does with it,
      shown in place under the strip. Without JavaScript the chips are still
@@ -137,7 +139,7 @@
           {%- else %}absent &mdash; the viewer omits whatever it would have contributed{% endif %}
         </dd>
         <dt>holds</dt><dd>{{ f.shape }}</dd>
-        <dt>on disk</dt><dd><code>{{ scene_id }}/{{ f.relpath }}</code> ({{ f.kind }})</dd>
+        <dt>on disk</dt><dd><code>{{ scene_id }}/{{ f.relpath }}</code> ({{ f.kind }}{% if f.size %}, {{ f.size }}{% endif %})</dd>
       </dl>
     </div>
     {% endfor %}
@@ -147,10 +149,27 @@
     </p>
   </div>
 
-  {% if page.map %}
-  {% with map = page.map %}{% include "_map.html" %}{% endwith %}
+  {% if page.disk %}
+  {% set disk = page.disk %}
+  <div class="card disk">
+    <header><h2>Disk usage</h2></header>
+    <dl class="stats">
+      {% for s in disk.stats %}
+      <div>
+        <dt>{{ s.label }}</dt>
+        <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+    <div class="diskpanel">{% with parts = disk.parts %}{% include "_diskbar.html" %}{% endwith %}</div>
+    {% if disk.note %}<p class="cardnote">{{ disk.note }}</p>{% endif %}
   </div>
   {% endif %}
+
+  {% if page.map %}
+  {% with map = page.map %}{% include "_map.html" %}{% endwith %}
+  {% endif %}
+  {% if wrapped %}</div>{% endif %}
 
   {% include "_notes.html" %}
 

@@ -122,6 +122,29 @@ pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: a
   margin: 2px 0 0; font: 600 20px/1.2 var(--display); font-variant-numeric: tabular-nums;
 }
 .totals dd small { font: 400 12px/1 var(--sans); color: var(--muted); }
+/* Disk usage by modality. Categorical slots validated against --panel for
+   colour-blind separation; the legend names every slot, so hue is never the
+   only thing that says which modality a segment is. */
+:root { --dk-1: #3987e5; --dk-2: #d95926; --dk-3: #199e70; --dk-4: #c98500; --dk-5: #d55181; }
+.diskpanel { margin: 0 0 10px; }
+.card .diskpanel { margin: 14px 0 0; }
+.diskbar { display: flex; gap: 2px; height: 10px; background: var(--track); border-radius: 2px; overflow: hidden; }
+.diskbar i { min-width: 0; }
+.dk-images { background: var(--dk-1); }
+.dk-clouds { background: var(--dk-2); }
+.dk-height_maps { background: var(--dk-3); }
+.dk-height_masks { background: var(--dk-4); }
+.dk-other { background: var(--dk-5); }
+.disklegend {
+  list-style: none; padding: 0; margin: 8px 0 0;
+  display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; color: var(--muted);
+}
+.disklegend li { display: flex; align-items: center; gap: 6px; }
+.disklegend i { width: 10px; height: 10px; border-radius: 2px; }
+.disklegend b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+.disklegend small { font: 12px var(--mono); }
+.diskcap { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+.diskcap code { font: 12px var(--mono); }
 .note { font-size: 14px; color: var(--muted); max-width: 100ch; margin: 0; }
 .note code { font: 13px var(--mono); }
 
@@ -516,7 +539,25 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   gap: 14px;
   align-items: stretch;
 }
-.pair > .card { display: flex; flex-direction: column; }
+.pair > .card { display: flex; flex-direction: column; min-width: 0; }
+/* With the disk card: files, disk and map at a quarter, a quarter and a half;
+   without the map the inventory keeps most of the row. Narrower, the map drops
+   under the other two, then everything stacks. */
+.pair.withdisk { grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr); }
+.pair.withmap.withdisk { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 1200px) {
+  .pair.withmap.withdisk { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pair.withmap.withdisk > .map { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .pair.withdisk, .pair.withmap.withdisk { grid-template-columns: minmax(0, 1fr); }
+}
+.pair > .card.disk > .cardnote { margin-top: auto; padding-top: 12px; }
+/* Beside the disk card the row is as tall as the file inventory, and a map box
+   stretched to match is taller than the tiles Leaflet loaded for it. The box
+   keeps its own height and the card's foot note takes the slack instead. */
+.pair.withdisk > .map > .mapbox { flex: none; height: 300px; }
+.pair.withdisk > .map > .cardnote { margin-top: auto; padding-top: 12px; }
 /* The strip no longer runs to the bottom of the card: an opened file panel
    follows it, and the note is what holds the card's foot instead. */
 .pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }

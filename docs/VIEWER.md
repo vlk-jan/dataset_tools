@@ -310,6 +310,22 @@ hero caption and the frame it links to all resolve through one
 whose atlas predates this names no frames, and the slots fall back to 10/50/90 %
 of the scene — which is where those files were cut.
 
+## Disk usage
+
+`helhest-disk-usage <root>` writes `<root>/disk_usage.json`: bytes per scene,
+per modality directory, and per top-level file. `helhest-extract` refreshes it
+for the scenes it just wrote, so run it by hand only on a root extracted before
+that, or after changing files in place (name the scenes, or `--all`). A file
+written under an older schema is rescanned whole.
+
+When it is present the index adds an **on disk** total (with GB per hour of
+recording), a bar of where the bytes go by modality, and an **on disk** cell on
+each scene card. The index sum covers only scenes in both the root and the
+file; any scene the file has not scanned yet is named under the bar. A scene
+page gets a **Disk usage** card (total, per frame, the same bar) and each entry
+in its file inventory shows its size. Like the atlas, the file is read once per
+process, so restart the viewer after a rescan.
+
 ## The train/val split: which scenes a model is scored on
 
 A root may carry a `splits.json` naming the scenes held out from training. When

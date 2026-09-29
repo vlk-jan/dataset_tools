@@ -373,6 +373,7 @@ class DatasetRoot:
         self._scene_ids: list[str] | None = None
         self._csv_rows: dict[str, dict] | None = None
         self._atlas: dict | None | object = _UNSET
+        self._disk_usage: dict | None | object = _UNSET
         self._splits: SceneSplits | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
@@ -446,6 +447,26 @@ class DatasetRoot:
                 data = None
             self._atlas = data if isinstance(data, dict) else None
         return self._atlas
+
+    def disk_usage(self) -> dict | None:
+        """``disk_usage.json``: bytes per scene and modality, or ``None``.
+
+        Written by ``helhest-disk-usage``, because measuring it walks every
+        file in the root. Read once per process, like the atlas.
+        """
+        if self._disk_usage is _UNSET:
+            text = read_text(self.path / "disk_usage.json", 4_000_000)
+            try:
+                data = json.loads(text) if text else None
+            except json.JSONDecodeError as exc:
+                logger.warning("cannot parse disk_usage.json: %s", exc)
+                data = None
+            self._disk_usage = data if isinstance(data, dict) else None
+        return self._disk_usage
+
+    def disk_usage_scene(self, scene_id: str) -> dict:
+        entry = ((self.disk_usage() or {}).get("scenes") or {}).get(scene_id)
+        return entry if isinstance(entry, dict) else {}
 
     def atlas_scene(self, scene_id: str) -> dict:
         atlas = self.atlas() or {}

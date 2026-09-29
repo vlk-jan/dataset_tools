@@ -231,3 +231,41 @@ def test_a_filled_span_is_drawn_once_not_twice(tmp_path):
     row = build_row(root, p)
     assert len(row["spans"]) == 1 and len(row["fill_spans"]) == 1
     assert row["spans"][0] not in row["fill_spans"]
+
+
+# --------------------------------------------------------------------------
+# disk usage (optional, root-level, from helhest-disk-usage)
+# --------------------------------------------------------------------------
+
+
+def test_disk_usage_is_summed_over_the_scenes_the_index_shows(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000", "0001"))
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert index_page.build_index(root, root.probe_all())["disk_panel"] is None
+
+    # 0001 was never scanned, and 9999 is a scene this root does not have.
+    mods = {"images": {"bytes": 900, "files": 3}, "lidar_raw": {"bytes": 60, "files": 1}, "other": {"bytes": 40}}
+    scenes = {
+        "0000": {"bytes": 1000, "span_s": 3.6, "modalities": mods},
+        "9999": {"bytes": 10**12, "span_s": 1.0, "modalities": {"images": {"bytes": 10**12}}},
+    }
+    (root_path / "disk_usage.json").write_text(json.dumps({"scenes": scenes}))
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+
+    dp = page["disk_panel"]
+    assert dp["missing"] == ["0001"] and dp["total"] == "1.0 kB"
+    # An unknown directory folds into "other" instead of taking a new colour.
+    assert [(p["key"], p["pct"]) for p in dp["parts"]] == [("images", "90%"), ("other", "10%")]
+    assert page["totals"][-1]["label"] == "on disk"
+
+    cards = {r["probe"].scene_id: r["stats"] for r in page["rows"]}
+    assert cards["0000"][-1] == {"label": "on disk", "value": "1.0 kB", "sub": "0 GB/h"}
+    assert all(s["label"] != "on disk" for s in cards["0001"])
+
+
+def test_disk_sizes_read_in_decimal_units():
+    assert index_page.fmt_bytes(80_154_887_377) == "80.2 GB"
+    assert index_page.fmt_bytes(454_081_342_044_000) == "454.08 TB"
+    assert index_page.fmt_bytes(3_625_000) == "3.6 MB" and index_page.fmt_bytes(326_000) == "326 kB"
+    assert index_page.fmt_share(0.00025) == "<0.1%" and index_page.fmt_share(0.074) == "7.4%"

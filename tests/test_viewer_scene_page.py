@@ -382,3 +382,25 @@ def test_the_index_and_the_scene_page_share_one_palette():
     root_scope = css[css.index(":root {") :].split("}", 1)[0]
     for token in ("--track", "--ok-soft", "--shade", "--mono"):
         assert token in root_scope
+
+
+def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
+    from dataset_tools import disk_usage
+
+    root_path = make_root(tmp_path)
+    page = scene_page(tmp_path, root_path)
+    assert page["disk"] is None
+    assert all(f["size"] is None for f in page["files"])
+
+    doc = disk_usage.update(root_path)
+    page = scene_page(tmp_path / "again", root_path)
+    card = page["disk"]
+    entry = doc["scenes"]["0000"]
+    assert [p["bytes"] for p in card["parts"]] == sorted((p["bytes"] for p in card["parts"]), reverse=True)
+    assert sum(p["bytes"] for p in card["parts"]) == entry["bytes"]
+    assert "images" in sub_of(card, "per frame")
+
+    files = {f["relpath"]: f for f in page["files"]}
+    assert files["images"]["size"] and files["odometry.txt"]["size"]
+    # An absent file has no size, whatever the measurement said.
+    assert files["gps.npy"]["size"] is None

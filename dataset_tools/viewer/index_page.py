@@ -29,6 +29,10 @@ THUMB_FRACTIONS: dict[str, float] = {"a": 0.1, "b": 0.5, "c": 0.9}
 COVERAGE_HIGH = 0.85
 COVERAGE_MID = 0.5
 
+#: Modalities the disk bar gives a colour of their own, in the order of the
+#: palette slots (style.css ``.dk-*``); any other directory counts as "other".
+DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "other")
+
 
 def coverage_class(coverage: float | None) -> str:
     if coverage is None:
@@ -57,6 +61,27 @@ def fmt_count(value: Any) -> str:
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return "—"
+
+
+def fmt_bytes(n: float) -> str:
+    """``3.6 MB`` / ``812 MB`` / ``80.2 GB`` / ``1.45 TB``, decimal units like ``df -H``."""
+    for unit in ("B", "kB", "MB", "GB"):
+        if n < 1000:
+            return f"{n:.1f} {unit}" if unit == "GB" or (unit != "B" and n < 10) else f"{n:.0f} {unit}"
+        n /= 1000
+    return f"{n:.2f} TB"
+
+
+def fmt_disk_rate(nbytes: float, seconds: float | None) -> str | None:
+    """Bytes per hour of recording: what one more hour in the field costs on disk."""
+    return f"{nbytes / seconds * 3600 / 1e9:.0f} GB/h" if seconds else None
+
+
+def fmt_share(f: float) -> str:
+    """``91%`` / ``7.4%`` / ``<0.1%``: a sliver of the bar still reads as present."""
+    if f >= 0.1:
+        return f"{f * 100:.0f}%"
+    return f"{f * 100:.1f}%" if f >= 0.001 else "<0.1%"
 
 
 def stat(label: str, value: Any, sub: str | None = None) -> dict[str, Any]:
@@ -219,6 +244,10 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     coverage = a.get("cov", probe.segment_coverage)
 
     normal, fill = segment_timeline(probe, a)
+    stats = _curated_stats(a) if a else _probed_stats(probe)
+    disk = root.disk_usage_scene(probe.scene_id)
+    if isinstance(disk.get("bytes"), int):
+        stats.append(stat("on disk", fmt_bytes(disk["bytes"]), fmt_disk_rate(disk["bytes"], disk.get("span_s"))))
 
     return {
         "probe": probe,
@@ -230,7 +259,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
         "coverage": coverage,
         "coverage_class": coverage_class(coverage),
         "thumbs": _thumbs(probe.scene_id, probe, a),
-        "stats": _curated_stats(a) if a else _probed_stats(probe),
+        "stats": stats,
         "spans": normal,
         "fill_spans": fill,
         "span_label": fmt_duration(a.get("dur_s") or probe.duration),
@@ -296,18 +325,76 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
             }
         )
 
+    totals = list(atlas.get("totals") or _derived_totals(rows))
+    disk = disk_panel(root, rows)
+    if disk:
+        totals.append(stat("on disk", disk["total"], disk["rate"]))
+
     return {
         "rows": rows,
         "groups": groups,
         "atlas": atlas or None,
         "atlas_warning": atlas_warning(root, atlas),
-        "totals": atlas.get("totals") or _derived_totals(rows),
+        "totals": totals,
+        # Where the bytes go, as one bar under the totals; None without a
+        # disk_usage.json, and the masthead is as it always was.
+        "disk_panel": disk,
         # The split panel under the masthead: what the card bands mean, and the
         # filter over them. Absent -- not empty -- on a root with no splits.json,
         # so the index of an unsplit root gains nothing at all.
         "split_panel": split_panel(root, rows),
         "split_warning": split_warning(root.splits(), root.path, [r["probe"].scene_id for r in rows], root.manifest()),
     }
+
+
+def disk_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The root's bytes by modality, summed over the scenes the index shows.
+
+    Summed here rather than read from the file's own totals, for the reason
+    `split_panel` counts rows: the file can lag the root (a scene extracted
+    after the last scan) or name scenes it no longer has, and the scenes it
+    has not measured are listed instead of silently left out of the sum.
+    """
+    ids = [r["probe"].scene_id for r in rows]
+    scanned = {s: root.disk_usage_scene(s) for s in ids}
+    scanned = {s: e for s, e in scanned.items() if e.get("modalities")}
+    parts = disk_parts(scanned.values())
+    if not parts:
+        return None
+    total = sum(p["bytes"] for p in parts)
+    seconds = sum(e.get("span_s") or 0 for e in scanned.values())
+    return {
+        "total": fmt_bytes(total),
+        "rate": fmt_disk_rate(total, seconds),
+        "generated": (root.disk_usage() or {}).get("generated"),
+        "missing": [s for s in ids if s not in scanned],
+        "parts": parts,
+    }
+
+
+def disk_parts(entries: Any) -> list[dict[str, Any]]:
+    """The disk bar's slices, largest first, summed over ``disk_usage.json``
+    scene entries. One function for the index's bar and a scene page's, so a
+    modality has the same colour and name on both."""
+    by_mod: dict[str, int] = {}
+    for entry in entries:
+        for name, m in (entry.get("modalities") or {}).items():
+            key = name if name in DISK_MODALITIES else "other"
+            by_mod[key] = by_mod.get(key, 0) + int(m.get("bytes") or 0)
+    total = sum(by_mod.values())
+    if not total:
+        return []
+    return [
+        {
+            "key": key,
+            "label": key.replace("_", " "),
+            "bytes": b,
+            "size": fmt_bytes(b),
+            "share": b / total,
+            "pct": fmt_share(b / total),
+        }
+        for key, b in sorted(by_mod.items(), key=lambda kv: -kv[1])
+    ]
 
 
 def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:

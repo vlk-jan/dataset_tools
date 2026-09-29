@@ -3,6 +3,8 @@
 Four cards -- what was recorded, what ground truth is inside it, how the camera
 was calibrated, what the robot reported -- from the directory probe, the curated
 ``atlas.json`` entry if there is one, and a few per-scene arrays read only here.
+Where the scene's bytes go sits beside the file inventory when the root has a
+``disk_usage.json``; the sizes in the inventory come from the same entry.
 
 The reading budget is deliberate: everything is either already in memory or in
 a file bounded by the frame count (the proprioception arrays, read strided
@@ -32,7 +34,10 @@ from .index_page import (
     THUMB_FRACTIONS,
     THUMB_SLOTS,
     coverage_class,
+    disk_parts,
+    fmt_bytes,
     fmt_count,
+    fmt_disk_rate,
     fmt_duration,
     segment_timeline,
     split_mark,
@@ -691,6 +696,37 @@ def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
     return out
 
 
+def disk_card(access: SceneAccess) -> dict[str, Any] | None:
+    """Where this scene's bytes go, from ``disk_usage.json``; None without an entry."""
+    d = access.root.disk_usage_scene(access.scene_id)
+    parts = disk_parts([d])
+    if not parts:
+        return None
+    total = sum(p["bytes"] for p in parts)
+    stats = [stat("on disk", fmt_bytes(total), fmt_disk_rate(total, d.get("span_s")))]
+    if d.get("frames"):
+        mods = d.get("modalities") or {}
+        each = [
+            f"{name.replace('_', ' ')} {fmt_bytes(mods[name]['bytes'] / mods[name]['files'])}"
+            for name in ("images", "clouds")
+            if (mods.get(name) or {}).get("files")
+        ]
+        stats.append(stat("per frame", fmt_bytes(total / d["frames"]), " · ".join(each) or None))
+    return {
+        "stats": stats,
+        "parts": parts,
+        "note": f"measured {d['scanned'][:10]} by helhest-disk-usage" if d.get("scanned") else None,
+    }
+
+
+def file_sizes(access: SceneAccess) -> dict[str, int]:
+    """Bytes per top-level entry of the scene, directories included, as last measured."""
+    d = access.root.disk_usage_scene(access.scene_id)
+    sizes = {name: m.get("bytes") for name, m in (d.get("modalities") or {}).items() if name != "other"}
+    sizes.update(d.get("files") or {})
+    return {k: v for k, v in sizes.items() if isinstance(v, int)}
+
+
 def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
     """The file inventory, each entry carrying what it is and what it is for.
 
@@ -701,6 +737,7 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
     have.
     """
     p = access.probe
+    sizes = file_sizes(access)
     entries: list[dict[str, Any]] = []
     for art in ARTEFACTS:
         count = p.counts.get(art.key)
@@ -713,6 +750,7 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
                 "present": p.has(art.key),
                 "count": count,
                 "count_unit": art.count_unit,
+                "size": fmt_bytes(sizes[art.relpath]) if p.has(art.key) and art.relpath in sizes else None,
                 "shape": art.description,
                 "purpose": art.purpose,
             }
@@ -747,6 +785,9 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # Not one of the four: it sits beside the file inventory, and it is
             # absent -- not empty -- on a scene without GNSS.
             "map": map_card(access),
+            # Between the inventory and the map, likewise absent on a root
+            # with no disk_usage.json.
+            "disk": disk_card(access),
             # The inventory strip: one entry per artefact the viewer knows,
             # present or not, each with the prose the page opens under it.
             "files": file_entries(access),
