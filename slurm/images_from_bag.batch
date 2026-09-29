@@ -1,0 +1,64 @@
+#!/bin/bash
+#SBATCH --job-name=helhest_jpg
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=24G
+#SBATCH --time=3:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=slurm/slurm_out/jpg_%A_%a.out
+#
+# scripts/images_from_bag.py over ONE SCENE PER ARRAY TASK: give a scene of
+# PNGs the camera's own JPEGs back from its bag, matched frame by frame by
+# pixel identity, and put them in the place of images/. Nothing else of the
+# scene is touched and no frame changes its index.
+#
+#   CSV=docs/v2_1_bags.csv sbatch --array=0-17%4 slurm/images_from_bag.batch /mnt/personal/$USER/HELHEST_v2_1
+#
+# Array index = row of the bag list = scene number, as in extract_v2.batch.
+# The PNGs of a scene that held them itself are kept beside the new images as
+# images.png_old until DROP_OLD=1 is given (in the same run or a later one);
+# a scene whose images/ was a link into another root has the link removed and
+# the other root is not touched. Afterwards, on a login node:
+#
+#   slurm/finalize_v2.sh <root> <bag list>      # declares images.extension
+set -uo pipefail
+
+OUT=${1:?the dataset root}
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+CSV=${CSV:-$REPO/docs/v2_bags.csv}
+SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
+SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
+PY="$REPO/.venv/bin/python"
+DROP_OLD=${DROP_OLD:-0}
+
+row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
+[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+scene=$(echo "$row" | cut -d, -f1)
+bagdir=$(echo "$row" | cut -d, -f3)
+[ -d "$OUT/$scene" ] || { echo "$OUT/$scene does not exist"; exit 1; }
+EXTRA="--swap"
+[ "$DROP_OLD" = "1" ] && EXTRA="$EXTRA --drop-old"
+
+SCRATCH=""
+for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
+    mkdir -p "$c/jpg_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/jpg_${SLURM_JOB_ID}" && break
+done
+[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
+trap 'rm -rf "$SCRATCH"' EXIT
+bag="$SCRATCH/$(basename "$bagdir")"
+BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
+
+if ls "$OUT/$scene/images" 2>/dev/null | head -1 | grep -q '\.jpg$' && [ ! -d "$OUT/$scene/images.new" ]; then
+    echo "$scene holds JPEGs already"
+else
+    echo "[$(date '+%F %T')] $scene fetch $bagdir -> $SCRATCH"
+    rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$scene: fetch failed"; exit 10; }
+    echo "[$(date '+%F %T')] $scene fetched $(du -sh "$bag" | cut -f1)"
+fi
+singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/images_from_bag.py" "$bag" "$OUT/$scene" \
+    --jobs "${SLURM_CPUS_PER_TASK:-8}" $EXTRA
+rc=$?
+echo "[$(date '+%F %T')] $scene rc=$rc: $(ls "$OUT/$scene/images" | wc -l) images, first $(ls "$OUT/$scene/images" | head -1), $(du -sh --apparent-size "$OUT/$scene/images/" 2>/dev/null | cut -f1)"
+exit $rc
