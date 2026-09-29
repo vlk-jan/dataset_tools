@@ -381,7 +381,8 @@ the viewer's own virtualenv:
   lookup onto a 10 Hz stream quantised every frame by up to 50 ms, which is 5 cm
   at 1 m/s. `interpolate_poses()` now lerps the translation and SLERPs the
   rotation, falling back to the nearest sample outside the sample range, across
-  a gap over 0.5 s, or across a bracket implying more than 4 m/s -- a GNSS
+  a gap over 0.5 s, or across a bracket implying more than 6 m/s (4 m/s until
+  2026-09-29, which the sprints of the 2026-09-28 recordings exceed) -- a GNSS
   teleport, where blending the two sides would fabricate a pose the robot never
   held. The speed gate matches the one `write_ground_truth()` breaks segments
   on, so the two files agree about which steps are real motion. The count of

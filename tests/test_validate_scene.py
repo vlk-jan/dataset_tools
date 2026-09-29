@@ -151,7 +151,7 @@ def test_a_step_no_robot_could_take_is_a_warning_even_when_it_is_short(scene: Pa
     assert report.errors == []
     assert not any("jumps >" in w for w in report.warnings)
     assert any("m/s" in w for w in report.warnings)
-    assert report.stats["max_speed_mps"] > 4.0
+    assert report.stats["max_speed_mps"] > vs.MAX_SPEED
 
 
 def test_non_orthonormal_transform_is_an_error(scene: Path):
