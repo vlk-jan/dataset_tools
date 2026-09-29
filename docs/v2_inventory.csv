@@ -62,5 +62,5 @@ session,bag,bag_dir_on_subtdata,size_gb,start_utc,duration_s,ntopics,lidar,camer
 26-09-28-temesvar,robotour_merged_2026_09_28-16_52_16,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_52_16,2.9,2026-09-28T14:52:17Z,147,47,2069,2070,1467,14664,0,0,v2.0 0011
 26-09-28-temesvar,robotour_merged_2026_09_28-16_59_55,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_59_55,5.4,2026-09-28T14:59:55Z,254,47,3646,3646,2533,25324,0,0,v2.0 0012
 26-09-28-temesvar,robotour_merged_2026_09_28-17_10_48,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-17_10_48,2.3,2026-09-28T15:10:48Z,103,39,1483,1482,607,6074,0,0,v2.0 0013
-26-09-28-temesvar,robotour_merged_2026_09_28-18_02_56,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_02_56,0.2,2026-09-28T16:02:56Z,18,47,181,182,176,1760,0,0,v2.0 0014
-26-09-28-temesvar,robotour_merged_2026_09_28-18_03_45,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_03_45,0.6,2026-09-28T16:03:45Z,33,47,477,477,315,3141,20826,0,v2.0 0015
+26-09-28-temesvar,robotour_merged_2026_09_28-18_02_56,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_02_56,0.2,2026-09-28T16:02:56Z,18,47,181,182,176,1760,0,0,dropped (18 s)
+26-09-28-temesvar,robotour_merged_2026_09_28-18_03_45,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_03_45,0.6,2026-09-28T16:03:45Z,33,47,477,477,315,3141,20826,0,dropped (33 s)
