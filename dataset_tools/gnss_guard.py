@@ -305,7 +305,7 @@ def _outages_with_a_jump(ts: np.ndarray, edges: np.ndarray, outages: list[Span])
     return out
 
 
-def _corroborated(span: Span, ts: np.ndarray, edges: np.ndarray, outages: list[Span]) -> bool:
+def _corroborated(span: Span, ts: np.ndarray, edges: np.ndarray, outages: list[Span], fix_ts=None) -> bool:
     """Is there a second reason to believe this frozen run is fabricated?
 
     On its own a frozen position is not enough, because a robot can be
@@ -325,6 +325,13 @@ def _corroborated(span: Span, ts: np.ndarray, edges: np.ndarray, outages: list[S
     jumps, and the receiver publishes null island through both.
     """
     if any(span.start <= o.end and o.start <= span.end for o in outages):
+        return True
+    # No usable fix anywhere under the run: the receiver never claimed a
+    # position there. ``outages`` cannot say so when the run sits before the
+    # first fix, after the last, or in a scene with none at all -- the 2026-09-28
+    # bag robotour_merged_2026_09_28-16_52_16 publishes the origin with an
+    # identity attitude for all of its 147 s, and null island on every fix.
+    if fix_ts is not None and not np.any((fix_ts >= span.start) & (fix_ts <= span.end)):
         return True
     inside = np.flatnonzero((ts >= span.start) & (ts <= span.end))
     if not len(inside):
@@ -352,8 +359,9 @@ def find_spans(ts, poses, fix_ts=None, *, max_speed=MAX_SPEED, max_gap=MAX_GAP) 
     pos = np.asarray(poses, dtype=float)[:, :3, 3]
     edges = teleport_edges(ts, pos, max_speed, max_gap)
     outages = [] if fix_ts is None else outage_spans(fix_ts)
+    fixes = None if fix_ts is None else np.asarray(fix_ts, dtype=float)
 
-    frozen = [s for s in frozen_spans(ts, pos) if _corroborated(s, ts, edges, outages)]
+    frozen = [s for s in frozen_spans(ts, pos) if _corroborated(s, ts, edges, outages, fixes)]
     found = frozen + island_spans(ts, edges) + _outages_with_a_jump(ts, edges, outages)
     if not found:
         return []

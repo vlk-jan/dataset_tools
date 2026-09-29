@@ -225,3 +225,26 @@ def test_an_outage_with_no_jump_in_it_is_still_left_alone():
     fixes = np.r_[np.arange(1000.0, 1030.0, 0.1), np.arange(1043.0, 1080.0, 0.1)]
     _, keep, verdict = gg.guard(odom, np.arange(1000.0, 1080.0, 0.08), fixes)
     assert verdict.clean and keep.all()
+
+
+def test_a_scene_that_never_had_a_fix_is_removed_whole():
+    """robotour_merged_2026_09_28-16_52_16: the origin, held for the whole bag,
+    and null island on every fix -- no outage between fixes, because there are
+    no fixes. The empty fix list is the receiver's admission."""
+    odom = reset(1470, 1000.0, at=(0.0, 0.0, 0.0))
+    kept, keep, verdict = gg.guard(odom, np.arange(1000.0, 1147.0, 0.07), [])
+    assert not kept and not keep.any()
+    assert verdict.spans[0].reason == "frozen"
+
+
+def test_a_freeze_before_the_first_fix_is_removed():
+    odom = reset(50, 995.0, at=(0.0, 0.0, 0.0)) + drive(300)
+    fixes = np.arange(1000.0, 1030.0, 0.1)
+    kept, _, verdict = gg.guard(odom, np.arange(995.0, 1030.0, 0.08), fixes)
+    assert len(verdict.spans) == 1 and len(kept) == 300
+
+
+def test_a_rig_with_no_fix_topic_keeps_a_frozen_stream():
+    odom = reset(100, 1000.0, at=(0.0, 0.0, 0.0))
+    kept, _, verdict = gg.guard(odom, np.arange(1000.0, 1010.0, 0.08), None)
+    assert verdict.clean and len(kept) == 100

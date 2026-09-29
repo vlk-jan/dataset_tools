@@ -888,8 +888,10 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         # The stamps of the fixes that carried a position. The gaps in them are
         # when the receiver had no solution, whether it said so by publishing
         # null island (gps_row drops those) or by publishing nothing at all.
-        fix_ts = [float(r[0]) for r in gps_rows]
-        odom_data, keep, guard_verdict = gnss_guard.guard(odom_data, frame_ts, fix_ts or None)
+        # A rig with a fix topic but not one usable fix is an empty list, not
+        # None: the receiver never had a solution, which is evidence too.
+        fix_ts = [float(r[0]) for r in gps_rows] if gps_topic else None
+        odom_data, keep, guard_verdict = gnss_guard.guard(odom_data, frame_ts, fix_ts)
         if not guard_verdict.clean:
             LOG.warning("%s: %s", bag_path.name, guard_verdict.summary(float(frame_ts[0])))
             valid_cam_ts, valid_pcd_ts, frame_ts = valid_cam_ts[keep], valid_pcd_ts[keep], frame_ts[keep]
