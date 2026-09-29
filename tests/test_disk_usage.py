@@ -46,3 +46,51 @@ def test_a_file_from_an_older_schema_is_rescanned_whole(tmp_path):
     (tmp_path / "disk_usage.json").write_text(json.dumps(stale))
     s = disk_usage.update(tmp_path)["scenes"]["0000"]
     assert s["bytes"] == 32 and s["files"] == {"data_ts.txt": 12} and s["note"] == "keep me"
+
+
+def test_what_a_link_leads_to_is_counted_apart(tmp_path):
+    """A root built from links into another one (v1.3 into v1.2, v2.1 into
+    v2.0): the linked frames are this root's frames, the linked bytes are not
+    its disk usage."""
+    make_scene(tmp_path / "other_root", "0000", 3)
+    (tmp_path / "other_root" / "0000" / "clouds").mkdir()
+    (tmp_path / "other_root" / "0000" / "clouds" / "00000.npy").write_bytes(b"x" * 7)
+    root = tmp_path / "root"
+    scene = root / "0000"
+    scene.mkdir(parents=True)
+    (scene / "images").symlink_to("../../other_root/0000/images")  # a linked directory
+    (scene / "data_ts.txt").symlink_to("../../other_root/0000/data_ts.txt")  # a linked file
+    (scene / "clouds").mkdir()  # a directory of its own, with a link inside
+    (scene / "clouds" / "00000.npy").symlink_to("../../../other_root/0000/clouds/00000.npy")
+    (scene / "clouds" / "00001.npy").write_bytes(b"x" * 5)
+    (scene / "gps.npy").symlink_to("../../other_root/0000/nothing_here")  # broken
+    (scene / "source_bag.txt").write_text("bag\n")
+
+    doc = disk_usage.update(root)
+    s = doc["scenes"]["0000"]
+    assert s["modalities"]["images"] == {
+        "bytes": 0,
+        "files": 0,
+        "linked_bytes": 30,
+        "linked_files": 3,
+        "link": "../../other_root/0000/images",
+    }
+    assert s["modalities"]["clouds"] == {"bytes": 5, "files": 1, "linked_bytes": 7, "linked_files": 1}
+    assert s["modalities"]["other"] == {"bytes": 4, "files": 1, "linked_bytes": 12, "linked_files": 1}
+    assert s["files"] == {"source_bag.txt": 4}
+    assert s["linked_files"] == {"data_ts.txt": {"bytes": 12, "link": "../../other_root/0000/data_ts.txt"}}
+    assert s["frames"] == 3 and s["span_s"] == 2.5
+    assert s["bytes"] == 9 and s["linked_bytes"] == 49 and s["broken_links"] == 1
+    t = doc["totals"]
+    assert (t["bytes"], t["files"], t["linked_bytes"], t["linked_files"]) == (9, 2, 49, 5)
+    assert t["frames"] == 3 and t["broken_links"] == 1
+    assert doc["modalities"][0] == "images"  # largest by what it holds, own or linked
+
+
+def test_a_scene_without_links_says_so_in_every_measured_key(tmp_path):
+    """The measured keys are always written, so a rescan of a scene that no
+    longer has links cannot leave the old figures behind."""
+    make_scene(tmp_path, "0000", 2)
+    s = disk_usage.update(tmp_path)["scenes"]["0000"]
+    assert s["linked_bytes"] == 0 and s["linked_files"] == {} and s["broken_links"] == 0
+    assert "linked_bytes" not in s["modalities"]["images"]
