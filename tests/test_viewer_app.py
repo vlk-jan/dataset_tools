@@ -536,7 +536,7 @@ def test_the_view_opens_with_the_robot_in_shot(client):
     assert "return false;" in fn
 
     overlay = client.get("/viewer-static/overlay.js").text
-    assert "if (centerOnRobot(app)) {" in overlay
+    assert "if (centered || centerOnRobot(app)) {" in overlay
     # Once, at load -- following it every frame is SimView's own trackBody.
     assert overlay.count("centerOnRobot(app)") == 1
 

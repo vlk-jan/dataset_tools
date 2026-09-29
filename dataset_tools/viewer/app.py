@@ -509,7 +509,6 @@ def create_app(
             render_viewer_page,
             f"/simview-static/{_simview_version()}",
             f"/api/data/{bundle_key}/{stamp}",
-            _simview_version(),
             body,
             head,
         )

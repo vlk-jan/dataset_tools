@@ -54,9 +54,10 @@ def test_write_static_bundle_lays_out_the_files_the_front_end_fetches(tmp_path):
 
 def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
     pytest.importorskip("simview")
-    page = wire.render_viewer_page("/simview-static", "/api/data/k", "1.2.3", "<div id='x'></div>")
+    page = wire.render_viewer_page("/simview-static", "/api/data/k", "<div id='x'></div>")
     assert 'window.__simviewStaticBase = "/api/data/k"' in page
     assert "/simview-static/js/main.js" in page
+    assert '"/static/' not in page
     assert '<base href="/">' in page
     assert "{{" not in page
     assert "<div id='x'></div>" in page
@@ -187,7 +188,9 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
     with open(scene / "odometry_segments.txt", "w") as fh:
         fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
     for i in range(2):
-        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), 1.0 if i == 0 else 0.0))
+        np.savez_compressed(
+            scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), 1.0 if i == 0 else 0.0)
+        )
         # Frame 0 measured everything it saw; frame 1 extrapolated everything.
         np.savez_compressed(
             scene / "height_masks" / f"{i:05d}.npz",

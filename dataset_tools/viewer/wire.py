@@ -130,7 +130,6 @@ def write_static_bundle(doc: dict, dest: Path) -> dict:
 def render_viewer_page(
     static_prefix: str,
     data_base: str,
-    version: str,
     body_html: str = "",
     head_html: str = "",
 ) -> str:
@@ -147,17 +146,9 @@ def render_viewer_page(
 
     template = (files("simview") / "templates" / "index.html").read_text()
 
-    # The template is Jinja2, but the only expressions in it are asset URLs and
-    # a cache-busting stamp. Substituting them directly avoids depending on how
-    # a given SimView version wires up its Jinja environment.
-    import re
-
-    def sub_url(match: re.Match) -> str:
-        path = match.group(1)
-        return f"{static_prefix.rstrip('/')}/{path}"
-
-    page = re.sub(r"\{\{\s*url_for\('static',\s*path='([^']+)'\)\s*\}\}", sub_url, template)
-    page = re.sub(r"\{\{\s*t\s*\}\}", version, page)
+    # SimView 5 hard-codes its asset URLs under "/static/" (4.x spelled them as
+    # Jinja url_for expressions); point them at our mount instead.
+    page = template.replace('"/static/', f'"{static_prefix.rstrip("/")}/')
 
     if "{{" in page:
         logger.warning("simview's index.html has unsubstituted template expressions")
