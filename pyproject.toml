@@ -41,8 +41,21 @@ viewer = [
     "uvicorn[standard]>=0.27",
     "jinja2>=3.1",
     "pillow>=10.0",
-    "simview>=5.0.0",
+    "simview[authoring]>=5.0.0",
+    # Listed directly only so the index below applies: uv honours an index
+    # override for direct dependencies, not for simview's transitive torch.
+    "torch",
 ]
+
+# The viewer builds scenes on the CPU; the default Linux torch wheel drags in
+# ~3 GB of CUDA libraries it never uses. Elsewhere (macOS) PyPI's wheel is used.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [project.urls]
 Homepage = "https://github.com/vlk-jan/dataset_tools"
