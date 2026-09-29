@@ -336,3 +336,30 @@ labels: 0000–0011 are v2.0's, through the link (80,502); 0012–0017 were
 written into v2.1 by DRIFT `035c342` (RCI job 11719760, same settings, r =
 0.334): 21,319 labels for 22,615 frames with a map, 94.3 %, against 74.4 % in
 v2.0. `HELHEST_v2_1_heldout/keyframes.lst` has 22,615 lines.
+
+## 9. Images as the camera's own JPEG (2026-09-29)
+
+Images were 91 % of a root: the Odin1 publishes baseline JPEG (4:2:0, quality
+about 95, 0.7 MB a frame) and the extractor stored a PNG of the decoded pixels
+(2.9–3.8 MB). Measured on scene 0016 and its bag: the PNG is pixel-identical
+to the decoded JPEG in every sampled frame, PIL and OpenCV decode the JPEG
+alike, PNG at level 9 saves 12 %, lossless WebP 40 %, the camera's bytes 76 %;
+re-encoding the PNG as JPEG gives the same size with a second generation of
+loss and is never the right thing.
+
+Since `ef1fce4` the extractor stores `msg.data` unmodified as
+`images/NNNNN.jpg`, a root declares its format in `manifest.json`
+(`images.extension`; no key = png, which is every root made before), and a
+scene that holds another format than declared is an error. DRIFT
+(`write_keyframes.py`), ScaLR (`write_scalr_keyframes.py`) and redrive read the
+key; DRIFT's loader needs the keyframe list to keep two columns.
+
+**v2.1 was rebuilt in that format, in place, images only**
+(`scripts/images_from_bag.py`, RCI jobs 11720341 and 11720347): for every
+frame the bag message that decodes to exactly its pixels, so no frame changed
+its index and clouds, maps, poses and labels are untouched. 133,060 of 133,060
+frames matched; 489.4 GB of PNG became 119.0 GB of JPEG (4.1×). In scenes
+0000–0011 `images/` stopped being a link into v2.0 and is a real directory;
+every other entry of those scenes is still a link, so **deleting v2.0 would
+leave them with their images and nothing else**. v2.0 itself is unchanged and
+stays PNG. v2.1 now stores 126.6 GB itself and reaches 38.0 GB through links.
