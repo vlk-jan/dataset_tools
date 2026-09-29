@@ -168,10 +168,9 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
 
 
 def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
-    """A cell is reached by dozens of maps. Taking the best validity among them
-    paints a cell measured on the strength of one distant frame whose map edge
-    caught a return, while the near frames that actually decided the height were
-    extrapolating. The layer has to be weighted as the height is."""
+    """A cell any frame measured takes its height from the measurements alone,
+    however far off they were taken -- a near frame's extrapolation is invented
+    ground and must not flatten a real return. The layer says so."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -188,7 +187,7 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
     with open(scene / "odometry_segments.txt", "w") as fh:
         fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
     for i in range(2):
-        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.zeros((128, 128)))
+        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), 1.0 if i == 0 else 0.0))
         # Frame 0 measured everything it saw; frame 1 extrapolated everything.
         np.savez_compressed(
             scene / "height_masks" / f"{i:05d}.npz",
@@ -203,14 +202,16 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)
-    _, layers, bounds = build._finish_terrain(grid, None)
+    height, layers, bounds = build._finish_terrain(grid, None)
 
     row, col, inside = grid.cell_of(track.positions[:, 0], track.positions[:, 1])
     under = layers["validity"][row[inside], col[inside]]
     assert bounds["validity"] == (0.0, 2.0)
     assert under[0] == pytest.approx(2.0, abs=0.1)
-    # Both maps reach it, so the best of them would call this cell measured.
-    assert under[1] == pytest.approx(0.0, abs=0.1)
+    # Only the distant frame measured it, and that measurement decides it.
+    assert under[1] == pytest.approx(2.0, abs=0.1)
+    # ... at full height: the near frame's invented ground would pull it to ~0.
+    assert height[row[inside], col[inside]][1] == pytest.approx(1.0, abs=0.01)
 
 
 def test_wheel_anchored_cells_do_not_read_as_measured(tmp_path):

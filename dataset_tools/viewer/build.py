@@ -561,6 +561,13 @@ class TerrainGrid:
     #: that absence as "extrapolated" rather than as "not said".
     sum_wv: np.ndarray = field(init=False)
     sum_w_v: np.ndarray = field(init=False)
+    #: The same weighted height sum over *measured* samples only. A per-frame
+    #: map is mostly invented (~70 % extrapolated on real data), and a tree or a
+    #: person is measured by the few frames that saw it and filled in at ground
+    #: level by the dozens that did not; one mean over all of them squashes it
+    #: flat. Wherever any frame measured a cell, these decide its height.
+    sum_wz_m: np.ndarray = field(init=False)
+    sum_w_m: np.ndarray = field(init=False)
     layers: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -569,6 +576,8 @@ class TerrainGrid:
         self.count = np.zeros((self.ny, self.nx), dtype=np.int64)
         self.sum_wv = np.zeros((self.ny, self.nx), dtype=np.float64)
         self.sum_w_v = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.sum_wz_m = np.zeros((self.ny, self.nx), dtype=np.float64)
+        self.sum_w_m = np.zeros((self.ny, self.nx), dtype=np.float64)
 
     @property
     def x_lim(self) -> tuple[float, float]:
@@ -707,6 +716,9 @@ def splat_height_maps(
             flat = ranked.astype(np.float64).ravel()[finite][inside]
             grid.sum_wv += grid.binned(r, c, flat * w)
             grid.sum_w_v += grid.binned(r, c, w)
+            wm = w * (flat == 2)
+            grid.sum_wz_m += grid.binned(r, c, world[inside, 2] * wm)
+            grid.sum_w_m += grid.binned(r, c, wm)
             stats["with_masks"] += 1
     return stats
 
@@ -878,6 +890,8 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
     height = np.zeros((grid.ny, grid.nx), dtype=np.float64)
     if covered.any():
         height[covered] = grid.sum_wz[covered] / grid.sum_w[covered]
+        measured = grid.sum_w_m > 0.0
+        height[measured] = grid.sum_wz_m[measured] / grid.sum_w_m[measured]
         background = _background_surface(height, covered)
         height[~covered] = background[~covered]
     else:
@@ -887,6 +901,8 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
     validity = np.zeros((grid.ny, grid.nx), dtype=np.float64)
     said = grid.sum_w_v > 0.0
     validity[said] = grid.sum_wv[said] / grid.sum_w_v[said]
+    # A measured height is what the cell shows, so that is what it reports.
+    validity[grid.sum_w_m > 0.0] = 2.0
 
     layers = {
         "coverage": (grid.count > 0).astype(np.float64) * grid.count,
