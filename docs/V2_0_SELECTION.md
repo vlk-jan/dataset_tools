@@ -212,3 +212,44 @@ written by hand afterwards, as for the beta.
 8. **Numbering.** v2.0 scenes start at 0000 again and do not match the beta's
    ids; anything that names beta scenes must not be pointed at v2.0.
    *Answer: yes, from 0000.*
+
+## 7. Added 2026-09-29: the Temesvár field test of 2026-09-28 (scenes 0005–0012)
+
+Eleven bags, 36 GB, 32 min of recording in `/data/helhest/26-09-28-temesvar`,
+surveyed as rows 54–64 of `docs/v2_inventory.csv` (RCI job 11717950). All on
+the new firmware: clouds and images 1:1 at 15 Hz, cloud latency 0.11 s, the
+Odin's per-boot mount inside the 09-14 envelope (the first boot of the day,
+bags 16:12–16:52, sits at y = 0.003 instead of 0.03). Content the root did not
+have: a meadow of knee-high grass, weeds and thistles, driven into a low sun,
+with two roll-overs; a forest gravel track between pines; a reed bed taller
+than the robot.
+
+| Bag (16:xx = 14:xx UTC) | s | Path | Kept as | Why / what to know |
+|---|---|---|---|---|
+| 16_12_11 | 226 | 8 m | 0005 | set-up at the meadow edge, 97 % stationary |
+| 16_16_16 | 449 | 365 m | 0006 | the meadow, longest scene of the day |
+| 16_25_23 | 307 | 314 m | 0007 | meadow into the sun, tilt 24°, RTK 87 % |
+| 16_35_04 | 121 | 18 m | 0008 | meadow edge, people, half stationary |
+| 16_40_50 | 191 | 80 m | 0009 | ends in a roll-over; guard removed 400 frames, 4 segments, 24 inverted frames kept |
+| 16_45_03 | 73 | 111 m | 0010 | second roll-over; 457 of 1030 frames removed, 4 segments, RTK 54 % afterwards |
+| 16_52_16 | 147 | 0 m | — | **INS pose never moves** for the whole bag while the wheels turn ~190 m; no GNSS fix at all. The guard sees a stationary robot; excluded by hand |
+| 16_59_55 | 254 | 94 m | 0011 | forest track into a reed bed: the lidar ground is the reed tops 0.32 m above base_link; 629 frames without a map |
+| 17_10_48 | 103 | 27 m | 0012 | forest gravel track; fix lost at 46 s, 857 of 1482 frames kept; tips over at the end, without a pose; no `/cmd_vel` |
+| 18_02_56 | 18 | 1 m | — | lawn at dusk; dropped as too short (user, 2026-09-29) |
+| 18_03_45 | 33 | 23 m | — | same; dropped |
+
+Vegetation is the thing to know about these scenes: the height maps map the
+canopy, not the soil (meadow lowest returns 0.10–0.20 m below base_link
+instead of 0.26 m; reed bed +0.32 m), and the shift relevel puts the
+wheel-contact anchors on that canopy too. The wheel odometry and the INS pose
+are the only record of the real ground. Build: RCI jobs 11717951 (all eleven
+as 0005–0015) and 11718014 (0011–0012 re-extracted after the drops renumbered
+them); finalized 2026-09-29. The root is now 13 scenes, 112,365 frames,
+4,885 m of ground truth, 2 h 15 min; `validate_scene` 0 failed, 5 with
+warnings (steps across pose holes in 0001, 0004, 0009, 0010, 0012 and the 24
+inverted frames of 0009).
+
+The frozen-pose bag exposes a gap in `dataset_tools.gnss_guard`: it looks for
+stretches that go bad (islands, teleports, fix loss), so a stream fabricated
+from its first message passes as a stationary robot. Catching it needs the
+pose path compared with the wheel odometry, which is not automated.
