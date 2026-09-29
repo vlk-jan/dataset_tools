@@ -68,6 +68,7 @@ helhest-extract = "dataset_tools.extract_data:main"
 helhest-validate = "dataset_tools.validate_scene:main"
 helhest-sort-bag = "dataset_tools.sort_bag:main"
 helhest-viewer = "dataset_tools.viewer.__main__:main"
+helhest-disk-usage = "dataset_tools.disk_usage:main"
 odom_recorder = "dataset_tools.odom_node:main"
 
 [tool.setuptools]

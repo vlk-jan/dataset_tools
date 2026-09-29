@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -214,6 +215,9 @@ def test_main_skips_complete_scenes_and_writes_index(tmp_path: Path):
     assert ed.main([str(tmp_path / "bags"), str(out), "--jobs", "1"]) == 0
     rows = (out / ed.SCENES_CSV).read_text().splitlines()
     assert rows[1].startswith("0000,synthetic_bag,")
+    # The skipped scene was never measured, so the disk figures pick it up.
+    usage = json.loads((out / "disk_usage.json").read_text())
+    assert list(usage["scenes"]) == ["0000"] and usage["scenes"]["0000"]["frames"] == 3
 
 
 @pytest.mark.parametrize("jobs", ["1", "2"])

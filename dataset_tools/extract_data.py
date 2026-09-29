@@ -30,7 +30,13 @@ from rosbags.highlevel import AnyReader
 from tqdm import tqdm
 
 try:
-    from dataset_tools import cloudini, gnss_guard, rosbags_compat, time_align  # noqa: F401  (patches rosbags)
+    from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
+        cloudini,
+        disk_usage,
+        gnss_guard,
+        rosbags_compat,
+        time_align,
+    )
     from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
     from dataset_tools.transforms import (  # noqa: F401  (re-exported: the transform helpers used to live here)
         euler_matrix,
@@ -46,6 +52,7 @@ except ImportError as exc:  # when the file is run directly from dataset_tools/
     if exc.name != "dataset_tools":
         raise
     import cloudini
+    import disk_usage
     import gnss_guard
     import rosbags_compat  # noqa: F401
     import time_align
@@ -1468,6 +1475,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             results.append(_worker(bag, output_dir, idx, args))
 
     csv_path = merge_scenes_csv(output_dir)
+    # The viewer's disk figures. Every scene this run touched is rescanned,
+    # failed ones too, since an overwrite may have left them smaller; a failure
+    # here costs the figures, never the extraction.
+    try:
+        disk_usage.update(output_dir, {f"{idx:04d}" for idx, _ in todo})
+    except (OSError, ValueError) as exc:
+        LOG.warning("could not update %s: %s", disk_usage.NAME, exc)
 
     failed = [r for r in results if r.status == STATUS_FAILED]
     empty = [r for r in results if r.status == STATUS_EMPTY]

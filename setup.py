@@ -37,6 +37,7 @@ setup(
             "helhest-validate = dataset_tools.validate_scene:main",
             "helhest-sort-bag = dataset_tools.sort_bag:main",
             "helhest-viewer = dataset_tools.viewer.__main__:main",
+            "helhest-disk-usage = dataset_tools.disk_usage:main",
         ],
     },
 )
