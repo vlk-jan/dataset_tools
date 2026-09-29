@@ -4,3 +4,14 @@ scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msg
 0002,26-09-19-stromovka-robotour,/data/helhest/26-09-19-stromovka-robotour/robotour_finals_1,40.6,2026-09-19T08:00:57Z,1999,28783,28754
 0003,26-09-22-lipnik,/data/helhest/26-09-22-lipnik/robotour_2026_09_22-14_16_30_merged,15.7,2026-09-22T12:16:20Z,1098,15880,15877
 0004,26-09-22-lipnik,/data/helhest/26-09-22-lipnik/robotour_2026_09_22-15_27_08_merged,21.4,2026-09-22T13:26:44Z,1766,21288,21273
+0005,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_12_11,3.6,2026-09-28T14:12:11Z,226,3219,3220
+0006,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_16_16,8.6,2026-09-28T14:16:15Z,449,6479,6478
+0007,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_25_23,5.7,2026-09-28T14:25:23Z,307,4415,4414
+0008,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_35_04,2.2,2026-09-28T14:35:04Z,121,1665,1665
+0009,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_40_50,3.3,2026-09-28T14:40:50Z,191,2760,2758
+0010,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_45_03,1.3,2026-09-28T14:45:02Z,73,1030,1031
+0011,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_52_16,2.9,2026-09-28T14:52:17Z,147,2069,2070
+0012,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-16_59_55,5.4,2026-09-28T14:59:55Z,254,3646,3646
+0013,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-17_10_48,2.3,2026-09-28T15:10:48Z,103,1483,1482
+0014,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_02_56,0.2,2026-09-28T16:02:56Z,18,181,182
+0015,26-09-28-temesvar,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_03_45,0.6,2026-09-28T16:03:45Z,33,477,477
