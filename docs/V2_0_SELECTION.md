@@ -280,3 +280,15 @@ The root is 12 scenes, 109,681 frames, 4,917 m of ground truth, 2 h 12 min,
 108,244 height maps; `validate_scene` 0 failed, 4 with warnings (steps across
 pose holes in 0001, 0004 and 0008, frames past 45° in 0008 and 0009).
 Finalized 2026-09-29.
+
+**DRIFT-side files, written the same day on the finalized root.**
+`keyframes.lst` (DRIFT `b6738ca`): 108,244 lines, every frame that has a
+cloud, an image, a map and a mask; no motion or tilt gate. `proprio_labels/`
+(DRIFT `da55abe`, RCI job 11718296, 2 s horizon, `min_validity` 2): 80,502 of
+108,244 keyframes labelled (74.4 %), with the robot model `helhest_v2` —
+wheel centres from `/robot_description`, **radius 0.334 m, the measured
+rolling scale** (path over integrated wheel rotation 0.334 on made surfaces,
+0.327 pooled; ground-truth speed over wheel rate 0.336), not the URDF's 0.36.
+By label count the root is 58 % made surfaces, 27.6 % Lipník and 14.4 %
+Temesvár. The laptop mirror of the root leaves `proprio_labels/` out on
+purpose.
