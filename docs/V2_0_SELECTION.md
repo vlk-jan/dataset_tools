@@ -238,8 +238,9 @@ pines; a reed bed taller than the robot.
 | 18_02_56 | 18 | — | | | lawn at dusk; dropped as too short (user, 2026-09-29) |
 | 18_03_45 | 33 | — | | | same; dropped |
 
-None of the Temesvár scenes has a `cmd_vel.npy`: the bags carry no `/cmd_vel`
-message. `joint_setpoints.npy` holds the commanded wheel rates.
+None of the Temesvár scenes has a `cmd_vel.npy`: the session was driven
+manually from the joystick, which does not publish `/cmd_vel` (only the
+autonomy stack does). `joint_setpoints.npy` holds the commanded wheel rates.
 
 **Two guard faults found on this session, fixed by the laptop session and
 merged (dataset_tools `3b46139`, `3fa1e26`):**
@@ -260,8 +261,9 @@ Scenes 0005–0011 were re-extracted with both (RCI job 11718103) and agree
 frame for frame with the root built on the laptop. 0000–0004 predate the fixes;
 their fastest step is 2.9 m/s and no frozen run without a fix is known in them.
 
-Vegetation is the thing to know about these scenes: the height maps map the
-canopy, not the soil (meadow lowest returns 0.10–0.20 m below base_link
+Vegetation is what these scenes are for, not a defect: the lidar sees the
+canopy and DRIFT has to predict the supporting terrain under it. The height
+maps map the canopy, not the soil (meadow lowest returns 0.10–0.20 m below base_link
 instead of 0.26 m; reed bed +0.32 m), and the shift relevel puts the
 wheel-contact anchors on that canopy too. Frames with no return beyond 1 m are
 counted per scene in the manifest (769 in the root, 401 of them in the reed
