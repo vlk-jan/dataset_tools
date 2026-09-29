@@ -22,6 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import image_format
 from .loaders import count_lines, read_segments, read_text
 from .splits import NO_SPLITS, SceneSplits, read_splits
 
@@ -60,7 +61,7 @@ class Artefact:
 #: Everything the viewer knows how to show. Order is the order shown in the UI.
 # fmt: off
 ARTEFACTS: tuple[Artefact, ...] = (
-    Artefact("images", "images", "dir", "Camera images", "RGB frame per sync'd frame", ".png"),
+    Artefact("images", "images", "dir", "Camera images", "RGB frame per sync'd frame", ".jpg"),
     Artefact("clouds", "clouds", "dir", "Point clouds", "(N, >=3) lidar scan in the robot base frame", ".npy"),
     Artefact("height_maps", "height_maps", "dir", "Height maps", "per-frame BEV height grid", ".npz"),
     Artefact("height_masks", "height_masks", "dir", "Height-map validity", "measured / interpolated / extrapolated / wheel-anchored per cell", ".npz"),
@@ -262,7 +263,10 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         if probe.present.get(key):
             art = ARTEFACTS_BY_KEY[key]
             try:
-                probe.counts[key] = sum(1 for n in os.listdir(scene_dir / art.relpath) if n.endswith(art.suffix))
+                if key == "images":  # .jpg or .png, by what the root holds
+                    probe.counts[key] = sum(image_format.held(scene_dir).values())
+                else:
+                    probe.counts[key] = sum(1 for n in os.listdir(scene_dir / art.relpath) if n.endswith(art.suffix))
             except OSError:
                 probe.counts[key] = 0
 

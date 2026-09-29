@@ -27,9 +27,11 @@ from pathlib import Path
 import numpy as np
 
 try:
+    from dataset_tools import image_format
     from dataset_tools.gnss_guard import MAX_SPEED
     from dataset_tools.gt_io import read_segments, read_trajectory
 except ImportError:  # when the file is run directly from dataset_tools/
+    import image_format
     from gnss_guard import MAX_SPEED
     from gt_io import read_segments, read_trajectory
 
@@ -377,7 +379,17 @@ def validate_scene(
     report = SceneReport(path=scene_dir)
     counts: dict[str, int] = {}
 
-    images = _indexed_files(scene_dir / "images", ".png")
+    # One format per scene, and the one the root declares: a scene that holds
+    # another is an error here, not a scene a consumer finds empty.
+    try:
+        image_ext = image_format.of_scene(scene_dir)
+    except image_format.ImageFormatError as exc:
+        report.error(str(exc))
+        image_ext = max(image_format.held(scene_dir).items(), key=lambda kv: kv[1], default=(image_format.DEFAULT, 0))[
+            0
+        ]
+    report.stats["image_format"] = image_ext.lstrip(".")
+    images = _indexed_files(scene_dir / "images", image_ext)
     clouds = _indexed_files(scene_dir / "clouds", ".npy")
     for label, files, directory in (
         ("images", images, scene_dir / "images"),

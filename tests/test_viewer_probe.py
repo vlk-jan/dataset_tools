@@ -107,3 +107,21 @@ def test_a_root_with_no_scenes_csv_or_manifest_still_works(tmp_path):
     assert root.manifest() is None
     assert root.csv_rows() == {}
     assert root.probe_all()
+
+
+def test_a_root_of_camera_jpegs_is_counted_and_found(tmp_path):
+    """The images are .jpg in a root made after 2026-09-29; the viewer reads
+    the extension off the root instead of assuming one."""
+    from dataset_tools.viewer import build
+
+    root_path = make_root(tmp_path)
+    for p in (root_path / "0000" / "images").iterdir():
+        p.rename(p.with_suffix(".jpg"))
+    (root_path / "manifest.json").write_text('{"images": {"extension": "jpg"}}')
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    p = root.probe("0000")
+    assert p.has("images") and p.counts["images"] == 12 and p.n_frames == 12
+    access = build.SceneAccess(root, "0000")
+    assert access.frame_path("images", 3).name == "00003.jpg" and access.frame_path("images", 3).is_file()
+    assert access.frame_path("clouds", 3).name == "00003.npy"
+    assert len(access.available_frames("images")) == 12

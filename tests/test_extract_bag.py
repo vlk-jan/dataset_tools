@@ -8,6 +8,7 @@ bag built in a temporary directory. No recording, no ROS installation.
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 
@@ -18,6 +19,8 @@ from rosbags.rosbag2 import Writer
 from rosbags.typesys import Stores, get_typestore
 
 from dataset_tools import extract_data as ed
+from dataset_tools import image_format
+from dataset_tools.validate_scene import validate_scene
 
 TS = get_typestore(Stores.ROS2_JAZZY)
 T0 = 1_700_000_000
@@ -66,11 +69,18 @@ def _cloud_msg(t: float, points: np.ndarray):
     )
 
 
-def _image_msg(t: float, value: int):
-    img = np.full((8, 12, 3), value, dtype=np.uint8)
-    ok, png = cv2.imencode(".png", img)
+def _image_payload(value: int, ext: str = ".png") -> np.ndarray:
+    """What the camera publishes for frame ``value``: the encoded bytes."""
+    ok, payload = cv2.imencode(ext, np.full((8, 12, 3), value, dtype=np.uint8))
     assert ok
-    return _t("sensor_msgs/msg/CompressedImage")(header=_header(t, "cam_optical"), format="png", data=png.ravel())
+    return payload.ravel()
+
+
+def _image_msg(t: float, value: int, ext: str = ".png"):
+    fmt = {".png": "png", ".jpg": "jpeg"}[ext]
+    return _t("sensor_msgs/msg/CompressedImage")(
+        header=_header(t, "cam_optical"), format=fmt, data=_image_payload(value, ext)
+    )
 
 
 def _camera_info_msg(t: float):
@@ -155,6 +165,7 @@ def write_bag(
     frames: int = FRAMES,
     dropped_camera: set[int] = frozenset(),
     reset_from: int | None = None,
+    image_ext: str = ".png",
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
@@ -196,7 +207,7 @@ def write_bag(
             pts[2] = [1.0, 0.0, 0.0, 9.0]  # a known point, to check the mount transform
             put("/lidar", t, _cloud_msg(t, pts))
             if k not in dropped_camera:
-                put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k))
+                put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k, image_ext))
                 put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03))
             lost = reset_from is not None and k >= reset_from
             put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
@@ -529,3 +540,56 @@ def test_the_guard_stays_off_for_wheel_odometry(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
     assert ed.main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
     assert not (out / "0000" / "gnss_guard.txt").exists()
+
+
+# --------------------------------------------------------------------------
+# what the images are stored as
+# --------------------------------------------------------------------------
+
+
+def test_a_scene_stores_the_camera_s_own_bytes(tmp_path: Path):
+    """The camera publishes a JPEG; the scene holds that JPEG, byte for byte,
+    and the root says so where a consumer looks for it."""
+    write_bag(tmp_path / "bags" / "bag_a", image_ext=".jpg")
+    out = tmp_path / "out"
+    assert ed.main([str(tmp_path / "bags"), str(out), *COMMON]) == 0
+    scene = out / "0000"
+    assert ed.scene_is_complete(scene)
+    assert {p.suffix for p in (scene / "images").iterdir()} == {".jpg"}
+    assert ed.scene_frame_counts(scene)["images"] == FRAMES
+    assert (scene / "images" / "00003.jpg").read_bytes() == _image_payload(3, ".jpg").tobytes()
+    assert image_format.declared(out) == ".jpg"
+    assert json.loads((out / "manifest.json").read_text())["images"] == {
+        "extension": "jpg",
+        "encoding": "camera JPEG bytes verbatim, msg.data unmodified",
+    }
+    assert validate_scene(scene).errors == []
+
+
+def test_image_format_png_stores_the_pixels_instead(tmp_path: Path):
+    write_bag(tmp_path / "bags" / "bag_a", image_ext=".jpg")
+    out = tmp_path / "out"
+    assert ed.main([str(tmp_path / "bags"), str(out), *COMMON, "--image_format", "png"]) == 0
+    scene = out / "0000"
+    assert {p.suffix for p in (scene / "images").iterdir()} == {".png"}
+    want = cv2.imdecode(_image_payload(3, ".jpg"), cv2.IMREAD_COLOR)
+    assert np.array_equal(cv2.imread(str(scene / "images" / "00003.png")), want)
+    # A PNG root declares nothing: that is what no declaration means.
+    assert image_format.declared(out) is None
+
+
+def test_a_root_holds_one_image_format(tmp_path: Path):
+    """A bag whose images are JPEG does not go into a root of PNGs: the scene
+    fails, named, instead of leaving a root two loaders would read differently."""
+    bags = tmp_path / "bags"
+    write_bag(bags / "bag_a", image_ext=".png")
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    write_bag(bags / "bag_b", image_ext=".jpg")
+    assert ed.main([str(bags), str(out), *COMMON]) == 1
+    assert ed.scene_is_complete(out / "0000")
+    assert not list((out / "0001").glob("images/*.jpg"))
+    # ... and with the pixels stored as PNG it extends the root.
+    assert ed.main([str(bags), str(out), *COMMON, "--image_format", "png"]) == 0
+    assert ed.scene_is_complete(out / "0001")
+    assert image_format.of_root(out) == ".png"

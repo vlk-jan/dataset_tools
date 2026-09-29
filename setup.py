@@ -38,6 +38,7 @@ setup(
             "helhest-sort-bag = dataset_tools.sort_bag:main",
             "helhest-viewer = dataset_tools.viewer.__main__:main",
             "helhest-disk-usage = dataset_tools.disk_usage:main",
+            "helhest-image-format = dataset_tools.image_format:main",
         ],
     },
 )

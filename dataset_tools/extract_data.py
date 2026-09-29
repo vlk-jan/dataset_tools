@@ -34,6 +34,7 @@ try:
         cloudini,
         disk_usage,
         gnss_guard,
+        image_format,
         rosbags_compat,
         time_align,
     )
@@ -54,6 +55,7 @@ except ImportError as exc:  # when the file is run directly from dataset_tools/
     import cloudini
     import disk_usage
     import gnss_guard
+    import image_format
     import rosbags_compat  # noqa: F401
     import time_align
     from gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
@@ -524,10 +526,49 @@ def _count_files(directory: Path, suffix: str) -> int:
     return sum(1 for p in directory.iterdir() if p.suffix == suffix)
 
 
+def _count_images(scene_dir: Path) -> int:
+    """Image files of a scene, under whichever extension it holds (`image_format`)."""
+    return sum(image_format.held(scene_dir).values())
+
+
+def root_image_extension(scene_dir: Path) -> str | None:
+    """What the root this scene belongs to holds already: what its manifest
+    declares, else what another of its scenes has. None for a root with no
+    images yet, which may take either format."""
+    root = scene_dir.parent
+    want = image_format.declared(root)
+    if want is not None:
+        return want
+    for other in image_format.scenes(root):
+        if other != scene_dir:
+            have = image_format.held(other)
+            if have:
+                return next(iter(have))
+    return None
+
+
+def image_extension(payload, how: str, index: int) -> str:
+    """The extension frame ``index`` is written under.
+
+    ``camera`` keeps the camera's own bytes, so the payload has to say what it
+    is; ``png`` decodes and writes the pixels out again, as every root before
+    2026-09-29 was made.
+    """
+    if how == "png":
+        return ".png"
+    ext = image_format.sniff(payload)
+    if ext is None:
+        raise ValueError(
+            f"image {index}: the payload is neither JPEG nor PNG (it starts {bytes(payload[:4]).hex()}); "
+            "--image_format png decodes it and stores the pixels instead"
+        )
+    return ext
+
+
 def scene_frame_counts(scene_dir: Path) -> dict[str, int]:
     """Per-modality frame counts of an extracted scene (missing -> absent key)."""
     counts: dict[str, int] = {}
-    counts["images"] = _count_files(scene_dir / "images", ".png")
+    counts["images"] = _count_images(scene_dir)
     counts["clouds"] = _count_files(scene_dir / "clouds", ".npy")
     for name in ("data_ts.txt", "pcd_ts.txt"):
         if (scene_dir / name).is_file():
@@ -552,7 +593,7 @@ def _scene_row(scene_dir: Path) -> list[str] | None:
     if not sentinel.is_file():
         return None
     bag = sentinel.read_text().strip()
-    frames = _count_files(scene_dir / "images", ".png")
+    frames = _count_images(scene_dir)
     start = ""
     data_ts = scene_dir / "data_ts.txt"
     if data_ts.is_file():
@@ -991,6 +1032,8 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     pcd_set = set(valid_pcd_ts)
 
     intrinsics_saved = False
+    image_how = getattr(args, "image_format", "camera")
+    image_ext = None  # one format per scene, and per root: decided by the first frame
 
     for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
         # Same stamp arithmetic as pass 1, so the set lookups below hit exactly
@@ -1019,7 +1062,25 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
                 # index-aligned scene, so the scene fails -- but with the frame
                 # named, not with an OpenCV assertion from cv2.imwrite.
                 raise ValueError(f"image {img_idx} (stamp {t:.6f}, {len(np_arr)} bytes) could not be decoded")
-            cv2.imwrite(str(scene_dir / "images" / f"{img_idx:05d}.png"), cv_img)
+            ext = image_extension(np_arr, image_how, img_idx)
+            if image_ext is None:
+                held = root_image_extension(scene_dir)
+                if held is not None and held != ext:
+                    raise ValueError(
+                        f"{scene_dir.parent} holds {held} images and this bag would add {ext}: a root has one "
+                        f"image format. Extract into a new root"
+                        + (", or pass --image_format png to extend this one" if held == ".png" else "")
+                    )
+                image_ext = ext
+            elif ext != image_ext:
+                raise ValueError(f"image {img_idx} is {ext} where the scene so far is {image_ext}")
+            image_path = scene_dir / "images" / f"{img_idx:05d}{ext}"
+            if image_how == "png":
+                cv2.imwrite(str(image_path), cv_img)
+            else:
+                # The camera's own bytes. Decoded above all the same, because a
+                # frame that cannot be read is better found here than in a loader.
+                image_path.write_bytes(np_arr.tobytes())
 
             # Extract Intrinsics once
             if not intrinsics_saved:
@@ -1380,6 +1441,14 @@ def build_parser() -> argparse.ArgumentParser:
         "there. Unlike --time_align this one re-pairs camera frames with "
         "sweeps, since it moves only one side of the match",
     )
+    parser.add_argument(
+        "--image_format",
+        choices=("camera", "png"),
+        default="camera",
+        help="camera: store the camera's own compressed bytes unmodified, as .jpg or .png by what they are "
+        "(default). png: decode and store the pixels as PNG, four times the size for the same pixels; "
+        "only for extending a root that already holds PNG",
+    )
     parser.add_argument("--base_frame", type=str, default="base_link")
     parser.add_argument(
         "--lidar_extrinsic",
@@ -1482,6 +1551,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         disk_usage.update(output_dir, {f"{idx:04d}" for idx, _ in todo})
     except (OSError, ValueError) as exc:
         LOG.warning("could not update %s: %s", disk_usage.NAME, exc)
+    # What the images are, where a consumer looks for it. Never the reason an
+    # extraction fails: a root whose scenes disagree is reported by the validator.
+    try:
+        image_format.declare(output_dir)
+    except (OSError, ValueError) as exc:
+        LOG.warning("could not declare the image format in %s: %s", image_format.NAME, exc)
 
     failed = [r for r in results if r.status == STATUS_FAILED]
     empty = [r for r in results if r.status == STATUS_EMPTY]

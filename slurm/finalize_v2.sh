@@ -25,6 +25,12 @@ print(merge_scenes_csv(Path('$OUT')))
 "
 column -s, -t "$OUT/scenes.csv"
 
+# What the images are, declared where a consumer looks for it (manifest.json ->
+# images.extension) before anything validates against it. Fails on a root whose
+# scenes do not agree, which is the state a partial re-extraction leaves.
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.image_format "$OUT" \
+    || echo "IMAGE FORMAT: the scenes of $OUT do not hold one format -- see above"
+
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$OUT" --csv "$OUT/validation.csv"
 vrc=$?

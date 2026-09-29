@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import image_format
 from . import loaders as L
 from .probe import DatasetRoot, SceneProbe
 from .render import unit_colors
@@ -72,7 +73,8 @@ WHEELS = {
 WHEEL_LABELS = ("left", "rear", "right")
 
 #: File suffix of each per-frame directory's entries.
-FRAME_SUFFIX = {"images": ".png", "clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}
+#: Images are not here: their extension is the root's to say (`SceneAccess.frame_suffix`).
+FRAME_SUFFIX = {"clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}
 
 #: Threads reading a window's per-frame files. A root usually sits on network
 #: storage, where a serial loop pays one round trip of latency per file before
@@ -348,11 +350,27 @@ class SceneAccess:
         Directories are built in flight, so a scene routinely has height maps
         for only a prefix (or a subsample) of its frames.
         """
-        suffix = FRAME_SUFFIX[kind]
+        suffix = self.frame_suffix(kind)
         return self._get(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
 
+    def frame_suffix(self, kind: str) -> str:
+        """The extension of a per-frame file. Fixed, except for the images: a
+        root holds the camera's JPEG or, before 2026-09-29, a PNG of it."""
+        if kind != "images":
+            return FRAME_SUFFIX[kind]
+
+        def held() -> str:
+            try:
+                return image_format.of_scene(self.dir)
+            except image_format.ImageFormatError:
+                # A scene the validator fails. Show what most of it is.
+                have = image_format.held(self.dir)
+                return max(have, key=have.get) if have else image_format.DEFAULT
+
+        return self._get("image_suffix", held)  # type: ignore[return-value]
+
     def frame_path(self, kind: str, index: int) -> Path:
-        return self.dir / kind / f"{index:05d}{FRAME_SUFFIX[kind]}"
+        return self.dir / kind / f"{index:05d}{self.frame_suffix(kind)}"
 
     # -- windows -----------------------------------------------------------
 

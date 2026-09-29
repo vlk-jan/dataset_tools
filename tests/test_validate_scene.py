@@ -305,3 +305,24 @@ def test_a_malformed_camera_extrinsic_is_an_error(scene: Path):
     assert any("T_cam_to_base.txt: not a rigid transform" in e for e in report.errors)
     np.savetxt(scene / "T_cam_to_base.txt", np.eye(4))
     assert not vs.validate_scene(scene).errors
+
+
+def test_a_scene_of_camera_jpegs_is_a_scene(scene: Path):
+    for p in (scene / "images").iterdir():
+        p.rename(p.with_suffix(".jpg"))
+    report = vs.validate_scene(scene)
+    assert report.errors == [] and report.stats["frames"] == 4
+    assert report.stats["image_format"] == "jpg"
+
+
+def test_images_other_than_the_root_declares_are_an_error(scene: Path):
+    (scene.parent / "manifest.json").write_text('{"images": {"extension": "jpg"}}')
+    report = vs.validate_scene(scene)
+    assert any("the root declares .jpg" in e for e in report.errors)
+    assert report.status() == "FAIL"
+
+
+def test_two_image_formats_in_one_scene_are_an_error(scene: Path):
+    (scene / "images" / "00003.png").rename(scene / "images" / "00003.jpg")
+    report = vs.validate_scene(scene)
+    assert any("more than one format" in e for e in report.errors)
