@@ -64,3 +64,9 @@ session,bag,bag_dir_on_subtdata,size_gb,start_utc,duration_s,ntopics,lidar,camer
 26-09-28-temesvar,robotour_merged_2026_09_28-17_10_48,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-17_10_48,2.3,2026-09-28T15:10:48Z,103,39,1483,1482,607,6074,0,0,v2.0 0011
 26-09-28-temesvar,robotour_merged_2026_09_28-18_02_56,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_02_56,0.2,2026-09-28T16:02:56Z,18,47,181,182,176,1760,0,0,dropped (18 s)
 26-09-28-temesvar,robotour_merged_2026_09_28-18_03_45,/data/helhest/26-09-28-temesvar/robotour_merged_2026_09_28-18_03_45,0.6,2026-09-28T16:03:45Z,33,47,477,477,315,3141,20826,0,dropped (33 s)
+26-09-29-temesvar,robotour_merged_2026_09_29-17_18_57,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-17_18_57,3.8,2026-09-29T15:18:58Z,307,47,4396,4395,3072,30720,0,0,v2.1 0012
+26-09-29-temesvar,robotour_merged_2026_09_29-17_25_16,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-17_25_16,3.8,2026-09-29T15:25:16Z,247,47,3498,3499,2466,24664,0,0,v2.1 0013
+26-09-29-temesvar,robotour_merged_2026_09_29-17_33_15,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-17_33_15,4.7,2026-09-29T15:33:15Z,246,47,3500,3500,2464,24640,0,0,v2.1 0014
+26-09-29-temesvar,robotour_merged_2026_09_29-18_23_35,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-18_23_35,2.9,2026-09-29T16:23:34Z,269,47,3885,3886,2654,26537,0,0,v2.1 0015
+26-09-29-temesvar,robotour_merged_2026_09_29-18_28_39,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-18_28_39,2.4,2026-09-29T16:28:40Z,187,47,2614,2614,1868,18677,0,0,v2.1 0016
+26-09-29-temesvar,robotour_merged_2026_09_29-18_32_30,/data/helhest/26-09-29-temesvar/robotour_merged_2026_09_29-18_32_30,5.4,2026-09-29T16:32:30Z,386,47,5507,5508,3860,38600,0,0,v2.1 0017
