@@ -292,3 +292,45 @@ rolling scale** (path over integrated wheel rotation 0.334 on made surfaces,
 By label count the root is 58 % made surfaces, 27.6 % Lipník and 14.4 %
 Temesvár. The laptop mirror of the root leaves `proprio_labels/` out on
 purpose.
+
+## 8. HELHEST v2.1 (2026-09-29): v2.0 linked, plus the Temesvár session of 2026-09-29
+
+`/mnt/personal/vlkjan6/HELHEST_v2_1`, bag list `docs/v2_1_bags.csv` (the twelve
+rows of v2.0 followed by six new ones). v2.0 was not extended in place because
+a training run reads it; it stays a separate, unchanged root.
+
+**Storage.** Scenes 0000–0011 are directories of relative symlinks into
+`../HELHEST_v2_0` (images, clouds, maps, masks and proprio labels as directory
+links, the small files one by one). Scenes 0012–0017 are real files, extracted
+by RCI job 11719242 with the code of v2.0's 0005–0011. A tool that writes into
+an existing directory of a linked scene writes into v2.0, so every writer has
+to be restricted to scenes ≥ 0012.
+
+**The new session.** Six bags in `/data/helhest/26-09-29-temesvar` (inventory
+rows 65–70), 23 GB, 27 min, the same meadow as 0005–0009 from late afternoon
+into dusk, driven from the joystick almost without stopping (2–11 % stationary,
+RTK ≥ 98 %). All six were kept; the pose guard removed nothing.
+
+| Scene | Bag | Frames | Maps | Path | > 10 m from 09-28 | What to know |
+|---|---|---|---|---|---|---|
+| 0012 | 17_18_57 | 4,395 | 4,248 | 402 m | 100 % | lane and verge, tight loops in knee-high grass |
+| 0013 | 17_25_16 | 3,498 | 3,414 | 283 m | 100 % | one tip onto the side: 129 frames past 45°, max 99° |
+| 0014 | 17_33_15 | 3,500 | 3,425 | 225 m | 93 % | tall grass under old fruit trees |
+| 0015 | 18_23_35 | 3,865 | 3,828 | 494 m | 100 % | long straight run, loops on open grass at dusk |
+| 0016 | 18_28_39 | 2,614 | 2,558 | 220 m | 79 % | open meadow at dusk; one empty cloud (frame 01480) |
+| 0017 | 18_32_30 | 5,507 | 5,142 | 321 m | 72 % | crosses the patch of the day before |
+
+**Held out.** The session is validation only (user, 2026-09-29) and the split
+of the root is deferred. DRIFT reads `<root>/keyframes.lst` by that fixed name,
+so v2.1 deliberately has **no** `keyframes.lst`: a loader pointed at it fails
+instead of training on the held-out session. `HELHEST_v2_1_heldout` beside it
+holds only scenes 0012–0017, as links into v2.1 under the same numbers, with a
+keyframe list of its own written by DRIFT. What a result on it supports is an
+unseen session of a known site: 90 % of the new track lies more than 10 m from
+anything driven on 2026-09-28 and 25 % more than 50 m, but the six bags overlap
+each other heavily (0012–0014 for their whole length).
+
+The root is 18 scenes, 133,060 frames, 6,863 m, 2 h 39 min, 130,859 height
+maps, 75 GB of its own; `validate_scene` 0 failed, 5 with warnings. Proprio
+labels exist for 0000–0011 (v2.0's, through the link); those of 0012–0017 are
+DRIFT's to write.
