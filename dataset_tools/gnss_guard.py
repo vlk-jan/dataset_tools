@@ -108,10 +108,17 @@ from pathlib import Path
 
 import numpy as np
 
-#: Speed, m/s, above which a step between two samples is not motion. Matches
-#: the gate :func:`~dataset_tools.extract_data.write_ground_truth` breaks
-#: segments on, so the two agree about which steps are real.
-MAX_SPEED = 4.0
+#: Speed, m/s, above which a step between two samples is not motion. The one
+#: definition: :func:`~dataset_tools.extract_data.write_ground_truth`,
+#: :func:`~dataset_tools.extract_data.interpolate_poses` and
+#: :mod:`dataset_tools.validate_scene` take it from here, so they all agree
+#: about which steps are real.
+#:
+#: It was 4.0 until the 2026-09-28 recordings, where the robot is sprinted at
+#: up to 5.35 m/s -- the receiver's own twist, the wheels and the Odin1's
+#: odometry all agree -- and every sample of a sprint read as a teleport. The
+#: slowest fabricated step on record is 53 m/s, so there is room above.
+MAX_SPEED = 6.0
 
 #: Sample interval, s, beyond which a step is a hole in the stream rather than
 #: a jump in the solution. Driving through a 60 s dropout covers ground

@@ -339,7 +339,7 @@ _REASON_TEXT = {
     "end_of_run": "the recording ended",
     "gap": "a gap of over 1 s in the GT stream",
     "wheel_gap": "the wheels drove further across a gap in the GT stream than the GT pose moved",
-    "teleport": "an implied speed over 4 m/s (GT jump)",
+    "teleport": "a step faster than the robot can move (GT jump)",
     "fix_lost": "the GNSS fix was lost and the poses the receiver fabricated without it were removed",
 }
 

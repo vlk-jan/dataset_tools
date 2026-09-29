@@ -363,7 +363,7 @@ def interpolate_poses(
     sample_ts: np.ndarray,
     poses: np.ndarray,
     max_gap: float = 0.5,
-    max_speed: float = 4.0,
+    max_speed: float = gnss_guard.MAX_SPEED,
 ) -> tuple[np.ndarray, int]:
     """Pose at each query time: linear in translation, SLERP in rotation.
 
@@ -1209,7 +1209,9 @@ def guard_enabled(args) -> bool:
     return "fixposition" in args.odom
 
 
-def write_ground_truth(odom_data, scene_dir: Path, max_gap=1.0, max_speed=4.0, min_poses=20, spans=None) -> bool:
+def write_ground_truth(
+    odom_data, scene_dir: Path, max_gap=1.0, max_speed=gnss_guard.MAX_SPEED, min_poses=20, spans=None
+) -> bool:
     """Write odometry.txt + odometry_segments.txt in the HELHEST v1.2 contract.
 
     For rigs whose odometry source is trustworthy on its own (Fixposition

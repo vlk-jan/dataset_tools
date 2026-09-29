@@ -27,8 +27,10 @@ from pathlib import Path
 import numpy as np
 
 try:
+    from dataset_tools.gnss_guard import MAX_SPEED
     from dataset_tools.gt_io import read_segments, read_trajectory
 except ImportError:  # when the file is run directly from dataset_tools/
+    from gnss_guard import MAX_SPEED
     from gt_io import read_segments, read_trajectory
 
 SCENE_DIR_RE = re.compile(r"^\d{4,}$")
@@ -204,7 +206,7 @@ def check_odometry(
     transforms: np.ndarray,
     max_jump: float,
     ts: np.ndarray | None = None,
-    max_speed: float = 4.0,
+    max_speed: float = MAX_SPEED,
 ) -> None:
     positions = transforms[:, :3, 3]
     if len(positions) < 2:
