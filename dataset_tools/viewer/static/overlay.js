@@ -744,6 +744,7 @@ function openInitialView() {
 
   const deadline = performance.now() + 60000;
   let seeked = false;
+  let centered = false;
   const attempt = () => {
     const app = window.__debugSimView;
     if (app && app.animationController && app.store && app.store.length > 0) {
@@ -754,9 +755,13 @@ function openInitialView() {
       // The camera can only be aimed once the robot has a resolved position,
       // which the seek above (or SimView's own initial draw) is what produces.
       // Keep waiting if the bodies are not built yet.
-      if (centerOnRobot(app)) {
-        update(true);
-        return;
+      if (centered || centerOnRobot(app)) {
+        centered = true;
+        // After centring: the carried camera is an offset from the robot.
+        if (restoreCarriedView(app)) {
+          update(true);
+          return;
+        }
       }
     }
     if (performance.now() < deadline) requestAnimationFrame(attempt);
@@ -844,8 +849,100 @@ function setupWindowNav() {
     // <span> with no id rather than a link that goes nowhere.
     if (!link) return;
     event.preventDefault();
-    window.location.href = link.href;
+    link.click();
   });
+  for (const link of [els.prevWindow, els.nextWindow]) {
+    if (link) link.addEventListener("click", saveCarriedView);
+  }
+}
+
+/* The view setup carried from one window to the next by `[` / `]`.
+ *
+ * Paging is a full page load, so without this every jump reset the camera,
+ * the tracked body, the playback speed and every toggle to SimView's defaults.
+ * Play state is deliberately not carried: a new window always opens paused.
+ * Saved only on a jump and read once, so an ordinary load still opens stock.
+ * sessionStorage keeps it to this tab. The camera travels as its offset from
+ * the orbit target: each window is its own world, so absolute coordinates
+ * mean nothing in the next one, but "this far behind the robot" does.
+ */
+const CARRY_KEY = "dt.carriedView";
+
+function guiControllers(app) {
+  const ui = app.uiControls;
+  if (!ui || !ui.gui) return [];
+  // The "Scene Info" folder is per-window metadata shown as read-only fields.
+  const skip = new Set(ui.metadataFolder ? ui.metadataFolder.controllersRecursive() : []);
+  return ui.gui.controllersRecursive().filter((c) => !skip.has(c) && typeof c.getValue() !== "function");
+}
+
+function saveCarriedView() {
+  const app = window.__debugSimView;
+  if (!app || !app.scene) return;
+  try {
+    const { camera, controls } = app.scene;
+    const anim = app.animationController;
+    const state = {
+      gui: Object.fromEntries(guiControllers(app).map((c) => [c.property, c.getValue()])),
+      speed: anim ? anim.playbackSpeed : undefined,
+      offset: camera.position.clone().sub(controls.target).toArray(),
+      cloud: els.cloud ? els.cloud.checked : undefined,
+      ghost: els.ghost ? els.ghost.checked : undefined,
+    };
+    sessionStorage.setItem(CARRY_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn("view setup not carried over:", error);
+  }
+}
+
+/** Apply a carried setup, once. False while SimView's panel is not built yet. */
+function restoreCarriedView(app) {
+  let state;
+  try {
+    state = JSON.parse(sessionStorage.getItem(CARRY_KEY) || "null");
+  } catch {
+    state = null;
+  }
+  if (!state) return true;
+  // The panel's own cloud/ghost switches are wired once the patches are in.
+  if (!app.uiControls || !app.uiControls.gui || !patches) return false;
+  try {
+    sessionStorage.removeItem(CARRY_KEY);
+  } catch {
+    /* read-once is a nicety: a stuck key only re-applies the same setup */
+  }
+  try {
+    // setValue runs each control's own onChange, so SimView's state follows.
+    // A control this window lacks, or an option it does not offer, is skipped.
+    for (const c of guiControllers(app)) {
+      if (!(c.property in (state.gui || {}))) continue;
+      const value = state.gui[c.property];
+      if (typeof value !== typeof c.getValue()) continue;
+      const select = c.domElement.querySelector("select");
+      if (select && ![...select.options].some((o) => o.textContent === String(value) || o.value === String(value))) continue;
+      if (value !== c.getValue()) c.setValue(value);
+    }
+    const anim = app.animationController;
+    if (anim && Number.isFinite(state.speed)) {
+      anim.setSpeed(state.speed);
+      const select = anim.playbackControls && anim.playbackControls.speedSelect;
+      if (select) select.value = String(state.speed);
+    }
+    if (Array.isArray(state.offset) && state.offset.length === 3) {
+      const { camera, controls } = app.scene;
+      camera.position.copy(controls.target).add(camera.position.clone().fromArray(state.offset));
+      controls.update();
+    }
+    for (const [el, want] of [[els.cloud, state.cloud], [els.ghost, state.ghost]]) {
+      if (el && !el.closest("[hidden]") && typeof want === "boolean" && el.checked !== want) {
+        el.checked = want;
+        el.dispatchEvent(new Event("change"));
+      }
+    }
+  } catch (error) {
+    console.warn("carried view setup only partly applied:", error);
+  }
+  return true;
 }
 
 function setupPanel() {
