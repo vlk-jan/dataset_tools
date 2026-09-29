@@ -332,5 +332,7 @@ each other heavily (0012–0014 for their whole length).
 
 The root is 18 scenes, 133,060 frames, 6,863 m, 2 h 39 min, 130,859 height
 maps, 75 GB of its own; `validate_scene` 0 failed, 5 with warnings. Proprio
-labels exist for 0000–0011 (v2.0's, through the link); those of 0012–0017 are
-DRIFT's to write.
+labels: 0000–0011 are v2.0's, through the link (80,502); 0012–0017 were
+written into v2.1 by DRIFT `035c342` (RCI job 11719760, same settings, r =
+0.334): 21,319 labels for 22,615 frames with a map, 94.3 %, against 74.4 % in
+v2.0. `HELHEST_v2_1_heldout/keyframes.lst` has 22,615 lines.
