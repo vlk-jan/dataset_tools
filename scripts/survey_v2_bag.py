@@ -152,8 +152,12 @@ def main(argv=None) -> int:
             elif t == CAMINFO and caminfo is None:
                 msg = reader.deserialize(raw, conn.msgtype)
                 caminfo = dict(
-                    frame=msg.header.frame_id, w=int(msg.width), h=int(msg.height), model=msg.distortion_model,
-                    K=[float(x) for x in msg.k], D=[float(x) for x in msg.d],
+                    frame=msg.header.frame_id,
+                    w=int(msg.width),
+                    h=int(msg.height),
+                    model=msg.distortion_model,
+                    K=[float(x) for x in msg.k],
+                    D=[float(x) for x in msg.d],
                 )
 
     out: dict = dict(bag=str(args.bag), counts=counts, n_topics=len(counts))
@@ -167,26 +171,45 @@ def main(argv=None) -> int:
         cloud_frame=cloud_frame,
         odin_mount=None if X is None else [round(float(v), 4) for v in X[:3, 3]],
         odin_mount_rpy_deg=None if X is None else rpy_deg(X[:3, :3]),
-        cam_in_base=None if caminfo is None or get_transform(G, caminfo["frame"], BASE) is None
-        else [round(float(v), 4) for v in get_transform(G, caminfo["frame"], BASE)[:3, 3]],
+        cam_in_base=(
+            None
+            if caminfo is None or get_transform(G, caminfo["frame"], BASE) is None
+            else [round(float(v), 4) for v in get_transform(G, caminfo["frame"], BASE)[:3, 3]]
+        ),
     )
-    out["camera"] = dict(shape=list(img_shape) if img_shape else None, info=caminfo,
-                         per_lidar=round(n_img / n_cloud, 3) if n_cloud else None)
-    out["latency_s"] = {t: dict(p50=float(np.median(v)), p05=float(np.percentile(v, 5)), p95=float(np.percentile(v, 95)))
-                        for t, v in lat.items() if len(v)}
+    out["camera"] = dict(
+        shape=list(img_shape) if img_shape else None,
+        info=caminfo,
+        per_lidar=round(n_img / n_cloud, 3) if n_cloud else None,
+    )
+    out["latency_s"] = {
+        t: dict(p50=float(np.median(v)), p05=float(np.percentile(v, 5)), p95=float(np.percentile(v, 95)))
+        for t, v in lat.items()
+        if len(v)
+    }
     # Frame clock: holes where the Odin stopped publishing.
     for t in (CAM, CLOUD):
         s = np.asarray(stamps.get(t, []))
         if len(s) > 2:
             d = np.diff(s)
-            out.setdefault("holes", {})[t] = dict(period_p50=float(np.median(d)), n_over_1s=int((d > 1).sum()),
-                                                  longest_s=float(d.max()), n_msgs=len(s))
+            out.setdefault("holes", {})[t] = dict(
+                period_p50=float(np.median(d)), n_over_1s=int((d > 1).sum()), longest_s=float(d.max()), n_msgs=len(s)
+            )
     # Diagnostics: anything that names a version or firmware.
     out["diagnostics"] = dict(
         status_names=sorted({n for n, _ in diag}),
         hardware_ids=sorted({h for _, h in diag if h}),
-        version_like={n: {k: v for k, v in kv.items() if any(w in (k + " " + str(v)).lower() for w in ("version", "firmware", "fw", "sdk", "driver", "serial", "build"))}
-                      for n, kv in diag_values.items()},
+        version_like={
+            n: {
+                k: v
+                for k, v in kv.items()
+                if any(
+                    w in (k + " " + str(v)).lower()
+                    for w in ("version", "firmware", "fw", "sdk", "driver", "serial", "build")
+                )
+            }
+            for n, kv in diag_values.items()
+        },
     )
     out["diagnostics"]["version_like"] = {n: kv for n, kv in out["diagnostics"]["version_like"].items() if kv}
     # Odometry: path, speed, tilt.
@@ -200,24 +223,38 @@ def main(argv=None) -> int:
         tilt = np.degrees(np.arccos(np.clip([quat_to_R(q)[2, 2] for q in o[:, 4:8]], -1, 1)))
         lvl = tilt < 60
         out["motion"] = dict(
-            poses=len(o), span_s=float(o[-1, 0] - o[0, 0]), path_m=float(d[ok].sum()),
+            poses=len(o),
+            span_s=float(o[-1, 0] - o[0, 0]),
+            path_m=float(d[ok].sum()),
             teleports=int(((d / np.maximum(dt, 1e-6)) >= MAX_SPEED).sum()),
-            v_p50=float(np.median(v)) if len(v) else None, v_p90=float(np.percentile(v, 90)) if len(v) else None,
+            v_p50=float(np.median(v)) if len(v) else None,
+            v_p90=float(np.percentile(v, 90)) if len(v) else None,
             stationary_frac=float((v < 0.05).mean()) if len(v) else None,
-            tilt_p50=float(np.median(tilt)), tilt_p95=float(np.percentile(tilt, 95)), tilt_max=float(tilt.max()),
-            tilt_std_level=float(tilt[lvl].std()) if lvl.any() else None, inverted_frac=float((tilt > 90).mean()),
+            tilt_p50=float(np.median(tilt)),
+            tilt_p95=float(np.percentile(tilt, 95)),
+            tilt_max=float(tilt.max()),
+            tilt_std_level=float(tilt[lvl].std()) if lvl.any() else None,
+            inverted_frac=float((tilt > 90).mean()),
         )
     if llh:
         g = np.asarray(llh)
         g = g[(g[:, 1] != 0) | (g[:, 2] != 0)]
         if len(g):
             sig = np.sqrt(np.maximum(g[:, 5] + g[:, 6], 0))
-            out["gnss"] = dict(fixes=len(g), rtk_frac=float((g[:, 4] == 2).mean()), nofix_frac=float((g[:, 4] < 0).mean()),
-                               h_sigma_p50=float(np.median(sig)))
+            out["gnss"] = dict(
+                fixes=len(g),
+                rtk_frac=float((g[:, 4] == 2).mean()),
+                nofix_frac=float((g[:, 4] < 0).mean()),
+                h_sigma_p50=float(np.median(sig)),
+            )
             step = max(1, int(len(g) / max(1.0, g[-1, 0] - g[0, 0])))
             np.save(args.out / "track.npy", g[::step, :5])
-    out["proprio"] = dict(joint_states=counts.get(JS, 0), joint_states_nonzero_frac=(js_nonzero / max(1, js_rows // 10 + 1)),
-                          cmd_vel=counts.get(CMD, 0), joint_setpoints=counts.get("/joint_setpoints", 0))
+    out["proprio"] = dict(
+        joint_states=counts.get(JS, 0),
+        joint_states_nonzero_frac=(js_nonzero / max(1, js_rows // 10 + 1)),
+        cmd_vel=counts.get(CMD, 0),
+        joint_setpoints=counts.get("/joint_setpoints", 0),
+    )
     # Clouds: self-returns, ground profile by range, extent.
     if clouds:
         near, npts, r95, prof, ground = [], [], [], [], []
@@ -225,10 +262,12 @@ def main(argv=None) -> int:
             if X is not None:
                 c = (X[:3, :3] @ c.T).T + X[:3, 3]
             r = np.hypot(c[:, 0], c[:, 1])
-            near.append(int((r < 0.5).sum())); npts.append(len(c)); r95.append(float(np.percentile(r, 95)))
+            near.append(int((r < 0.5).sum()))
+            npts.append(len(c))
+            r95.append(float(np.percentile(r, 95)))
             fwd = np.abs(np.arctan2(c[:, 1], c[:, 0])) < np.radians(20)
             row = []
-            for lo, hi in zip(RANGE_BINS[:-1], RANGE_BINS[1:]):
+            for lo, hi in zip(RANGE_BINS[:-1], RANGE_BINS[1:], strict=True):
                 m = fwd & (r >= lo) & (r < hi)
                 row.append(float(np.percentile(c[m, 2], 20)) if m.sum() > 30 else np.nan)
             prof.append(row)
@@ -237,17 +276,26 @@ def main(argv=None) -> int:
                 ground.append(float(np.median(c[m, 2])))
         prof = np.asarray(prof)
         out["clouds"] = dict(
-            sampled=len(clouds), in_base_link=X is not None,
-            npts_p50=float(np.median(npts)), near_r05_p50=float(np.median(near)), r95_p50=float(np.median(r95)),
+            sampled=len(clouds),
+            in_base_link=X is not None,
+            npts_p50=float(np.median(npts)),
+            near_r05_p50=float(np.median(near)),
+            r95_p50=float(np.median(r95)),
             ground_z_p50=float(np.median(ground)) if ground else None,
-            ground_profile_low20_by_range={f"{lo:.1f}-{hi:.1f}": (None if np.isnan(v) else round(float(v), 3))
-                                           for lo, hi, v in zip(RANGE_BINS[:-1], RANGE_BINS[1:], np.nanmedian(prof, axis=0))},
+            ground_profile_low20_by_range={
+                f"{lo:.1f}-{hi:.1f}": (None if np.isnan(v) else round(float(v), 3))
+                for lo, hi, v in zip(RANGE_BINS[:-1], RANGE_BINS[1:], np.nanmedian(prof, axis=0), strict=True)
+            },
         )
-    for i, (t, im) in enumerate(thumbs):
+    for i, (_, im) in enumerate(thumbs):
         cv2.imwrite(str(args.out / f"thumb_{i:02d}.jpg"), im, [cv2.IMWRITE_JPEG_QUALITY, 82])
     out["thumbs"] = [round(t, 3) for t, _ in thumbs]
     (args.out / "summary.json").write_text(json.dumps(out, indent=1, default=str))
-    print(json.dumps({k: v for k, v in out.items() if k not in ("counts", "tf_static", "diagnostics")}, indent=1, default=str))
+    print(
+        json.dumps(
+            {k: v for k, v in out.items() if k not in ("counts", "tf_static", "diagnostics")}, indent=1, default=str
+        )
+    )
     return 0
 
 
