@@ -33,7 +33,7 @@ _UNSET = object()
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
-PROBE_CACHE_FORMAT = 3
+PROBE_CACHE_FORMAT = 4
 
 
 @dataclass(frozen=True)
@@ -65,6 +65,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("clouds", "clouds", "dir", "Point clouds", "(N, >=3) lidar scan in the robot base frame", ".npy"),
     Artefact("height_maps", "height_maps", "dir", "Height maps", "per-frame BEV height grid", ".npz"),
     Artefact("height_masks", "height_masks", "dir", "Height-map validity", "measured / interpolated / extrapolated / wheel-anchored per cell", ".npz"),
+    Artefact("driven_similarity", "driven_similarity", "dir", "Driven & similar terrain", "cells the wheels rolled over, and each cell's feature similarity to them (DRIFT)", ".npz"),
     Artefact("data_ts", "data_ts.txt", "file", "Frame timestamps", "one timestamp per frame"),
     Artefact("pcd_ts", "pcd_ts.txt", "file", "Lidar timestamps", "one lidar timestamp per frame"),
     Artefact("odometry", "odometry.txt", "file", "Ground-truth odometry", "timestamped 4x4 poses"),
@@ -108,6 +109,15 @@ ARTEFACT_PURPOSE: dict[str, str] = {
         "measurements, extrapolated beyond them, or anchored to a wheel contact. Only measured "
         "cells are a real observation, so both the viewer's colouring and any supervision drawn "
         "from a map are gated on this."
+    ),
+    "driven_similarity": (
+        "Where the robot actually drove, and how far DRIFT trusts that experience around it. Per "
+        "keyframe, `driven` marks the height-map cells a wheel-bottom contact of the ground-truth "
+        "path landed in over the label horizon after the scan, and `max_sim` gives every cell the "
+        "cosine similarity of its terrain feature to the most similar driven cell -- the trust "
+        "region DRIFT extends the driven footprint to (cells above `threshold`). The similarity says "
+        "where a prediction is believed, not what the terrain is: it is a feature match, not a "
+        "class. Written by DRIFT for keyframes with at least one driven cell; other frames have no file."
     ),
     "data_ts": (
         "The frame clock: one timestamp per frame, in seconds. Everything per-frame lines up by "
@@ -184,7 +194,7 @@ ARTEFACT_PURPOSE: dict[str, str] = {
 ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 
 #: Directories whose file count is worth knowing on the index page.
-COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks")
+COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
 
 
 @dataclass

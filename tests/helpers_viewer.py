@@ -34,6 +34,7 @@ def make_root(
     with_joints: bool = True,
     with_camera_info: bool = True,
     with_gps: bool = False,
+    with_driven_similarity: bool = False,
     segments: bool = True,
 ) -> Path:
     """A synthetic dataset root with a controllable set of optional files."""
@@ -102,6 +103,38 @@ def make_root(
                 validity = np.full((128, 128), 2, dtype=np.uint8)
                 validity[:64] = 0  # behind the robot: extrapolated
                 np.savez_compressed(d / "height_masks" / f"{i:05d}.npz", validity=validity)
+        if with_driven_similarity:
+            # Off by default: a DRIFT product most roots never carry. Every frame
+            # gets a sidecar with the cell right under the robot driven (the
+            # grid's centre, [row=x, col=y]), a 3x3 patch of driven cells one
+            # metre ahead, and a similarity that falls off with range from the
+            # driven patch -- so a known cell is driven, a known cell is trusted
+            # and a known cell is neither.
+            (d / "driven_similarity").mkdir()
+            rows, cols = np.mgrid[0:128, 0:128]
+            for i in range(frames):
+                driven = np.zeros((128, 128), dtype=bool)
+                driven[63:65, 63:65] = True  # under the robot
+                driven[72:75, 63:66] = True  # ~1 m ahead
+                dist = np.hypot(rows - 73.0, cols - 64.0) * 0.1  # metres from the patch
+                max_sim = np.clip(1.0 - dist / 3.0, 0.0, 1.0)
+                max_sim[driven] = 1.0
+                np.savez_compressed(
+                    d / "driven_similarity" / f"{i:05d}.npz",
+                    driven=driven,
+                    max_sim=max_sim.astype(np.float16),
+                    threshold=np.float32(0.9),
+                    res=np.float32(0.1),
+                    R_align=np.eye(3, dtype=np.float32),
+                    label_horizon=np.float32(4.0),
+                    robot="helhest",
+                    setprop_ckpt="test.pth",
+                    wi_ckpt="wi.pth",
+                    feature_dim=np.int32(960),
+                    rig="test",
+                    dataset_version="test",
+                    odometry_frame="base_link",
+                )
         if with_gps:
             # Off by default: most roots have no GNSS, and the viewer must look
             # exactly as it always did on those. Four fixes per frame, walking

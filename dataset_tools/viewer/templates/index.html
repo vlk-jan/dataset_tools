@@ -196,9 +196,12 @@
           </dl>
 
           <div class="chips">
-            {% for key in ("images", "clouds", "height_maps", "height_masks") %}
+            {# driven_similarity is a DRIFT product most roots lack: shown only where it exists,
+               so a root without it looks exactly as it always did. #}
+            {% for key in ("images", "clouds", "height_maps", "height_masks", "driven_similarity") %}
               {% set count = p.counts.get(key, 0) %}
-              {% if not p.present.get(key) %}
+              {% if key == "driven_similarity" and not p.present.get(key) %}
+              {% elif not p.present.get(key) %}
                 <span class="chip no">{{ key }}</span>
               {% elif p.n_frames and count < p.n_frames %}
                 <span class="chip partial" title="{{ count }} of {{ p.n_frames }} frames">{{ key }} {{ count }}/{{ p.n_frames }}</span>

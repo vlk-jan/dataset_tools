@@ -74,7 +74,7 @@ WHEEL_LABELS = ("left", "rear", "right")
 
 #: File suffix of each per-frame directory's entries.
 #: Images are not here: their extension is the root's to say (`SceneAccess.frame_suffix`).
-FRAME_SUFFIX = {"clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz"}
+FRAME_SUFFIX = {"clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz", "driven_similarity": ".npz"}
 
 #: Threads reading a window's per-frame files. A root usually sits on network
 #: storage, where a serial loop pays one round trip of latency per file before
@@ -107,7 +107,10 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #: 7: the ``validity`` terrain layer is the weighted mean of the samples behind
 #:    each cell rather than the best of them, so cached bundles hold a layer
 #:    that no longer means what its legend says.
-META_VERSION = 7
+#: 8: the ``driven`` and ``drivable`` terrain layers from ``driven_similarity/``,
+#:    and ``meta.available`` lists that modality; a bundle built before knows
+#:    neither.
+META_VERSION = 8
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -137,6 +140,22 @@ TERRAIN_COLOR_MODE_HELP = {
         "zero in the sensor's blind wedge and far off the driven path."
     ),
     "cloud_intensity": "Mean lidar return intensity of those points.",
+    "driven": (
+        "1 where a wheel of the robot rolled over the cell, by DRIFT's own "
+        "reckoning: the wheel-bottom contacts of the ground-truth path, "
+        "rasterised per keyframe and united over the window. 0 everywhere "
+        "else, including terrain the robot merely saw."
+    ),
+    "drivable": (
+        "How closely the cell's terrain feature matches something the robot "
+        "drove over: the highest cosine similarity, over the window's "
+        "keyframes, between the cell's pre-head SeTProP feature and any driven "
+        "cell's. 1 on the driven path itself; DRIFT trusts its prediction "
+        "above the threshold the sidecar records (0.9 as trained). A feature "
+        "match, not a terrain class -- and these features are known to encode "
+        "range and viewpoint as well as terrain, so read it with the Driven "
+        "tile's per-frame view beside it."
+    ),
     "cloud_spread": (
         "Vertical spread (max minus min z) of the lidar points in the cell: "
         "near zero on flat ground, large on vegetation, trunks and walls."
@@ -741,6 +760,80 @@ def splat_height_maps(
     return stats
 
 
+def splat_driven_similarity(
+    access: SceneAccess,
+    grid: TerrainGrid,
+    frames: np.ndarray,
+    poses: np.ndarray,
+    opts: BuildOptions,
+) -> dict:
+    """Accumulate the per-keyframe ``driven_similarity`` sidecars into two layers.
+
+    Same grid, same layout and the same ``R_pose @ R_ga.T`` placement as
+    :func:`splat_height_maps`, so a driven cell lands on the terrain cell whose
+    height came from the same map. ``driven`` is the union over frames (a cell
+    is driven once any wheel rolled over it); ``drivable`` keeps each cell's
+    highest similarity to a driven cell, clipped below at 0 -- a max, not a
+    weighted mean, because the question is "did anything the robot drove on ever
+    look like this", and a distant frame's answer is as good as a near one's.
+    Frames without a sidecar (no driven cell in their horizon) contribute
+    nothing, which is what they have to say.
+    """
+    have = access.available_frames("driven_similarity")
+    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
+    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0}
+    if len(usable) == 0:
+        return stats
+    chosen = _pick(usable, opts.max_hm_frames)
+    ga = access.gravity_align
+
+    def load(path):
+        try:
+            with np.load(path) as d:
+                if "driven" not in d.files or "max_sim" not in d.files:
+                    return None
+                return np.asarray(d["driven"], dtype=bool), np.asarray(d["max_sim"], dtype=np.float64)
+        except (OSError, ValueError, KeyError) as exc:
+            logger.warning("unreadable driven_similarity %s: %s", path, exc)
+            return None
+
+    sidecars = _read_all([access.frame_path("driven_similarity", int(frames[i])) for i in chosen], load)
+
+    driven_layer = grid.layers.setdefault("driven", np.zeros((grid.ny, grid.nx), dtype=np.float64))
+    drivable_layer = grid.layers.setdefault("drivable", np.zeros((grid.ny, grid.nx), dtype=np.float64))
+    for i, pair in zip(chosen, sidecars, strict=True):
+        if pair is None:
+            continue
+        driven, max_sim = pair
+        if driven.ndim != 2 or max_sim.shape != driven.shape:
+            continue
+        frame = int(frames[i])
+        xs, ys = L.height_map_cell_centers(driven.shape)
+        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        sim = np.clip(np.nan_to_num(max_sim, nan=0.0), 0.0, 1.0).ravel()
+        drv = driven.ravel()
+        # Only cells that say something: the driven ones and any with a
+        # positive similarity. The rest would splat zeros over other frames'
+        # answers -- harmless under a max, but a million samples of nothing.
+        keep = drv | (sim > 0.0)
+        if not keep.any():
+            continue
+        local = np.stack([X.ravel()[keep], Y.ravel()[keep], np.zeros(int(keep.sum()))], axis=1)
+        R = poses[i][:3, :3]
+        t = poses[i][:3, 3]
+        if ga is not None and frame < len(ga):
+            R = R @ np.asarray(ga[frame], dtype=np.float64).T
+        world = local @ R.T + t
+        row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
+        if not inside.any():
+            continue
+        r, c = row[inside], col[inside]
+        np.maximum.at(driven_layer, (r, c), drv[keep][inside].astype(np.float64))
+        np.maximum.at(drivable_layer, (r, c), sim[keep][inside])
+        stats["used"] += 1
+    return stats
+
+
 def aggregate_clouds(
     access: SceneAccess,
     grid: TerrainGrid | None,
@@ -927,7 +1020,7 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
         "validity": validity,
     }
     layers.update(grid.layers)
-    bounds = {"validity": (0.0, 2.0)}
+    bounds = {"validity": (0.0, 2.0), "driven": (0.0, 1.0), "drivable": (0.0, 1.0)}
     # Drop layers that carry no information (all-zero) so the viewer's colour
     # mode list only offers modes that show something.
     layers = {k: v for k, v in layers.items() if np.any(v != v.flat[0])}
@@ -1157,6 +1250,7 @@ def build_scene(
     # ---- terrain -------------------------------------------------------
     grid = _make_grid(gt.positions, opts)
     hm_stats = splat_height_maps(access, grid, frames, poses, opts)
+    driven_stats = splat_driven_similarity(access, grid, frames, poses, opts)
     cloud, cloud_stats = aggregate_clouds(access, grid, frames, poses, opts)
     terrain_source = "height_maps"
     if hm_stats["used"] == 0:
@@ -1180,6 +1274,7 @@ def build_scene(
         "terrain_cells": [grid.ny, grid.nx],
         "terrain_color_modes": terrain_color_modes(layers.keys()),
         "height_maps": hm_stats,
+        "driven_similarity": driven_stats,
         "clouds": cloud_stats,
         "frames": [int(frames[0]), int(frames[-1])],
         "notes": notes,
@@ -1273,7 +1368,7 @@ def build_scene(
         "build": metadata,
         "available": {
             kind: sorted(int(f) for f in access.available_frames(kind) & set(frames.tolist()))
-            for kind in ("images", "clouds", "height_maps", "height_masks")
+            for kind in ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
             if access.probe.has(kind)
         },
     }

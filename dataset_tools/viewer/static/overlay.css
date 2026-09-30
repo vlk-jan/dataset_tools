@@ -265,6 +265,8 @@
 .dt-sw-m { background: #3caa5a; }
 .dt-sw-i { background: #e6be46; }
 .dt-sw-e { background: #c83c3c; }
+.dt-sw-d { background: #28dceb; }
+.dt-sw-s { background: linear-gradient(90deg, #26262a, #e88228, #ffcd78); }
 
 .dt-imgwrap { position: relative; background: #0d0f12; border: 1px solid #333844; border-radius: 5px; min-height: 40px; }
 .dt-imgwrap img { display: block; width: 100%; border-radius: 4px; }
@@ -275,6 +277,7 @@
 }
 .dt-imgwrap.absent .dt-absent { display: block; }
 .dt-tile.unavailable { opacity: 0.45; }
+.dt-tile.hidden { display: none; }
 
 .dt-foot { padding: 8px 12px; border-top: 1px solid #333844; }
 

@@ -648,6 +648,11 @@ def create_app(
         access = _access_or_404(state, scene_id)
         return await _npz_png(access, index, "height_masks", "validity", render.render_validity)
 
+    @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
+    async def api_frame_driven(scene_id: str, index: int):
+        access = _access_or_404(state, scene_id)
+        return await _driven_png(access, index)
+
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
         access = _access_or_404(state, scene_id)
@@ -1045,6 +1050,47 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, rendere
     return Response(data, media_type="image/png", headers=DAY_CACHE)
 
 
+async def _driven_png(access: SceneAccess, index: int) -> Response:
+    """The driven-similarity tile: three keys of one small npz, one image."""
+
+    def work():
+        sidecar = _read_driven_sidecar(access.frame_path("driven_similarity", index))
+        if sidecar is None:
+            return None
+        driven, max_sim, threshold = sidecar
+        return render.render_driven_similarity(driven, max_sim, threshold)
+
+    data = await run_in_threadpool(work)
+    if data is None:
+        raise HTTPException(404, f"no driven_similarity for frame {index}")
+    return Response(data, media_type="image/png", headers=DAY_CACHE)
+
+
+def _read_driven_sidecar(path: Path):
+    """``(driven, max_sim, threshold)`` from a ``driven_similarity`` file, or None.
+
+    Tolerant the way ``loaders.load_npz_key`` is: a missing or malformed file is
+    "nothing to show", not an error page.
+    """
+    import numpy as np
+
+    if not path.is_file():
+        return None
+    try:
+        with np.load(path) as d:
+            if "driven" not in d.files or "max_sim" not in d.files:
+                return None
+            driven = np.asarray(d["driven"], dtype=bool)
+            max_sim = np.asarray(d["max_sim"], dtype=np.float64)
+            threshold = float(d["threshold"]) if "threshold" in d.files else 0.9
+    except (OSError, ValueError, KeyError) as exc:
+        logger.debug("unreadable driven_similarity %s: %s", path, exc)
+        return None
+    if driven.ndim != 2 or max_sim.shape != driven.shape:
+        return None
+    return driven, max_sim, threshold
+
+
 def _safe_render(fn, *args):
     try:
         return fn(*args)
@@ -1258,9 +1304,23 @@ def _frame_details(
             details["camera_lidar_offset_ms"] = round((details["timestamp"] - float(pcd[index])) * 1000, 2)
 
     present: dict[str, bool] = {}
-    for kind in ("images", "clouds", "height_maps", "height_masks"):
+    for kind in ("images", "clouds", "height_maps", "height_masks", "driven_similarity"):
         present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
     details["present"] = present
+
+    if present["driven_similarity"]:
+        # The one per-frame array this page does decode: a 128x128 bool and a
+        # float16 of the same size, a few kilobytes, and the caption under the
+        # tile has to say how many cells the wheels touched and how many more
+        # the trust gate admits.
+        sidecar = _read_driven_sidecar(access.frame_path("driven_similarity", index))
+        if sidecar is not None:
+            driven, max_sim, threshold = sidecar
+            details["driven"] = {
+                "n_driven": int(driven.sum()),
+                "n_trusted": int((driven | (max_sim > threshold)).sum()),
+                "threshold": threshold,
+            }
 
     if present["clouds"]:
         shape = _npy_shape(access.frame_path("clouds", index))

@@ -62,6 +62,7 @@ HELHEST/
 │   ├── trajectory.txt            [some scenes] identical copy of odometry.txt
 │   ├── height_maps/00000.npz …   [derived] per-frame BEV height map, key `height_map` (128,128) float64, 0.1 m cells, ±6.4 m
 │   ├── height_masks/00000.npz …  [derived] key `validity` (128,128) uint8 (0 extrapolated / 1 interpolated / 2 measured / 3 wheel-anchored), `height_threshold`
+│   ├── driven_similarity/00000.npz … [derived, by DRIFT] `driven` (128,128) bool: cells a wheel-bottom contact of the GT path landed in over `label_horizon`; `max_sim` (128,128) float16: max cosine similarity of the cell's pre-head SeTProP feature to a driven cell's (1 on driven cells); `max_sim_geom`: the same from the 64-d height-map-statistics block alone (fails on tall obstacles, passes nearly everything else); `threshold` (0.9); plus `res`, `R_align`, `label_horizon`, `robot`, `setprop_ckpt` / `setprop_epoch` / `setprop_sha256`, `wi_ckpt`, `feature_dim`, `rig`, `dataset_version`, `odometry_frame`, `git_commit`. Written by DRIFT `scripts/data/generate_driven_similarity.py`; only keyframes with a driven cell have a file
 │   └── <scene>_full.npz          [derived, 31 scenes] scene-wide aggregated height map: `height_map`, `side_range`, `fwd_range`, `res`
 ├── maps_full/<scene>.pcd         [derived, 31 scenes] scene-wide aggregated point cloud
 ├── keyframes.lst                 [derived] "scene/clouds/f.npy scene/images/f.png" pairs used for training

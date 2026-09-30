@@ -168,6 +168,7 @@ driving. Below 2 Hz the rate is flagged.
 | `gravity_align.npy` | the attitude comparison and its plots; places each height map level in the world; levels the window (above) |
 | `height_maps/` | the terrain surface, and a per-frame tile in the side panel |
 | `height_masks/` | the terrain's `validity` colour layer (weighted mean per cell), and its own panel tile |
+| `driven_similarity/` | the terrain's `driven` and `drivable` colour layers, and the **Driven & drivable** tile (DRIFT's product; see below) |
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
 | `images/` | the side panel's camera tile, served per frame |
 | `joint_states.npy` | wheel spin animation + velocity/effort plots |
@@ -534,6 +535,27 @@ means travels with the window (`build.TERRAIN_COLOR_MODE_HELP` â†’ `meta.json` â
 the panel's **terrain colour modes** legend), so the names in SimView's own
 "Color Mode" dropdown are explained next to it rather than left to be guessed.
 
+A root DRIFT has written `driven_similarity/` into offers two more modes.
+`driven` is 1 where a wheel rolled over the cell -- the wheel-bottom contacts of
+the ground-truth path, rasterised per keyframe by DRIFT and united over the
+window -- and 0 everywhere else, terrain the robot merely saw included.
+`drivable` is each cell's highest cosine similarity, over the window's
+keyframes, between its pre-head SeTProP feature and any driven cell's: 1 on the
+path itself, and above the threshold the sidecar records (0.9, as DRIFT trained)
+where DRIFT trusts its prediction. It is a feature match and not a terrain
+class, and the features are known to encode range and viewpoint as well as
+terrain, so a band of high similarity around the robot is the sensor's
+geometry, not grass. Measured on 2026-09-30 over 37 held-out v2.1 keyframes
+(WI_v8 backbone, `v20_wi8` at epoch 39): the 0.9 gate admits 0.92 / 0.61 / 0.26
+of ground-level cells at 0-2 / 2-4 / 4-6.4 m from the robot against 0.79 / 0.12
+/ 0.03 of cells more than a metre tall, and 25 % of random cell pairs. Beyond
+2 m it does separate obstacles from ground; within 2 m, where the wheels are
+about to go, it admits most of both, and everywhere the number falls with
+range. Read it as "near the path and seen by the lidar", not as a terrain
+match (DRIFT `docs/METHOD.md`, issue 24). The **Driven & drivable** tile shows
+one frame of it unmixed: the ember ramp is `max_sim`, a visible step marks the
+threshold, and the driven cells are cyan.
+
 `validity` is the mean validity of the samples behind a cell, weighted exactly
 as its height was, so it reports how measured the surface you are looking at
 actually is. Taking the best of them instead reads far more of the map as
@@ -653,6 +675,7 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
+| `/api/scene/{scene}/frame/{n}/driven.png` | that frame's driven cells and feature similarity (`driven_similarity/`) |
 | `/api/scene/{scene}/frame/{n}/cloud.png` | that frame's cloud, top-down |
 | `/api/data/{scene}/{window}/{opts}/...` | the SimView static bundle: `model.json`, `states.json`, `blob/N`, plus `meta.json` and `status` |
 | `/healthz` | liveness, the root path and the scene count |

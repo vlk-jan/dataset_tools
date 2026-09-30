@@ -125,7 +125,7 @@ pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: a
 /* Disk usage by modality. Categorical slots validated against --panel for
    colour-blind separation; the legend names every slot, so hue is never the
    only thing that says which modality a segment is. */
-:root { --dk-1: #3987e5; --dk-2: #d95926; --dk-3: #199e70; --dk-4: #c98500; --dk-5: #d55181; }
+:root { --dk-1: #3987e5; --dk-2: #d95926; --dk-3: #199e70; --dk-4: #c98500; --dk-5: #d55181; --dk-6: #8a5cd6; }
 .diskpanel { margin: 0 0 10px; }
 .card .diskpanel { margin: 14px 0 0; }
 .diskbar { display: flex; gap: 2px; height: 10px; background: var(--track); border-radius: 2px; overflow: hidden; }
@@ -134,6 +134,7 @@ pre { background: #101216; padding: 10px 12px; border-radius: 6px; overflow-x: a
 .dk-clouds { background: var(--dk-2); }
 .dk-height_maps { background: var(--dk-3); }
 .dk-height_masks { background: var(--dk-4); }
+.dk-driven_similarity { background: var(--dk-6); }
 .dk-other { background: var(--dk-5); }
 .disklegend {
   list-style: none; padding: 0; margin: 8px 0 0;

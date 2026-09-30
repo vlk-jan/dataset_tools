@@ -991,6 +991,13 @@ async function main() {
   for (const tile of els.tiles) {
     const kind = tile.dataset.kind;
     if (!(kind in available)) {
+      // A tile marked optional is for a product most roots never carry
+      // (DRIFT's driven-similarity maps); saying "not present" would be the
+      // panel's own noise, so it is removed instead of dimmed.
+      if (tile.dataset.optional !== undefined) {
+        tile.classList.add("hidden");
+        continue;
+      }
       tile.classList.add("unavailable");
       tile.querySelector(".dt-imgwrap").classList.add("absent");
       tile.querySelector(".dt-absent").textContent = "not present in this scene";

@@ -54,6 +54,27 @@ VALIDITY_COLORS = np.array(
 )
 
 
+#: Ramp for the ``driven_similarity`` tile's ``max_sim`` (0 -> 1): dark grey
+#: through ember to a pale orange, so the tile cannot be mistaken for the
+#: turbo-coloured height map beside it.
+DRIVEN_SIM_ANCHORS = np.array(
+    [
+        [38, 38, 42],  # 0.0  nothing like anything driven
+        [92, 52, 40],
+        [168, 72, 30],
+        [232, 130, 40],
+        [255, 205, 120],  # 1.0  a driven cell's own feature
+    ],
+    dtype=np.float64,
+)
+#: Cells the wheels actually rolled over, one fixed colour: cyan, which the ramp
+#: never produces.
+DRIVEN_COLOR = np.array([40, 220, 235], dtype=np.uint8)
+#: Brightening applied to cells above the sidecar's trust threshold, so the gate
+#: DRIFT actually applies is visible as a step inside the smooth ramp.
+DRIVEN_TRUST_BOOST = 1.18
+
+
 #: HELHEST's footprint in its own frame (metres), forward = +x, left = +y.
 #:
 #: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
@@ -79,7 +100,7 @@ def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
 
 #: The one colour map every renderer here uses; ``colorize`` falls back to it
 #: for a name it does not know.
-LUTS = {"turbo": _build_lut(_TURBO_ANCHORS)}
+LUTS = {"turbo": _build_lut(_TURBO_ANCHORS), "ember": _build_lut(DRIVEN_SIM_ANCHORS)}
 
 
 def colorize(
@@ -175,6 +196,27 @@ def render_validity(mask: np.ndarray, size: int = 384) -> bytes:
     disp = _bev_to_display(np.asarray(mask))
     idx = np.clip(disp.astype(np.int32), 0, len(VALIDITY_COLORS) - 1)
     return _bev_png(VALIDITY_COLORS[idx], size)
+
+
+def render_driven_similarity(driven: np.ndarray, max_sim: np.ndarray, threshold: float, size: int = 384) -> bytes:
+    """The ``driven_similarity`` tile: similarity ramp, trust gate, driven cells.
+
+    ``max_sim`` in [0, 1] runs through the ``ember`` ramp (negative similarity
+    is as unlike as zero and is shown so); cells above ``threshold`` are
+    brightened by :data:`DRIVEN_TRUST_BOOST` so the step where DRIFT starts
+    trusting its prediction is visible; the cells the wheels rolled over are
+    painted :data:`DRIVEN_COLOR` on top of everything, and the robot silhouette
+    on top of that. Robot centred, forward up, like every BEV tile.
+    """
+    sim = np.nan_to_num(np.asarray(max_sim, dtype=np.float64), nan=0.0)
+    disp_sim = _bev_to_display(sim)
+    disp_driven = _bev_to_display(np.asarray(driven, dtype=bool))
+    rgb = colorize(disp_sim, vmin=0.0, vmax=1.0, cmap="ember").astype(np.float64)
+    trusted = disp_sim > float(threshold)
+    rgb[trusted] = np.clip(rgb[trusted] * DRIVEN_TRUST_BOOST, 0, 255)
+    rgb = rgb.astype(np.uint8)
+    rgb[disp_driven] = DRIVEN_COLOR
+    return _bev_png(rgb, size)
 
 
 def draw_robot_silhouette(img, px_per_m: float):

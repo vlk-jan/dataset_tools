@@ -31,7 +31,7 @@ COVERAGE_MID = 0.5
 
 #: Modalities the disk bar gives a colour of their own, in the order of the
 #: palette slots (style.css ``.dk-*``); any other directory counts as "other".
-DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "other")
+DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "driven_similarity", "other")
 
 
 def coverage_class(coverage: float | None) -> str:
@@ -140,7 +140,11 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
         stats.append(stat("segments", p.n_segments, reasons or None))
     if p.segment_coverage is not None:
         stats.append(stat("GT coverage", f"{p.segment_coverage * 100:.0f}%"))
-    for key, label in (("height_maps", "height maps"), ("height_masks", "validity masks")):
+    for key, label in (
+        ("height_maps", "height maps"),
+        ("height_masks", "validity masks"),
+        ("driven_similarity", "driven & similar"),
+    ):
         if p.counts.get(key):
             stats.append(stat(label, fmt_count(p.counts[key])))
     if p.start_ts:

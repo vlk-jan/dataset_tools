@@ -60,7 +60,7 @@ OPTIONAL_FILES = (
     "T_cam_to_lidar.txt",
     "tf_pins.txt",
 )
-OPTIONAL_DIRS = ("height_maps", "height_masks")
+OPTIONAL_DIRS = ("height_maps", "height_masks", "driven_similarity")
 
 ERROR = "ERROR"
 WARNING = "WARN"
