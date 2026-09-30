@@ -203,10 +203,10 @@
      are. Without JavaScript the links are what they always were. #}
   <div id="tabpanel" data-swap>
   <nav class="tabs">
-    <a class="tab {{ 'active' if tab == 'windows' else '' }}" href="/scene/{{ scene_id }}?tab=windows">
+    <a class="tab {{ 'active' if tab == 'windows' else '' }}"{% if tab == 'windows' %} aria-current="page"{% endif %} href="/scene/{{ scene_id }}?tab=windows">
       Segments &amp; windows <span class="muted">{{ windows|length }}</span>
     </a>
-    <a class="tab {{ 'active' if tab == 'frames' else '' }}" href="/scene/{{ scene_id }}?tab=frames">
+    <a class="tab {{ 'active' if tab == 'frames' else '' }}"{% if tab == 'frames' %} aria-current="page"{% endif %} href="/scene/{{ scene_id }}?tab=frames">
       Frames <span class="muted">{{ probe.n_frames }}</span>
     </a>
   </nav>
