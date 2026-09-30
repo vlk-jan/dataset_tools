@@ -70,6 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="who new notes are from (default: $USER)",
     )
+    parser.add_argument(
+        "--no-prefetch",
+        dest="prefetch",
+        action="store_false",
+        help="do not build the next window in the background when one is opened: for a root on storage "
+        "slow enough that an unasked build competes with the one being looked at",
+    )
     parser.add_argument("--open", action="store_true", help="open a browser at the index page")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return parser
@@ -117,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         author=args.author,
         clear_cache=args.clear_cache,
         allowed_hosts=sorted(LOOPBACK_HOSTS) if loopback else None,
+        prefetch=args.prefetch,
     )
     url = f"http://{args.host}:{args.port}/"
     print(f"dataset viewer for {args.root}\n  {url}")

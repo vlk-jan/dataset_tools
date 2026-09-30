@@ -809,3 +809,33 @@ def test_a_scene_handle_follows_the_directory_while_it_is_being_written(client, 
     after = client.get("/api/scene/0000").json()
     assert "gps" not in after["probe"]["missing"]
     assert client.get("/api/scene/0000/gps.json").status_code == 200
+
+
+def test_opening_a_window_builds_the_next_one_in_the_background(tmp_path):
+    """Paging with ] should find its window ready; with prefetch off, nothing is
+    built that nobody asked for."""
+    import time
+
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer.app import create_app
+
+    opts = "40-160000-80-500000-0.1-height"
+
+    def ready(client, key):
+        return client.get(f"/api/data/0000/{key}/{opts}/x/status").json()["ready"]
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=12)
+    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache")) as client:
+        assert not ready(client, "seg001")
+        assert client.get("/view/0000/seg000").status_code == 200
+        deadline = time.time() + 30
+        while not ready(client, "seg001") and time.time() < deadline:
+            time.sleep(0.2)
+        assert ready(client, "seg001")
+
+    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache2", prefetch=False)) as client:
+        assert client.get("/view/0000/seg000").status_code == 200
+        time.sleep(1.0)
+        assert not ready(client, "seg001")

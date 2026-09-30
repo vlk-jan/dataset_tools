@@ -211,6 +211,7 @@ def create_app(
     author: str = "",
     clear_cache: bool = False,
     allowed_hosts: Sequence[str] | None = None,
+    prefetch: bool = True,
 ) -> FastAPI:
     """The viewer as an ASGI app.
 
@@ -219,6 +220,11 @@ def create_app(
     the loopback interface passes the loopback names here, which stops a page
     on another site from reaching it through a hostname that resolves to
     127.0.0.1 (DNS rebinding). ``None`` answers every host.
+
+    ``prefetch`` starts building the window after the one just opened, so
+    paging through a scene with ``[`` / ``]`` does not wait on a build; off
+    for a root on storage slow enough that an unasked build competes with the
+    one being looked at.
     """
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
     state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds)
@@ -527,6 +533,12 @@ def create_app(
         # runs, and the bundle may still be building. The overlay controller
         # re-inserts this exact script once the build reports ready.
         page = _defer_main_script(page)
+        if prefetch and next_window is not None:
+            # The window ] pages to, built now rather than when asked for. It
+            # takes the same per-bundle lock a request would, so a reader who
+            # pages before it is done joins the build instead of starting a
+            # second one; and it never surfaces an error -- nobody asked.
+            asyncio.ensure_future(_prefetch(state, scene_id, next_window.key, opts.cache_key()))
         return HTMLResponse(page)
 
     # ------------------------------------------------------------------- api
@@ -1038,6 +1050,14 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             # type, not its text, which tends to carry file paths.
             logger.exception("build failed for %s/%s", scene_id, window_key)
             raise HTTPException(500, f"build failed ({type(exc).__name__}); see the viewer's log") from exc
+
+
+async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> None:
+    """Build a window nobody has asked for yet, quietly."""
+    try:
+        await _ensure_bundle(state, scene_id, window_key, opts_key)
+    except Exception as exc:  # noqa: BLE001 - the request that wants it will report properly
+        logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
 
 async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
