@@ -16,8 +16,10 @@ get byte-range support from Starlette for free.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger("dataset_tools.viewer.wire")
@@ -132,6 +134,7 @@ def render_viewer_page(
     data_base: str,
     body_html: str = "",
     head_html: str = "",
+    title: str | None = None,
 ) -> str:
     """Render SimView's own ``index.html`` against our asset and data URLs.
 
@@ -161,6 +164,9 @@ def render_viewer_page(
     # base restores root-relative resolution; every URL we emit ourselves is
     # already absolute, so nothing else is affected.
     page = page.replace("<head>", '<head>\n    <base href="/">', 1)
+
+    if title is not None:
+        page = re.sub(r"<title>.*?</title>", lambda _: f"<title>{html.escape(title)}</title>", page, count=1)
 
     injection = f'<script>window.__simviewStaticBase = "{data_base.rstrip("/")}";</script>\n' f"{head_html}\n</head>"
     page = page.replace("</head>", injection, 1)
