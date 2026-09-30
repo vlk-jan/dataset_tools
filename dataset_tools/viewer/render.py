@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -353,6 +354,67 @@ def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> byte
 OVERLAY_MIN_DEPTH = 0.1
 
 
+def _project_points(
+    cam: np.ndarray,
+    K: np.ndarray,
+    scale: float,
+    distortion_model: str | None = None,
+    distortion_coeffs: Sequence[float] | np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project camera-frame 3D points (x, y, z) into pixel coordinates (u, v).
+
+    Applies the camera's distortion model when available (e.g. equidistant fisheye
+    or plumb_bob/rational_polynomial), falling back to pinhole projection when
+    unspecified or unsupported.
+    """
+    if not len(cam):
+        return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
+
+    K_scaled = np.asarray(K, dtype=np.float64).copy()
+    K_scaled[:2, :] *= scale
+    D = np.asarray(distortion_coeffs, dtype=np.float64).ravel() if distortion_coeffs is not None else None
+
+    if distortion_model in ("equidistant", "fisheye") and D is not None and len(D) == 4:
+        try:
+            import cv2
+
+            pts = cam.reshape(-1, 1, 3).astype(np.float64)
+            proj, _ = cv2.fisheye.projectPoints(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
+            proj = proj.reshape(-1, 2)
+            return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
+        except ImportError:
+            R = np.sqrt(cam[:, 0] ** 2 + cam[:, 1] ** 2)
+            theta = np.arctan2(R, cam[:, 2])
+            theta2 = theta**2
+            theta_d = theta * (1.0 + D[0] * theta2 + D[1] * theta2**2 + D[2] * theta2**3 + D[3] * theta2**4)
+            s = np.where(R > 1e-8, theta_d / R, 1.0)
+            xp = cam[:, 0] * s
+            yp = cam[:, 1] * s
+            u = np.round(K_scaled[0, 0] * xp + K_scaled[0, 1] * yp + K_scaled[0, 2]).astype(np.int64)
+            v = np.round(K_scaled[1, 1] * yp + K_scaled[1, 2]).astype(np.int64)
+            return u, v
+
+    if (
+        distortion_model in ("plumb_bob", "rational_polynomial")
+        and D is not None
+        and len(D) in (4, 5, 8, 12, 14)
+    ):
+        try:
+            import cv2
+
+            pts = cam.reshape(-1, 1, 3).astype(np.float64)
+            proj, _ = cv2.projectPoints(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
+            proj = proj.reshape(-1, 2)
+            return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
+        except ImportError:
+            pass
+
+    fx, fy, cx, cy = K_scaled[0, 0], K_scaled[1, 1], K_scaled[0, 2], K_scaled[1, 2]
+    u = np.round(fx * cam[:, 0] / cam[:, 2] + cx).astype(np.int64)
+    v = np.round(fy * cam[:, 1] / cam[:, 2] + cy).astype(np.int64)
+    return u, v
+
+
 def render_cloud_on_image(
     image_path: Path,
     cloud: np.ndarray,
@@ -360,6 +422,8 @@ def render_cloud_on_image(
     T_cam_to_base: np.ndarray,
     width: int = 1280,
     quality: int = 78,
+    distortion_model: str | None = None,
+    distortion_coeffs: Sequence[float] | np.ndarray | None = None,
 ) -> bytes:
     """The frame's lidar returns projected into its camera image, as a JPEG.
 
@@ -369,13 +433,14 @@ def render_cloud_on_image(
     Odin1's own extrinsic estimate wanders by. Each return is taken from the
     base frame into the camera's optical frame with the inverse of
     ``T_cam_to_base`` (``p_base = T @ p_cam_optical``), kept if it lies in
-    front of the lens, and projected through the pinhole ``K``; the dots are
+    front of the lens, and projected through the camera model; the dots are
     coloured by depth, near to far.
 
-    Pinhole only: the distortion model in ``camera_info.yaml`` is deliberately
-    ignored. Both rigs' coefficients are small, a few pixels at the image
-    edge, and what this is looking for is metres, not pixels. ``K`` is scaled
-    with the image when it is downscaled to ``width``.
+    When ``distortion_model`` and ``distortion_coeffs`` are provided (from
+    ``camera_info.yaml``), the camera's distortion model is applied (e.g.
+    equidistant fisheye for Odin1, plumb_bob / rational_polynomial for pinhole
+    lenses). If absent or unknown, uncorrected pinhole projection is used as a
+    fallback. ``K`` is scaled with the image when it is downscaled to ``width``.
     """
     from PIL import Image
 
@@ -394,9 +459,7 @@ def render_cloud_on_image(
         cam = pts[:, :3] @ T[:3, :3].T + T[:3, 3]
         cam = cam[cam[:, 2] > OVERLAY_MIN_DEPTH]
         K = np.asarray(K, dtype=np.float64)
-        fx, fy, cx, cy = K[0, 0] * scale, K[1, 1] * scale, K[0, 2] * scale, K[1, 2] * scale
-        u = np.round(fx * cam[:, 0] / cam[:, 2] + cx).astype(np.int64)
-        v = np.round(fy * cam[:, 1] / cam[:, 2] + cy).astype(np.int64)
+        u, v = _project_points(cam, K, scale, distortion_model, distortion_coeffs)
         inside = (u >= 0) & (u < w) & (v >= 0) & (v < h)
         u, v, z = u[inside], v[inside], cam[inside, 2]
         if len(z):

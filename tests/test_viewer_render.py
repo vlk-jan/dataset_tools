@@ -87,3 +87,36 @@ def test_a_known_point_lands_on_its_pixel_when_projected_into_the_image(tmp_path
     # A return behind the camera is not drawn at all.
     behind = render.render_cloud_on_image(path, np.array([[-5.0, 1.0, 0.2, 10.0]]), K, T)
     assert np.asarray(Image.open(io.BytesIO(behind)).convert("RGB")).sum() < 3000
+
+
+def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path):
+    pytest.importorskip("PIL")
+    import io
+
+    from PIL import Image
+
+    path = tmp_path / "00000.png"
+    Image.new("RGB", (300, 100), (0, 0, 0)).save(path)
+    K = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]])
+    T = np.eye(4)
+    T[:3, :3] = [[0, 0, 1], [-1, 0, 0], [0, -1, 0]]
+    T[2, 3] = 0.2
+    # Point at 45 degrees to the right: x_cam = 5, y_cam = 0, z_cam = 5 -> theta = pi/4
+    # Pinhole projection: u = 100 + 100 * (5 / 5) = 200
+    # Equidistant fisheye (D=0): u = 100 + 100 * (pi / 4) ≈ 179
+    cloud = np.array([[5.0, -5.0, 0.2, 10.0]], dtype=np.float32)
+
+    # 1. Pinhole: lands around u=200
+    jpeg_pin = render.render_cloud_on_image(path, cloud, K, T, width=1280)
+    px_pin = np.asarray(Image.open(io.BytesIO(jpeg_pin)).convert("RGB"))
+    assert px_pin[50, 200].sum() > 100
+    assert px_pin[50, 179].sum() < 30
+
+    # 2. Equidistant fisheye: lands around u=179
+    jpeg_fish = render.render_cloud_on_image(
+        path, cloud, K, T, width=1280, distortion_model="equidistant", distortion_coeffs=[0.0, 0.0, 0.0, 0.0]
+    )
+    px_fish = np.asarray(Image.open(io.BytesIO(jpeg_fish)).convert("RGB"))
+    assert px_fish[50, 179].sum() > 100
+    assert px_fish[50, 200].sum() < 30
+

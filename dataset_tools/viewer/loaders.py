@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -137,6 +138,51 @@ def read_text(path: Path, max_bytes: int = 200_000) -> str | None:
             return fh.read(max_bytes)
     except OSError:
         return None
+
+
+def _scalar(text: str) -> Any:
+    text = text.strip()
+    for cast in (int, float):
+        try:
+            return cast(text)
+        except ValueError:
+            continue
+    return text
+
+
+def read_camera_info(path: Path) -> dict[str, Any] | None:
+    """The flat subset of a ROS ``camera_info.yaml``.
+
+    Hand-rolled rather than a YAML dependency: the file is machine-written by
+    the extractor and is always flat scalars plus ``data: [...]`` rows. Nested
+    blocks collapse to ``<parent>`` (the data list) and ``<parent>_rows`` /
+    ``<parent>_cols``. Anything unparseable is simply left out.
+    """
+    text = read_text(path, 200_000)
+    if not text:
+        return None
+    info: dict[str, Any] = {}
+    parent: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, val = line.partition(":")
+        if not sep:
+            continue
+        key, val = key.strip(), val.strip()
+        if len(raw) - len(raw.lstrip()) == 0:
+            parent = key
+            if val:
+                info[key] = _scalar(val)
+        elif parent and key in ("rows", "cols"):
+            info[f"{parent}_{key}"] = _scalar(val)
+        elif parent and key == "data":
+            try:
+                info[parent] = [float(v) for v in val.strip("[] ").split(",") if v.strip()]
+            except ValueError:
+                continue
+    return info or None
 
 
 # --------------------------------------------------------------------------

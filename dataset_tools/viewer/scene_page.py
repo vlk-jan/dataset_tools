@@ -47,7 +47,7 @@ from .index_page import (
     thumb_slots,
     validation_mark,
 )
-from .loaders import read_text, roll_pitch_from_gravity_align
+from .loaders import _scalar, read_camera_info, read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS, DatasetRoot
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
@@ -79,54 +79,8 @@ MOVING_M_S = 0.1
 
 
 # --------------------------------------------------------------------------
-# small readers
+# series
 # --------------------------------------------------------------------------
-
-
-def _scalar(text: str) -> Any:
-    text = text.strip()
-    for cast in (int, float):
-        try:
-            return cast(text)
-        except ValueError:
-            continue
-    return text
-
-
-def read_camera_info(path: Path) -> dict[str, Any] | None:
-    """The flat subset of a ROS ``camera_info.yaml`` this page shows.
-
-    Hand-rolled rather than a YAML dependency: the file is machine-written by
-    the extractor and is always flat scalars plus ``data: [...]`` rows, and the
-    viewer should not grow a dependency to read four fields out of it. Nested
-    blocks collapse to ``<parent>`` (the data list) and ``<parent>_rows`` /
-    ``<parent>_cols``. Anything unparseable is simply left out.
-    """
-    text = read_text(path, 200_000)
-    if not text:
-        return None
-    info: dict[str, Any] = {}
-    parent: str | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, sep, val = line.partition(":")
-        if not sep:
-            continue
-        key, val = key.strip(), val.strip()
-        if len(raw) - len(raw.lstrip()) == 0:
-            parent = key
-            if val:
-                info[key] = _scalar(val)
-        elif parent and key in ("rows", "cols"):
-            info[f"{parent}_{key}"] = _scalar(val)
-        elif parent and key == "data":
-            try:
-                info[parent] = [float(v) for v in val.strip("[] ").split(",") if v.strip()]
-            except ValueError:
-                continue
-    return info or None
 
 
 @dataclass

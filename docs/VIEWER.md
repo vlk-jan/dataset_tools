@@ -190,10 +190,10 @@ with every lidar return of that frame projected into it and coloured by depth
 road that lands beside the road, or a trunk that lands a metre from its
 picture, is a wrong extrinsic -- the error that shifted every v1 cloud by
 0.34 m, and the one the Odin1's own extrinsic estimate wanders by between
-boots. Metres of error are pixels of misalignment at any range, which is why
-the projection is a plain pinhole: the distortion model in `camera_info.yaml`
-is ignored, since both rigs' coefficients move a few pixels at the image edge
-and what is being looked for is far larger. A root that has only
+boots. Metres of error are pixels of misalignment at any range. Where
+`camera_info.yaml` is present, its distortion model (e.g. `equidistant` fisheye
+for Odin1 or `plumb_bob` / `rational_polynomial` for pinhole rigs) is applied;
+otherwise, uncorrected pinhole projection is used as fallback. A root that has only
 `T_cam_to_lidar.txt` (v1) gets no overlay: that matrix is the camera in the raw
 lidar frame, not the base frame the clouds are in.
 

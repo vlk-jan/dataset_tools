@@ -660,7 +660,17 @@ def create_app(
             cloud = load_cloud(access.frame_path("clouds", index))
             if cloud is None or not image.is_file():
                 return None
-            return _safe_render(render.render_cloud_on_image, image, cloud, access.K, access.T_cam, w)
+            info = access.camera_info or {}
+            return _safe_render(
+                render.render_cloud_on_image,
+                image,
+                cloud,
+                access.K,
+                access.T_cam,
+                w,
+                distortion_model=info.get("distortion_model"),
+                distortion_coeffs=info.get("distortion_coefficients"),
+            )
 
         data = await run_in_threadpool(work)
         if data is None:
@@ -1175,9 +1185,9 @@ def _overlay_possible(access: SceneAccess) -> bool:
     return access.K is not None and access.T_cam is not None
 
 
-def _safe_render(fn, *args):
+def _safe_render(fn, *args, **kwargs):
     try:
-        return fn(*args)
+        return fn(*args, **kwargs)
     except (OSError, ValueError) as exc:
         logger.debug("render failed: %s", exc)
         return None

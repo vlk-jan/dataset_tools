@@ -17,6 +17,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -357,6 +358,10 @@ class SceneAccess:
     @property
     def K(self) -> np.ndarray | None:
         return self._optional("K", "camera_intrinsics", lambda: L.read_matrix(self.dir / "camera_intrinsics.txt", (3, 3)))  # type: ignore[return-value]
+
+    @property
+    def camera_info(self) -> dict[str, Any] | None:
+        return self._optional("camera_info", "camera_info", lambda: L.read_camera_info(self.dir / "camera_info.yaml"))  # type: ignore[return-value]
 
     @property
     def T_cam(self) -> np.ndarray | None:
