@@ -44,6 +44,7 @@ from .index_page import (
     stat,
     thumb_index,
     thumb_slots,
+    validation_mark,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS, DatasetRoot
@@ -589,6 +590,47 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     }
 
 
+def validation_card(access: SceneAccess) -> dict[str, Any] | None:
+    """What ``helhest-validate`` made of the scene; None without a report row.
+
+    The report is ``<root>/validation.csv``, which carries the status, the
+    numbers and counts of findings -- never the messages, which only the
+    validator's own output has. The card says so instead of pretending.
+    """
+    row = access.root.validation_scene(access.scene_id)
+    mark = validation_mark(row)
+    if mark is None:
+        return None
+    stats = [
+        stat("errors", row.get("errors") or "0", "structural: the scene contract"),
+        stat("warnings", row.get("warnings") or "0", "data quality: NaNs, jumps, tilt"),
+    ]
+    for key, label, unit in (
+        ("max_step_m", "max step", "m between frames"),
+        ("max_speed_mps", "max speed", "m/s implied by it"),
+        ("tilt_max_deg", "max tilt", "degrees"),
+        ("max_sync_offset_s", "max sync offset", "s, camera vs lidar"),
+        ("nan_frac", "non-finite", "fraction of cloud points"),
+    ):
+        if row.get(key):
+            stats.append(stat(label, row[key], unit))
+    note = "Counts only: the file holds how many findings, not what they said. "
+    note += (
+        f"For the messages, run helhest-validate {access.scene_id} on the root."
+        if mark["cls"] != "yes"
+        else "Nothing was found."
+    )
+    return {
+        "kind": "validation",
+        "title": "Validation",
+        "badge": mark["status"],
+        "badge_class": {"yes": "hi", "partial": "lo", "no": "lo"}[mark["cls"]],
+        "badge_title": "the status helhest-validate gave this scene",
+        "stats": stats,
+        "note": note,
+    }
+
+
 def _gps_src(scene_id: str, segment, frame: int | None) -> str:
     """The endpoint one map fetches its track from."""
     query = []
@@ -773,6 +815,7 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             ground_truth_card(access, a),
             calibration_card(access, info),
             proprioception_card(access),
+            validation_card(access),
         ]
         return {
             "hero": hero_thumbs(access, a),

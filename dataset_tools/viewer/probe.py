@@ -378,6 +378,7 @@ class DatasetRoot:
         self._csv_rows: dict[str, dict] | None = None
         self._atlas: dict | None | object = _UNSET
         self._disk_usage: dict | None | object = _UNSET
+        self._validation: dict | None | object = _UNSET
         self._splits: SceneSplits | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
@@ -471,6 +472,34 @@ class DatasetRoot:
     def disk_usage_scene(self, scene_id: str) -> dict:
         entry = ((self.disk_usage() or {}).get("scenes") or {}).get(scene_id)
         return entry if isinstance(entry, dict) else {}
+
+    def validation(self) -> dict[str, dict[str, str]] | None:
+        """``validation.csv``, the report ``helhest-validate --csv`` writes, by scene.
+
+        ``slurm/finalize_v2.sh`` leaves it at the root. It carries a status
+        and the numbers per scene and *counts* of errors and warnings, not
+        their text -- the messages only go to the validator's own output. Read
+        once per process, like the atlas; ``None`` when absent or unreadable.
+        """
+        if self._validation is _UNSET:
+            rows: dict[str, dict[str, str]] | None = None
+            path = self.path / "validation.csv"
+            if path.is_file():
+                try:
+                    with open(path, newline="") as fh:
+                        rows = {}
+                        for row in csv.DictReader(fh):
+                            key = (row.get("scene") or "").strip()
+                            if key and row.get("status"):
+                                rows[key] = {k: (v or "").strip() for k, v in row.items() if k}
+                except (OSError, csv.Error) as exc:
+                    logger.warning("cannot read validation.csv: %s", exc)
+                    rows = None
+            self._validation = rows
+        return self._validation
+
+    def validation_scene(self, scene_id: str) -> dict[str, str]:
+        return (self.validation() or {}).get(scene_id, {})
 
     def atlas_scene(self, scene_id: str) -> dict:
         atlas = self.atlas() or {}

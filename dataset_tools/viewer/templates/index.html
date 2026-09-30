@@ -210,6 +210,10 @@
             {% for key in ("odometry", "joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
               <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
             {% endfor %}
+            {# What helhest-validate made of the scene, when validation.csv sits at the root. #}
+            {% if row.validation %}
+              <span class="chip {{ row.validation.cls }} validated" title="{{ row.validation.title }}">{{ row.validation.label }}</span>
+            {% endif %}
           </div>
 
           {% if p.bag %}<p class="bagline">{{ p.bag }}</p>{% endif %}

@@ -788,3 +788,19 @@ def test_the_map_sits_beside_the_files_card_when_there_is_a_track(gps_client):
 def test_the_frame_page_marks_the_frame_it_is_showing(gps_client):
     page = gps_client.get("/scene/0000/frame/6").text
     assert 'data-src="/api/scene/0000/gps.json?frame=6"' in page
+
+
+def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
+    from fastapi.testclient import TestClient
+    from test_viewer_index import VALIDATION_CSV
+
+    from dataset_tools.viewer.app import create_app
+
+    (tmp_path / "root" / "validation.csv").write_text(VALIDATION_CSV)
+    fresh = TestClient(create_app(tmp_path / "root", cache_dir=tmp_path / "cache"))
+    index = fresh.get("/").text
+    assert 'class="chip yes validated"' in index and ">validated ok<" in index
+    assert 'class="chip partial validated"' in index and ">2 warnings<" in index
+    assert "<dt>validated</dt>" in index
+    scene = fresh.get("/scene/0001").text
+    assert "<h2>Validation</h2>" in scene and "run helhest-validate 0001" in scene

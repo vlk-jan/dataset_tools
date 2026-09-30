@@ -326,6 +326,20 @@ page gets a **Disk usage** card (total, per frame, the same bar) and each entry
 in its file inventory shows its size. Like the atlas, the file is read once per
 process, so restart the viewer after a rescan.
 
+## Validation: what `helhest-validate` made of each scene
+
+`helhest-validate <root> --csv <root>/validation.csv` (which is what
+`slurm/finalize_v2.sh` runs) leaves the validator's table at the root. When it
+is there, every index card gets a chip -- `validated ok`, `N warnings` or `N
+errors`, with the row's numbers in its tooltip -- the masthead counts how the
+scenes fared, and the scene page gets a **Validation** card with the status,
+the counts and the numbers behind them (max step, max tilt, sync offset,
+non-finite fraction). The file carries *counts* of findings, not their text:
+the messages only go to the validator's own output, and the card says so
+rather than pretending. A scene the file does not mention gets no chip, and a
+root without the file looks exactly as before. Like the atlas, the file is
+read once per process.
+
 ## The train/val split: which scenes a model is scored on
 
 A root may carry a `splits.json` naming the scenes held out from training. When
