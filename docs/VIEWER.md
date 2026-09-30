@@ -175,6 +175,9 @@ driving. Below 2 Hz the rate is flagged.
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
 | `gps.npy` | the map, on the scene, segment and frame pages |
+| `time_align.txt` | the scene page's **Extraction** card: whether the frame clock was corrected, by how much, and from how many windows |
+| `gnss_guard.txt` | the same card: how many fabricated GNSS/INS stretches were removed and what they cost in poses and frames |
+| `tf_pins.txt` | the same card: how far each pinned static transform sat from what the bag itself published |
 
 ## The scene page's two strips
 

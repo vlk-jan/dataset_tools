@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -589,6 +590,136 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     }
 
 
+def _report_lines(access: SceneAccess, name: str) -> tuple[list[str], list[str]]:
+    """``(comment lines, data lines)`` of one of the extractor's report files."""
+    text = read_text(access.dir / name) or ""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    return [ln for ln in lines if ln.startswith("#")], [ln for ln in lines if not ln.startswith("#")]
+
+
+def _time_align_stats(access: SceneAccess) -> list[dict[str, Any]]:
+    """What ``time_align.txt`` says the frame clock was moved by.
+
+    Its second comment line is ``time_align.Profile.summary`` -- "no correction
+    (why)" or "<shape> from K/N windows (note)" -- and its rows are the windows
+    measured, ``t delta gain depth``. A constant given on the command line has
+    a summary and no rows.
+    """
+    comments, rows = _report_lines(access, "time_align.txt")
+    summary = comments[1].lstrip("# ").strip() if len(comments) > 1 else ""
+    if summary.startswith("no correction"):
+        return [stat("frame clock", "not corrected", summary[len("no correction") :].strip("() "))]
+    shape, _, rest = summary.partition(" from ")
+    stats = [stat("frame clock", shape or "corrected", rest.strip() or None)]
+    deltas = np.array([float(r.split()[1]) for r in rows]) if rows else np.zeros(0)
+    if len(deltas):
+        biggest = deltas[np.argmax(np.abs(deltas))]
+        stats.append(
+            stat(
+                "measured offset",
+                f"{np.median(deltas) * 1000:+.0f} ms",
+                f"median over {len(deltas)} windows, largest {biggest * 1000:+.0f} ms",
+            )
+        )
+    return stats
+
+
+def _gnss_guard_stats(access: SceneAccess) -> tuple[list[dict[str, Any]], str | None]:
+    """What ``gnss_guard.txt`` says was removed: two counted comment lines and one row per stretch."""
+    comments, rows = _report_lines(access, "gnss_guard.txt")
+    counts = re.findall(r"(\d+)/(\d+) (poses|frames|further frames)", " ".join(comments))
+    by = {what: (int(a), int(b)) for a, b, what in counts}
+    poses, frames, unsupported = by.get("poses"), by.get("frames"), by.get("further frames")
+    if poses is None or frames is None or unsupported is None:
+        raise ValueError("gnss_guard.txt has no counts in its header")
+    stats = [
+        stat("fabricated stretches", len(rows), "removed by the GNSS guard"),
+        stat("cost", f"{poses[0]:,} poses · {frames[0]:,} frames", f"of {poses[1]:,} · {frames[1]:,}"),
+        stat("no pose under them", f"{unsupported[0]:,} frames", f"of {unsupported[1]:,}, dropped as well"),
+    ]
+    reasons = sorted({r.split()[2] for r in rows if len(r.split()) > 2})
+    note = f"Stretches caught as {', '.join(reasons)}." if reasons else None
+    return stats, note
+
+
+def _tf_pins_stats(access: SceneAccess) -> list[dict[str, Any]]:
+    """How far each pinned transform sat from what the bag itself published.
+
+    Rows come in pin/bag pairs per edge; the numbers are recomputed from the
+    rows through ``tf_pins.Record`` rather than read off the report's own
+    comment, so the card and the extractor cannot disagree about a distance.
+    """
+    from .. import tf_pins
+
+    _, rows = _report_lines(access, "tf_pins.txt")
+    said: dict[tuple[str, str], dict[str, tuple]] = {}
+    for row in rows:
+        parent, child, which, *nums = row.split()
+        xyz, rpy = tuple(map(float, nums[:3])), tuple(map(float, nums[3:6]))
+        said.setdefault((parent, child), {})[which] = (xyz, rpy)
+    stats = []
+    for (parent, child), have in said.items():
+        if "pin" not in have or "bag" not in have:
+            continue
+        pin = tf_pins.Pin(parent, child, have["pin"][0], have["pin"][1], "")
+        record = tf_pins.Record(pin, have["bag"][0], have["bag"][1])
+        stats.append(
+            stat(
+                f"{parent} → {child}",
+                f"{record.translation_m * 100:.1f} cm · {record.rotation_deg:.2f}°",
+                "bag from pin" + (", far" if record.far else ""),
+            )
+        )
+    return stats
+
+
+def extraction_card(access: SceneAccess) -> dict[str, Any] | None:
+    """What the extractor did to the recording on its way to a scene.
+
+    Three report files, each optional, each read on its own: a malformed one
+    costs the card its part and a warning, never the page. ``None`` when the
+    scene carries none of them (a root extracted before they existed).
+    """
+    p = access.probe
+    stats: list[dict[str, Any]] = []
+    notes: list[str] = []
+    warnings: list[str] = []
+    parts = (
+        ("time_align", "time_align.txt", lambda: (_time_align_stats(access), None)),
+        ("gnss_guard", "gnss_guard.txt", lambda: _gnss_guard_stats(access)),
+        ("tf_pins", "tf_pins.txt", lambda: (_tf_pins_stats(access), None)),
+    )
+    for key, name, read in parts:
+        if not p.has(key):
+            continue
+        try:
+            more, note = read()
+        except (ValueError, IndexError) as exc:
+            logger.warning("cannot read %s of scene %s: %s", name, p.scene_id, exc)
+            warnings.append(f"{name} could not be read")
+            continue
+        stats.extend(more)
+        if note:
+            notes.append(note)
+    if not stats and not warnings:
+        return None
+    if p.has("time_align"):
+        notes.append(
+            "The offset is what was added to the frame stamps: negative moves a frame earlier, "
+            "to when it was captured rather than published."
+        )
+    absent = [name for key, name, _ in parts if not p.has(key)]
+    if absent:
+        notes.append(f"No {', '.join(absent)} in this scene.")
+    return {
+        "kind": "extraction",
+        "title": "Extraction",
+        "stats": stats,
+        "note": " ".join(notes) or None,
+        "warn": "; ".join(warnings) or None,
+    }
+
+
 def _gps_src(scene_id: str, segment, frame: int | None) -> str:
     """The endpoint one map fetches its track from."""
     query = []
@@ -773,6 +904,7 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             ground_truth_card(access, a),
             calibration_card(access, info),
             proprioception_card(access),
+            extraction_card(access),
         ]
         return {
             "hero": hero_thumbs(access, a),
