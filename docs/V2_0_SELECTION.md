@@ -393,7 +393,13 @@ v2.1 in every scene (the guard and the clock are unchanged); 130,912 maps
 against 130,859, the difference being frames at the `min_points` edge whose
 cloud moved by the pin. The bags' own lidar offsets from the pin were 10–35 mm;
 only 0010 exceeds 30 mm and is flagged `far`. 164.4 GB (images 119.3, clouds
-40.3, maps 4.4). No `keyframes.lst` and no proprio labels yet; v2.1's do not
-transfer (the clouds under them sit at a different height, and the map sets
-differ). The manifest carries a `derived.driven_similarity` placeholder for
-the viewer session's product. v2.0 and v2.1 are unchanged.
+40.3, maps 4.4). Lists and labels, same day: `HELHEST_v2_2_train` (0000–0011, 108,293
+keyframes) and `HELHEST_v2_2_heldout` (0012–0017, 22,619), each one symlink
+per scene into v2.2 plus its list and a manifest; `HELHEST_v2_2_allframes_notrain`
+lists all 18 scenes for generators only. Proprio labels for every scene by
+DRIFT `gen_proprio_v2_2.batch` (`610fb27`, RCI job 11723939, same settings as
+v2.0/v2.1): 101,876 for 130,912 mapped frames, 77.8 % (train 74.4 %, held out
+94.3 %, the same yields as before). v2.1's lists and labels were not copied
+(different lidar height, slightly different map sets). The manifest carries a
+`derived.driven_similarity` placeholder for the viewer session's product.
+v2.0 and v2.1 are unchanged.
