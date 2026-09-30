@@ -40,7 +40,7 @@ logger = logging.getLogger("dataset_tools.viewer.build")
 # HELHEST geometry from DRIFT's robot model (simulator/utils.py,
 # helhest_robot_model, sourced from the robot URDF): base_link IS the front
 # axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
-# 0.36 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
+# 0.334 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
 # axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
 # ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
 # middle of the box and every return looked 0.4 m too close.
@@ -53,7 +53,7 @@ logger = logging.getLogger("dataset_tools.viewer.build")
 CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
 CHASSIS_CENTER = (-0.15, 0.0, 0.0)
 CHASSIS_Z = 0.0
-WHEEL_RADIUS = 0.36
+WHEEL_RADIUS = 0.334
 WHEEL_WIDTH = 0.142
 #: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
 #: being how far the sample sat from the robot that measured it. A window splats
@@ -107,7 +107,8 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #: 7: the ``validity`` terrain layer is the weighted mean of the samples behind
 #:    each cell rather than the best of them, so cached bundles hold a layer
 #:    that no longer means what its legend says.
-META_VERSION = 7
+#: 8: wheel radius 0.36 -> 0.334 m, so cached bundles draw the old wheels.
+META_VERSION = 8
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:

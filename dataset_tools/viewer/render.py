@@ -63,7 +63,7 @@ VALIDITY_COLORS = np.array(
 #: box sits mostly behind the origin.
 ROBOT_CHASSIS_HALF = (0.35, 0.25)  # half length (x), half width (y)
 ROBOT_CHASSIS_CENTER = (-0.15, 0.0)  # box centre in the base frame
-ROBOT_WHEEL_RADIUS = 0.36
+ROBOT_WHEEL_RADIUS = 0.334
 ROBOT_WHEEL_WIDTH = 0.142
 #: (x, y) of each wheel hub -- two front wheels on the axle, one rear centre wheel.
 ROBOT_WHEEL_HUBS = ((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0))
