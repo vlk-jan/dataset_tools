@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 
 from . import geo
-from .build import SceneAccess
+from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
 from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
@@ -286,6 +286,36 @@ def hero_thumbs(access: SceneAccess, frames: tuple[int, int]) -> list[dict[str, 
                 "sub": f"frame {index}" + (f" · {at} in" if at else ""),
             }
         )
+    return out
+
+
+#: Windows per page above which the per-window attitude verdict is skipped and
+#: the column shows a dash. Each verdict interpolates its segment's poses over
+#: the window's frames, a few milliseconds each; two hundred of them is a page
+#: that should be read segment by segment anyway. ponytail: raise it, or
+#: compute per row on demand, if a root ever cuts a scene that finely.
+MAX_WINDOW_VERDICTS = 200
+
+
+def attitude_per_window(access: SceneAccess, windows: list[Window]) -> dict[str, dict]:
+    """The GT-versus-IMU verdict for each window of a table, keyed by window key.
+
+    Every entry carries the tooltip that explains it, written once here rather
+    than in two templates. A window with no verdict (no ground truth, no
+    gravity alignment) has no entry, and the table shows a dash.
+    """
+    if len(windows) > MAX_WINDOW_VERDICTS:
+        return {}
+    title = (
+        "median tilt gap between the ground truth's attitude and the IMU over this window: "
+        f"under {ATTITUDE_BANDS['ok']:.0f}° the ground truth's orientation tracks the IMU, "
+        f"over {ATTITUDE_BANDS['warn']:.0f}° it has diverged"
+    )
+    out: dict[str, dict] = {}
+    for w in windows:
+        verdict = window_attitude(access, w)
+        if verdict is not None:
+            out[w.key] = {**verdict, "title": f"{title} (95th percentile {verdict['p95']:.1f}°)"}
     return out
 
 

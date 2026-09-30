@@ -404,3 +404,12 @@ def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
     assert files["images"]["size"] and files["odometry.txt"]["size"]
     # An absent file has no size, whatever the measurement said.
     assert files["gps.npy"]["size"] is None
+
+
+def test_the_window_tables_carry_the_attitude_verdict(client):
+    for url in ("/scene/0000", "/scene/0000/segment/0"):
+        text = client.get(url).text
+        assert "GT attitude" in text
+        # The fixture's ground truth is level and so is its IMU: a green 0.0°.
+        assert "median tilt gap" in text
+        assert 'class="chip yes"' in text and "0.0°" in text

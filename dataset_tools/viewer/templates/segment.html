@@ -87,7 +87,8 @@
     <thead>
       <tr>
         <th>Window</th><th>Frames</th><th class="num">Count</th>
-        <th class="num">Duration</th><th class="num">GT poses</th><th></th>
+        <th class="num">Duration</th><th class="num">GT poses</th>
+        <th class="num">GT attitude</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -100,6 +101,14 @@
         <td class="num">
           {%- if w.pose_rate %}{{ w.n_poses }}
             <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
+          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+        </td>
+        {# The ground truth's attitude against the IMU, the check the 3D view's
+           panel carries, computed the same way before any window is built. #}
+        {%- set att = attitude_per_window.get(w.key) %}
+        <td class="num">
+          {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
+                title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
           {%- else %}<span class="muted">&mdash;</span>{% endif %}
         </td>
         <td><a class="btn primary" href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>

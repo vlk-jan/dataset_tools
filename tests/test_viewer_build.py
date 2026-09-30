@@ -423,3 +423,51 @@ def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
     opts = BuildOptions()
     assert _make_grid(positions, opts.sanitized()).res > opts.terrain_res
     assert _make_grid(positions, budgets_for_window(opts, 3000)).res == opts.terrain_res
+
+
+# --------------------------------------------------------------------------
+# the window tables' verdict, without a build
+# --------------------------------------------------------------------------
+
+
+def _window_attitude_of(root_path: Path, key: str = "seg000") -> dict | None:
+    from dataset_tools.viewer import build
+    from dataset_tools.viewer import probe as probe_mod
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    return build.window_attitude(access, access.window(key, 1500))
+
+
+def test_the_window_verdict_is_ok_when_the_ground_truth_tracks_the_imu(tmp_path):
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 20.0)
+    _rewrite_odometry(root_path / "0000", roll_step_deg=0.0)
+    verdict = _window_attitude_of(root_path)
+    assert verdict["median"] == pytest.approx(0.0, abs=0.2)
+    assert verdict["band"] == "ok"
+
+
+def test_the_window_verdict_is_bad_when_the_ground_truth_rolls_away(tmp_path):
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 30.0)
+    _rewrite_odometry(root_path / "0000", roll_step_deg=12.0)
+    verdict = _window_attitude_of(root_path)
+    assert verdict["median"] > 20.0
+    assert verdict["band"] == "bad"
+
+
+def test_the_window_verdict_is_the_panels_number(tmp_path):
+    """One comparison, two places: the table must promise what the panel shows."""
+    root_path = make_root(tmp_path, frames=12)
+    _tilt_gravity(root_path, "0000", 12, 20.0)
+    _rewrite_odometry(root_path / "0000", roll_step_deg=5.0)
+    panel = _attitude_of(root_path)
+    table = _window_attitude_of(root_path)
+    assert table["median"] == pytest.approx(panel["median_error"], abs=1e-6)
+    assert table["band"] == panel["band"]
+
+
+def test_there_is_no_window_verdict_without_gravity_alignment_or_ground_truth(tmp_path):
+    assert _window_attitude_of(make_root(tmp_path, frames=12, with_gravity=False)) is None
+    (tmp_path / "raw").mkdir()
+    assert _window_attitude_of(make_root(tmp_path / "raw", frames=12, segments=False), "raw") is None
