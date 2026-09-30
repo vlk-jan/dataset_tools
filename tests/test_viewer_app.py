@@ -868,3 +868,14 @@ def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
     assert "<dt>validated</dt>" in index
     scene = fresh.get("/scene/0001").text
     assert "<h2>Validation</h2>" in scene and "run helhest-validate 0001" in scene
+
+
+def test_the_tabs_and_frame_strips_swap_in_place(client):
+    """The tabs and the strip's pager are plain links, and swap.js swaps only
+    the region they live in, so the page keeps its scroll position."""
+    scene = client.get("/scene/0000").text
+    assert 'id="tabpanel" data-swap' in scene and "/viewer-static/swap.js" in scene
+    assert scene.index('id="tabpanel"') < scene.index('class="tabs"')
+    segment = client.get("/scene/0000/segment/0").text
+    assert 'id="framestrip" data-swap' in segment and "/viewer-static/swap.js" in segment
+    assert client.get("/viewer-static/swap.js").status_code == 200

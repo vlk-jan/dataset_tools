@@ -404,6 +404,8 @@ button.chip[aria-expanded="true"] {
 .fileinfo .kv dd { font-variant-numeric: normal; overflow-wrap: anywhere; }
 
 /* ------------------------------------------------- scene tabs & frame pages */
+/* A region being swapped in place (swap.js) dims until the new one lands. */
+[data-swap][aria-busy="true"] { opacity: .6; }
 .tabs { display: flex; gap: 2px; margin: 26px 0 0; border-bottom: 1px solid var(--line); }
 .tab {
   padding: 7px 14px; border: 1px solid var(--line); border-bottom: 0;

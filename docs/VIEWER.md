@@ -230,6 +230,13 @@ poses, and both halves are turned into plain language by
 `windows.describe_reason`. Nothing that reads as a tag the tooling invented for
 itself should reach a page.
 
+The **tabs** under the cards, and the pager of every frame strip, switch in
+place: a click fetches the same page with the new query and swaps in only the
+region the link lives in (`static/swap.js`), so the cards above and the scroll
+position stay where they were, the address still updates and the back button
+walks it. A frame tile opens the frame's own page as before. Without
+JavaScript the links are what they always were, a full page each.
+
 ## The segment page
 
 A segment is the unit the ground truth is actually anchored in, and until it
