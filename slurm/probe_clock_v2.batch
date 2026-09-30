@@ -24,29 +24,14 @@ OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta/.clock_skew}
 # this file from its spool, so the checkout is found through the submit
 # directory rather than through $0, and --output above is relative to it too.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
-[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+. "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 CSV=$REPO/docs/v2_bags.csv
-SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
-SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
-PY="$REPO/.venv/bin/python"
 
-row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
-[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+read_row
 scene=$(echo "$row" | cut -d, -f1)
-bagdir=$(echo "$row" | cut -d, -f3)
-
-SCRATCH=""
-for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
-    mkdir -p "$c/skew_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/skew_${SLURM_JOB_ID}" && break
-done
-[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
-trap 'rm -rf "$SCRATCH"' EXIT
+make_scratch skew
 bag="$SCRATCH/$(basename "$bagdir")"
-BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
-
-echo "[$(date '+%F %T')] $scene fetch $bagdir"
-rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$scene: fetch failed"; exit 10; }
-echo "[$(date '+%F %T')] $scene fetched $(du -sh "$bag" | cut -f1)"
+fetch_bag "$scene" "$bag"
 
 mkdir -p "$OUT"
 singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/probe_clock_skew.py" \

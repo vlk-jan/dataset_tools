@@ -34,14 +34,11 @@ and [`docs/GT_HOLE_REPLAY.md`](../docs/GT_HOLE_REPLAY.md).
 
 | Script | Stage |
 | --- | --- |
-| `dgx07_regen.sh` | fan-out driver for the whole regeneration on one big machine (`slurm/regen_scene.batch` is its cluster twin) |
-| `run_scene_offset.sh` | replay one bag (or one window of it) through FAST-LIO with the segment-restarting recorder; runs inside the container |
 | `filter_segments.py` | post-hoc filter of a regenerated `odometry.txt` against the live `/odom`, the acceptance every later step reuses |
-| `fetch_hole_bags.sh`, `replay_holes.sh` | the hole campaign: fetch one bag at a time, replay each hole with lead-in and run-out, delete the bag |
-| `score_hole_replay.py` | score one replayed hole with the same acceptance before it reaches a root |
-| `merge_v11_fill.py` | fill v1.2's gaps with quality-gated v1.1 odometry, tagged `v11_fill` |
-| `build_fill_root.py` | build the v1.3 fill root: a symlink tree carrying the coverage guard, the hole replays and the v1.1 fill, each tagged in the segment table |
-| `compare_v1_v12.py` | the paired comparison of the published v1 root against the regenerated v1.2 (`docs/regen_comparison.csv`) |
+
+The drivers (`dgx07_regen.sh`, `slurm/regen_scene.batch`), the hole-replay
+scripts, the v1.1 fill, the fill-root builder and the v1 vs v1.2 comparison
+were removed once the campaign finished; see git history.
 
 ## Cluster helpers
 

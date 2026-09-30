@@ -29,6 +29,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from dataset_tools.gt_gaps import split_runs  # noqa: E402
 from dataset_tools.gt_io import (  # noqa: E402
     SegmentRow,
     anchor_to_first,
@@ -112,16 +113,9 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
             bad |= (ts >= a) & (ts <= b)
         if len(ts) > 1:
             st["cut_s"] += float(np.sum(np.diff(ts)[bad[1:] | bad[:-1]]))
-        k, n = 0, len(ts)
-        while k < n:
-            if bad[k]:
-                k += 1
-                continue
-            j = k
-            while j + 1 < n and not bad[j + 1]:
-                j += 1
-            run_t, run_T = ts[k : j + 1], Ts[k : j + 1]
-            ends_at_cut = j + 1 < n  # a cut pose follows inside this input segment
+        for r0, r1, ended in split_runs(len(ts), np.zeros(len(ts) - 1, bool), [], bad):
+            run_t, run_T = ts[r0:r1], Ts[r0:r1]
+            ends_at_cut = ended is not None  # a cut pose follows inside this input segment
             if len(run_t) < min_poses:
                 st["dropped_short"] += len(run_t)
             else:
@@ -135,7 +129,6 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
                 rows.append(SegmentRow(len(rows), run_t[0], run_t[-1], len(run_t), reason))
                 st["span_out"] += run_t[-1] - run_t[0]
                 st["poses_out"] += len(run_t)
-            k = j + 1
     st["segments_out"] = len(rows)
     if not check:
         regen = scene / "regen"

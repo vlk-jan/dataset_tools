@@ -14,8 +14,8 @@
 # the extraction itself is --jobs 1 and IO-bound, the map build is not.
 #
 # Staged entirely on node-local NVMe so the shared NFS is touched only for the
-# sif, the repo, and one final rsync of the finished scene. Same shape as
-# slurm/regen_scene.batch, minus the FAST-LIO stage: the new rig ships its own
+# sif, the repo, and one final rsync of the finished scene. No FAST-LIO stage,
+# unlike the v1 regeneration: the new rig ships its own
 # ground truth (/fixposition/odometry_enu), so no --lidar_extrinsic is needed -
 # the Odin mount extrinsic is in tf_static from 2026-09-02 onwards
 # (docs/NEW_RIG_READINESS.md §4).
@@ -69,18 +69,13 @@ OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
 # this file from its spool, so the checkout is found through the submit
 # directory rather than through $0, and --output above is relative to it too.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
-[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+. "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 # The bag list is what makes a root: row = scene number. v2 beta was built
 # from docs/v2_bags.csv; a root with a different selection passes its own.
 CSV=${CSV:-$REPO/docs/v2_bags.csv}
-SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
-SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
-PY="$REPO/.venv/bin/python"
 
-row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
-[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+read_row
 scene=$(echo "$row" | cut -d, -f1)
-bagdir=$(echo "$row" | cut -d, -f3)
 FORCE=${FORCE:-0}
 if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
     echo "$scene already complete"; exit 0
@@ -88,22 +83,12 @@ fi
 EXTRA=""
 [ "$FORCE" = "1" ] && EXTRA="--overwrite"
 
-# Node-local scratch: /data (NVMe) preferred, /tmp fallback. Needs room for the
-# bag (<= 44 GB) and the extracted scene (<= 90 GB).
-SCRATCH=""
-for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
-    mkdir -p "$c/v2_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/v2_${SLURM_JOB_ID}" && break
-done
-[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
-trap 'rm -rf "$SCRATCH"' EXIT
+# Needs room for the bag (<= 44 GB) and the extracted scene (<= 90 GB).
+make_scratch v2
 stage="$SCRATCH/stage"; local_out="$SCRATCH/out"
 mkdir -p "$stage" "$local_out"
 bag="$stage/$(basename "$bagdir")"
-BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
-
-echo "[$(date '+%F %T')] $scene fetch $bagdir -> $SCRATCH"
-rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$scene: fetch failed"; exit 10; }
-echo "[$(date '+%F %T')] $scene fetched $(du -sh "$bag" | cut -f1)"
+fetch_bag "$scene" "$bag"
 
 echo "[$(date '+%F %T')] $scene extract"
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.extract_data \

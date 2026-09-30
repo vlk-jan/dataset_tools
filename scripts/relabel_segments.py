@@ -45,31 +45,26 @@ CUT_TAG = PREFIX + "odom_mismatch"
 END_TOL = 1e-3
 
 
-def read_segments(path: Path):
-    """``(row, start_ts, end_ts, n_poses, reason)`` per data row, in file order.
-
-    ``row`` is the position in the file, which is what ``apply_scene`` rewrites
-    by; it equals the segment index for every table this package writes.
-    """
-    return [(i, s.start_ts, s.end_ts, s.n_poses, s.reason) for i, s in enumerate(gt_io.read_segments(path))]
-
-
 def plan_scene(scene_dir: Path):
     """Segments of one scene whose reason is inherited, as ``(index, old, new)``."""
     post_p = scene_dir / "odometry_segments.txt"
     pre_p = scene_dir / "regen" / "odometry_segments_prefilter.txt"
     if not (post_p.exists() and pre_p.exists()):
         return []
-    parents = read_segments(pre_p)
+    parents = gt_io.read_segments(pre_p)
     out = []
-    for i, s0, s1, _, reason in read_segments(post_p):
-        if not reason.startswith(PREFIX) or reason == CUT_TAG:
+    # ``i`` is the row's position in the file, which is what ``apply_scene``
+    # rewrites by; it equals the segment index for every table this package writes.
+    for i, s in enumerate(gt_io.read_segments(post_p)):
+        if not s.reason.startswith(PREFIX) or s.reason == CUT_TAG:
             continue
         # The parent is the input segment this run was carved out of: the one
         # whose span contains it. They are disjoint, so at most one matches.
-        parent = next((p for p in parents if p[1] - END_TOL <= s0 and s1 <= p[2] + END_TOL), None)
-        if parent is not None and abs(parent[2] - s1) > END_TOL:
-            out.append((i, reason, CUT_TAG))
+        parent = next(
+            (p for p in parents if p.start_ts - END_TOL <= s.start_ts and s.end_ts <= p.end_ts + END_TOL), None
+        )
+        if parent is not None and abs(parent.end_ts - s.end_ts) > END_TOL:
+            out.append((i, s.reason, CUT_TAG))
     return out
 
 

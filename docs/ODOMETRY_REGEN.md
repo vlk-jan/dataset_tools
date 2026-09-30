@@ -7,11 +7,12 @@ root on RCI.
 > **Where the pieces live.** The per-scene driver `run_scene.sh`, the
 > segment-restarting recorder it runs (`dataset_tools/odom_node.py` with
 > `--restart`) and `extract_wheels.py` are on the `odometry-regen-recorder`
-> branch, which `scripts/dgx07_regen.sh` and `slurm/regen_scene.batch` expect
-> checked out at `$REGEN_REPO`. `extract_odom_ref.py`, which both drivers also
+> branch, which the drivers `scripts/dgx07_regen.sh` and `slurm/regen_scene.batch`
+> (both removed since; see git history) expected checked out at `$REGEN_REPO`. `extract_odom_ref.py`, which both drivers also
 > call, is not committed on any branch; it lived only in that checkout. Main
 > carries the post-processing (`scripts/filter_segments.py`,
-> `merge_v11_fill.py`, `relabel_segments.py`) and the extraction.
+> `relabel_segments.py`; `merge_v11_fill.py` was removed after the fill, see git
+> history) and the extraction.
 >
 > Replaying a single hole rather than a whole scene is a separate pipeline with
 > its own driver and acceptance step: see
@@ -78,7 +79,8 @@ Tooling, all on the laptop:
   `pcl_ros::CropBox` nodes on `/livox/lidar_front` → `/livox/lidar_front_filtered`),
   `launch/odom_recorder.launch.py` + `dataset_tools/odom_node.py`
   (`OdomRecorder`: `/Odometry` → `trajectory.txt`, append mode, respawn).
-  `launch/body_filter.launch.py` was an experiment; nothing consumed its output.
+  `launch/body_filter.launch.py` was an experiment; nothing consumed its output
+  (removed from main; see git history).
 - `~/Work/helhest-singularity/helhest-jazzy.sif` (2026-02-18) — ROS Jazzy, the
   only image that can deserialize every v1 topic (`compass_interfaces`
   source under `/opt/helhest/src`). **Copy it aside before any rebuild**: the
@@ -264,7 +266,7 @@ scene 47 min → 93 min at rate 0.5 plus a ≤ 70 GB fetch. Array of 43 tasks,
 = array index`, outputs to `/mnt/personal`. Fully parallel → wall ≈ the longest
 scene, but the 21 cpufast nodes are shared and each task re-pays the transfer.
 Use it if dgx07 is saturated by training.
-`slurm/regen_scene.batch` implements this — one scene per array task
+`slurm/regen_scene.batch` (removed since; see git history) implemented this — one scene per array task
 (`sbatch --array=0-42%6 slurm/regen_scene.batch <out_root>`), everything on
 node-local NVMe (`/data`: 1.8 TB on cpu nodes, 7 TB on amd; both partitions
 reach subtdata and have singularity), one rsync of the finished scene to NFS.

@@ -50,10 +50,7 @@ from typing import Any
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))  # compare_v1_v12, a sibling script
 sys.path.insert(0, str(HERE.parent))  # the package, when it is not installed
-
-from compare_v1_v12 import windows  # noqa: E402
 
 from dataset_tools.gt_io import read_trajectory  # noqa: E402
 from dataset_tools.viewer import render  # noqa: E402
@@ -77,8 +74,7 @@ CURATION_SCHEMA = "dataset_tools.viewer/curation@1"
 THUMB_WIDTH = 384
 THUMB_QUALITY = 80
 
-#: Window length of the local-consistency metric, in seconds -- the same 2 s
-#: ``scripts/compare_v1_v12.py`` uses, against the same reference.
+#: Window length of the local-consistency metric, in seconds.
 WINDOW_S = 2.0
 
 #: Clouds sampled for ``pts_mean`` when ``regen/validation.csv`` has no count.
@@ -147,6 +143,26 @@ def as_float(value: Any) -> float | None:
 # --------------------------------------------------------------------------
 # the computed half
 # --------------------------------------------------------------------------
+
+
+def rel(T, i, j):
+    return np.linalg.inv(T[i]) @ T[j]
+
+
+def windows(t, T, rt, rT, segs, w):
+    """Translation error of every ``w``-second window of ``T`` against ``rT``."""
+    errs = []
+    for i in range(len(t)):
+        j = np.searchsorted(t, t[i] + w)
+        if j >= len(t) or t[j] - t[i] > w + 0.5:
+            continue
+        if segs and not any(a <= t[i] and t[j] <= b for a, b in segs):
+            continue
+        ri, rj = np.searchsorted(rt, t[i]), np.searchsorted(rt, t[j])
+        if ri >= len(rt) or rj >= len(rt) or abs(rt[ri] - t[i]) > 0.2 or abs(rt[rj] - t[j]) > 0.2:
+            continue
+        errs.append(np.linalg.norm(rel(T, i, j)[:3, 3] - rel(rT, ri, rj)[:3, 3]))
+    return np.array(errs)
 
 
 def window_errors(access: SceneAccess) -> tuple[float, float] | None:

@@ -1,8 +1,9 @@
 # Replaying ground-truth holes
 
 Status: **run (v1.3 campaign 2026-09-09, merged as v1.4 / v1.5)**. This is the
-record of that campaign and the home of the tools it used, so the next one --
-almost certainly on the v2 rig -- does not start from nothing.
+record of that campaign. The replay scripts it names (`fetch_hole_bags.sh`,
+`replay_holes.sh`, `run_scene_offset.sh`, `score_hole_replay.py`,
+`build_fill_root.py`) were removed once it finished; see git history.
 
 A *hole* is a stretch of frame time no odometry segment covers. The frames, the
 clouds, the wheel encoders and `/odom` are all there; only the ground truth is

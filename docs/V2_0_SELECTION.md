@@ -355,7 +355,7 @@ scene that holds another format than declared is an error. DRIFT
 key; DRIFT's loader needs the keyframe list to keep two columns.
 
 **v2.1 was rebuilt in that format, in place, images only**
-(`scripts/images_from_bag.py`, RCI jobs 11720341 and 11720347): for every
+(`scripts/images_from_bag.py`, removed since, see git history; RCI jobs 11720341 and 11720347): for every
 frame the bag message that decodes to exactly its pixels, so no frame changed
 its index and clouds, maps, poses and labels are untouched. 133,060 of 133,060
 frames matched; 489.4 GB of PNG became 119.0 GB of JPEG (4.1×). In scenes

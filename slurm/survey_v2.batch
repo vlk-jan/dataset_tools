@@ -19,32 +19,18 @@ set -uo pipefail
 
 OUT=${1:-/mnt/personal/$USER/HELHEST_v2_survey}
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
-[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+. "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 CSV=${CSV:-$REPO/docs/v2_inventory.csv}
-SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
-SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
-PY="$REPO/.venv/bin/python"
 
-row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
-[ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
+read_row
 session=$(echo "$row" | cut -d, -f1)
 bagname=$(echo "$row" | cut -d, -f2)
-bagdir=$(echo "$row" | cut -d, -f3)
 dest="$OUT/$session/$bagname"
 [ -e "$dest/summary.json" ] && { echo "$bagname already surveyed"; exit 0; }
 
-SCRATCH=""
-for c in /data/temporary/$USER /data/$USER /tmp/$USER; do
-    mkdir -p "$c/survey_${SLURM_JOB_ID}" 2>/dev/null && SCRATCH="$c/survey_${SLURM_JOB_ID}" && break
-done
-[ -n "$SCRATCH" ] || { echo "no writable scratch"; exit 1; }
-trap 'rm -rf "$SCRATCH"' EXIT
+make_scratch survey
 bag="$SCRATCH/$bagname"
-BINDS="--bind /mnt/personal --bind /mnt/data --bind $SCRATCH"
-
-echo "[$(date '+%F %T')] $bagname fetch $bagdir"
-rsync -a --partial "$SUBTDATA:$bagdir/" "$bag/" || { echo "$bagname: fetch failed"; exit 10; }
-echo "[$(date '+%F %T')] $bagname fetched $(du -sh "$bag" | cut -f1)"
+fetch_bag "$bagname" "$bag"
 
 mkdir -p "$SCRATCH/out"
 singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/survey_v2_bag.py" "$bag" "$SCRATCH/out"

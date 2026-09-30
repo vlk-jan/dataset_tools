@@ -23,13 +23,10 @@ setup(
         (os.path.join("share", package_name), ["package.xml"]),
         (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),
     ],
-    install_requires=["setuptools"],
-    zip_safe=True,
     maintainer="Jan Vlk",
     maintainer_email="vlkjan6@fel.cvut.cz",
     description="Tools for extracting the HELHEST robot dataset from ROS 2 bags.",
     license="BSD-3-Clause",
-    tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "odom_recorder = dataset_tools.odom_node:main",
