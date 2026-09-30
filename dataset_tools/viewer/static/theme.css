@@ -1,0 +1,80 @@
+/* The viewer's palette: Catppuccin Latte (light) and Mocha (dark), with the
+   same single blue accent as the author's web page, so the two read as one
+   family. Light is the default; theme.js sets data-theme="dark" on <html>
+   from the saved choice or the OS preference before the page paints.
+
+   The 3D view's panel (#dt-panel, .dt-build) is always dark: it floats over
+   SimView's renderer, which is dark whatever the page around it says.
+
+   Tokens only -- every page's stylesheet imports this one. */
+:root {
+  color-scheme: light;
+  --bg: #e6e9ef;        /* mantle */
+  --panel: #eff1f5;     /* base */
+  --panel-2: #dce0e8;   /* crust */
+  --line: #bcc0cc;      /* surface1 */
+  --line-2: #acb0be;    /* surface2 */
+  --fg: #4c4f69;        /* text */
+  --fg-2: #5c5f77;      /* subtext1 */
+  --muted: #6c6f85;     /* subtext0 */
+  --faint: #8c8fa1;     /* overlay1 */
+  --accent: #1e66f5;    /* blue */
+  --ok: #40a02b;
+  --warn: #fe640b;      /* peach, as the web page's warning colour */
+  --caution: #df8e1d;   /* yellow */
+  --bad: #d20f39;
+  /* Train/val. Deliberately not --ok/--warn/--bad: which side of a split a
+     scene is on is not a quality judgement, and a held-out scene reading as a
+     warning is exactly the wrong thing for it to say. Mauve for held out,
+     sapphire for trained on, grey for a scene in neither. */
+  --val: #8839ef;
+  --train: #209fb5;
+  /* Component tokens: the groove a timeline is drawn in, the backdrop an
+     image or a matrix sits on. */
+  --track: #ccd0da;     /* surface0 */
+  --shade: #dce0e8;     /* crust */
+}
+:root[data-theme="dark"], #dt-panel, .dt-build {
+  color-scheme: dark;
+  --bg: #181825;        /* mantle */
+  --panel: #1e1e2e;     /* base */
+  --panel-2: #313244;   /* surface0 */
+  --line: #45475a;      /* surface1 */
+  --line-2: #585b70;    /* surface2 */
+  --fg: #cdd6f4;
+  --fg-2: #bac2de;
+  --muted: #a6adc8;
+  --faint: #7f849c;
+  --accent: #89b4fa;
+  --ok: #a6e3a1;
+  --warn: #fab387;
+  --caution: #f9e2af;
+  --bad: #f38ba8;
+  --val: #cba6f7;
+  --train: #74c7ec;
+  --track: #313244;
+  --shade: #11111b;     /* crust */
+}
+/* Washes and rules derived from the hues above, so each theme gets its own
+   without a second list. Declared on every element that redefines the hues,
+   or they would be computed once from the light ones and inherited. */
+:root, #dt-panel, .dt-build {
+  --ok-soft: color-mix(in srgb, var(--ok) 18%, var(--panel));
+  --val-soft: color-mix(in srgb, var(--val) 18%, var(--panel));
+  --train-soft: color-mix(in srgb, var(--train) 18%, var(--panel));
+  --accent-soft: color-mix(in srgb, var(--accent) 22%, var(--panel));
+  --ok-line: color-mix(in srgb, var(--ok) 45%, var(--panel));
+  --warn-line: color-mix(in srgb, var(--warn) 45%, var(--panel));
+  --bad-line: color-mix(in srgb, var(--bad) 45%, var(--panel));
+  --accent-line: color-mix(in srgb, var(--accent) 55%, var(--panel));
+}
+
+/* The toggle theme.js puts at the end of a page's header. */
+.theme-toggle {
+  margin-left: auto; align-self: center;
+  width: 32px; height: 32px; padding: 0; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

@@ -379,9 +379,16 @@ def test_the_index_and_the_scene_page_share_one_palette():
     for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line"):
         assert token not in index_scope, f"{token} is redefined for the index"
     assert "--sans" in index_scope  # only the type stacks are the index's own
-    root_scope = css[css.index(":root {") :].split("}", 1)[0]
-    for token in ("--track", "--ok-soft", "--shade", "--mono"):
-        assert token in root_scope
+    assert '@import url("theme.css")' in css
+    assert "--mono" in css[css.index(":root {") :].split("}", 1)[0]
+    # The palette is theme.css's: light on :root, and dark redefining every
+    # hue the light one sets, so no token leaks from one theme into the other.
+    theme = (Path(viewer.__file__).parent / "static" / "theme.css").read_text()
+    light = theme[theme.index(":root {") :].split("}", 1)[0]
+    dark = theme[theme.index(':root[data-theme="dark"]') :].split("}", 1)[0]
+    for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line", "--track", "--shade"):
+        assert f"{token}:" in light and f"{token}:" in dark, token
+    assert "--ok-soft" in theme
 
 
 def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
