@@ -24,8 +24,8 @@
   --val-soft: #2b2140;
   --train: #5f7fa8;
   --train-soft: #1e2735;
-  /* Type stacks. The index overrides these with web fonts; everything sizes
-     off the same stacks either way. */
+  /* Type stacks. System fonts only: the viewer runs where there is no route
+     to the internet, and everything sizes off these three. */
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", monospace;
@@ -516,15 +516,12 @@ button.chip[aria-expanded="true"] {
 .notemark:hover { text-decoration: none; border-color: var(--warn); }
 
 /* -------------------------------------------------------- index typography
-   The scene index reads as a document rather than a control panel, so it
-   swaps in the atlas page's type. Loaded non-blocking: without the web fonts
-   it falls back to the same system stacks every other page uses. */
-body.atlas {
-  --sans: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --display: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
-  font-family: var(--sans);
-}
+   The scene index reads as a document rather than a control panel. It used to
+   swap in the atlas page's web fonts from Google; they went, because the
+   viewer runs where there is no route to the internet (the reason Leaflet is
+   vendored) and three headings do not justify vendoring a font. The same
+   system stacks as every other page, with balanced headings. */
+body.atlas { font-family: var(--sans); }
 body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-wrap: balance; }
 
 /* --------------------------------------------------------- the GNSS map

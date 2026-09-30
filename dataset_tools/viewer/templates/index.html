@@ -6,10 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
-{# Non-blocking: the page is fully readable in the system stack, and upgrades
-   if the machine viewing it can reach Google Fonts. #}
-<link rel="stylesheet" media="print" onload="this.media='all'"
-      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+{# No web fonts: the viewer runs where there is no route to the internet (the
+   reason Leaflet is vendored), and a request to Google Fonts from every index
+   view is a network dependency for three headings. System stacks throughout. #}
 </head>
 <body class="atlas">
 <header>
