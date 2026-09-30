@@ -27,32 +27,34 @@
     {% if index + 1 < probe.n_frames %}
     <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index + 1 }}">frame {{ index + 1 }} &rarr;</a>
     {% else %}<span class="btn disabled">last frame &rarr;</span>{% endif %}
+    {% if details.overlay %}
+    <button type="button" class="btn cloudtoggle" id="cloudtoggle" aria-pressed="false"
+            title="Project this frame's lidar cloud onto the image"
+            data-cloud="/api/scene/{{ scene_id }}/frame/{{ index }}/overlay.jpg?w=1280">Cloud on image</button>
+    {% endif %}
   </div>
 
   <div class="framepage">
     <div class="framemain">
       {% if details.present.images %}
-      <img class="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
-           alt="scene {{ scene_id }} frame {{ index }}">
-      {% else %}
-      <div class="card"><span class="muted">This frame has no camera image on disk.</span></div>
-      {% endif %}
-
-      {# The calibration check: this frame's cloud on this frame's picture.
-         Only where the scene has T_cam_to_base.txt and K and the frame has
-         both files -- otherwise nothing, rather than a broken image. #}
-      {% if details.overlay %}
       <figure class="bigoverlay">
-        <img class="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/overlay.jpg?w=1280"
-             alt="scene {{ scene_id }} frame {{ index }}, lidar cloud projected into the camera image"
-             loading="lazy" decoding="async">
-        <figcaption class="muted">
-          <b>Cloud on image.</b> Every lidar return of this frame projected through
+        <img class="bigframe" id="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
+             alt="scene {{ scene_id }} frame {{ index }}">
+        {# The calibration check: this frame's cloud on this frame's picture,
+           swapped in over the same image by the button. Only where the scene
+           has T_cam_to_base.txt and K and the frame has both files --
+           otherwise no button, rather than a broken image. #}
+        {% if details.overlay %}
+        <figcaption class="muted" id="cloudcap" hidden>
+          Every lidar return of this frame projected through
           <code>camera_intrinsics.txt</code> and <code>T_cam_to_base.txt</code>, coloured by
           depth (blue near, red far). If the road lands beside
           the road, or a trunk a metre from its picture, the extrinsic is wrong.
         </figcaption>
+        {% endif %}
       </figure>
+      {% else %}
+      <div class="card"><span class="muted">This frame has no camera image on disk.</span></div>
       {% endif %}
 
       <div class="tiles">
@@ -189,6 +191,28 @@
 {% if map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>
+{% endif %}
+{% if details.overlay %}
+<script>
+// The cloud toggle. Remembered across frames, so paging through a scene with
+// the cloud on keeps it on; the overlay is only fetched once it is asked for.
+(() => {
+  const img = document.getElementById("bigframe");
+  const btn = document.getElementById("cloudtoggle");
+  const cap = document.getElementById("cloudcap");
+  const plain = img.src;
+  const set = (on) => {
+    img.src = on ? btn.dataset.cloud : plain;
+    img.alt = on ? img.alt.replace(/(, lidar cloud.*)?$/, ", lidar cloud projected into the camera image")
+                 : img.alt.replace(/, lidar cloud.*$/, "");
+    btn.setAttribute("aria-pressed", on);
+    cap.hidden = !on;
+    try { localStorage.setItem("cloudOnImage", on ? "1" : ""); } catch {}
+  };
+  btn.addEventListener("click", () => set(btn.getAttribute("aria-pressed") !== "true"));
+  try { if (localStorage.getItem("cloudOnImage")) set(true); } catch {}
+})();
+</script>
 {% endif %}
 </body>
 </html>
