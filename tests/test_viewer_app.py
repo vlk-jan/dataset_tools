@@ -31,6 +31,8 @@ def test_index_and_scene_pages_render(client):
     r = client.get("/scene/0000")
     assert r.status_code == 200
     assert "Segment 0" in r.text
+    # The header's jump list reaches the other scenes.
+    assert 'href="/scene/0001"' in r.text
 
 
 def test_unknown_scene_is_a_404(client):

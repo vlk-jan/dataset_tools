@@ -321,6 +321,7 @@ def create_app(
             context={
                 "root": root,
                 "scene_id": scene_id,
+                "scene_ids": root.scene_ids(),
                 "probe": access.probe,
                 "windows": windows,
                 "artefacts": ARTEFACTS,

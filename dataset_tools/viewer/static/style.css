@@ -718,3 +718,19 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .sig .xaxis span.r { transform: translateX(-100%); }
 .sig .xaxis span.r::before { left: auto; right: 0; }
 .sig .signote { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+
+/* The scene page's jump-to-scene arrow, next to the scene number in the h1. */
+.scene-jump { display: inline-block; position: relative; font-size: 16px; font-weight: 400; }
+.scene-jump summary { list-style: none; cursor: pointer; color: var(--muted); padding: 0 4px; }
+.scene-jump summary::-webkit-details-marker { display: none; }
+.scene-jump summary::after { content: "▾"; }
+.scene-jump[open] summary::after { content: "▴"; }
+.scene-jump summary:hover { color: var(--fg); }
+.scene-jump ul {
+  position: absolute; left: 0; top: 100%; z-index: 1200; margin: 4px 0 0; padding: 4px 0;
+  list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  max-height: 60vh; overflow-y: auto; width: max-content; box-shadow: 0 4px 12px rgb(0 0 0 / .2);
+}
+.scene-jump li a { display: block; padding: 2px 10px; font-family: ui-monospace, monospace; }
+.scene-jump li a:hover { background: var(--panel-2); text-decoration: none; }
+.scene-jump li a[aria-current] { color: var(--fg); font-weight: 600; }
