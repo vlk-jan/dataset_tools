@@ -638,7 +638,11 @@ of ground-level cells at 0-2 / 2-4 / 4-6.4 m from the robot against 0.79 / 0.12
 2 m it does separate obstacles from ground; within 2 m, where the wheels are
 about to go, it admits most of both, and everywhere the number falls with
 range. Read it as "near the path and seen by the lidar", not as a terrain
-match (DRIFT `docs/METHOD.md`, issue 24). The **Driven & drivable** tile shows
+match (DRIFT `docs/METHOD.md`, issue 24). The same checkpoint's compression
+prediction has the same reach: on held-out windows it tracks the target out to
+about 1.5 m and decays to nothing by 3-4 m, so the trust bubble and the head's
+own footprint coincide because both fade with range, not because they agree
+about terrain. The **Driven & drivable** tile shows
 one frame of it unmixed: the ember ramp is `max_sim`, a visible step marks the
 threshold, and the driven cells are cyan.
 
