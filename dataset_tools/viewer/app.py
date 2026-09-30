@@ -23,6 +23,8 @@ network storage, and a slow read must not block the event loop serving the page.
 from __future__ import annotations
 
 import asyncio
+import bisect
+import hashlib
 import json
 import logging
 import re
@@ -33,8 +35,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import numpy as np
 from fastapi import Body, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -43,10 +46,11 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
+from .loaders import load_cloud, load_npz_key, read_text, roll_pitch_from_gravity_align
 from .notes import NoteStore, NotesUnavailable
-from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot
+from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape
 from .scene_page import build_scene_page, map_card
-from .segment_page import build_segment_page
+from .segment_page import attitude_per_window, build_segment_page
 from .segment_page import find as find_segment
 from .windows import (
     DEFAULT_MAX_FRAMES,
@@ -171,11 +175,21 @@ class ViewerState:
 
     def access(self, scene_id: str) -> SceneAccess:
         """A cached per-scene handle. Bounded so a long session browsing many
-        scenes does not accumulate every scene's arrays in memory."""
-        if scene_id in self._access:
+        scenes does not accumulate every scene's arrays in memory.
+
+        Dropped when the scene directory has changed since the handle was
+        made: a scene still being written gains height maps and a timestamp
+        file while it is looked at, and a handle from before that would keep
+        serving the old frame list. ``root.probe`` is one ``stat`` while the
+        mtime holds, so the check costs nothing on a finished root.
+        """
+        cached = self._access.get(scene_id)
+        if cached is not None and self.root.probe(scene_id) is cached.probe:
             self._access_order.remove(scene_id)
             self._access_order.append(scene_id)
-            return self._access[scene_id]
+            return cached
+        if cached is not None:
+            self._access_order.remove(scene_id)
         access = SceneAccess(self.root, scene_id)
         self._access[scene_id] = access
         self._access_order.append(scene_id)
@@ -197,6 +211,7 @@ def create_app(
     author: str = "",
     clear_cache: bool = False,
     allowed_hosts: Sequence[str] | None = None,
+    prefetch: bool = True,
 ) -> FastAPI:
     """The viewer as an ASGI app.
 
@@ -205,6 +220,11 @@ def create_app(
     the loopback interface passes the loopback names here, which stops a page
     on another site from reaching it through a hostname that resolves to
     127.0.0.1 (DNS rebinding). ``None`` answers every host.
+
+    ``prefetch`` starts building the window after the one just opened, so
+    paging through a scene with ``[`` / ``]`` does not wait on a build; off
+    for a root on storage slow enough that an unasked build competes with the
+    one being looked at.
     """
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
     state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds)
@@ -274,8 +294,6 @@ def create_app(
     # browser that cached the old response (with any freshness lifetime) would
     # mix stale trajectory blobs with fresh model.json. A new stamp on every
     # code change makes previously cached entries unaddressable.
-    import hashlib
-
     _h = hashlib.sha1()
     # Every module whose output ends up inside a bundle, not just the three
     # that write it: a change to how windows are cut (windows.py), how poses
@@ -310,9 +328,25 @@ def create_app(
                 "manifest": root.manifest(),
                 "simview_version": _simview_version(),
                 "simview_ok": simview_ok,
+                "notes_enabled": notes_store.enabled,
                 **page,
             },
         )
+
+    @app.get("/notes", response_class=HTMLResponse)
+    async def notes_index(request: Request, topic: str | None = Query(None, max_length=32)):
+        """Every note in the root on one page, grouped by topic.
+
+        Notes are written one scene at a time, from wherever a bad stretch was
+        noticed; this is where they are read back as a list of what is wrong
+        with the root. With notes off the page still answers, saying so.
+        """
+        page = await run_in_threadpool(_notes_index, state, notes_store, topic)
+        return templates.TemplateResponse(request=request, name="notes.html", context={"root": root, **page})
+
+    @app.get("/api/notes")
+    async def api_notes_index(topic: str | None = Query(None, max_length=32)):
+        return await run_in_threadpool(_notes_index, state, notes_store, topic)
 
     @app.get("/scene/{scene_id}", response_class=HTMLResponse)
     async def scene_page(
@@ -354,6 +388,9 @@ def create_app(
                 # Which windows a note lands in, so the table says where the
                 # flagged stretches are without anyone reading every note.
                 "notes_per_window": _notes_per_window(scene_notes, windows),
+                # How far each window's ground truth has wandered from the
+                # IMU, so the segments worth opening are told apart here.
+                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, windows),
             },
         )
 
@@ -394,14 +431,13 @@ def create_app(
                 "notes": [n for n in scene_notes if n.overlaps(lo, hi)],
                 "notes_status": notes_store.status(),
                 "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
+                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, detail["windows"]),
             },
         )
 
     @app.get("/scene/{scene_id}/jump")
     async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
         """The frames tab's jump box: clamp to the scene and go to that frame."""
-        from fastapi.responses import RedirectResponse
-
         access = _access_or_404(state, scene_id)
         last = max(0, access.probe.n_frames - 1)
         return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
@@ -511,11 +547,18 @@ def create_app(
             f"/api/data/{bundle_key}/{stamp}",
             body,
             head,
+            f"Scene {scene_id} {window_key} — 3D view",
         )
         # Defer SimView's own entry point: it fetches the scene the instant it
         # runs, and the bundle may still be building. The overlay controller
         # re-inserts this exact script once the build reports ready.
         page = _defer_main_script(page)
+        if prefetch and next_window is not None:
+            # The window ] pages to, built now rather than when asked for. It
+            # takes the same per-bundle lock a request would, so a reader who
+            # pages before it is done joins the build instead of starting a
+            # second one; and it never surfaces an error -- nobody asked.
+            asyncio.ensure_future(_prefetch(state, scene_id, next_window.key, opts.cache_key()))
         return HTMLResponse(page)
 
     # ------------------------------------------------------------------- api
@@ -599,6 +642,31 @@ def create_app(
             raise HTTPException(404, f"no image for frame {index}")
         return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
 
+    @app.get("/api/scene/{scene_id}/frame/{index}/overlay.jpg")
+    async def api_frame_overlay(scene_id: str, index: int, w: int = Query(1280, ge=64, le=1920)):
+        """The frame's cloud projected into its image: a check on the extrinsic.
+
+        404 rather than a bare picture when the scene cannot support it -- no
+        ``T_cam_to_base.txt`` (a v1 root's ``T_cam_to_lidar.txt`` is in the
+        lidar frame and would draw the cloud in the wrong place), no ``K``, or
+        no image or cloud for this frame.
+        """
+        access = _access_or_404(state, scene_id)
+        if not _overlay_possible(access):
+            raise HTTPException(404, f"scene {scene_id} has no camera calibration to project with")
+
+        def work():
+            image = access.frame_path("images", index)
+            cloud = load_cloud(access.frame_path("clouds", index))
+            if cloud is None or not image.is_file():
+                return None
+            return _safe_render(render.render_cloud_on_image, image, cloud, access.K, access.T_cam, w)
+
+        data = await run_in_threadpool(work)
+        if data is None:
+            raise HTTPException(404, f"no image and cloud to overlay for frame {index}")
+        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
+
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
         """One index thumbnail: the curated file if the root has one, else a live frame.
@@ -656,7 +724,6 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
         access = _access_or_404(state, scene_id)
-        from .loaders import load_cloud
 
         def work():
             cloud = load_cloud(access.frame_path("clouds", index))
@@ -893,8 +960,6 @@ def _defer_main_script(page: str) -> str:
     recording its URL lets the overlay insert it after the build is ready --
     the front-end itself is untouched and runs exactly as it normally does.
     """
-    import re
-
     match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
     if not match:
         logger.warning("could not find simview's main.js script tag; loading it inline")
@@ -1037,9 +1102,15 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             raise HTTPException(500, f"build failed ({type(exc).__name__}); see the viewer's log") from exc
 
 
-async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
-    from .loaders import load_npz_key
+async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> None:
+    """Build a window nobody has asked for yet, quietly."""
+    try:
+        await _ensure_bundle(state, scene_id, window_key, opts_key)
+    except Exception as exc:  # noqa: BLE001 - the request that wants it will report properly
+        logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
+
+async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
     def work():
         arr = load_npz_key(access.frame_path(kind, index), key)
         return None if arr is None else renderer(arr)
@@ -1091,6 +1162,19 @@ def _read_driven_sidecar(path: Path):
     return driven, max_sim, threshold
 
 
+def _overlay_possible(access: SceneAccess) -> bool:
+    """Can this scene's clouds be drawn on its images at all?
+
+    Needs ``K`` and ``T_cam_to_base.txt`` specifically: ``access.T_cam`` falls
+    back to a v1 root's ``T_cam_to_lidar.txt``, which is the camera in the raw
+    lidar frame, not the base frame the clouds are in.
+    """
+    p = access.probe
+    if not (p.has("images") and p.has("clouds") and p.has("camera_intrinsics") and p.has("T_cam_to_base")):
+        return False
+    return access.K is not None and access.T_cam is not None
+
+
 def _safe_render(fn, *args):
     try:
         return fn(*args)
@@ -1101,10 +1185,6 @@ def _safe_render(fn, *args):
 
 def _scene_details(access: SceneAccess) -> dict[str, Any]:
     """Small, cheap, human-facing extras for the scene page."""
-    import numpy as np
-
-    from .loaders import read_text
-
     details: dict[str, Any] = {}
     if access.K is not None:
         details["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()
@@ -1229,8 +1309,6 @@ def _page_of_frame(access: SceneAccess, index: int) -> int:
     directory the browser pages through the frames that *exist*, so a frame's
     page is its position in that list, not its own number.
     """
-    import bisect
-
     indices = _frame_indices(access)
     if not indices:
         return 0
@@ -1279,10 +1357,6 @@ def _frame_details(
     the per-frame artefacts. No cloud, image or height map is decoded here --
     those are separate requests the browser makes for itself.
     """
-    import numpy as np
-
-    from .probe import _npy_shape
-
     probe = access.probe
     details: dict[str, Any] = {
         "index": index,
@@ -1307,6 +1381,8 @@ def _frame_details(
     for kind in ("images", "clouds", "height_maps", "height_masks", "driven_similarity"):
         present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
     details["present"] = present
+    # The cloud-on-image check needs both per-frame files and the calibration.
+    details["overlay"] = present["images"] and present["clouds"] and _overlay_possible(access)
 
     if present["driven_similarity"]:
         # The one per-frame array this page does decode: a 128x128 bool and a
@@ -1330,8 +1406,6 @@ def _frame_details(
 
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
-        from .loaders import roll_pitch_from_gravity_align
-
         roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
         details["roll_deg"] = round(float(np.degrees(roll[0])), 2)
         details["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)
@@ -1353,11 +1427,7 @@ def _frame_details(
     else:
         details["segment"] = None
 
-    # The enumerated window this frame sits in: a ground-truth one if there is
-    # one, otherwise the whole-scene fallback. This is the "show me the motion
-    # around this frame" link, as opposed to the static single-frame view.
-    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
-    best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
+    best = _window_of_frame(access, index, max_frames, max_seconds)
     if best is not None:
         details["window"] = {
             "key": best.key,
@@ -1372,10 +1442,56 @@ def _frame_details(
     return details
 
 
-def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
-    """Per-frame numbers for the overlay's readout."""
-    import numpy as np
+def _window_of_frame(access: SceneAccess, index: int, max_frames: int, max_seconds: float) -> Window | None:
+    """The enumerated window a frame sits in: a ground-truth one if there is
+    one, otherwise the whole-scene fallback. This is the "show me the motion
+    around this frame" link, as opposed to the static single-frame view."""
+    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
+    return next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
 
+
+def _notes_index(state: ViewerState, notes_store: NoteStore, topic: str | None) -> dict[str, Any]:
+    """Every note in the root, grouped by topic, for the ``/notes`` page.
+
+    Each note carries the links the page draws: its scene, its first frame and
+    the window holding that frame opened on it. A notes file for a scene the
+    root does not have is listed and said to be orphaned rather than dropped --
+    the note is a person's work, and a scene renumbered out from under it is
+    exactly the case worth seeing.
+    """
+    by_scene = notes_store.list_all()
+    known = set(state.root.scene_ids(refresh=True))
+    rows: list[dict[str, Any]] = []
+    for scene_id, notes in by_scene.items():
+        access = state.access(scene_id) if scene_id in known else None
+        for note in notes:
+            window = _window_of_frame(access, note.frame_start, state.max_frames, state.max_seconds) if access else None
+            rows.append(
+                {
+                    **note.to_json(),
+                    "scene": scene_id,
+                    "orphan": access is None,
+                    "view_url": f"/view/{scene_id}/{window.key}?frame={note.frame_start}" if window else None,
+                }
+            )
+    # The UI's own topics in their own order, then anything hand-written after.
+    offered = notes_store.status()["topics"]
+    topics = sorted({r["topic"] for r in rows}, key=lambda t: (offered.index(t) if t in offered else len(offered), t))
+    if topic:
+        rows = [r for r in rows if r["topic"] == topic]
+    groups = [{"topic": t, "notes": [r for r in rows if r["topic"] == t]} for t in topics]
+    return {
+        "topic": topic,
+        "topics": topics,
+        "groups": [g for g in groups if g["notes"]],
+        "n_notes": len(rows),
+        "n_scenes": len({r["scene"] for r in rows}),
+        "status": notes_store.status(),
+    }
+
+
+def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
+    """Per-frame numbers, as JSON, for anything that wants them without a page."""
     info: dict[str, Any] = {"frame": index}
     ts = access.frame_ts
     if ts is not None and 0 <= index < len(ts):
@@ -1387,8 +1503,6 @@ def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
             info["camera_lidar_offset_ms"] = round((info["timestamp"] - float(pcd[index])) * 1000, 2)
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
-        from .loaders import roll_pitch_from_gravity_align
-
         roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
         info["roll_deg"] = round(float(np.degrees(roll[0])), 2)
         info["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)

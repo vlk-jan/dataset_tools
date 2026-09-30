@@ -24,8 +24,8 @@
   --val-soft: #2b2140;
   --train: #5f7fa8;
   --train-soft: #1e2735;
-  /* Type stacks. The index overrides these with web fonts; everything sizes
-     off the same stacks either way. */
+  /* Type stacks. System fonts only: the viewer runs where there is no route
+     to the internet, and everything sizes off these three. */
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", monospace;
@@ -66,6 +66,8 @@ td.num small { display: block; font-size: 12px; font-family: var(--mono); }
 .chip.yes { color: var(--ok); border-color: #2f6b4f; }
 .chip.no { color: #8a6060; border-color: #5a3a3a; text-decoration: line-through; }
 .chip.partial { color: var(--warn); border-color: #6b5a2f; }
+/* A verdict that failed, as opposed to a file that is absent: red, not struck through. */
+.chip.bad { color: var(--bad); border-color: #6b3a3a; }
 .card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
@@ -403,6 +405,8 @@ button.chip[aria-expanded="true"] {
 .fileinfo .kv dd { font-variant-numeric: normal; overflow-wrap: anywhere; }
 
 /* ------------------------------------------------- scene tabs & frame pages */
+/* A region being swapped in place (swap.js) dims until the new one lands. */
+[data-swap][aria-busy="true"] { opacity: .6; }
 .tabs { display: flex; gap: 2px; margin: 26px 0 0; border-bottom: 1px solid var(--line); }
 .tab {
   padding: 7px 14px; border: 1px solid var(--line); border-bottom: 0;
@@ -438,7 +442,6 @@ button.chip[aria-expanded="true"] {
 .framelabel small { color: var(--muted); font-size: 11.5px; }
 
 .pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
-.btn.disabled { color: var(--muted); border-style: dashed; }
 
 .framenav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
@@ -446,6 +449,12 @@ button.chip[aria-expanded="true"] {
 .bigframe {
   width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: #0d0f13;
 }
+/* The cloud-on-image check under the big frame: the same width as the frame,
+   with what it is said under it rather than left to be guessed. */
+.bigoverlay { margin: 12px 0 0; }
+.bigoverlay figcaption { font-size: 13px; margin-top: 6px; max-width: 100ch; }
+.bigoverlay figcaption b { color: var(--fg); font-weight: 600; }
+.bigoverlay figcaption code { font-size: 12px; }
 .framemain .tiles {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px; margin-top: 12px;
@@ -518,15 +527,12 @@ button.chip[aria-expanded="true"] {
 .notemark:hover { text-decoration: none; border-color: var(--warn); }
 
 /* -------------------------------------------------------- index typography
-   The scene index reads as a document rather than a control panel, so it
-   swaps in the atlas page's type. Loaded non-blocking: without the web fonts
-   it falls back to the same system stacks every other page uses. */
-body.atlas {
-  --sans: "Source Sans 3", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --display: Archivo, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
-  font-family: var(--sans);
-}
+   The scene index reads as a document rather than a control panel. It used to
+   swap in the atlas page's web fonts from Google; they went, because the
+   viewer runs where there is no route to the internet (the reason Leaflet is
+   vendored) and three headings do not justify vendoring a font. The same
+   system stacks as every other page, with balanced headings. */
+body.atlas { font-family: var(--sans); }
 body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-wrap: balance; }
 
 /* --------------------------------------------------------- the GNSS map

@@ -81,6 +81,9 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("T_cam_to_base", "T_cam_to_base.txt", "file", "Camera extrinsic", "4x4 camera-optical -> base"),
     Artefact("T_cam_to_lidar", "T_cam_to_lidar.txt", "file", "Camera->lidar extrinsic", "4x4, older roots"),
     Artefact("source_bag", "source_bag.txt", "file", "Source bag", "provenance of the recording"),
+    Artefact("time_align", "time_align.txt", "file", "Frame-clock correction", "the latency taken off the frame clock, per window measured"),
+    Artefact("gnss_guard", "gnss_guard.txt", "file", "GNSS guard", "fabricated pose stretches removed, and what they cost"),
+    Artefact("tf_pins", "tf_pins.txt", "file", "Pinned transforms", "the static transforms pinned to a constant, and what the bag said"),
 )
 # fmt: on
 
@@ -187,6 +190,25 @@ ARTEFACT_PURPOSE: dict[str, str] = {
     "source_bag": (
         "Which recording this scene was extracted from. Provenance only, but it is the only link "
         "back to the raw bag the scene came out of."
+    ),
+    "time_align": (
+        "What the frame clock was corrected by and on what evidence: the sensor unit stamps at "
+        "publish, not at capture, so the extractor measures its latency against the clouds it "
+        "wrote and takes it off data_ts.txt and pcd_ts.txt. One row per window measured; the "
+        "Extraction card on this page sums it up. Absent when --time_align was off, or on a root "
+        "extracted before the correction existed."
+    ),
+    "gnss_guard": (
+        "The stretches of fabricated GNSS/INS pose the extractor removed -- a receiver that has "
+        "lost its fix keeps publishing a reset position -- with what they cost in poses and "
+        "frames, and how many further frames went for having no pose under them at all. Absent "
+        "when the guard did not run (wheel odometry, or --gnss_guard off)."
+    ),
+    "tf_pins": (
+        "The static transforms the extractor pinned to one constant for every bag, because the "
+        "Odin1 re-estimates its own extrinsics as it runs: for each, the pin the scene was built "
+        "with and what the bag's own /tf_static said, so a bag whose estimate sat far from the "
+        "constant can be found. Absent when nothing was pinned (a Livox bag, or --tf_pins off)."
     ),
 }
 
@@ -357,16 +379,25 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
 
 
 def _first_last_float(path: Path) -> tuple[float, float] | None:
-    """First and last parseable float in a text file, without reading it all."""
+    """First and last parseable float in a text file, without reading it all.
+
+    Blank and ``#`` lines are skipped at both ends, as ``loaders.read_timestamps``
+    skips them, so a header comment does not cost a scene its duration.
+    """
+
+    def data_lines(chunk: bytes) -> list[str]:
+        lines = chunk.decode("utf-8", "replace").splitlines()
+        return [ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+
     try:
         size = path.stat().st_size
         with open(path, "rb") as fh:
-            first = fh.readline().decode("utf-8", "replace").strip()
-            tail_start = max(0, size - 4096)
-            fh.seek(tail_start)
-            tail = fh.read().decode("utf-8", "replace").strip().splitlines()
-        last = tail[-1].strip() if tail else first
-        return float(first.split()[0]), float(last.split()[0])
+            head = data_lines(fh.read(4096))
+            fh.seek(max(0, size - 4096))
+            tail = data_lines(fh.read())
+        if not head:
+            return None
+        return float(head[0].split()[0]), float((tail or head)[-1].split()[0])
     except (OSError, ValueError, IndexError):
         return None
 
@@ -388,6 +419,7 @@ class DatasetRoot:
         self._csv_rows: dict[str, dict] | None = None
         self._atlas: dict | None | object = _UNSET
         self._disk_usage: dict | None | object = _UNSET
+        self._validation: dict | None | object = _UNSET
         self._splits: SceneSplits | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
@@ -409,7 +441,10 @@ class DatasetRoot:
         return self._scene_ids
 
     def scene_dir(self, scene_id: str) -> Path:
-        if not scene_id.isdigit() or scene_id not in self.scene_ids():
+        # A scene that appeared after the list was taken -- an array job still
+        # writing the root -- is looked for once more before being refused.
+        known = scene_id.isdigit() and (scene_id in self.scene_ids() or scene_id in self.scene_ids(refresh=True))
+        if not known:
             raise KeyError(f"unknown scene {scene_id!r}")
         return self.path / scene_id
 
@@ -481,6 +516,34 @@ class DatasetRoot:
     def disk_usage_scene(self, scene_id: str) -> dict:
         entry = ((self.disk_usage() or {}).get("scenes") or {}).get(scene_id)
         return entry if isinstance(entry, dict) else {}
+
+    def validation(self) -> dict[str, dict[str, str]] | None:
+        """``validation.csv``, the report ``helhest-validate --csv`` writes, by scene.
+
+        ``slurm/finalize_v2.sh`` leaves it at the root. It carries a status
+        and the numbers per scene and *counts* of errors and warnings, not
+        their text -- the messages only go to the validator's own output. Read
+        once per process, like the atlas; ``None`` when absent or unreadable.
+        """
+        if self._validation is _UNSET:
+            rows: dict[str, dict[str, str]] | None = None
+            path = self.path / "validation.csv"
+            if path.is_file():
+                try:
+                    with open(path, newline="") as fh:
+                        rows = {}
+                        for row in csv.DictReader(fh):
+                            key = (row.get("scene") or "").strip()
+                            if key and row.get("status"):
+                                rows[key] = {k: (v or "").strip() for k, v in row.items() if k}
+                except (OSError, csv.Error) as exc:
+                    logger.warning("cannot read validation.csv: %s", exc)
+                    rows = None
+            self._validation = rows
+        return self._validation
+
+    def validation_scene(self, scene_id: str) -> dict[str, str]:
+        return (self.validation() or {}).get(scene_id, {})
 
     def atlas_scene(self, scene_id: str) -> dict:
         atlas = self.atlas() or {}
@@ -566,8 +629,13 @@ class DatasetRoot:
         scene, so the first index render of a 43-scene root serialised it 43
         times -- quadratic in the number of scenes, for one file that only has
         to be right at the end.
+
+        The scene list is always re-read: one listing of the root, so a scene
+        an array job finished after the viewer started shows up on the next
+        index render rather than after a restart. Each scene's probe still
+        stands while its directory's mtime does.
         """
-        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=refresh)]
+        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=True)]
         self.save_probe_cache()
         return probes
 

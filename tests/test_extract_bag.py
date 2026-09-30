@@ -626,7 +626,8 @@ def test_odin_extrinsics_are_pinned(tmp_path: Path):
     mount = np.eye(4)
     mount[:3, 3] = ODIN_MOUNT_XYZ
     T_lidar = mount @ _pin_matrix("imu_link", "odin1_lidar")
-    known = np.load(scene / "clouds" / "00000.npy")[0, :3]  # the known point (1, 0, 0); the NaN and origin rows are dropped
+    # The known point (1, 0, 0); the NaN and origin rows are dropped.
+    known = np.load(scene / "clouds" / "00000.npy")[0, :3]
     assert np.allclose(known, (T_lidar @ [1.0, 0.0, 0.0, 1.0])[:3], atol=1e-5)
     assert not np.allclose(known[2], ODIN_MOUNT_XYZ[2] + ODIN_LIDAR_IN_IMU_XYZ[2], atol=0.01)  # not the bag's 5 cm
 

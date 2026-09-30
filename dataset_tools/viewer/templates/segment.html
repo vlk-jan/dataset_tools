@@ -87,7 +87,8 @@
     <thead>
       <tr>
         <th>Window</th><th>Frames</th><th class="num">Count</th>
-        <th class="num">Duration</th><th class="num">GT poses</th><th></th>
+        <th class="num">Duration</th><th class="num">GT poses</th>
+        <th class="num">GT attitude</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -102,6 +103,14 @@
             <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
           {%- else %}<span class="muted">&mdash;</span>{% endif %}
         </td>
+        {# The ground truth's attitude against the IMU, the check the 3D view's
+           panel carries, computed the same way before any window is built. #}
+        {%- set att = attitude_per_window.get(w.key) %}
+        <td class="num">
+          {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
+                title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
+          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+        </td>
         <td><a class="btn primary" href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
       </tr>
     {% endfor %}
@@ -114,6 +123,8 @@
   </span></div>
   {% endif %}
 
+  {# Paged in place by swap.js, like the scene page's tabs. #}
+  <div id="framestrip" data-swap>
   <h2>Frames{% if frames %} &mdash; {{ frames.total }}{% endif %}</h2>
   <p class="muted" style="margin-top:-4px">
     Only this segment's frames, {{ frames.per_page if frames else 100 }} at a time.
@@ -122,9 +133,11 @@
   {% with strip_base = "/scene/" ~ scene_id ~ "/segment/" ~ seg.index ~ "?", strip_jump = false %}
     {% include "_frames.html" %}
   {% endwith %}
+  </div>
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>
+<script type="module" src="/viewer-static/swap.js"></script>
 {% if page.map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>

@@ -242,6 +242,71 @@ def split_mark(root: DatasetRoot, scene_id: str) -> dict[str, str] | None:
     }
 
 
+def validation_mark(row: dict[str, str]) -> dict[str, str] | None:
+    """The chip a scene's ``validation.csv`` row earns, or ``None`` without one.
+
+    One function for the index chip and the scene page's badge, so a scene
+    cannot pass on one page and fail on the other. The tooltip carries the
+    numbers the row has, since the file holds counts of findings and not
+    their text -- for the messages, run ``helhest-validate`` on the scene.
+    """
+    if not row.get("status"):
+        return None
+    errors, warnings = _count(row.get("errors")), _count(row.get("warnings"))
+    if errors:
+        cls, label = "no", f"{errors} error{'s' if errors != 1 else ''}"
+    elif warnings:
+        cls, label = "partial", f"{warnings} warning{'s' if warnings != 1 else ''}"
+    else:
+        cls, label = "yes", "validated ok"
+    detail = "; ".join(f"{k} {row[k]}" for k in VALIDATION_DETAIL if row.get(k))
+    status = row["status"]
+    if status == "FAIL" and not errors:
+        status = "FAIL (--strict)"  # a warning-only scene the run was told to fail on
+    return {"cls": cls, "label": label, "status": status, "title": f"helhest-validate: {status}; {detail}"}
+
+
+#: The columns of ``validation.csv`` worth reading off a chip, in this order.
+VALIDATION_DETAIL: tuple[str, ...] = (
+    "frames",
+    "max_step_m",
+    "max_speed_mps",
+    "tilt_max_deg",
+    "max_sync_offset_s",
+    "nan_frac",
+    "cloud_dtype",
+)
+
+
+def _count(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def validation_totals(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """One masthead cell: how the scenes the index shows fared, or ``None``.
+
+    Counted over the index's rows, as the disk and split panels are: the file
+    may name scenes this root no longer has, or miss ones added since.
+    """
+    if root.validation() is None:
+        return None
+    tally = {"yes": 0, "partial": 0, "no": 0}
+    for row in rows:
+        mark = row.get("validation")
+        if mark:
+            tally[mark["cls"]] += 1
+    seen = sum(tally.values())
+    if not seen:
+        return None
+    sub = f"{tally['partial']} with warnings, {tally['no']} with errors"
+    if seen < len(rows):
+        sub += f"; {len(rows) - seen} not in the report"
+    return stat("validated", f"{tally['yes']} ok", sub)
+
+
 def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     """One scene card's worth of content."""
     a = root.atlas_scene(probe.scene_id)
@@ -256,6 +321,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     return {
         "probe": probe,
         "split": split_mark(root, probe.scene_id),
+        "validation": validation_mark(root.validation_scene(probe.scene_id)),
         "csv": root.csv_rows().get(probe.scene_id, {}),
         "atlas": a,
         "description": a.get("description"),
@@ -333,6 +399,9 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
     disk = disk_panel(root, rows)
     if disk:
         totals.append(stat("on disk", disk["total"], disk["rate"]))
+    validated = validation_totals(root, rows)
+    if validated:
+        totals.append(validated)
 
     return {
         "rows": rows,

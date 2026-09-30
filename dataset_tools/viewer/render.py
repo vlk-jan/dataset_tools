@@ -84,7 +84,7 @@ DRIVEN_TRUST_BOOST = 1.18
 #: box sits mostly behind the origin.
 ROBOT_CHASSIS_HALF = (0.35, 0.25)  # half length (x), half width (y)
 ROBOT_CHASSIS_CENTER = (-0.15, 0.0)  # box centre in the base frame
-ROBOT_WHEEL_RADIUS = 0.36
+ROBOT_WHEEL_RADIUS = 0.334
 ROBOT_WHEEL_WIDTH = 0.142
 #: (x, y) of each wheel hub -- two front wheels on the axle, one rear centre wheel.
 ROBOT_WHEEL_HUBS = ((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0))
@@ -326,15 +326,91 @@ def render_cloud_bev(
 
 
 def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:
-    """Downscaled JPEG of a camera frame (the PNGs are 1280x800 and slow to
-    ship one per playback frame)."""
+    """JPEG of a camera frame, downscaled to at most ``width`` pixels across.
+
+    The frames are 1280x800 and one is shipped per playback frame, so the
+    panel asks for them small. A root that holds the camera's own JPEG
+    (``images.extension: jpg``, roots made from 2026-09-29) is served the file
+    as it is whenever no downscale is needed: re-encoding it would only cost
+    CPU and a generation of JPEG loss.
+    """
     from PIL import Image
 
     with Image.open(path) as img:
+        if img.format == "JPEG" and not (width and img.width > width):
+            return path.read_bytes()
         img = img.convert("RGB")
         if width and img.width > width:
             height = max(1, round(img.height * width / img.width))
             img = img.resize((width, height), Image.BILINEAR)
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality, optimize=False)
+    return buf.getvalue()
+
+
+#: Returns closer to the camera than this (metres, along its optical axis) are
+#: not drawn: they are the robot's own body, or behind the lens.
+OVERLAY_MIN_DEPTH = 0.1
+
+
+def render_cloud_on_image(
+    image_path: Path,
+    cloud: np.ndarray,
+    K: np.ndarray,
+    T_cam_to_base: np.ndarray,
+    width: int = 1280,
+    quality: int = 78,
+) -> bytes:
+    """The frame's lidar returns projected into its camera image, as a JPEG.
+
+    A calibration check, not a product: a road that lands beside the road, or
+    a trunk that lands a metre from its picture, is a wrong ``T_cam_to_base``
+    -- the kind of error that shifted every v1 cloud by 0.34 m and that the
+    Odin1's own extrinsic estimate wanders by. Each return is taken from the
+    base frame into the camera's optical frame with the inverse of
+    ``T_cam_to_base`` (``p_base = T @ p_cam_optical``), kept if it lies in
+    front of the lens, and projected through the pinhole ``K``; the dots are
+    coloured by depth, near to far.
+
+    Pinhole only: the distortion model in ``camera_info.yaml`` is deliberately
+    ignored. Both rigs' coefficients are small, a few pixels at the image
+    edge, and what this is looking for is metres, not pixels. ``K`` is scaled
+    with the image when it is downscaled to ``width``.
+    """
+    from PIL import Image
+
+    with Image.open(image_path) as src:
+        img = src.convert("RGB")
+    scale = 1.0
+    if width and img.width > width:
+        scale = width / img.width
+        img = img.resize((width, max(1, round(img.height * scale))), Image.BILINEAR)
+    rgb = np.asarray(img).copy()
+    h, w = rgb.shape[:2]
+
+    pts = np.asarray(cloud, dtype=np.float64)
+    if pts.ndim == 2 and pts.shape[1] >= 3 and len(pts):
+        T = np.linalg.inv(np.asarray(T_cam_to_base, dtype=np.float64))
+        cam = pts[:, :3] @ T[:3, :3].T + T[:3, 3]
+        cam = cam[cam[:, 2] > OVERLAY_MIN_DEPTH]
+        K = np.asarray(K, dtype=np.float64)
+        fx, fy, cx, cy = K[0, 0] * scale, K[1, 1] * scale, K[0, 2] * scale, K[1, 2] * scale
+        u = np.round(fx * cam[:, 0] / cam[:, 2] + cx).astype(np.int64)
+        v = np.round(fy * cam[:, 1] / cam[:, 2] + cy).astype(np.int64)
+        inside = (u >= 0) & (u < w) & (v >= 0) & (v < h)
+        u, v, z = u[inside], v[inside], cam[inside, 2]
+        if len(z):
+            # Far to near, so where dots overlap the nearer return is on top.
+            order = np.argsort(-z)
+            u, v, colors = u[order], v[order], colorize(z[order], cmap="turbo")
+            # A 3x3 dot per return, painted in nine vectorised strokes rather
+            # than one Pillow call per point: a cloud has tens of thousands.
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    vv, uu = v + dy, u + dx
+                    ok = (uu >= 0) & (uu < w) & (vv >= 0) & (vv < h)
+                    rgb[vv[ok], uu[ok]] = colors[ok]
+
+    buf = io.BytesIO()
+    Image.fromarray(rgb, mode="RGB").save(buf, format="JPEG", quality=quality, optimize=False)
     return buf.getvalue()

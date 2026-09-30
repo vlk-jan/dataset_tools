@@ -216,3 +216,45 @@ def test_only_the_notes_touching_the_segment_are_listed(client):
     assert "late dropout" in second and "early wobble" not in second
     # The compose form opens pinned to the segment being looked at.
     assert 'name="frame_start"' in second and 'value="6"' in second
+
+
+# --------------------------------------------------------------------------
+# GNSS against the ground truth
+# --------------------------------------------------------------------------
+
+
+def test_a_gnss_track_that_disagrees_with_the_ground_truth_flags_the_segment(tmp_path):
+    """The fixture's fixes walk ~1 m a frame while the odometry drives 0.3 m,
+    so the receiver describes three times the path the poses do."""
+    access = access_for(tmp_path, make_root(tmp_path, frames=40, with_gps=True))
+    position, seg = segment_page.find(access, 0)
+    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    track = next(s for s in card["stats"] if s["label"] == "GNSS track")
+    assert track["sub"].endswith("% of the GT path")
+    assert "disagree" in card["note"]
+
+
+def test_a_gnss_track_that_matches_the_ground_truth_is_a_quiet_check(tmp_path):
+    root_path = make_root(tmp_path, frames=40, with_gps=True)
+    scene = root_path / "0000"
+    # Fixes spaced exactly as the odometry drives: 0.3 m per frame, due north.
+    ts = np.loadtxt(scene / "data_ts.txt")
+    gps = np.zeros((len(ts), 8))
+    gps[:, 0] = ts
+    gps[:, 1] = 50.109 + 0.3 / 111_320.0 * np.arange(len(ts))
+    gps[:, 2] = 14.418
+    gps[:, 4] = 2
+    np.save(scene / "gps.npy", gps)
+    access = access_for(tmp_path, root_path)
+    position, seg = segment_page.find(access, 0)
+    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    assert value_of(card, "GNSS track") == value_of(card, "path")
+    assert "disagree" not in card["note"]
+    assert "not ground truth" in card["note"]
+
+
+def test_a_segment_without_fixes_says_nothing_about_gnss(tmp_path):
+    access = access_for(tmp_path, make_root(tmp_path))
+    position, seg = segment_page.find(access, 0)
+    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    assert value_of(card, "GNSS track") is None

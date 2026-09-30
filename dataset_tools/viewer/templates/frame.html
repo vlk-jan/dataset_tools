@@ -37,6 +37,23 @@
       <div class="card"><span class="muted">This frame has no camera image on disk.</span></div>
       {% endif %}
 
+      {# The calibration check: this frame's cloud on this frame's picture.
+         Only where the scene has T_cam_to_base.txt and K and the frame has
+         both files -- otherwise nothing, rather than a broken image. #}
+      {% if details.overlay %}
+      <figure class="bigoverlay">
+        <img class="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/overlay.jpg?w=1280"
+             alt="scene {{ scene_id }} frame {{ index }}, lidar cloud projected into the camera image"
+             loading="lazy" decoding="async">
+        <figcaption class="muted">
+          <b>Cloud on image.</b> Every lidar return of this frame projected through
+          <code>camera_intrinsics.txt</code> and <code>T_cam_to_base.txt</code>, coloured by
+          depth (blue near, red far). Pinhole only, distortion ignored. If the road lands beside
+          the road, or a trunk a metre from its picture, the extrinsic is wrong.
+        </figcaption>
+      </figure>
+      {% endif %}
+
       <div class="tiles">
         {% for kind, endpoint, label in (
              ("height_maps", "heightmap.png", "Height map"),
@@ -70,13 +87,13 @@
         <h2 style="margin-top:0">This frame</h2>
         <dl class="kv">
           <dt>Index</dt><dd>{{ index }}</dd>
-          {% if details.timestamp %}
+          {% if details.timestamp is defined %}
           <dt>Camera stamp</dt><dd>{{ "%.6f"|format(details.timestamp) }}</dd>
           {% endif %}
-          {% if details.lidar_timestamp %}
+          {% if details.lidar_timestamp is defined %}
           <dt>Lidar stamp</dt><dd>{{ "%.6f"|format(details.lidar_timestamp) }}</dd>
           {% endif %}
-          {% if details.camera_lidar_offset_ms is not none and details.camera_lidar_offset_ms is defined %}
+          {% if details.camera_lidar_offset_ms is defined %}
           <dt>Camera &minus; lidar</dt><dd>{{ details.camera_lidar_offset_ms }} ms</dd>
           {% endif %}
           {% if details.t_since_start is defined %}

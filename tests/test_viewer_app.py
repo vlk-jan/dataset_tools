@@ -118,6 +118,19 @@ def test_per_frame_endpoints_serve_images_and_404_past_the_end(client):
     assert "timestamp" in info
 
 
+def test_the_cloud_is_projected_into_the_image_only_where_the_calibration_allows(client, tmp_path):
+    r = client.get("/api/scene/0000/frame/0/overlay.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/scene/0000/frame/9999/overlay.jpg").status_code == 404
+    page = client.get("/scene/0000/frame/0").text
+    assert "overlay.jpg" in page and "Cloud on image" in page
+    # A v1 root has T_cam_to_lidar.txt only, which is the wrong frame to project from.
+    scene = tmp_path / "root" / "0001"
+    (scene / "T_cam_to_base.txt").rename(scene / "T_cam_to_lidar.txt")
+    assert client.get("/api/scene/0001/frame/0/overlay.jpg").status_code == 404
+    assert "overlay.jpg" not in client.get("/scene/0001/frame/0").text
+
+
 def test_viewer_page_wires_the_static_base_and_defers_simview(client):
     r = client.get("/view/0000/seg000")
     assert r.status_code == 200
@@ -788,3 +801,81 @@ def test_the_map_sits_beside_the_files_card_when_there_is_a_track(gps_client):
 def test_the_frame_page_marks_the_frame_it_is_showing(gps_client):
     page = gps_client.get("/scene/0000/frame/6").text
     assert 'data-src="/api/scene/0000/gps.json?frame=6"' in page
+
+
+def test_a_scene_handle_follows_the_directory_while_it_is_being_written(client, tmp_path):
+    """A scene an array job is still writing gains files while it is looked at."""
+    import os
+
+    import numpy as np
+
+    scene = tmp_path / "root" / "0000"
+    before = client.get("/api/scene/0000").json()
+    assert "gps" in before["probe"]["missing"]
+    gps = np.zeros((4, 8))
+    gps[:, 0] = np.loadtxt(scene / "data_ts.txt")[:4]
+    gps[:, 1], gps[:, 2] = 50.1, 14.4
+    np.save(scene / "gps.npy", gps)
+    # The probe is keyed by the directory's mtime; make sure it moved.
+    stat = scene.stat()
+    os.utime(scene, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+    after = client.get("/api/scene/0000").json()
+    assert "gps" not in after["probe"]["missing"]
+    assert client.get("/api/scene/0000/gps.json").status_code == 200
+
+
+def test_opening_a_window_builds_the_next_one_in_the_background(tmp_path):
+    """Paging with ] should find its window ready; with prefetch off, nothing is
+    built that nobody asked for."""
+    import time
+
+    from fastapi.testclient import TestClient
+    from helpers_viewer import make_root
+
+    from dataset_tools.viewer.app import create_app
+
+    opts = "40-160000-80-500000-0.1-height"
+
+    def ready(client, key):
+        return client.get(f"/api/data/0000/{key}/{opts}/x/status").json()["ready"]
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=12)
+    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache")) as client:
+        assert not ready(client, "seg001")
+        assert client.get("/view/0000/seg000").status_code == 200
+        deadline = time.time() + 30
+        while not ready(client, "seg001") and time.time() < deadline:
+            time.sleep(0.2)
+        assert ready(client, "seg001")
+
+    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache2", prefetch=False)) as client:
+        assert client.get("/view/0000/seg000").status_code == 200
+        time.sleep(1.0)
+        assert not ready(client, "seg001")
+
+
+def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
+    from fastapi.testclient import TestClient
+    from test_viewer_index import VALIDATION_CSV
+
+    from dataset_tools.viewer.app import create_app
+
+    (tmp_path / "root" / "validation.csv").write_text(VALIDATION_CSV)
+    fresh = TestClient(create_app(tmp_path / "root", cache_dir=tmp_path / "cache"))
+    index = fresh.get("/").text
+    assert 'class="chip yes validated"' in index and ">validated ok<" in index
+    assert 'class="chip partial validated"' in index and ">2 warnings<" in index
+    assert "<dt>validated</dt>" in index
+    scene = fresh.get("/scene/0001").text
+    assert "<h2>Validation</h2>" in scene and "run helhest-validate 0001" in scene
+
+
+def test_the_tabs_and_frame_strips_swap_in_place(client):
+    """The tabs and the strip's pager are plain links, and swap.js swaps only
+    the region they live in, so the page keeps its scroll position."""
+    scene = client.get("/scene/0000").text
+    assert 'id="tabpanel" data-swap' in scene and "/viewer-static/swap.js" in scene
+    assert scene.index('id="tabpanel"') < scene.index('class="tabs"')
+    segment = client.get("/scene/0000/segment/0").text
+    assert 'id="framestrip" data-swap' in segment and "/viewer-static/swap.js" in segment
+    assert client.get("/viewer-static/swap.js").status_code == 200

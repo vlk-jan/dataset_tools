@@ -810,13 +810,18 @@ function tick() {
  * is not reaching into SimView at all, and "the thing you are typing into gets
  * the keystroke" stays right whatever upstream does.
  */
-function claimKeyboardForFields() {
-  const editable = (node) =>
+/** Is this node something a person types into? Shared by the two key handlers. */
+function editable(node) {
+  return Boolean(
     node &&
-    (node.tagName === "INPUT" ||
-      node.tagName === "TEXTAREA" ||
-      node.tagName === "SELECT" ||
-      node.isContentEditable);
+      (node.tagName === "INPUT" ||
+        node.tagName === "TEXTAREA" ||
+        node.tagName === "SELECT" ||
+        node.isContentEditable),
+  );
+}
+
+function claimKeyboardForFields() {
   for (const type of ["keydown", "keyup", "keypress"]) {
     els.panel.addEventListener(type, (event) => {
       if (editable(event.target)) event.stopPropagation();
@@ -835,12 +840,6 @@ function claimKeyboardForFields() {
  * cover), and so is one carrying a modifier, which is a browser shortcut.
  */
 function setupWindowNav() {
-  const editable = (node) =>
-    node &&
-    (node.tagName === "INPUT" ||
-      node.tagName === "TEXTAREA" ||
-      node.tagName === "SELECT" ||
-      node.isContentEditable);
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     if (editable(event.target) || editable(document.activeElement)) return;

@@ -6,16 +6,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
-{# Non-blocking: the page is fully readable in the system stack, and upgrades
-   if the machine viewing it can reach Google Fonts. #}
-<link rel="stylesheet" media="print" onload="this.media='all'"
-      href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+{# No web fonts: the viewer runs where there is no route to the internet (the
+   reason Leaflet is vendored), and a request to Google Fonts from every index
+   view is a network dependency for three headings. System stacks throughout. #}
 </head>
 <body class="atlas">
 <header>
   <h1>Dataset viewer</h1>
   <span class="path">{{ root.path }}</span>
   <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
+  {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
   {% if not simview_ok %}
   <span class="warn">simview assets missing &mdash; 3D views unavailable</span>
   {% else %}
@@ -212,6 +212,10 @@
             {% for key in ("odometry", "joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
               <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
             {% endfor %}
+            {# What helhest-validate made of the scene, when validation.csv sits at the root. #}
+            {% if row.validation %}
+              <span class="chip {{ row.validation.cls }} validated" title="{{ row.validation.title }}">{{ row.validation.label }}</span>
+            {% endif %}
           </div>
 
           {% if p.bag %}<p class="bagline">{{ p.bag }}</p>{% endif %}

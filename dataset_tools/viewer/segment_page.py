@@ -24,7 +24,8 @@ from typing import Any
 
 import numpy as np
 
-from .build import SceneAccess
+from . import geo
+from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
 from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
@@ -38,6 +39,15 @@ THIN_POSE_RATE = 2.0
 
 #: A segment anchored at least this densely is anchored well.
 GOOD_POSE_RATE = 5.0
+
+#: The GNSS track and the ground-truth path over the same span are flagged as
+#: disagreeing when they differ by BOTH this fraction and this many metres. The
+#: fraction alone cries wolf on a segment where the robot barely moved (a 2 m
+#: receiver wander is 200 % of a 1 m path); the metres alone would miss a
+#: fabricated stretch inside a long segment. The receiver's sigma is well under
+#: a metre on either rig, so 5 m over 25 % is a different drive, not noise.
+GNSS_MISMATCH_FRAC = 0.25
+GNSS_MISMATCH_M = 5.0
 
 
 def find(access: SceneAccess, index: int) -> tuple[int, Segment] | None:
@@ -202,6 +212,29 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
         stats.append(stat("net displacement", f"{net:.0f} m", sub))
         climb = float(xyz[:, 2].max() - xyz[:, 2].min())
         stats.append(stat("z range", f"{climb:.1f} m", "as the ground truth has it"))
+        # The receiver's own position over the same span. It is not ground
+        # truth, and that is what makes agreement a check: the two come from
+        # different devices, so a path the fixes do not describe is a flag on
+        # the segment (a fabricated stretch, a lost fix), not noise to average.
+        gps = access.gps
+        fixes = geo.slice_time(gps, seg.start_ts, seg.end_ts) if geo.is_track(gps) else None
+        if fixes is not None and len(fixes) >= 2:
+            along = geo.track_length_m(fixes)
+            stats.append(
+                stat("GNSS track", f"{along:.0f} m", f"{along / path * 100:.0f}% of the GT path" if path > 0 else None)
+            )
+            gap = abs(along - path)
+            if gap > GNSS_MISMATCH_M and gap > GNSS_MISMATCH_FRAC * max(path, along):
+                notes.append(
+                    f"The GNSS track and the ground truth disagree by {gap:.0f} m over this segment: the "
+                    "receiver's position and the poses do not describe the same driving, which is a flag on "
+                    "the segment -- a fabricated stretch or a lost fix -- rather than a measurement error to "
+                    "average away."
+                )
+            else:
+                notes.append(
+                    "The GNSS fixes are the receiver's own position, not ground truth; their agreement is a check."
+                )
     else:
         notes.append("No ground-truth poses could be read for this segment.")
 
@@ -253,6 +286,36 @@ def hero_thumbs(access: SceneAccess, frames: tuple[int, int]) -> list[dict[str, 
                 "sub": f"frame {index}" + (f" · {at} in" if at else ""),
             }
         )
+    return out
+
+
+#: Windows per page above which the per-window attitude verdict is skipped and
+#: the column shows a dash. Each verdict interpolates its segment's poses over
+#: the window's frames, a few milliseconds each; two hundred of them is a page
+#: that should be read segment by segment anyway. ponytail: raise it, or
+#: compute per row on demand, if a root ever cuts a scene that finely.
+MAX_WINDOW_VERDICTS = 200
+
+
+def attitude_per_window(access: SceneAccess, windows: list[Window]) -> dict[str, dict]:
+    """The GT-versus-IMU verdict for each window of a table, keyed by window key.
+
+    Every entry carries the tooltip that explains it, written once here rather
+    than in two templates. A window with no verdict (no ground truth, no
+    gravity alignment) has no entry, and the table shows a dash.
+    """
+    if len(windows) > MAX_WINDOW_VERDICTS:
+        return {}
+    title = (
+        "median tilt gap between the ground truth's attitude and the IMU over this window: "
+        f"under {ATTITUDE_BANDS['ok']:.0f}° the ground truth's orientation tracks the IMU, "
+        f"over {ATTITUDE_BANDS['warn']:.0f}° it has diverged"
+    )
+    out: dict[str, dict] = {}
+    for w in windows:
+        verdict = window_attitude(access, w)
+        if verdict is not None:
+            out[w.key] = {**verdict, "title": f"{title} (95th percentile {verdict['p95']:.1f}°)"}
     return out
 
 

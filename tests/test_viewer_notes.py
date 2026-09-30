@@ -308,3 +308,38 @@ def test_an_unknown_topic_in_a_hand_edited_file_is_kept_as_written(tmp_path):
     )
     _, client = _notes_client(tmp_path, root_path=root_path)
     assert client.get("/api/scene/0000/notes").json()["notes"][0]["topic"] == "lidar-dropout"
+
+
+def test_the_notes_page_lists_every_note_in_the_root_by_topic(tmp_path):
+    root_path, client = _notes_client(tmp_path, root_path=make_root(tmp_path, scenes=("0000", "0001")))
+    client.post("/api/scene/0000/notes", json={"frames": [1, 3], "topic": "odometry", "text": "GT walks off"})
+    client.post("/api/scene/0001/notes", json={"frames": [5, 5], "topic": "camera", "text": "dropped out"})
+    # A file for a scene the root no longer has: listed and said so, not dropped.
+    (root_path / "notes" / "0007.json").write_text(
+        json.dumps({"notes": [{"frames": [0, 1], "topic": "event", "text": "outlived its scene"}]})
+    )
+    from dataset_tools.viewer.notes import NoteStore
+
+    assert sorted(NoteStore(root_path).list_all()) == ["0000", "0001", "0007"]
+
+    page = client.get("/notes").text
+    assert "3 notes across 3 scenes" in page
+    assert page.index("<h2>odometry") < page.index("<h2>camera") < page.index("<h2>event")
+    assert 'href="/scene/0000/frame/1"' in page
+    assert 'href="/view/0000/seg000?frame=1"' in page  # the window holding it, opened on the frame
+    assert "no scene 0007 in this root" in page and 'href="/scene/0007"' not in page
+
+    only = client.get("/notes?topic=camera")
+    assert only.text.count("<li>") == 1 and "dropped out" in only.text
+    data = client.get("/api/notes?topic=camera").json()
+    assert data["n_notes"] == 1 and data["groups"][0]["notes"][0]["view_url"] == "/view/0001/seg000?frame=5"
+    assert 'href="/notes"' in client.get("/").text
+    assert 'href="/notes"' in client.get("/scene/0000").text
+
+
+def test_the_notes_page_says_so_when_notes_are_off(tmp_path):
+    _, client = _notes_client(tmp_path, notes=False)
+    page = client.get("/notes")
+    assert page.status_code == 200 and "Notes are off" in page.text
+    assert client.get("/api/notes").json()["n_notes"] == 0
+    assert 'href="/notes"' not in client.get("/").text

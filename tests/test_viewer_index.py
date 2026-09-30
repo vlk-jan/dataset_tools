@@ -264,6 +264,60 @@ def test_disk_usage_is_summed_over_the_scenes_the_index_shows(tmp_path):
     assert all(s["label"] != "on disk" for s in cards["0001"])
 
 
+VALIDATION_CSV = (
+    "scene,status,frames,duration_s,points_mean,cloud_dtype,nan_frac,max_step_m,max_speed_mps,"
+    "path_len_m,tilt_mean_deg,tilt_max_deg,max_sync_offset_s,errors,warnings\n"
+    "0000,OK,12,1.100,64,float32,0.00e+00,0.301,3.0,3.3,0.0,0.0,0.005,0,0\n"
+    "0001,WARN,12,1.100,64,float32,0.00e+00,1.842,18.4,3.3,0.0,0.0,0.005,0,2\n"
+    "0002,FAIL,12,1.100,64,float32,0.00e+00,0.301,3.0,3.3,0.0,0.0,0.005,1,0\n"
+    "0009,OK,12,1.100,64,float32,0.00e+00,0.301,3.0,3.3,0.0,0.0,0.005,0,0\n"
+)
+
+
+def test_the_validation_report_marks_each_scene_it_names(tmp_path):
+    """validation.csv at the root gives every scene it names a chip and the
+    scene page a card; a scene it does not name, and a root without the file,
+    get nothing. The file carries counts, so the card says the messages are
+    not in it."""
+    from dataset_tools.viewer.build import SceneAccess
+    from dataset_tools.viewer.scene_page import build_scene_page
+
+    root_path = make_root(tmp_path, scenes=("0000", "0001", "0002", "0003"))
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    assert all(r["validation"] is None for r in page["rows"])
+    assert not any(t["label"] == "validated" for t in page["totals"])
+    assert build_scene_page(root, SceneAccess(root, "0000"))["cards"][-1]["title"] != "Validation"
+
+    (root_path / "validation.csv").write_text(VALIDATION_CSV)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    marks = {r["probe"].scene_id: r["validation"] for r in page["rows"]}
+    assert (marks["0000"]["cls"], marks["0000"]["label"]) == ("yes", "validated ok")
+    assert (marks["0001"]["cls"], marks["0001"]["label"]) == ("partial", "2 warnings")
+    assert (marks["0002"]["cls"], marks["0002"]["label"]) == ("no", "1 error")
+    assert marks["0003"] is None
+    assert "max_step_m 1.842" in marks["0001"]["title"]
+    total = next(t for t in page["totals"] if t["label"] == "validated")
+    # Counted over the scenes the index shows: 0009 is in the file, not the root.
+    assert total["value"] == "1 ok" and total["sub"] == "1 with warnings, 1 with errors; 1 not in the report"
+
+    card = build_scene_page(root, SceneAccess(root, "0001"))["cards"][-1]
+    assert card["title"] == "Validation" and card["badge"] == "WARN"
+    assert next(s["value"] for s in card["stats"] if s["label"] == "warnings") == "2"
+    assert next(s["value"] for s in card["stats"] if s["label"] == "max step") == "1.842"
+    assert "run helhest-validate 0001" in card["note"]
+    assert build_scene_page(root, SceneAccess(root, "0003"))["cards"][-1]["title"] != "Validation"
+
+
+def test_a_malformed_validation_report_degrades_to_none(tmp_path):
+    root_path = make_root(tmp_path)
+    (root_path / "validation.csv").write_text("not,a,report\n")
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert root.validation() == {}
+    assert index_page.build_row(root, root.probe("0000"))["validation"] is None
+
+
 def test_disk_sizes_read_in_decimal_units():
     assert index_page.fmt_bytes(80_154_887_377) == "80.2 GB"
     assert index_page.fmt_bytes(454_081_342_044_000) == "454.08 TB"

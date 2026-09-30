@@ -404,3 +404,115 @@ def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
     assert files["images"]["size"] and files["odometry.txt"]["size"]
     # An absent file has no size, whatever the measurement said.
     assert files["gps.npy"]["size"] is None
+
+
+# --------------------------------------------------------------------------
+# the Extraction card: the extractor's own three report files
+# --------------------------------------------------------------------------
+
+
+def _write_reports(scene: Path) -> None:
+    """The three files exactly as the extractor writes them, through its own writers."""
+    from dataset_tools import gnss_guard, tf_pins, time_align
+
+    ts = np.loadtxt(scene / "data_ts.txt")
+    t0 = float(ts[0])
+    windows = [
+        {"t": t0 + 1.0, "delta": -0.69, "gain": 30.0, "depth": 25.0},
+        {"t": t0 + 2.0, "delta": -0.71, "gain": 28.0, "depth": 22.0},
+        {"t": t0 + 3.0, "delta": -0.05, "gain": 3.0, "depth": 4.0},
+    ]
+    profile = time_align.Profile(windows, np.array([t0 + 1.0, t0 + 2.0]), np.array([-0.69, -0.71]), "measured")
+    time_align.write_report(scene / "time_align.txt", profile, t0)
+    verdict = gnss_guard.Verdict(
+        spans=[gnss_guard.Span(t0 + 5.0, t0 + 8.0, "frozen"), gnss_guard.Span(t0 + 20.0, t0 + 21.0, "island")],
+        n_poses_dropped=40,
+        n_frames_dropped=30,
+        n_poses=1000,
+        n_frames=900,
+        n_frames_unsupported=7,
+    )
+    gnss_guard.write_report(scene / "gnss_guard.txt", verdict, t0)
+    pin = tf_pins.PINS[0]
+    bag_xyz = tuple(v + d for v, d in zip(pin.xyz, (0.03, 0.04, 0.0), strict=True))  # 5 cm off, far
+    tf_pins.write_report(scene / tf_pins.FILE, [tf_pins.Record(pin, bag_xyz, pin.rpy_deg)])
+
+
+def test_the_extraction_card_sums_up_the_three_report_files(tmp_path):
+    from dataset_tools import tf_pins
+
+    root_path = make_root(tmp_path)
+    _write_reports(root_path / "0000")
+    page = scene_page(tmp_path, root_path)
+    card = card_of(page, "Extraction")
+    assert card is not None and card["warn"] is None
+
+    assert value_of(card, "frame clock") == "-0.710 s"
+    assert sub_of(card, "frame clock") == "2/3 windows (measured)"
+    assert value_of(card, "measured offset") == "-690 ms"
+    assert sub_of(card, "measured offset") == "median over 3 windows, largest -710 ms"
+
+    assert value_of(card, "fabricated stretches") == 2
+    assert value_of(card, "cost") == "40 poses · 30 frames"
+    assert sub_of(card, "cost") == "of 1,000 · 900"
+    assert value_of(card, "no pose under them") == "7 frames"
+    assert "frozen, island" in card["note"]
+
+    pin = tf_pins.PINS[0]
+    assert value_of(card, f"{pin.parent} → {pin.child}") == "5.0 cm · 0.00°"
+    assert sub_of(card, f"{pin.parent} → {pin.child}") == "bag from pin, far"
+    assert "negative moves a frame earlier" in card["note"]
+
+    # And the inventory knows the files by name.
+    present = {f["relpath"] for f in page["files"] if f["present"]}
+    assert {"time_align.txt", "gnss_guard.txt", "tf_pins.txt"} <= present
+
+
+def test_a_scene_without_the_report_files_has_no_extraction_card(tmp_path):
+    page = scene_page(tmp_path, make_root(tmp_path))
+    assert card_of(page, "Extraction") is None
+    absent = {f["relpath"] for f in page["files"] if not f["present"]}
+    assert {"time_align.txt", "gnss_guard.txt", "tf_pins.txt"} <= absent
+
+
+def test_an_uncorrected_clock_and_a_constant_read_as_such(tmp_path):
+    from dataset_tools import time_align
+
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    t0 = float(np.loadtxt(scene / "data_ts.txt")[0])
+    time_align.write_report(
+        scene / "time_align.txt", time_align.Profile([], np.zeros(0), np.zeros(0), "too little"), t0
+    )
+    card = card_of(scene_page(tmp_path, root_path), "Extraction")
+    assert value_of(card, "frame clock") == "not corrected"
+    assert sub_of(card, "frame clock") == "too little"
+    assert value_of(card, "measured offset") is None
+
+    constant = time_align.Profile([], np.array([t0]), np.array([0.69]), "given on the command line")
+    time_align.write_report(scene / "time_align.txt", constant, t0)
+    card = card_of(scene_page(tmp_path / "again", root_path), "Extraction")
+    assert value_of(card, "frame clock") == "+0.690 s"
+    assert "given on the command line" in sub_of(card, "frame clock")
+    assert "No gnss_guard.txt, tf_pins.txt" in card["note"]
+
+
+def test_a_malformed_report_costs_its_part_and_says_so(tmp_path):
+    root_path = make_root(tmp_path)
+    scene = root_path / "0000"
+    _write_reports(scene)
+    (scene / "gnss_guard.txt").write_text("# nothing the card can count\n")
+    (scene / "tf_pins.txt").write_text("base_link odin1_lidar pin 0.1 not-a-number\n")
+    card = card_of(scene_page(tmp_path, root_path), "Extraction")
+    assert value_of(card, "frame clock") is not None
+    assert value_of(card, "cost") is None
+    assert card["warn"] == "gnss_guard.txt could not be read; tf_pins.txt could not be read"
+
+
+def test_the_window_tables_carry_the_attitude_verdict(client):
+    for url in ("/scene/0000", "/scene/0000/segment/0"):
+        text = client.get(url).text
+        assert "GT attitude" in text
+        # The fixture's ground truth is level and so is its IMU: a green 0.0°.
+        assert "median tilt gap" in text
+        assert 'class="chip yes"' in text and "0.0°" in text

@@ -173,6 +173,11 @@
 
   {% include "_notes.html" %}
 
+  {# The tabs and the frame strip's pager swap this region in place (swap.js):
+     a click fetches the same page with the new query and replaces only what is
+     inside here, so the cards above and the scroll position stay where they
+     are. Without JavaScript the links are what they always were. #}
+  <div id="tabpanel" data-swap>
   <nav class="tabs">
     <a class="tab {{ 'active' if tab == 'windows' else '' }}" href="/scene/{{ scene_id }}?tab=windows">
       Segments &amp; windows <span class="muted">{{ windows|length }}</span>
@@ -209,7 +214,7 @@
       <tr>
         <th>Window</th><th>Frames</th><th class="num">Count</th>
         <th class="num">Duration</th><th>Pose source</th><th class="num">GT poses</th>
-        <th>Note</th><th></th>
+        <th class="num">GT attitude</th><th>Note</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -242,6 +247,14 @@
             <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
           {%- else %}<span class="muted">&mdash;</span>{% endif %}
         </td>
+        {# The ground truth's attitude against the IMU, the check the 3D view's
+           panel carries, computed the same way before any window is built. #}
+        {%- set att = attitude_per_window.get(w.key) %}
+        <td class="num">
+          {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
+                title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
+          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+        </td>
         <td class="muted">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
                href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
@@ -251,9 +264,11 @@
   </table>
 
   {% endif %}
+  </div>
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>
+<script type="module" src="/viewer-static/swap.js"></script>
 <script type="module" src="/viewer-static/files.js"></script>
 {% if page.map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>

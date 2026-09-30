@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer needs Python 3.12+ and pulls in
-[SimView](https://pypi.org/project/simview/) (`>=4.2.1,<5`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=5.0.0`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. The 3.12 floor is
 SimView's, not ours — the extraction tools still run on 3.10, so keep the viewer
 in its own virtualenv when the extraction venv is older:
@@ -38,6 +38,7 @@ python3.12 -m venv .venv-viewer
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
+| `--no-prefetch` | do not build the next window in the background when one is opened (see [Performance](#performance)) |
 | `--open` | open a browser at the index page |
 | `-v` | debug logging |
 
@@ -172,10 +173,29 @@ driving. Below 2 Hz the rate is flagged.
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
 | `images/` | the side panel's camera tile, served per frame |
 | `joint_states.npy` | wheel spin animation + velocity/effort plots |
-| `joint_setpoints.npy` | commanded wheel-velocity plots |
+| `joint_setpoints.npy` | commanded wheel-velocity plots, and with `joint_states.npy` the `wheel_slip_*` plots (commanded minus measured, rad/s, per wheel) |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
-| `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
+| `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic; and, on a frame page, the frame's cloud projected into its image (below) |
 | `gps.npy` | the map, on the scene, segment and frame pages |
+| `time_align.txt` | the scene page's **Extraction** card: whether the frame clock was corrected, by how much, and from how many windows |
+| `gnss_guard.txt` | the same card: how many fabricated GNSS/INS stretches were removed and what they cost in poses and frames |
+| `tf_pins.txt` | the same card: how far each pinned static transform sat from what the bag itself published |
+
+## The cloud on the image: a check on the extrinsic
+
+A frame page whose scene carries both `camera_intrinsics.txt` and
+`T_cam_to_base.txt` shows a second copy of the camera frame under the first,
+with every lidar return of that frame projected into it and coloured by depth
+(`/api/scene/{scene}/frame/{n}/overlay.jpg`). It is a calibration check: a
+road that lands beside the road, or a trunk that lands a metre from its
+picture, is a wrong extrinsic -- the error that shifted every v1 cloud by
+0.34 m, and the one the Odin1's own extrinsic estimate wanders by between
+boots. Metres of error are pixels of misalignment at any range, which is why
+the projection is a plain pinhole: the distortion model in `camera_info.yaml`
+is ignored, since both rigs' coefficients move a few pixels at the image edge
+and what is being looked for is far larger. A root that has only
+`T_cam_to_lidar.txt` (v1) gets no overlay: that matrix is the camera in the raw
+lidar frame, not the base frame the clouds are in.
 
 ## The scene page's two strips
 
@@ -210,6 +230,13 @@ segment came from or why it ended, each `+` tail says what was then done to its
 poses, and both halves are turned into plain language by
 `windows.describe_reason`. Nothing that reads as a tag the tooling invented for
 itself should reach a page.
+
+The **tabs** under the cards, and the pager of every frame strip, switch in
+place: a click fetches the same page with the new query and swaps in only the
+region the link lives in (`static/swap.js`), so the cards above and the scroll
+position stay where they were, the address still updates and the back button
+walks it. A frame tile opens the frame's own page as before. Without
+JavaScript the links are what they always were, a full page each.
 
 ## The segment page
 
@@ -326,6 +353,20 @@ file; any scene the file has not scanned yet is named under the bar. A scene
 page gets a **Disk usage** card (total, per frame, the same bar) and each entry
 in its file inventory shows its size. Like the atlas, the file is read once per
 process, so restart the viewer after a rescan.
+
+## Validation: what `helhest-validate` made of each scene
+
+`helhest-validate <root> --csv <root>/validation.csv` (which is what
+`slurm/finalize_v2.sh` runs) leaves the validator's table at the root. When it
+is there, every index card gets a chip -- `validated ok`, `N warnings` or `N
+errors`, with the row's numbers in its tooltip -- the masthead counts how the
+scenes fared, and the scene page gets a **Validation** card with the status,
+the counts and the numbers behind them (max step, max tilt, sync offset,
+non-finite fraction). The file carries *counts* of findings, not their text:
+the messages only go to the validator's own output, and the card says so
+rather than pretending. A scene the file does not mention gets no chip, and a
+root without the file looks exactly as before. Like the atlas, the file is
+read once per process.
 
 ## The train/val split: which scenes a model is scored on
 
@@ -495,6 +536,15 @@ extraction does. Each notes file records the `dataset_version` it was written
 against, and the scene page says so when that stops matching `manifest.json` —
 the same check, for the same reason, as the atlas's.
 
+**Reading them back.** `/notes` lists every note in the root on one page,
+grouped by topic and ordered by scene and frame inside each, with `?topic=`
+narrowing it to one topic: a review campaign's to-do list. Each entry links to
+its scene, to its first frame and, where the frame sits in a window, to the 3D
+view opened on it. A notes file whose scene is no longer in the root is listed
+and marked as such rather than dropped: it is a person's work, and a scene
+renumbered out from under it is exactly the case worth seeing. `/api/notes`
+returns the same as JSON. With `--no-notes` the page says notes are off.
+
 Notes are served from their own endpoint and are never folded into a window
 bundle. A bundle URL carries a content stamp and its `meta.json` is cached per
 window on disk, so a note stored in there would be invisible until the next
@@ -518,6 +568,15 @@ has actually failed sits above 40°. The bands (`build.ATTITUDE_BANDS`) travel i
 `meta.json` rather than living in the front-end. A single frame's gap can be
 large honestly — a jolt the IMU catches and the interpolated ground truth smooths
 over — so the verdict is taken from the window, not the frame.
+
+The same verdict sits in the window tables of the scene page and the segment
+page, as a **GT attitude** column: the median gap in degrees, green, amber or
+red on the same bands. It is computed before any window is built, from the
+same code (`build.window_attitude` interpolates and levels the poses exactly as
+a build does, then `build.attitude_error_deg` reads the gap), so the number in
+the table is the number the panel will show once the window is opened. A
+scene with more than 200 windows on one page shows dashes instead, and a
+window with no ground truth or no `gravity_align.npy` has nothing to compare.
 
 A window splats ~80 height maps 12.8 m across along a path a few tens of metres
 long, so every terrain cell is covered by dozens of them. Their contributions
@@ -658,6 +717,12 @@ Dataset roots usually live on contended network storage, so:
   cached separately.
 - Camera frames are served one at a time as downscaled JPEG, not shipped with
   the scene.
+- Opening a window starts building the next one in the background, with the
+  same build options, so paging with <kbd>]</kbd> does not wait. It takes the
+  same per-window lock a request would, so paging early joins the build rather
+  than starting a second one. `--no-prefetch` turns it off, for a root on
+  storage slow enough that an unasked build competes with the one being looked
+  at.
 
 ## URLs
 
@@ -667,14 +732,19 @@ Dataset roots usually live on contended network storage, so:
 | `/scene/{scene}` | one scene's inventory, window list and calibration |
 | `/scene/{scene}/segment/{n}` | one ground-truth segment: what it is, what happened inside it, where |
 | `/scene/{scene}/frame/{n}` | one frame: its image, its derived tiles and its numbers |
+| `/scene/{scene}/jump?index=N` | the frames tab's jump box: redirects to that frame, clamped to the scene |
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scenes` | the index as JSON |
 | `/api/scene/{scene}` | one scene's probe, windows and details as JSON |
 | `/api/scene/{scene}/segment/{n}` | one segment's cards, frame range and windows as JSON |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
+| `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
-| `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
+| `/api/scene/{scene}/frame/{n}/info` | that frame's numbers as JSON: stamps, camera-lidar offset, roll and pitch, which per-frame files it has |
+| `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
+| `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |
+| `/api/scene/{scene}/thumb/{slot}.jpg` | one index thumbnail (`a`, `b` or `c`): the stored `atlas/thumbs/` file, else the frame rendered live at 384 px |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
 | `/api/scene/{scene}/frame/{n}/driven.png` | that frame's driven cells and feature similarity (`driven_similarity/`) |
@@ -748,7 +818,10 @@ somewhere else (they then no longer travel with the dataset) or `--no-notes` to
 switch the feature off. `/healthz` reports the same state under `notes`.
 
 **A scene changed on disk and the index still shows the old numbers.** The
-probe cache is keyed by each scene directory's mtime and refreshes itself; to
+probe cache is keyed by each scene directory's mtime and refreshes itself, and
+the scene list is re-read on every index render, so a scene an array job
+finishes while the viewer runs appears without a restart. Only `manifest.json`,
+`atlas/`, `splits.json` and `disk_usage.json` are read once per process. To
 force a full rebuild, start once with `--clear-cache`. That removes only what
 the viewer wrote -- `probe_cache.json` and `bundles/` -- so it is safe even
 when `--cache-dir` points at a directory holding something else. To clear every
