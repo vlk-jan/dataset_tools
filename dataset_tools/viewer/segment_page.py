@@ -29,6 +29,7 @@ from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
 from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
+from .signals import signal_charts
 from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, segment_bounds
 
 logger = logging.getLogger("dataset_tools.viewer.segment_page")
@@ -346,6 +347,8 @@ def build_segment_page(
             # Narrowed to this segment: the drawn track, and the numbers beside it.
             "map": map_card(access, segment=seg),
             "windows": segment_windows(access, seg, max_frames, max_seconds),
+            # Over the segment's own span: nothing to shade, it is all one segment.
+            "signals": signal_charts(access, seg.start_ts, seg.end_ts, shade=False),
             "prev": segments[position - 1] if position > 0 else None,
             "next": segments[position + 1] if position + 1 < len(segments) else None,
             "position": position,

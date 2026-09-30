@@ -1,0 +1,44 @@
+{# The scene's or segment's time series, one chart per unit on a shared time
+   axis (signals.signal_charts). Drawn here as SVG, so every line is on the
+   page without JavaScript; charts.js adds the crosshair, the readout and the
+   click that opens the frame under the pointer. Included only when `signals`
+   exists: a scene with none of the arrays renders no markup. #}
+<div class="card signals" data-signals data-scene="{{ scene_id }}"
+     data-t0="{{ signals.t0 }}" data-duration="{{ signals.duration }}"
+     {% if signals.offset %}data-offset="{{ signals.offset }}"{% endif %}
+     {% if signals.frames %}data-frames="{{ signals.frames }}"{% endif %}>
+  <header>
+    <h2>Signals</h2>
+    <span class="sigtime muted" data-sigtime>{{ signals.charts|length }} charts &middot; point at one to read every chart at that instant, click to open the frame</span>
+  </header>
+  {% for c in signals.charts %}
+  {# Each chart folds away under its own arrow; all start open. #}
+  <details class="sig" open data-series="{{ c.data }}">
+    <summary class="sighead">
+      <b>{{ c.title }}</b> <span class="muted">{{ c.unit }}</span>
+      {% if c.series|length > 1 %}
+      <span class="legend">
+        {% for s in c.series %}<span class="key {{ s.cls }}{{ ' dash' if s.dash }}">{{ s.label }}</span>{% endfor %}
+      </span>
+      {% endif %}
+      <span class="sigval" data-sigval></span>
+    </summary>
+    <div class="plot">
+      {% for sh in signals.shade %}<i class="gt" style="left:{{ '%.3f'|format(sh[0]) }}%;width:{{ '%.3f'|format(sh[1]) }}%"></i>{% endfor %}
+      <svg viewBox="0 0 {{ signals.bins }} 100" preserveAspectRatio="none" role="img" aria-label="{{ c.title }} over time, {{ c.lo }} to {{ c.hi }} {{ c.unit }}">
+        {% if c.zero is not none %}<line class="zero" x1="0" x2="{{ signals.bins }}" y1="{{ '%.1f'|format(c.zero) }}" y2="{{ '%.1f'|format(c.zero) }}"/>{% endif %}
+        {# first-listed on top: the ground truth over what it checks #}{% for s in c.series|reverse %}<path class="{{ s.cls }}{{ ' dash' if s.dash }}" d="{{ s.d }}"/>{% endfor %}
+        <line class="cursor" x1="-10" x2="-10" y1="0" y2="100"/>
+      </svg>
+      <span class="ylab hi">{{ c.hi }}</span><span class="ylab lo">{{ c.lo }}</span>
+    </div>
+    {# The time axis under every chart, so one folded or scrolled away never
+       takes the only reading of the clock with it. #}
+    <div class="xaxis" aria-hidden="true">
+      {% for tk in signals.ticks %}<span class="{{ tk.edge }}" style="left:{{ '%.3f'|format(tk.pct) }}%">{{ tk.label }}</span>{% endfor %}
+    </div>
+    {% if c.note %}<p class="signote">{{ c.note }}</p>{% endif %}
+  </details>
+  {% endfor %}
+  {% if signals.shade %}<p class="cardnote">Shaded: where ground truth exists. The robot's own signals run straight through the gaps.</p>{% endif %}
+</div>

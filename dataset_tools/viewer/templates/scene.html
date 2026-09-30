@@ -172,6 +172,8 @@
   {% endif %}
   {% if wrapped %}</div>{% endif %}
 
+  {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
+
   {% include "_notes.html" %}
 
   {# The tabs and the frame strip's pager swap this region in place (swap.js):
@@ -270,6 +272,7 @@
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>
 <script type="module" src="/viewer-static/swap.js"></script>
+{% if page.signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
 <script type="module" src="/viewer-static/files.js"></script>
 {% if page.map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>

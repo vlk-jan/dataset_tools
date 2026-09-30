@@ -261,6 +261,31 @@ after `scripts/filter_segments.py` has renumbered the table. Every figure on
 the page stops at the segment's own boundaries: poses either side of one share
 no reference frame, so nothing is ever accumulated across a boundary.
 
+## Signals: the arrays over time
+
+The cards reduce every array to a mean and a max, and the 3D view plots them only
+per window, once built. The **Signals** card on the scene page (whole recording,
+ground-truth segments shaded) and on the segment page (that segment only) plots
+them over one shared time axis (`signals.signal_charts`):
+
+| chart | from | what to look for |
+| --- | --- | --- |
+| ground speed, m/s | `odometry.txt` (differentiated inside each segment, never across one), `transforms.npy`, `cmd_vel.npy` | where GT and the robot's odometry part |
+| wheel speed, rad/s -- one chart per wheel, one shared scale | `joint_states.npy`, dashed `joint_setpoints.npy` | a wheel leaving its dashed line: slip or load |
+| wheel effort | `joint_states.npy`, in the file's units | slopes, mud, obstacles |
+| roll & pitch, deg | `gravity_align.npy` | slopes, tip-overs |
+| GNSS altitude, m and horizontal σ, m | `gps.npy` | a step in σ is a lost or downgraded fix |
+| frame interval, ms | `data_ts.txt` (longest gap per column) | dropped frames |
+
+One chart per unit, never two y-axes. Each is resampled onto 600 columns: the mean
+of the samples in a column, interpolated where a column has none, and a gap where
+the samples either side are more than 1.5 s apart. The y-range covers the central
+99 % of values, so a spike is clipped at the edge rather than flattening the chart.
+The lines are server-rendered SVG; `static/charts.js` adds a crosshair shared by
+every chart, a per-chart readout, and a click (or arrow keys + Enter) that opens
+the frame under the pointer. Each chart carries its own time axis and folds away
+under the arrow before its name (a native `<details>`, open by default).
+
 ## The map: where the recording happened
 
 A scene that carries `gps.npy` gets a map. On the scene page it sits beside the

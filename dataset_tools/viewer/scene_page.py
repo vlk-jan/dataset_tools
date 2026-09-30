@@ -49,6 +49,7 @@ from .index_page import (
 )
 from .loaders import _scalar, read_camera_info, read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS, DatasetRoot
+from .signals import signal_charts
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
 
@@ -920,6 +921,16 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # The inventory strip: one entry per artefact the viewer knows,
             # present or not, each with the prose the page opens under it.
             "files": file_entries(access),
+            # The same arrays over time, on the frame clock's own span.
+            "signals": scene_signals(access),
         }
 
     return access.cached("scene_page", work)
+
+
+def scene_signals(access: SceneAccess) -> dict[str, Any] | None:
+    """The signal charts over the whole recording, segments shaded behind."""
+    ts = access.frame_ts
+    if ts is None or len(ts) < 2:
+        return None
+    return signal_charts(access, float(ts[0]), float(ts[-1]))

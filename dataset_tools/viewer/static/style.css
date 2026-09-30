@@ -603,3 +603,69 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 /* Paging between one scene's segments, above the segment page's own cards. */
 .segnav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .btn.disabled { color: var(--muted); border-style: dashed; cursor: default; }
+
+/* --------------------------------------------------------- signal charts
+   One chart per unit, stacked on a shared time axis (templates/_signals.html).
+   Series hues are their own, not the status tokens: which wheel a line is has
+   nothing to do with good or bad. Validated (dataviz validate_palette.js) as a
+   categorical triple against each theme's panel; identity is also carried by
+   the legend and the readout, never by colour alone. */
+.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 14px 0; }
+:root[data-theme="dark"] .signals { --s1: #5b8ef8; --s2: #c77d12; --s3: #a266f2; }
+.signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.signals > header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.signals .sigtime { font: 400 12px var(--mono); }
+.sig { margin-top: 12px; }
+.sighead { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+/* The chart's toggle: a flex summary loses the native marker, so the arrow is
+   drawn here and turns down while the chart is open. */
+.sighead { cursor: pointer; list-style: none; user-select: none; }
+.sighead::-webkit-details-marker { display: none; }
+.sighead::before {
+  content: "\25B6"; font-size: 9px; color: var(--muted);
+  display: inline-block; width: 10px; transition: transform .12s;
+}
+.sig[open] > .sighead::before { transform: rotate(90deg); }
+.sig:not([open]) > .sighead { color: var(--muted); }
+.sighead:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.sighead .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--fg-2); }
+.sighead .key::before {
+  content: ""; display: inline-block; width: 14px; margin-right: 4px; vertical-align: middle;
+  border-top: 2px solid var(--line-2);
+}
+.sighead .key.s1::before { border-top-color: var(--s1); }
+.sighead .key.s2::before { border-top-color: var(--s2); }
+.sighead .key.s3::before { border-top-color: var(--s3); }
+.sighead .key.dash::before { border-top-style: dashed; }
+.sighead .sigval { margin-left: auto; font: 400 12px var(--mono); color: var(--fg); }
+.sig .plot {
+  position: relative; height: 84px; margin-top: 4px;
+  background: var(--shade); border-radius: 4px; overflow: hidden;
+}
+.sig .plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
+.sig .plot i.gt { position: absolute; top: 0; bottom: 0; background: var(--ok); opacity: .12; }
+.sig path { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.sig path.s1 { stroke: var(--s1); }
+.sig path.s2 { stroke: var(--s2); }
+.sig path.s3 { stroke: var(--s3); }
+.sig path.dash { stroke-dasharray: 4 3; stroke-opacity: .75; }
+.sig line.zero { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.sig line.cursor { stroke: var(--fg); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.sig .ylab {
+  position: absolute; left: 4px; font: 400 10.5px var(--mono); color: var(--muted);
+  pointer-events: none;
+}
+.sig .ylab.hi { top: 2px; }
+.sig .ylab.lo { bottom: 2px; }
+/* The time axis: round-numbered ticks under each plot, centred on their
+   position, except those at an edge, which align to it rather than spill. */
+.sig .xaxis { position: relative; height: 14px; font: 400 10.5px var(--mono); color: var(--muted); }
+.sig .xaxis span { position: absolute; top: 1px; transform: translateX(-50%); white-space: nowrap; }
+.sig .xaxis span::before {
+  content: ""; position: absolute; left: 50%; top: -4px; height: 3px; border-left: 1px solid var(--line-2);
+}
+.sig .xaxis span.l { transform: none; }
+.sig .xaxis span.l::before { left: 0; }
+.sig .xaxis span.r { transform: translateX(-100%); }
+.sig .xaxis span.r::before { left: auto; right: 0; }
+.sig .signote { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
