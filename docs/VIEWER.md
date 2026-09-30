@@ -171,7 +171,7 @@ driving. Below 2 Hz the rate is flagged.
 | `clouds/` | an aggregated point-cloud body, three terrain colour layers, and a per-frame top-down tile |
 | `images/` | the side panel's camera tile, served per frame |
 | `joint_states.npy` | wheel spin animation + velocity/effort plots |
-| `joint_setpoints.npy` | commanded wheel-velocity plots |
+| `joint_setpoints.npy` | commanded wheel-velocity plots, and with `joint_states.npy` the `wheel_slip_*` plots (commanded minus measured, rad/s, per wheel) |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
 | `gps.npy` | the map, on the scene, segment and frame pages |

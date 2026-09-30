@@ -108,7 +108,9 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #:    each cell rather than the best of them, so cached bundles hold a layer
 #:    that no longer means what its legend says.
 #: 8: wheel radius 0.36 -> 0.334 m, so cached bundles draw the old wheels.
-META_VERSION = 8
+#: 9: ``wheel_slip_*`` scalars (setpoint minus measured), so a cached bundle's
+#:    plot list is short of them.
+META_VERSION = 9
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -1030,6 +1032,11 @@ def build_scalars(
         res = L.resample_series(sp[:, 0], sp[:, 1:10], times)
         for k, label in enumerate(WHEEL_LABELS):
             scalars[f"wheel_setpoint_{label}"] = res[:, 3 + k]
+            # Commanded minus measured: where slip and load show up, per wheel.
+            # Both series are already on the frame clock, so the difference is
+            # taken there rather than by resampling either again.
+            if f"wheel_vel_{label}" in scalars:
+                scalars[f"wheel_slip_{label}"] = res[:, 3 + k] - scalars[f"wheel_vel_{label}"]
 
     cv = access.cmd_vel
     if cv is not None and cv.ndim == 2 and cv.shape[1] >= 7:

@@ -423,3 +423,25 @@ def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
     opts = BuildOptions()
     assert _make_grid(positions, opts.sanitized()).res > opts.terrain_res
     assert _make_grid(positions, budgets_for_window(opts, 3000)).res == opts.terrain_res
+
+
+def test_wheel_slip_is_the_commanded_speed_minus_the_measured_one(tmp_path):
+    """joint_setpoints beside joint_states: the difference is where slip and
+    load show up, so it is a plot of its own rather than two to read against
+    each other."""
+    from dataset_tools.viewer import build
+    from dataset_tools.viewer import probe as probe_mod
+
+    root_path = make_root(tmp_path, frames=12)
+    scene = root_path / "0000"
+    setpoints = np.load(scene / "joint_states.npy").copy()
+    setpoints[:, 4:7] = 2.0  # commanded, against the 1.5 rad/s the wheels did
+    np.save(scene / "joint_setpoints.npy", setpoints)
+
+    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
+    window = access.window("seg000", 1500)
+    times = access.frame_ts[np.arange(window.frame_start, window.frame_end)]
+    gt = build.resolve_poses(access, window, times)
+    scalars, _ = build.build_scalars(access, window, times, gt, None)
+    for label in build.WHEEL_LABELS:
+        assert scalars[f"wheel_slip_{label}"] == pytest.approx(0.5, abs=1e-6)
