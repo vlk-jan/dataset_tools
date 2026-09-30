@@ -315,7 +315,7 @@ dl.stats dd small {
    to; each links to the frame it was cut from. */
 .hero {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px; margin: 4px 0 18px;
+  gap: 14px; margin: 4px 0 14px;
 }
 .hero figure {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
@@ -338,8 +338,8 @@ dl.stats dd small {
 /* The info cards, three to a row on the same columns as the hero frames above,
    every card in a row as tall as the tallest. A card with nothing to say is
    not rendered at all. */
-.cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.cards .card { padding: 12px 16px 16px; display: flex; flex-direction: column; }
+.cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.cards .card { padding: 12px 16px 16px; display: flex; flex-direction: column; margin: 0; }
 .cards .card > .cardnote:first-of-type { margin-top: auto; padding-top: 12px; }
 @media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
@@ -390,7 +390,7 @@ button.chip[aria-expanded="true"] {
 /* ------------------------------------------------- scene tabs & frame pages */
 /* A region being swapped in place (swap.js) dims until the new one lands. */
 [data-swap][aria-busy="true"] { opacity: .6; }
-.tabs { display: flex; gap: 2px; margin: 26px 0 0; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; gap: 2px; margin: 0; border-bottom: 1px solid var(--line); }
 .tab {
   padding: 7px 14px; border: 1px solid var(--line); border-bottom: 0;
   border-radius: 6px 6px 0 0; background: var(--panel); color: var(--muted);
@@ -427,7 +427,7 @@ button.chip[aria-expanded="true"] {
 .pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
 
 .framenav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-.framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
+.framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 14px; }
 @media (max-width: 1000px) { .framepage { grid-template-columns: 1fr; } }
 .bigframe {
   width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: var(--shade);
@@ -443,7 +443,7 @@ button.chip[aria-expanded="true"] {
 .bigoverlay figcaption code { font-size: 12px; }
 .framemain .tiles {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px; margin-top: 12px;
+  gap: 14px; margin: 14px 0;
 }
 .framemain .tile {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
@@ -503,6 +503,8 @@ button.chip[aria-expanded="true"] {
    range. Styled as one more card so it sits in the same document as the
    probed facts around it -- it is not a separate app, it is the half of the
    scene's description that only a person can write. */
+/* Last on every page, often after a table or pager that has no margin under it. */
+.card.notes { margin-top: 14px; }
 .notelist { list-style: none; margin: 0; padding: 0; }
 .notelist li { padding: 9px 0; border-top: 1px solid var(--line); }
 .notelist li:first-child { border-top: 0; padding-top: 2px; }
@@ -652,7 +654,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
    nothing to do with good or bad. Validated (dataviz validate_palette.js) as a
    categorical triple against each theme's panel; identity is also carried by
    the legend and the readout, never by colour alone. */
-.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 14px 0; }
+.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 0 0 14px; }
 :root[data-theme="dark"] .signals { --s1: #5b8ef8; --s2: #c77d12; --s3: #a266f2; }
 .signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .signals > header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
