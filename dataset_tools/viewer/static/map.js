@@ -78,7 +78,7 @@ async function draw(el) {
   const tiles = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: OSM_ATTRIBUTION });
   tiles.on("tileerror", () => {
     if (++tileErrors === MAX_TILE_ERRORS) {
-      note(el, "No map tiles could be fetched — the track is drawn on a plain backdrop.");
+      note(el, "No map tiles could be fetched - the track is drawn on a plain backdrop.");
       el.classList.add("notiles");
     }
   });

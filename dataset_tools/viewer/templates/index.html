@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer &mdash; {{ root.path.name }}{% endif %}</title>
+<title>{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer - {{ root.path.name }}{% endif %}</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
@@ -18,7 +18,7 @@
   <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
   {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
   {% if not simview_ok %}
-  <span class="warn">simview assets missing &mdash; 3D views unavailable</span>
+  <span class="warn">simview assets missing - 3D views unavailable</span>
   {% else %}
   <span class="muted">simview {{ simview_version }}</span>
   {% endif %}
@@ -66,7 +66,7 @@
       {% with parts = dp.parts %}{% include "_diskbar.html" %}{% endwith %}
       <p class="diskcap">
         Measured by <code>helhest-disk-usage</code>{% if dp.generated %} on {{ dp.generated[:10] }}{% endif %}.
-        {%- if dp.missing %} <span class="warn">Not scanned: {{ dp.missing | join(", ") }} &mdash; left out of the sum.</span>{% endif %}
+        {%- if dp.missing %} <span class="warn">Not scanned: {{ dp.missing | join(", ") }} - left out of the sum.</span>{% endif %}
       </p>
     </div>
     {% endif %}

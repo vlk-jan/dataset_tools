@@ -65,7 +65,7 @@
   const idle = () => {
     cell.hidden = true;
     read.textContent = grid.height_range
-      ? `colours span ${grid.height_range[0]} … ${grid.height_range[1]} m (2nd–98th percentile of this map)`
+      ? `colours span ${grid.height_range[0]} … ${grid.height_range[1]} m (2nd-98th percentile of this map)`
       : "hover over the map to read a cell";
   };
 

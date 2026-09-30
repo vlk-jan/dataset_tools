@@ -564,7 +564,7 @@ def create_app(
             f"/api/data/{bundle_key}/{stamp}",
             body,
             head,
-            f"Scene {scene_id} {window_key} — 3D view",
+            f"Scene {scene_id} {window_key} - 3D view",
         )
         # Defer SimView's own entry point: it fetches the scene the instant it
         # runs, and the bundle may still be building. The overlay controller

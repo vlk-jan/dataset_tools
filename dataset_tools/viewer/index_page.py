@@ -45,7 +45,7 @@ def coverage_class(coverage: float | None) -> str:
 def fmt_duration(seconds: float | None) -> str:
     """``39 s`` / ``10 min 53 s`` / ``1 h 3 min`` -- the atlas's own phrasing."""
     if not seconds or seconds <= 0:
-        return "—"
+        return "-"
     total = int(seconds)  # truncate: a scene is "10 min 53 s" long, not 54
     if total < 60:
         return f"{total} s"
@@ -60,7 +60,7 @@ def fmt_count(value: Any) -> str:
     try:
         return f"{int(value):,}"
     except (TypeError, ValueError):
-        return "—"
+        return "-"
 
 
 def fmt_bytes(n: float) -> str:
@@ -131,8 +131,8 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
         stats.append(
             stat(
                 "images · clouds",
-                f"{fmt_count(images) if images is not None else '—'}"
-                f" · {fmt_count(clouds) if clouds is not None else '—'}",
+                f"{fmt_count(images) if images is not None else '-'}"
+                f" · {fmt_count(clouds) if clouds is not None else '-'}",
             )
         )
     if p.n_segments:
@@ -534,7 +534,7 @@ def atlas_warning(root: DatasetRoot, atlas: dict) -> str | None:
     theirs, ours = atlas.get("dataset_version"), manifest.get("dataset_version")
     if theirs and ours and str(theirs) != str(ours):
         return (
-            f"atlas/atlas.json describes dataset {theirs}, this root is {ours} — "
+            f"atlas/atlas.json describes dataset {theirs}, this root is {ours} - "
             "its prose and numbers are stale; regenerate with scripts/make_atlas.py"
         )
     return None

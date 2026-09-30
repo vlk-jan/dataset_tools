@@ -302,7 +302,7 @@ def split_warning(
     declared = splits.root
     if declared and Path(declared) != Path(root_path):
         return (
-            f"{SPLITS_FILE} was exported against {declared}, this root is {root_path} — "
+            f"{SPLITS_FILE} was exported against {declared}, this root is {root_path} - "
             "scene ids only mean the same thing inside one tree, so the train/val marks "
             f"may be wrong; regenerate it for this root (DRIFT scripts/data/dump_split.py)"
         )
@@ -312,14 +312,14 @@ def split_warning(
             shown = ", ".join(unknown[:6]) + ("…" if len(unknown) > 6 else "")
             return (
                 f"{SPLITS_FILE} says nothing about {len(unknown)} scene(s) in this root "
-                f"({shown}) — they are shown unmarked rather than assumed to be training "
+                f"({shown}) - they are shown unmarked rather than assumed to be training "
                 "data; regenerate it for this root (DRIFT scripts/data/dump_split.py)"
             )
     theirs = splits.dataset_version
     ours = (manifest or {}).get("dataset_version")
     if theirs and ours and str(theirs) != str(ours):
         return (
-            f"{SPLITS_FILE} was exported against dataset {theirs}, this root is {ours} — "
+            f"{SPLITS_FILE} was exported against dataset {theirs}, this root is {ours} - "
             "scene ids have survived every renumbering so far, so the marks are most "
             "likely still right, but the file is stale"
         )

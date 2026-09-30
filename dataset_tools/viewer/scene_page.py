@@ -195,8 +195,8 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
         stats.append(
             stat(
                 "images · clouds",
-                f"{fmt_count(images) if images is not None else '—'}"
-                f" · {fmt_count(clouds) if clouds is not None else '—'}",
+                f"{fmt_count(images) if images is not None else '-'}"
+                f" · {fmt_count(clouds) if clouds is not None else '-'}",
             )
         )
 
@@ -299,7 +299,7 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
         # from stays -- that is what makes an amber block different.
         described = describe_reason(seg.reason)
         why = described.split("; ends because", 1)[0] if described.startswith("filled") else ""
-        title = f"segment {seg.index} \u2014 {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses"
+        title = f"segment {seg.index} - {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses"
         marks.append(
             {
                 "index": seg.index,
@@ -758,16 +758,16 @@ def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dic
         ts = access.frame_ts
         here = geo.locate(gps, float(ts[frame])) if ts is not None and 0 <= frame < len(ts) else None
         stats.append(
-            stat("this frame", f"{here[0]:.6f}, {here[1]:.6f}" if here else "—", "latitude, longitude")
+            stat("this frame", f"{here[0]:.6f}, {here[1]:.6f}" if here else "-", "latitude, longitude")
             if here
-            else stat("this frame", "—", "no fix within a second of it")
+            else stat("this frame", "-", "no fix within a second of it")
         )
     span = float(track[-1, geo.T] - track[0, geo.T])
     rate = f"{len(track) / span:.1f} Hz" if span > 0 else None
     stats.append(stat("fixes", fmt_count(len(track)), rate))
     stats.append(stat("track", f"{geo.track_length_m(track):.0f} m", "along the fixes"))
     ew, ns = geo.span_m(track)
-    stats.append(stat("extent", f"{ew:.0f} × {ns:.0f} m", "east–west × north–south"))
+    stats.append(stat("extent", f"{ew:.0f} × {ns:.0f} m", "east-west × north-south"))
     sigma = geo.sigma_m(track)
     if sigma is not None:
         stats.append(stat("accuracy", f"± {sigma:.2f} m", "median horizontal 1σ"))
@@ -785,7 +785,7 @@ def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dic
         "badge_title": "the commonest GNSS fix quality over this track",
         "stats": stats,
         "src": _gps_src(access.scene_id, segment, frame),
-        "note": "GNSS as the receiver reported it — where the robot was on the Earth, not ground truth.",
+        "note": "GNSS as the receiver reported it - where the robot was on the Earth, not ground truth.",
     }
 
 
@@ -890,7 +890,7 @@ def frame_gaps(names: list[str], n_frames: int) -> list[tuple[int, int]]:
 
 
 def _gap_text(gaps: list[tuple[int, int]], shown: int = 6) -> str:
-    runs = [f"{a}" if a == b else f"{a}–{b}" for a, b in gaps[:shown]]
+    runs = [f"{a}" if a == b else f"{a}-{b}" for a, b in gaps[:shown]]
     more = len(gaps) - shown
     return ", ".join(runs) + (f" and {more} more gap{'s' if more > 1 else ''}" if more > 0 else "")
 
@@ -973,7 +973,6 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
                     "key": art.key,
                     "label": art.label,
                     "relpath": art.relpath,
-                    "shown": art.relpath + ("/" if art.kind == "dir" else ""),
                     "group": title,
                     "present": p.has(art.key),
                     "size": fmt_bytes(size) if size is not None else None,
@@ -982,7 +981,8 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
                     "stats": stats,
                     "coverage": coverage,
                     "shape": art.description,
-                    "purpose": art.purpose,
+                    # The prose is written with ASCII "--"; the card sets it as a plain dash.
+                    "purpose": art.purpose.replace(" -- ", " - "),
                 }
             )
     return out
@@ -996,13 +996,13 @@ def file_groups(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """The file card's badge, and a line naming what is missing (the badge counts what is short)."""
-    missing = [e["shown"] for e in entries if e["state"] == "no"]
-    partial = [e["shown"] for e in entries if e["state"] == "partial"]
+    missing = [e["relpath"] for e in entries if e["state"] == "no"]
+    partial = [e["relpath"] for e in entries if e["state"] == "partial"]
     bits = [f"{len(missing)} missing"] * bool(missing) + [f"{len(partial)} partial"] * bool(partial)
     lines = []
     if missing:
         what = "it" if len(missing) == 1 else "they"
-        lines.append(f"Missing: {', '.join(missing)} — the viewer leaves out whatever {what} would have shown.")
+        lines.append(f"Missing: {', '.join(missing)} - the viewer leaves out whatever {what} would have shown.")
     return {
         "badge": " · ".join(bits) or "complete",
         "badge_class": "lo" if bits else "hi",

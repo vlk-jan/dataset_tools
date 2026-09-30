@@ -15,7 +15,7 @@ function fmtTime(s) {
 }
 
 function fmtValue(v) {
-  if (v === null || v === undefined) return "—";
+  if (v === null || v === undefined) return "-";
   return Math.abs(v) >= 100 ? v.toFixed(0) : v.toPrecision(3);
 }
 

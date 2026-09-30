@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Scene {{ scene_id }} &mdash; dataset viewer</title>
+<title>Scene {{ scene_id }} - dataset viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
@@ -74,7 +74,7 @@
         </div>
         <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>
         {% if card.timeline.marks %}
-        <p class="barhint">Each block is one ground-truth segment &mdash; click it to open that segment.</p>
+        <p class="barhint">Each block is one ground-truth segment - click it to open that segment.</p>
         {% endif %}
       </div>
       {% endif %}
@@ -129,7 +129,7 @@
         <div class="chips">
         {% for f in g.entries %}
           <button type="button" class="chip {{ f.state }}" title="{{ f.label }}: {{ f.state_word }}"
-                  data-file="{{ f.key }}" aria-expanded="false" aria-controls="fileinfo-{{ f.key }}">{{ f.shown }}</button>
+                  data-file="{{ f.key }}" aria-expanded="false" aria-controls="fileinfo-{{ f.key }}">{{ f.relpath }}</button>
         {% endfor %}
         </div>
       </div>
@@ -141,7 +141,7 @@
         <h3>{{ f.label }}</h3>
         <span class="chip {{ f.state }}">{{ f.state_word }}</span>
       </header>
-      <code class="filepath">{{ scene_id }}/{{ f.shown }}</code>
+      <code class="filepath">{{ scene_id }}/{{ f.relpath }}</code>
       {% if f.stats %}
       <dl class="stats">
         {% for s in f.stats %}
@@ -173,7 +173,6 @@
     <p class="cardnote legend">
       <span class="chip yes">present</span> <span class="chip partial">short of frames</span>
       <span class="chip no">missing</span> <span class="chip optional">not written</span>
-      &mdash; click any entry to read what it holds.
     </p>
     {% if page.disk %}
     {% set disk = page.disk %}
@@ -212,7 +211,7 @@
   </nav>
 
   {% if tab == 'frames' %}
-  <h2>Frames{% if frames %} &mdash; {{ frames.total }}{% endif %}</h2>
+  <h2>Frames{% if frames %} - {{ frames.total }}{% endif %}</h2>
   <p class="muted" style="margin-top:-4px">
     Every synced frame in the scene, {{ frames.per_page if frames else 100 }} at a time.
     Each thumbnail is one request, made only when it scrolls into view; the server never
@@ -224,7 +223,7 @@
   {% endwith %}
 
   {% else %}
-  <h2>Windows &mdash; {{ windows|length }}</h2>
+  <h2>Windows - {{ windows|length }}</h2>
   <p class="muted" style="margin-top:-4px">
     Ground-truth segments are re-anchored to identity individually, so each one is its own
     world: a trajectory, terrain or cloud is only ever built inside a single segment.
@@ -254,7 +253,7 @@
              title="{{ wn | map(attribute='text') | join(' / ') | truncate(160) }}">{{ wn | length }} note{{ 's' if wn | length > 1 else '' }}</a>
           {%- endif %}
         </td>
-        <td class="muted">{{ w.frame_start }} &ndash; {{ w.frame_end - 1 }}</td>
+        <td class="muted">{{ w.frame_start }} - {{ w.frame_end - 1 }}</td>
         <td class="num">{{ w.n_frames }}</td>
         <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
         <td>
@@ -269,7 +268,7 @@
         <td class="num">
           {%- if w.pose_rate %}{{ w.n_poses }}
             <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
-          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+          {%- else %}<span class="muted">-</span>{% endif %}
         </td>
         {# The ground truth's attitude against the IMU, the check the 3D view's
            panel carries, computed the same way before any window is built. #}
@@ -277,7 +276,7 @@
         <td class="num">
           {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
                 title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
-          {%- else %}<span class="muted">&mdash;</span>{% endif %}
+          {%- else %}<span class="muted">-</span>{% endif %}
         </td>
         <td class="muted">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"

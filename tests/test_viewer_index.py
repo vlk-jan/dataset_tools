@@ -170,7 +170,7 @@ def test_duration_formatting_matches_the_atlas_phrasing():
     assert fmt_duration(39.4) == "39 s"
     assert fmt_duration(653.6) == "10 min 53 s"
     assert fmt_duration(3780) == "1 h 3 min"
-    assert fmt_duration(None) == "—"
+    assert fmt_duration(None) == "-"
     assert coverage_class(0.9) == "hi"
     assert coverage_class(0.6) == "mid"
     assert coverage_class(0.42) == "lo"

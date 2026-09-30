@@ -235,7 +235,7 @@ def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
     entries = {f["key"]: f for f in page["files"]}
     assert entries["odometry"]["state"] == "yes" and "ground truth" in entries["odometry"]["purpose"].lower()
     assert entries["odometry"]["relpath"] == "odometry.txt"
-    assert entries["images"]["shown"] == "images/" and entries["images"]["group"] == "Per frame"
+    assert entries["images"]["relpath"] == "images" and entries["images"]["group"] == "Per frame"
     # An absent file keeps its entry: the page says what the scene is missing,
     # and tells a missing file from one that is only written sometimes.
     assert entries["cmd_vel"]["state"] == "no" and entries["cmd_vel"]["purpose"]

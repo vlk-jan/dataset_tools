@@ -204,7 +204,7 @@ function update(force) {
 
   const frame = meta.frames[index];
   els.frame.textContent = frame;
-  els.stamp.textContent = meta.abs_times ? meta.abs_times[index].toFixed(3) : "—";
+  els.stamp.textContent = meta.abs_times ? meta.abs_times[index].toFixed(3) : "-";
   showAttitude(index);
 
   requestTiles(frame);
@@ -392,7 +392,7 @@ function readNoteRange() {
 }
 
 function rangeText(lo, hi) {
-  return lo === hi ? `frame ${lo}` : `frames ${lo}–${hi}`;
+  return lo === hi ? `frame ${lo}` : `frames ${lo}-${hi}`;
 }
 
 function noteRangeText() {

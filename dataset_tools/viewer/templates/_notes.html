@@ -32,7 +32,7 @@
     <ul class="notelist">
       {% for n in notes %}
       {# The stored values, not the rendered ones: the inline editor opens on
-         them, and re-parsing "frames 3–7" out of the label to get them back
+         them, and re-parsing "frames 3-7" out of the label to get them back
          would break the first time the label reads differently. #}
       <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
           data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}">
@@ -56,7 +56,7 @@
     {% else %}
     <p class="muted">
       Nothing noted on this {{ scope }} yet. Notes are for what only a person looking
-      at the data can say &mdash; a stretch whose odometry is wrong, a camera
+      at the data can say - a stretch whose odometry is wrong, a camera
       that dropped out, something that happened in front of the robot.
     </p>
     {% endif %}

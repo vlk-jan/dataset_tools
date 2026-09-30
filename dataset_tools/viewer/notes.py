@@ -93,7 +93,7 @@ class Note:
         """How the range reads in the UI: one frame, or a span."""
         if self.frame_start == self.frame_end:
             return f"frame {self.frame_start}"
-        return f"frames {self.frame_start}–{self.frame_end}"
+        return f"frames {self.frame_start}-{self.frame_end}"
 
     def to_json(self) -> dict:
         d = asdict(self)

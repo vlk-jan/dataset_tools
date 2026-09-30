@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Scene {{ scene_id }} frame {{ index }} &mdash; dataset viewer</title>
+<title>Scene {{ scene_id }} frame {{ index }} - dataset viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/viewer-static/style.css">
@@ -171,7 +171,7 @@
         {% else %}
         <p class="warn" style="margin-top:0">No ground-truth pose for this frame.</p>
         <p class="muted" style="margin-bottom:0">
-          It falls between ground-truth segments &mdash; where the odometry run diverged or was
+          It falls between ground-truth segments - where the odometry run diverged or was
           filtered out. The single-frame view below is robot-centric instead: the robot at the
           origin, with this frame's own cloud and height map around it.
         </p>
@@ -188,7 +188,7 @@
           A static 3D scene of this frame alone: the robot at
           {% if details.segment %}its ground-truth pose{% else %}the origin{% endif %},
           this frame's height map as terrain (its cloud when there is no map) and its cloud as points.
-          Nothing moves &mdash; there is one state to look at.
+          Nothing moves - there is one state to look at.
         </p>
         {% if details.window %}
         <p>

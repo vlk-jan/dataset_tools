@@ -40,7 +40,7 @@ def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
     assert created.status_code == 201
     note = created.json()
     assert (note["frame_start"], note["frame_end"]) == (3, 7)
-    assert note["label"] == "frames 3–7"
+    assert note["label"] == "frames 3-7"
 
     # Stored next to the data, one file per scene, with the range as a pair.
     stored = json.loads((root_path / "notes" / "0000.json").read_text())
@@ -101,7 +101,7 @@ def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path)
     ).json()
     assert (moved["frame_start"], moved["frame_end"]) == (1, 4)
     assert moved["topic"] == "odometry"
-    assert moved["label"] == "frames 1–4"
+    assert moved["label"] == "frames 1-4"
     assert (moved["id"], moved["author"], moved["created"]) == (
         note["id"],
         note["author"],
@@ -141,7 +141,7 @@ def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):
     )
     page = client.get("/scene/0000").text
     assert "wrong odometry here" in page
-    assert "frames 0–2" in page
+    assert "frames 0-2" in page
     assert "1 note" in page  # the windows table marks the window it falls in
     assert 'id="noteform"' in page
 
@@ -149,7 +149,7 @@ def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):
 def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
     """The inline editor opens on a note's own range and topic, so both are on
     the element as stored: re-parsing them back out of the rendered label
-    ("frames 3–7") would break the first time the label read differently. The
+    ("frames 3-7") would break the first time the label read differently. The
     topics the picker offers come from the card, so an editor can be opened on
     a note whether or not the compose form is on the page."""
     _, client = _notes_client(tmp_path)

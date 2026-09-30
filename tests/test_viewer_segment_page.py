@@ -78,7 +78,7 @@ def test_the_segment_card_states_the_range_the_rate_and_the_gaps(tmp_path):
     page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
 
     card = card_of(page, "Segment")
-    assert value_of(card, "frames") == "6 – 11"
+    assert value_of(card, "frames") == "6 - 11"
     assert value_of(card, "GT poses") == "6"
     # The 0.1 s gap to segment 0, not a number out of thin air.
     assert value_of(card, "gap before") == "0.1 s"
