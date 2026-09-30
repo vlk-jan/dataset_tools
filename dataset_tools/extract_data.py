@@ -36,6 +36,7 @@ try:
         gnss_guard,
         image_format,
         rosbags_compat,
+        tf_pins,
         time_align,
     )
     from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
@@ -57,6 +58,7 @@ except ImportError as exc:  # when the file is run directly from dataset_tools/
     import gnss_guard
     import image_format
     import rosbags_compat  # noqa: F401
+    import tf_pins
     import time_align
     from gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
     from transforms import (  # noqa: F401
@@ -105,6 +107,7 @@ SCENE_OUTPUT_FILES = (
     "gps.npy",
     TIME_ALIGN_FILE,
     GNSS_GUARD_FILE,
+    tf_pins.FILE,
     SENTINEL_FILE,
 )
 #: Written only when the odometry source is its own ground truth (``--gt``).
@@ -982,6 +985,20 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Process TF Static
     tf_graph = build_tf_graph(tf_msgs) if tf_msgs else nx.DiGraph()
+    if args.tf_pins == "on":
+        pinned = tf_pins.apply(tf_graph)
+        for rec in pinned:
+            (LOG.warning if rec.far else LOG.info)(
+                "%s: %s -> %s pinned; the bag's own value is %.0f mm, %.2f deg from the pin%s",
+                bag_path.name,
+                rec.pin.parent,
+                rec.pin.child,
+                rec.translation_m * 1000,
+                rec.rotation_deg,
+                " (FAR: check the clouds of this scene against its neighbours)" if rec.far else "",
+            )
+        if pinned:
+            tf_pins.write_report(scene_dir / tf_pins.FILE, pinned)
 
     lidar_frame = get_first_frame(reader, lidar_conn)
     T_lidar_to_base = get_transform(tf_graph, lidar_frame, args.base_frame)
@@ -1450,6 +1467,14 @@ def build_parser() -> argparse.ArgumentParser:
         "only for extending a root that already holds PNG",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
+    parser.add_argument(
+        "--tf_pins",
+        choices=("on", "off"),
+        default="on",
+        help="on (default): the static transforms the Odin1 estimates online (its lidar-to-IMU and "
+        "lidar-to-camera extrinsics) are replaced by one constant for every bag, and what the bag said "
+        f"is recorded in {tf_pins.FILE}. off: the bag's own values are used, as before 2026-09-30",
+    )
     parser.add_argument(
         "--lidar_extrinsic",
         type=float,

@@ -58,6 +58,7 @@ OPTIONAL_FILES = (
     "odometry_segments.txt",
     "trajectory.txt",
     "T_cam_to_lidar.txt",
+    "tf_pins.txt",
 )
 OPTIONAL_DIRS = ("height_maps", "height_masks")
 

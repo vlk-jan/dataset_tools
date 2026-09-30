@@ -180,6 +180,7 @@ lidar works.
 | `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt` |
 | `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
+| `--tf_pins on\|off` | `on` (default): the two static transforms the Odin1 estimates online, `imu_link -> odin1_lidar` and `odin1_lidar -> odin1_camera_link`, are replaced by one constant for every bag (`dataset_tools.tf_pins.PINS`, the median of what 42 bags published), because the estimate wanders by 3 cm and half a degree between boots and even within a bag. What the bag said is recorded per scene in `tf_pins.txt`. `off` uses the bag's values, as every root before 2026-09-30 |
 | `-v` | debug logging |
 
 Behaviour worth knowing:
@@ -224,6 +225,7 @@ index-aligned.
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
 | `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
 | `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, and how many further frames went for having no pose under them at all; absent when the guard did not run |
+| `tf_pins.txt` | — | text | m, degrees | the static transforms pinned to a constant (`--tf_pins`): for each, the pin the scene was built with and what the bag's own `/tf_static` said, so a bag whose estimate sat far from the constant can be found; absent when nothing was pinned (a Livox bag, or `--tf_pins off`) |
 | `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
 | `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
 | `camera_intrinsics.txt` | 3 x 3 | text `float64` | pixels | `K` from the matching `camera_info` topic |
@@ -348,6 +350,17 @@ the viewer's own virtualenv:
   `odin1_base_link` to `base_link` — the mount extrinsic was never published.
   Without `--lidar_extrinsic` the identity is used and a warning is logged, so
   those clouds are in the lidar frame.
+- **The Odin1 re-estimates its own extrinsics.** From the 2026-09-14
+  firmware the unit publishes `imu_link -> odin1_lidar` and
+  `odin1_lidar -> odin1_camera_link` on `/tf_static`, but as a running
+  estimate: across 42 bags the lidar-to-IMU translation spans 3 cm per axis
+  between the 10th and 90th percentile, and one bag changes it seven times in
+  its first minutes. The mount `base_link -> odin1_base_link` (the URDF's
+  (0.10, 0, 0.10)) is not affected. Since 2026-09-30 the extractor pins both
+  edges to the median (`--tf_pins`, `dataset_tools/tf_pins.py`, survey in
+  `docs/odin_tf_static_2026-09-30.txt`); HELHEST v2.0 and v2.1 were built from
+  the bags' own values, so their ground height differs by up to 3.5 cm from
+  scene to scene for no physical reason.
 - **Static-TF convention (fixed 2026-08-28).** `get_transform(G, src, dst)`
   now returns the point map `p_dst = T @ p_src`, matching tf2's
   `lookup_transform(dst, src)`, and a manual `--lidar_extrinsic X Y Z R P Y`

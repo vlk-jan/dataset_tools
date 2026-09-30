@@ -19,7 +19,7 @@ from rosbags.rosbag2 import Writer
 from rosbags.typesys import Stores, get_typestore
 
 from dataset_tools import extract_data as ed
-from dataset_tools import image_format
+from dataset_tools import image_format, tf_pins
 from dataset_tools.validate_scene import validate_scene
 
 TS = get_typestore(Stores.ROS2_JAZZY)
@@ -49,7 +49,7 @@ def _vec(x=0.0, y=0.0, z=0.0):
     return _t("geometry_msgs/msg/Vector3")(x=x, y=y, z=z)
 
 
-def _cloud_msg(t: float, points: np.ndarray):
+def _cloud_msg(t: float, points: np.ndarray, frame: str = "lidar_frame"):
     """A PointCloud2 with x, y, z, intensity float32 fields."""
     fields = [
         _t("sensor_msgs/msg/PointField")(name=n, offset=4 * i, datatype=7, count=1)
@@ -57,7 +57,7 @@ def _cloud_msg(t: float, points: np.ndarray):
     ]
     data = np.ascontiguousarray(points, dtype=np.float32).tobytes()
     return _t("sensor_msgs/msg/PointCloud2")(
-        header=_header(t, "lidar_frame"),
+        header=_header(t, frame),
         height=1,
         width=len(points),
         fields=fields,
@@ -76,16 +76,14 @@ def _image_payload(value: int, ext: str = ".png") -> np.ndarray:
     return payload.ravel()
 
 
-def _image_msg(t: float, value: int, ext: str = ".png"):
+def _image_msg(t: float, value: int, ext: str = ".png", frame: str = "cam_optical"):
     fmt = {".png": "png", ".jpg": "jpeg"}[ext]
-    return _t("sensor_msgs/msg/CompressedImage")(
-        header=_header(t, "cam_optical"), format=fmt, data=_image_payload(value, ext)
-    )
+    return _t("sensor_msgs/msg/CompressedImage")(header=_header(t, frame), format=fmt, data=_image_payload(value, ext))
 
 
-def _camera_info_msg(t: float):
+def _camera_info_msg(t: float, frame: str = "cam_optical"):
     return _t("sensor_msgs/msg/CameraInfo")(
-        header=_header(t, "cam_optical"),
+        header=_header(t, frame),
         height=8,
         width=12,
         distortion_model="plumb_bob",
@@ -144,7 +142,14 @@ def _navsatfix_msg(t: float, lat: float, lon: float, cov_type: int = 3):
     )
 
 
-def _tf_static_msg():
+#: What the Odin1 rig's tf_static carries: the URDF mount, and the unit's own
+#: lidar-to-IMU and lidar-to-camera estimates, here deliberately off the pins.
+ODIN_MOUNT_XYZ = (0.1, 0.0, 0.1)
+ODIN_LIDAR_IN_IMU_XYZ = (0.0, 0.0, 0.05)
+ODIN_CAM_IN_LIDAR_XYZ = (0.0, 0.1, 0.0)
+
+
+def _tf_static_msg(odin: bool = False):
     def tf(parent, child, xyz, quat):
         return _t("geometry_msgs/msg/TransformStamped")(
             header=_header(T0, parent),
@@ -152,12 +157,19 @@ def _tf_static_msg():
             transform=_t("geometry_msgs/msg/Transform")(translation=_vec(*xyz), rotation=quat),
         )
 
-    return _t("tf2_msgs/msg/TFMessage")(
-        transforms=[
+    if odin:
+        transforms = [
+            tf("base_link", "odin1_base_link", ODIN_MOUNT_XYZ, _quat()),
+            tf("odin1_base_link", "imu_link", (0.0, 0.0, 0.0), _quat()),
+            tf("imu_link", "odin1_lidar", ODIN_LIDAR_IN_IMU_XYZ, _quat()),
+            tf("odin1_lidar", "odin1_camera_link", ODIN_CAM_IN_LIDAR_XYZ, _quat()),
+        ]
+    else:
+        transforms = [
             tf("base_link", "lidar_frame", LIDAR_XYZ, _quat(x=1.0, w=0.0)),  # rolled 180 deg
             tf("base_link", "cam_optical", (0.3, 0.0, 0.2), _quat()),
         ]
-    )
+    return _t("tf2_msgs/msg/TFMessage")(transforms=transforms)
 
 
 def write_bag(
@@ -166,6 +178,7 @@ def write_bag(
     dropped_camera: set[int] = frozenset(),
     reset_from: int | None = None,
     image_ext: str = ".png",
+    odin: bool = False,
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
@@ -197,7 +210,8 @@ def write_bag(
         def put(topic, t, msg):
             writer.write(conns[topic], int(t * 1e9), TS.serialize_cdr(msg, conns[topic].msgtype))
 
-        put("/tf_static", T0, _tf_static_msg())
+        put("/tf_static", T0, _tf_static_msg(odin))
+        lidar_frame, cam_frame = ("odin1_lidar", "odin1_camera_link") if odin else ("lidar_frame", "cam_optical")
         rng = np.random.default_rng(0)
         for k in range(frames):
             t = T0 + 0.1 * k
@@ -205,10 +219,10 @@ def write_bag(
             pts[0] = [np.nan, 0, 0, 1]  # a NaN return
             pts[1] = [0, 0, 0, 5]  # a dropped shot encoded as the origin
             pts[2] = [1.0, 0.0, 0.0, 9.0]  # a known point, to check the mount transform
-            put("/lidar", t, _cloud_msg(t, pts))
+            put("/lidar", t, _cloud_msg(t, pts, lidar_frame))
             if k not in dropped_camera:
-                put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k, image_ext))
-                put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03))
+                put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k, image_ext, cam_frame))
+                put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03, cam_frame))
             lost = reset_from is not None and k >= reset_from
             put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
             put("/imu", t, _imu_msg(t, math.radians(10.0)))
@@ -593,3 +607,58 @@ def test_a_root_holds_one_image_format(tmp_path: Path):
     assert ed.main([str(bags), str(out), *COMMON, "--image_format", "png"]) == 0
     assert ed.scene_is_complete(out / "0001")
     assert image_format.of_root(out) == ".png"
+
+
+def _pin_matrix(parent, child):
+    return next(p for p in tf_pins.PINS if p.edge == (parent, child)).matrix()
+
+
+def test_odin_extrinsics_are_pinned(tmp_path: Path):
+    """An Odin1 bag's own lidar-to-IMU and lidar-to-camera estimates are replaced by the pins,
+    the clouds and T_cam_to_base.txt come out with the pinned chain, and tf_pins.txt says what
+    the bag had."""
+    bags = tmp_path / "bags"
+    write_bag(bags / "bag_a", odin=True)
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    scene = out / "0000"
+
+    mount = np.eye(4)
+    mount[:3, 3] = ODIN_MOUNT_XYZ
+    T_lidar = mount @ _pin_matrix("imu_link", "odin1_lidar")
+    known = np.load(scene / "clouds" / "00000.npy")[0, :3]  # the known point (1, 0, 0); the NaN and origin rows are dropped
+    assert np.allclose(known, (T_lidar @ [1.0, 0.0, 0.0, 1.0])[:3], atol=1e-5)
+    assert not np.allclose(known[2], ODIN_MOUNT_XYZ[2] + ODIN_LIDAR_IN_IMU_XYZ[2], atol=0.01)  # not the bag's 5 cm
+
+    T_cam = np.loadtxt(scene / "T_cam_to_base.txt")
+    assert np.allclose(T_cam, T_lidar @ _pin_matrix("odin1_lidar", "odin1_camera_link"), atol=1e-6)
+
+    text = (scene / tf_pins.FILE).read_text()
+    rows = [line.split() for line in text.splitlines() if line and not line.startswith("#")]
+    assert [(r[0], r[1], r[2]) for r in rows] == [
+        ("imu_link", "odin1_lidar", "pin"),
+        ("imu_link", "odin1_lidar", "bag"),
+        ("odin1_lidar", "odin1_camera_link", "pin"),
+        ("odin1_lidar", "odin1_camera_link", "bag"),
+    ]
+    assert [float(v) for v in rows[1][3:6]] == list(ODIN_LIDAR_IN_IMU_XYZ)
+    assert "(far)" in text  # 10 cm of camera offset is far from the pin
+    report = validate_scene(scene)
+    assert report.status() != "FAIL", report.errors
+
+
+def test_tf_pins_off_keeps_the_bag(tmp_path: Path):
+    bags = tmp_path / "bags"
+    write_bag(bags / "bag_a", odin=True)
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON, "--tf_pins", "off"]) == 0
+    scene = out / "0000"
+    known = np.load(scene / "clouds" / "00000.npy")[0, :3]
+    assert np.allclose(known, (1.1, 0.0, 0.15), atol=1e-5)
+    assert not (scene / tf_pins.FILE).exists()
+
+
+def test_livox_bag_has_nothing_to_pin(bags: Path, tmp_path: Path):
+    out = tmp_path / "out"
+    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert not (out / "0000" / tf_pins.FILE).exists()
