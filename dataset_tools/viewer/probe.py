@@ -33,7 +33,7 @@ _UNSET = object()
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
-PROBE_CACHE_FORMAT = 3
+PROBE_CACHE_FORMAT = 4
 
 
 @dataclass(frozen=True)
@@ -80,6 +80,9 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("T_cam_to_base", "T_cam_to_base.txt", "file", "Camera extrinsic", "4x4 camera-optical -> base"),
     Artefact("T_cam_to_lidar", "T_cam_to_lidar.txt", "file", "Camera->lidar extrinsic", "4x4, older roots"),
     Artefact("source_bag", "source_bag.txt", "file", "Source bag", "provenance of the recording"),
+    Artefact("time_align", "time_align.txt", "file", "Frame-clock correction", "the latency taken off the frame clock, per window measured"),
+    Artefact("gnss_guard", "gnss_guard.txt", "file", "GNSS guard", "fabricated pose stretches removed, and what they cost"),
+    Artefact("tf_pins", "tf_pins.txt", "file", "Pinned transforms", "the static transforms pinned to a constant, and what the bag said"),
 )
 # fmt: on
 
@@ -177,6 +180,25 @@ ARTEFACT_PURPOSE: dict[str, str] = {
     "source_bag": (
         "Which recording this scene was extracted from. Provenance only, but it is the only link "
         "back to the raw bag the scene came out of."
+    ),
+    "time_align": (
+        "What the frame clock was corrected by and on what evidence: the sensor unit stamps at "
+        "publish, not at capture, so the extractor measures its latency against the clouds it "
+        "wrote and takes it off data_ts.txt and pcd_ts.txt. One row per window measured; the "
+        "Extraction card on this page sums it up. Absent when --time_align was off, or on a root "
+        "extracted before the correction existed."
+    ),
+    "gnss_guard": (
+        "The stretches of fabricated GNSS/INS pose the extractor removed -- a receiver that has "
+        "lost its fix keeps publishing a reset position -- with what they cost in poses and "
+        "frames, and how many further frames went for having no pose under them at all. Absent "
+        "when the guard did not run (wheel odometry, or --gnss_guard off)."
+    ),
+    "tf_pins": (
+        "The static transforms the extractor pinned to one constant for every bag, because the "
+        "Odin1 re-estimates its own extrinsics as it runs: for each, the pin the scene was built "
+        "with and what the bag's own /tf_static said, so a bag whose estimate sat far from the "
+        "constant can be found. Absent when nothing was pinned (a Livox bag, or --tf_pins off)."
     ),
 }
 
