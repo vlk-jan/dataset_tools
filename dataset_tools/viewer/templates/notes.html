@@ -1,19 +1,10 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Notes - dataset viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/viewer-static/style.css">
-<script src="/viewer-static/theme.js"></script>
-</head>
-<body>
-<header>
+{% extends "base.html" %}
+{% block title %}Notes - dataset viewer{% endblock %}
+{% block header %}
   <h1><a href="/">Dataset viewer</a> / notes</h1>
   <span class="muted">{{ n_notes }} note{{ "s" if n_notes != 1 }} across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
-</header>
-<main>
+{% endblock %}
+{% block main %}
 
   {% if not status.enabled %}
   <p class="stale">Notes are off for this viewer (<code>--no-notes</code>): nothing is read, written or shown.</p>
@@ -63,6 +54,4 @@
   </div>
   {% endfor %}
 
-</main>
-</body>
-</html>
+{% endblock %}

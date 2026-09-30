@@ -1,17 +1,12 @@
-"""Shared fixtures. Adds the repository root to sys.path so the tests run
-straight from a checkout, without installing the package."""
+"""Shared fixtures. The tests run straight from a checkout, without installing
+the package: pyproject.toml puts the repository root on sys.path."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 
 def write_scene(
@@ -62,43 +57,25 @@ def scene(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(tmp_path):
-    pytest.importorskip("simview")
-    pytest.importorskip("torch")
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-    from helpers_viewer import make_root
-
-    from dataset_tools.viewer.app import create_app
+    from helpers_viewer import make_root, viewer_client
 
     root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=12, with_cmd_vel=False)
-    app = create_app(root_path, cache_dir=tmp_path / "cache")
-    return TestClient(app)
+    return viewer_client(root_path, tmp_path / "cache")
 
 
 @pytest.fixture
 def gps_client(tmp_path):
     """The same root, but with gps.npy -- the only thing that turns maps on."""
-    pytest.importorskip("simview")
-    pytest.importorskip("torch")
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-    from helpers_viewer import make_root
-
-    from dataset_tools.viewer.app import create_app
+    from helpers_viewer import make_root, viewer_client
 
     root_path = make_root(tmp_path, scenes=("0000",), frames=12, with_gps=True)
-    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    return viewer_client(root_path, tmp_path / "cache")
 
 
 @pytest.fixture
 def atlas_client(tmp_path):
-    pytest.importorskip("simview")
-    pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-    from helpers_viewer import make_root, write_atlas
-
-    from dataset_tools.viewer.app import create_app
+    from helpers_viewer import make_root, viewer_client, write_atlas
 
     root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=12)
     write_atlas(root_path, scenes=("0000", "0001"))
-    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    return viewer_client(root_path, tmp_path / "cache")

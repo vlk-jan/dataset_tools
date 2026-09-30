@@ -186,7 +186,6 @@ def test_the_segment_page_renders_and_links_where_it_should(client):
 
 def test_an_unknown_segment_is_a_404(client):
     assert client.get("/scene/0000/segment/7").status_code == 404
-    assert client.get("/api/scene/0000/segment/7").status_code == 404
     assert client.get("/scene/9999/segment/0").status_code == 404
 
 
@@ -197,13 +196,6 @@ def test_the_scene_page_links_every_segment_to_its_own_page(client):
 
 def test_the_frame_page_links_the_segment_the_frame_falls_in(client):
     assert "/scene/0000/segment/0" in client.get("/scene/0000/frame/2").text
-
-
-def test_the_segment_api_carries_the_range_and_the_windows(client):
-    data = client.get("/api/scene/0000/segment/0").json()
-    assert data["segment"]["index"] == 0 and data["position"] == 0
-    assert data["frames"] == [0, 6]
-    assert [w["key"] for w in data["windows"]] == ["seg000"]
 
 
 def test_only_the_notes_touching_the_segment_are_listed(client):

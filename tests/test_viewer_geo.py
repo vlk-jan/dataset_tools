@@ -105,10 +105,11 @@ def test_a_slice_never_reaches_outside_its_segment():
 
 def test_a_summary_survives_a_track_of_one_fix():
     """A one-fix scene is a point on the map, not a crash."""
-    summary = geo.summarise(track(1), 2000)
-    assert summary["n_fixes"] == 1 and summary["length_m"] == 0.0
-    assert summary["start"] == summary["end"]
-    assert summary["bounds"] is not None
+    one = track(1)
+    assert geo.track_length_m(one) == 0.0 and geo.span_m(one) == (0.0, 0.0)
+    assert len(geo.points(geo.decimate(one, 2000))) == 1
+    bounds = geo.bounds(one)
+    assert bounds is not None and bounds[0] == bounds[1]
 
 
 def test_what_is_not_a_track_is_rejected():

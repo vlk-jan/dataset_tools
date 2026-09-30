@@ -30,13 +30,17 @@ import logging
 import re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Sequence
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import numpy as np
+import simview
 from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Path as PathParam
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -44,7 +48,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import geo, render
-from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
+from .build import META_VERSION, BuildOptions, SceneAccess, build_scene, read_driven_similarity
 from .index_page import THUMB_SLOTS, build_index, thumb_index
 from .loaders import (
     HM_EXTENT,
@@ -52,7 +56,6 @@ from .loaders import (
     VALIDITY_LABELS,
     load_cloud,
     load_npz_key,
-    read_text,
     roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
@@ -72,38 +75,16 @@ from .windows import (
 from .wire import render_viewer_page, scene_document, write_static_bundle
 
 
-class _RevalidatingStatic(StaticFiles):
-    """StaticFiles that forces the browser to revalidate every asset.
+class _CachedStatic(StaticFiles):
+    """StaticFiles that sends one ``Cache-Control`` with every file it serves."""
 
-    Only SimView's entry point carries a cache-bust (``main.js?v=<ver>``); the
-    ES modules it imports do not. With no ``Cache-Control``, a browser keeps the
-    OLD modules after an upgrade -- the server reports the new version and our
-    version-gated workarounds stand down while the tab still runs the buggy JS
-    (blank Analysis plots after 4.2.1). ``no-cache`` keeps the file cached but
-    forces a conditional request: a cheap 304, or the upgrade picked up at once.
-    """
+    def __init__(self, *, cache_control: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.cache_control = cache_control
 
     async def get_response(self, path, scope):
         response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "no-cache"
-        return response
-
-
-class _ImmutableStatic(StaticFiles):
-    """StaticFiles for URLs that already carry a version in their path.
-
-    When the URL is unique per version (``/simview-static/<ver>/...``) the file
-    at it never changes, so it is safe -- and best -- to let the browser cache
-    it forever. An upgrade changes the version segment, so the new build is a
-    new URL the browser has never seen; there is no way to serve a stale module
-    the way an unversioned path invites. This is the belt to the no-cache
-    braces: it is what actually guarantees the JS the browser runs matches the
-    version the server reports.
-    """
-
-    async def get_response(self, path, scope):
-        response = await super().get_response(path, scope)
-        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        response.headers["Cache-Control"] = self.cache_control
         return response
 
 
@@ -122,20 +103,8 @@ OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 #: Stored atlas thumbnails are curated files that only change when someone
 #: regenerates them by hand, and the index asks for 129 of them at once.
 CURATED = {"Cache-Control": "public, max-age=31536000, immutable"}
-
-
-def _simview_static_dir() -> Path | None:
-    """Where SimView's front-end lives, or ``None`` when the package is absent.
-
-    The rest of the app degrades to "3D views unavailable" on ``None``; without
-    this catch, a missing extra would take the whole viewer down at startup.
-    """
-    try:
-        from importlib.resources import files
-
-        return Path(str(files("simview") / "static"))
-    except (ImportError, TypeError):
-        return None
+#: Scene handles kept at once, least recently used dropped first.
+CACHE_SCENES = 4
 
 
 def _warm_build_imports() -> None:
@@ -155,15 +124,6 @@ def _warm_build_imports() -> None:
         logger.debug("build imports not warmed: %s", exc)
 
 
-def _simview_version() -> str:
-    try:
-        import simview
-
-        return getattr(simview, "__version__", "unknown")
-    except Exception:  # noqa: BLE001
-        return "unavailable"
-
-
 class ViewerState:
     """Shared, per-process state: the dataset root, caches and build locks."""
 
@@ -172,14 +132,11 @@ class ViewerState:
         root: DatasetRoot,
         max_frames: int,
         max_seconds: float = DEFAULT_MAX_SECONDS,
-        cache_scenes: int = 4,
     ) -> None:
         self.root = root
         self.max_frames = max_frames
         self.max_seconds = max_seconds
-        self._access: dict[str, SceneAccess] = {}
-        self._access_order: list[str] = []
-        self._cache_scenes = cache_scenes
+        self._access: OrderedDict[str, SceneAccess] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
         self.bundle_dir = root.cache_dir / BUNDLE_DIR_NAME
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -194,19 +151,13 @@ class ViewerState:
         serving the old frame list. ``root.probe`` is one ``stat`` while the
         mtime holds, so the check costs nothing on a finished root.
         """
-        cached = self._access.get(scene_id)
-        if cached is not None and self.root.probe(scene_id) is cached.probe:
-            self._access_order.remove(scene_id)
-            self._access_order.append(scene_id)
-            return cached
-        if cached is not None:
-            self._access_order.remove(scene_id)
-        access = SceneAccess(self.root, scene_id)
-        self._access[scene_id] = access
-        self._access_order.append(scene_id)
-        while len(self._access_order) > self._cache_scenes:
-            self._access.pop(self._access_order.pop(0), None)
-        return access
+        cached = self._access.pop(scene_id, None)
+        if cached is None or self.root.probe(scene_id) is not cached.probe:
+            cached = SceneAccess(self.root, scene_id)
+        self._access[scene_id] = cached
+        while len(self._access) > CACHE_SCENES:
+            self._access.popitem(last=False)
+        return cached
 
     def lock(self, key: str) -> asyncio.Lock:
         return self._locks.setdefault(key, asyncio.Lock())
@@ -253,7 +204,6 @@ def create_app(
         logger.warning("notes are read-only: %s", notes_store.reason)
 
     app = FastAPI(title="dataset_tools viewer", docs_url=None, redoc_url=None)
-    app.state.viewer = state
     if allowed_hosts is not None:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(allowed_hosts))
 
@@ -261,41 +211,32 @@ def create_app(
     templates.env.globals["reason_text"] = describe_reason
     app.mount(
         "/viewer-static",
-        _RevalidatingStatic(directory=str(HERE / "static")),
+        # Only SimView's entry point carries a cache-bust; with no
+        # Cache-Control a browser keeps OLD modules after an upgrade.
+        # ``no-cache`` keeps the file cached but forces a conditional request:
+        # a cheap 304, or the upgrade picked up at once.
+        _CachedStatic(directory=str(HERE / "static"), cache_control="no-cache"),
         name="viewer_static",
     )
 
-    simview_static = _simview_static_dir()
-    simview_ok = simview_static is not None and simview_static.is_dir()
-    simview_ver = _simview_version()
-    if simview_ok:
-        # Version-stamped path first (most specific): the entry point and every
-        # ES module it imports resolve under it, so a package upgrade changes
-        # every module's URL at once and the browser cannot serve a stale mix
-        # of old and new modules. This is what render_viewer_page points at.
-        app.mount(
-            f"/simview-static/{simview_ver}",
-            _ImmutableStatic(directory=str(simview_static)),
-            name="simview_static_versioned",
-        )
-        # Unversioned fallback (revalidating), still needed for SimView's own
-        # document-relative asset paths (config.js: "static/textures/...").
-        app.mount(
-            "/simview-static",
-            _RevalidatingStatic(directory=str(simview_static)),
-            name="simview_static",
-        )
-        app.mount(
-            "/static",
-            _RevalidatingStatic(directory=str(simview_static)),
-            name="simview_static_root",
-        )
-    else:
-        logger.error(
-            "simview static assets not found (%s); the 3D view will not work -- "
-            'install the viewer extra: pip install "dataset_tools[viewer]"',
-            simview_static or "simview is not installed",
-        )
+    simview_static = str(files("simview") / "static")
+    simview_ver = simview.__version__
+    # The entry point and every ES module it imports resolve under a
+    # version-stamped path, so a package upgrade changes every module's URL at
+    # once and the browser cannot run a stale mix of old and new modules: the
+    # file at a URL never changes, so it is cached forever. This is what
+    # render_viewer_page points at.
+    app.mount(
+        f"/simview-static/{simview_ver}",
+        _CachedStatic(directory=simview_static, cache_control="public, max-age=31536000, immutable"),
+        name="simview_static_versioned",
+    )
+    # SimView's own document-relative asset paths (config.js: "static/textures/...").
+    app.mount(
+        "/static",
+        _CachedStatic(directory=simview_static, cache_control="no-cache"),
+        name="simview_static_root",
+    )
     threading.Thread(target=_warm_build_imports, name="warm-build-imports", daemon=True).start()
 
     # ------------------------------------------------------------------ pages
@@ -337,8 +278,7 @@ def create_app(
                 "root": root,
                 "artefacts": ARTEFACTS,
                 "manifest": root.manifest(),
-                "simview_version": _simview_version(),
-                "simview_ok": simview_ok,
+                "simview_version": simview_ver,
                 "notes_enabled": notes_store.enabled,
                 **page,
             },
@@ -368,11 +308,6 @@ def create_app(
     ):
         access = _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
-        # `_scene_details` is deliberately NOT computed here: the page renders
-        # none of it (the four cards below carry the same facts, read through a
-        # memory map instead), and asking for it loaded joint_states.npy,
-        # cmd_vel.npy and joint_setpoints.npy whole on every page view. It
-        # remains what /api/scene/{id} returns, which is where it is read.
         # The thumbnails and the four cards. Cached on the scene handle, so
         # switching tabs does not re-read this scene's small arrays.
         card_page = await run_in_threadpool(build_scene_page, root, access)
@@ -477,7 +412,6 @@ def create_app(
                 "index": index,
                 "probe": access.probe,
                 "details": details,
-                "simview_ok": simview_ok,
                 "frame_window": single.key if single is not None else None,
                 "map": frame_map,
                 "signals": await run_in_threadpool(_frame_signals, access, details.get("timestamp")),
@@ -494,8 +428,6 @@ def create_app(
         window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
         if window is None:
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
-        if not simview_ok:
-            raise HTTPException(500, "simview's static assets are not installed")
 
         opts = _options_from_query(request.query_params)
         bundle_key = _bundle_key(scene_id, window_key, opts)
@@ -523,31 +455,17 @@ def create_app(
             # "Segment 3/17" rather than leaving "3 of how many?" to a trip
             # back to the scene page.
             n_segments=len(access.segments),
-            data_base=f"/api/data/{bundle_key}/{stamp}",
-            meta_url=f"/api/data/{bundle_key}/{stamp}/meta.json",
-            status_url=f"/api/data/{bundle_key}/{stamp}/status",
-            frame_base=f"/api/scene/{scene_id}/frame",
             scene_url=f"/scene/{scene_id}",
         )
         config = json.dumps(
             {
-                "sceneId": scene_id,
-                "windowKey": window_key,
-                "dataBase": f"/api/data/{bundle_key}/{stamp}",
                 "frameBase": f"/api/scene/{scene_id}/frame",
-                "statusUrl": f"/api/data/{bundle_key}/{stamp}/status",
                 "metaUrl": f"/api/data/{bundle_key}/{stamp}/meta.json",
                 "initialFrame": initial_frame,
-                "sceneUrl": f"/scene/{scene_id}",
                 "notesUrl": f"/api/scene/{scene_id}/notes",
                 "notes": notes_store.status(),
                 "frameStart": window.frame_start,
                 "frameEnd": window.frame_end - 1,
-                # Which SimView the page is running against. The overlay gates
-                # its workarounds on this so that upgrading the package turns
-                # them off by itself -- a stopgap left running over a fixed
-                # SimView would override the real fix (see simview_patch.js).
-                "simviewVersion": _simview_version(),
             }
         )
         # json.dumps leaves "<" alone, and a "</script>" inside any value (the
@@ -560,7 +478,7 @@ def create_app(
         body = overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
         page = await run_in_threadpool(
             render_viewer_page,
-            f"/simview-static/{_simview_version()}",
+            f"/simview-static/{simview_ver}",
             f"/api/data/{bundle_key}/{stamp}",
             body,
             head,
@@ -579,51 +497,6 @@ def create_app(
         return HTMLResponse(page)
 
     # ------------------------------------------------------------------- api
-
-    @app.get("/api/scenes")
-    async def api_scenes():
-        probes = await run_in_threadpool(root.probe_all)
-        return {
-            "root": str(root.path),
-            "scenes": [p.to_json() for p in probes],
-            "artefacts": [a.__dict__ for a in ARTEFACTS],
-        }
-
-    @app.get("/api/scene/{scene_id}")
-    async def api_scene(scene_id: str):
-        access = _access_or_404(state, scene_id)
-        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
-        details = await run_in_threadpool(_scene_details, access)
-        return {
-            "scene": scene_id,
-            "probe": access.probe.to_json(),
-            "windows": [w.to_json() for w in windows],
-            "details": details,
-        }
-
-    @app.get("/api/scene/{scene_id}/segment/{segment_index}")
-    async def api_segment(scene_id: str, segment_index: int):
-        access = _access_or_404(state, scene_id)
-        found = await run_in_threadpool(find_segment, access, segment_index)
-        if found is None:
-            raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
-        position, seg = found
-        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames, state.max_seconds)
-        return {
-            "scene": scene_id,
-            "segment": {
-                "index": seg.index,
-                "start_ts": seg.start_ts,
-                "end_ts": seg.end_ts,
-                "duration": seg.duration,
-                "n_poses": seg.n_poses,
-                "reason": seg.reason,
-            },
-            "position": detail["position"],
-            "frames": list(detail["frames"]),
-            "cards": detail["cards"],
-            "windows": [w.to_json() for w in detail["windows"]],
-        }
 
     @app.get("/api/scene/{scene_id}/gps.json")
     async def api_scene_gps(
@@ -644,11 +517,6 @@ def create_app(
         if payload is None:
             raise HTTPException(404, f"scene {scene_id} has no gps.npy")
         return payload
-
-    @app.get("/api/scene/{scene_id}/frame/{index}/info")
-    async def api_frame_info(scene_id: str, index: int):
-        access = _access_or_404(state, scene_id)
-        return await run_in_threadpool(_frame_info, access, index)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/image.jpg")
     async def api_frame_image(scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)):
@@ -847,30 +715,16 @@ def create_app(
 
     # ------------------------------------------------------------ scene data
 
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/status")
-    async def api_status(scene_id: str, window_key: str, opts_key: str, stamp: str):
-        path = _bundle_path(state, scene_id, window_key, opts_key)
-        # The same test _ensure_bundle uses. Reporting "ready" for a bundle
-        # written by an older viewer would promise a fetch that in fact blocks
-        # on a full rebuild.
-        access = _access_or_404(state, scene_id)
-        window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
-        return {"ready": _bundle_is_current(path, window), "path": str(path)}
-
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/meta.json")
-    async def api_meta(scene_id: str, window_key: str, opts_key: str, stamp: str):
+    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/{name}")
+    async def api_bundle_json(
+        scene_id: str,
+        window_key: str,
+        opts_key: str,
+        stamp: str,
+        name: str = PathParam(pattern=r"^(meta|model|states)\.json$"),
+    ):
         bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
-        return FileResponse(bundle / "meta.json", media_type="application/json")
-
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/model.json")
-    async def api_model(scene_id: str, window_key: str, opts_key: str, stamp: str):
-        bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
-        return FileResponse(bundle / "model.json", media_type="application/json")
-
-    @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/states.json")
-    async def api_states(scene_id: str, window_key: str, opts_key: str, stamp: str):
-        bundle = await _ensure_bundle(state, scene_id, window_key, opts_key)
-        return FileResponse(bundle / "states.json", media_type="application/json")
+        return FileResponse(bundle / name, media_type="application/json")
 
     @app.get("/api/data/{scene_id}/{window_key}/{opts_key}/{stamp}/blob/{blob_id}")
     async def api_blob(scene_id: str, window_key: str, opts_key: str, stamp: str, blob_id: str):
@@ -1165,41 +1019,15 @@ async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
     """The driven-similarity tile: three keys of one small npz, one image."""
 
     def work():
-        sidecar = _read_driven_sidecar(access.frame_path("driven_similarity", index))
+        sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
         if sidecar is None:
             return None
-        driven, max_sim, threshold = sidecar
-        return render.render_driven_similarity(driven, max_sim, threshold, size=size)
+        return render.render_driven_similarity(sidecar["driven"], sidecar["max_sim"], sidecar["threshold"], size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
         raise HTTPException(404, f"no driven_similarity for frame {index}")
     return Response(data, media_type="image/png", headers=DAY_CACHE)
-
-
-def _read_driven_sidecar(path: Path):
-    """``(driven, max_sim, threshold)`` from a ``driven_similarity`` file, or None.
-
-    Tolerant the way ``loaders.load_npz_key`` is: a missing or malformed file is
-    "nothing to show", not an error page.
-    """
-    import numpy as np
-
-    if not path.is_file():
-        return None
-    try:
-        with np.load(path) as d:
-            if "driven" not in d.files or "max_sim" not in d.files:
-                return None
-            driven = np.asarray(d["driven"], dtype=bool)
-            max_sim = np.asarray(d["max_sim"], dtype=np.float64)
-            threshold = float(d["threshold"]) if "threshold" in d.files else 0.9
-    except (OSError, ValueError, KeyError) as exc:
-        logger.debug("unreadable driven_similarity %s: %s", path, exc)
-        return None
-    if driven.ndim != 2 or max_sim.shape != driven.shape:
-        return None
-    return driven, max_sim, threshold
 
 
 def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
@@ -1226,16 +1054,10 @@ def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
         if validity is not None:
             layers["validity"] = validity
     if access.probe.has("driven_similarity"):
-        path = access.frame_path("driven_similarity", index)
-        sidecar = _read_driven_sidecar(path)
+        sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
         if sidecar is not None:
-            layers["driven"], layers["max_sim"], out["threshold"] = sidecar
-            try:
-                with np.load(path) as d:
-                    if "max_sim_geom" in d.files:
-                        layers["max_sim_geom"] = np.asarray(d["max_sim_geom"], dtype=np.float64)
-            except (OSError, ValueError):
-                pass
+            out["threshold"] = sidecar.pop("threshold")
+            layers.update(sidecar)
     if not layers:
         return None
     shape = next(iter(layers.values())).shape
@@ -1274,43 +1096,6 @@ def _safe_render(fn, *args, **kwargs):
         return None
 
 
-def _scene_details(access: SceneAccess) -> dict[str, Any]:
-    """Small, cheap, human-facing extras for the scene page."""
-    details: dict[str, Any] = {}
-    if access.K is not None:
-        details["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()
-    if access.T_cam is not None:
-        details["T_cam_to_base"] = np.asarray(access.T_cam).round(4).tolist()
-    bag = read_text(access.dir / "source_bag.txt", 2048)
-    if bag:
-        details["source_bag"] = bag.strip()
-    segments = access.segments
-    details["segments"] = [
-        {
-            "index": s.index,
-            "start_ts": s.start_ts,
-            "end_ts": s.end_ts,
-            "duration": s.duration,
-            "n_poses": s.n_poses,
-            "reason": s.reason,
-        }
-        for s in segments
-    ]
-    ts = access.frame_ts
-    if ts is not None and len(ts) > 1:
-        diffs = np.diff(ts)
-        details["frame_rate_hz"] = round(float(1.0 / np.median(diffs)), 2) if np.median(diffs) > 0 else None
-        details["duration_s"] = round(float(ts[-1] - ts[0]), 1)
-    for key in ("joint_states", "cmd_vel", "joint_setpoints"):
-        arr = getattr(access, key)
-        if arr is not None:
-            details[f"{key}_shape"] = list(arr.shape)
-            if arr.ndim == 2 and arr.shape[0] > 1:
-                span = float(arr[-1, 0] - arr[0, 0])
-                details[f"{key}_rate_hz"] = round(arr.shape[0] / span, 1) if span > 0 else None
-    return details
-
-
 #: Fixes drawn for the *context* track -- the whole scene behind a highlighted
 #: stretch. Thinner than the highlight: it is there for shape, not for detail.
 GPS_CONTEXT_POINTS = 800
@@ -1322,7 +1107,7 @@ def _gps_payload(
     frame_index: int | None,
     max_points: int,
 ) -> dict[str, Any] | None:
-    """The map's whole answer for one scene: track, extent, quality, marker.
+    """What the map draws for one scene: the track, its bounds, a marker, the context.
 
     Read straight from ``gps.npy`` and thinned here rather than in the browser,
     so a 16-minute scene ships tens of kilobytes instead of ten thousand pairs
@@ -1335,13 +1120,11 @@ def _gps_payload(
         return None
 
     track = gps
-    scope = "scene"
     if segment_index is not None:
         seg = next((s for s in access.segments if s.index == segment_index), None)
         if seg is None:
             raise HTTPException(404, f"scene {access.scene_id} has no segment {segment_index}")
         track = geo.slice_time(gps, seg.start_ts, seg.end_ts)
-        scope = f"segment {seg.index}"
 
     marker = None
     if frame_index is not None:
@@ -1349,14 +1132,16 @@ def _gps_payload(
         if ts is not None and 0 <= frame_index < len(ts):
             marker = geo.locate(gps, float(ts[frame_index]))
 
-    payload: dict[str, Any] = {"scene": access.scene_id, "scope": scope, "marker": marker}
-    payload.update(geo.summarise(track, max_points))
-    # The rest of the scene, faint, behind a highlighted stretch -- so a
-    # segment is seen where in the outing it happened, not just on its own.
-    payload["context"] = (
-        geo.points(geo.decimate(gps, GPS_CONTEXT_POINTS)) if track is not gps and len(gps) > len(track) else None
-    )
-    return payload
+    return {
+        "points": geo.points(geo.decimate(track, max_points)),
+        "bounds": geo.bounds(track),
+        "marker": marker,
+        # The rest of the scene, faint, behind a highlighted stretch -- so a
+        # segment is seen where in the outing it happened, not just on its own.
+        "context": (
+            geo.points(geo.decimate(gps, GPS_CONTEXT_POINTS)) if track is not gps and len(gps) > len(track) else None
+        ),
+    }
 
 
 #: Thumbnails per page of the frame browser. One HTTP request each, lazily,
@@ -1480,12 +1265,12 @@ def _frame_details(
         # float16 of the same size, a few kilobytes, and the caption under the
         # tile has to say how many cells the wheels touched and how many more
         # the trust gate admits.
-        sidecar = _read_driven_sidecar(access.frame_path("driven_similarity", index))
+        sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
         if sidecar is not None:
-            driven, max_sim, threshold = sidecar
+            driven, threshold = sidecar["driven"], sidecar["threshold"]
             details["driven"] = {
                 "n_driven": int(driven.sum()),
-                "n_trusted": int((driven | (max_sim > threshold)).sum()),
+                "n_trusted": int((driven | (sidecar["max_sim"] > threshold)).sum()),
                 "threshold": threshold,
             }
 
@@ -1650,27 +1435,3 @@ def _notes_index(state: ViewerState, notes_store: NoteStore, topic: str | None) 
         "n_scenes": len({r["scene"] for r in rows}),
         "status": notes_store.status(),
     }
-
-
-def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
-    """Per-frame numbers, as JSON, for anything that wants them without a page."""
-    info: dict[str, Any] = {"frame": index}
-    ts = access.frame_ts
-    if ts is not None and 0 <= index < len(ts):
-        info["timestamp"] = float(ts[index])
-    pcd = access.pcd_ts
-    if pcd is not None and 0 <= index < len(pcd):
-        info["lidar_timestamp"] = float(pcd[index])
-        if "timestamp" in info:
-            info["camera_lidar_offset_ms"] = round((info["timestamp"] - float(pcd[index])) * 1000, 2)
-    ga = access.gravity_align
-    if ga is not None and 0 <= index < len(ga):
-        roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
-        info["roll_deg"] = round(float(np.degrees(roll[0])), 2)
-        info["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)
-    info["has"] = {
-        kind: index in access.available_frames(kind)
-        for kind in ("images", "clouds", "height_maps", "height_masks")
-        if access.probe.has(kind)
-    }
-    return info

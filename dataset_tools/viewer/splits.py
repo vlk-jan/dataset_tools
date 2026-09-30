@@ -69,14 +69,9 @@ EXCLUDED = "excluded"
 #: the page is looking for.
 SPLIT_ORDER: tuple[str, ...] = (VAL, TRAIN, EXCLUDED)
 
-#: What each assignment is called on the page, and the tooltip that says what it
-#: means. Keyed by what `SceneSplits.of` returns; a scene it returns ``None`` for
-#: gets no tag and no band at all.
-SPLIT_LABELS: dict[str, str] = {
-    TRAIN: "train",
-    VAL: "val",
-    EXCLUDED: "excluded",
-}
+#: The tooltip that says what each assignment means; the page calls it by its
+#: own name. Keyed by what `SceneSplits.of` returns; a scene it returns ``None``
+#: for gets no tag and no band at all.
 SPLIT_TITLES: dict[str, str] = {
     TRAIN: "training scene: a model fits on this one",
     VAL: "validation scene: held out, a model never fits on this one",
@@ -90,15 +85,6 @@ SPLIT_NAMES: dict[str, str] = {
     VAL: "Validation",
     EXCLUDED: "Excluded",
 }
-
-#: Which count a held-out share can be quoted in, and what to call it. The two
-#: disagree substantially -- one scene is 30 % of the held-out labels but 56 % of
-#: the held-out windows -- so a bare percentage would be meaningless and the
-#: panel always names its unit.
-SHARE_UNITS: tuple[tuple[str, str], ...] = (
-    ("windows_per_scene", "windows"),
-    ("labels_per_scene", "labels"),
-)
 
 
 @dataclass(frozen=True)
@@ -154,8 +140,10 @@ class SceneSplits:
         towards the total, and towards no side.
         """
         wanted = None if scene_ids is None else set(scene_ids)
-        for key, unit in SHARE_UNITS:
-            counts = self.windows if key == "windows_per_scene" else self.labels
+        # The two disagree substantially -- one scene is 30 % of the held-out
+        # labels but 56 % of the held-out windows -- so a bare percentage would
+        # be meaningless and the panel always names its unit.
+        for counts, unit in ((self.windows, "windows"), (self.labels, "labels")):
             if wanted is not None:
                 counts = {scene: n for scene, n in counts.items() if scene in wanted}
             total = sum(counts.values())

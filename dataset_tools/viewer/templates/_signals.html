@@ -4,7 +4,7 @@
    click that opens the frame under the pointer. Included only when `signals`
    exists: a scene with none of the arrays renders no markup. #}
 <div class="card signals" data-signals data-scene="{{ scene_id }}"
-     data-t0="{{ signals.t0 }}" data-duration="{{ signals.duration }}"
+     data-duration="{{ signals.duration }}"
      {% if signals.offset %}data-offset="{{ signals.offset }}"{% endif %}
      {% if signals.frames %}data-frames="{{ signals.frames }}"{% endif %}>
   <header>

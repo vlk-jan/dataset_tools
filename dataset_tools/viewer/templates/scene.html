@@ -1,39 +1,24 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Scene {{ scene_id }} - dataset viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/viewer-static/style.css">
-<script src="/viewer-static/theme.js"></script>
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Scene {{ scene_id }} - dataset viewer{% endblock %}
+{% block head %}
 {# Leaflet is loaded only by a page that actually has a map on it. #}
 {% if page.map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
-</head>
-<body>
-<header>
+{% endblock %}
+{% block header %}
   <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}</h1>
   {% if page.split %}
-  <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.label }}</span>
+  <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.which }}</span>
   {% endif %}
   {% if atlas and atlas.description %}<span class="muted">{{ atlas.description }}</span>{% endif %}
-</header>
-<main>
+{% endblock %}
+{% block main %}
 
   {# The same three frames the index card shows, sampled at 10 / 50 / 90 % of
      the scene -- stored thumbnails on a curated root, live renders otherwise;
      here each one also opens the frame it was cut from. #}
   {% if page.hero %}
-  <div class="hero">
-    {% for thumb in page.hero %}
-    <a href="{{ thumb.href or '/scene/' ~ scene_id }}">
-      <figure>
-        <img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async">
-        <figcaption><b>{{ thumb.label }}</b><span>{{ thumb.sub }}</span></figcaption>
-      </figure>
-    </a>
-    {% endfor %}
-  </div>
+  {{ ui.hero(page.hero, '/scene/' ~ scene_id) }}
   {% endif %}
 
   {# Four cards, each dropped rather than shown empty when the scene has
@@ -42,12 +27,7 @@
   <div class="grid cards">
     {% for card in page.cards %}
     <div class="card">
-      <header>
-        <h2>{{ card.title }}</h2>
-        {% if card.badge %}
-        <span class="cov {{ card.badge_class }}" title="{{ card.badge_title }}">{{ card.badge }}</span>
-        {% endif %}
-      </header>
+      {{ ui.card_head(card.title, card.badge, card.badge_class, card.badge_title) }}
 
       {# Where ground truth exists inside the scene. When the segment file could
          be read every block is one segment and opens it; a curated-only scene
@@ -62,13 +42,7 @@
                style="left:{{ "%.3f"|format(m.left) }}%;width:{{ "%.3f"|format(m.width) }}%"></a>
             {% endfor %}
           {% else %}
-            {% for span in card.timeline.spans %}
-            <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-            {% endfor %}
-            {% for span in card.timeline.fill %}
-            <i class="fill" title="segment borrowed from an earlier root"
-               style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-            {% endfor %}
+            {{ ui.spans(card.timeline.spans, card.timeline.fill) }}
           {% endif %}
         </div>
         <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>
@@ -78,16 +52,7 @@
       </div>
       {% endif %}
 
-      {% if card.stats %}
-      <dl class="stats">
-        {% for s in card.stats %}
-        <div>
-          <dt>{{ s.label }}</dt>
-          <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
-        </div>
-        {% endfor %}
-      </dl>
-      {% endif %}
+      {% if card.stats %}{{ ui.stats(card.stats) }}{% endif %}
 
       {% for m in card.matrices or [] %}
       <details class="matrix">
@@ -117,10 +82,7 @@
      readable, in order, at the bottom of the card. #}
   {% set fs = page.files_summary %}
   <div class="card files">
-    <header>
-      <h2>Files</h2>
-      <span class="cov {{ fs.badge_class }}" title="{{ fs.present }} of {{ fs.total }} entries on disk">{{ fs.badge }}</span>
-    </header>
+    {{ ui.card_head("Files", fs.badge, fs.badge_class, fs.present ~ " of " ~ fs.total ~ " entries on disk") }}
     <div class="filegroups" id="filechips">
     {% for g in page.file_groups %}
       <div class="filegroup">
@@ -141,13 +103,7 @@
         <span class="chip {{ f.state }}">{{ f.state_word }}</span>
       </header>
       <code class="filepath">{{ scene_id }}/{{ f.relpath }}</code>
-      {% if f.stats %}
-      <dl class="stats">
-        {% for s in f.stats %}
-        <div><dt>{{ s.label }}</dt><dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd></div>
-        {% endfor %}
-      </dl>
-      {% endif %}
+      {% if f.stats %}{{ ui.stats(f.stats) }}{% endif %}
       {% if f.coverage %}
       <div class="bar">
         <div class="track cover" title="frames with no file, in orange">
@@ -173,11 +129,7 @@
     {% set disk = page.disk %}
     <details class="matrix diskusage">
       <summary>Disk usage &middot; {{ disk.stats[0].value }}</summary>
-      <dl class="stats">
-        {% for s in disk.stats %}
-        <div><dt>{{ s.label }}</dt><dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd></div>
-        {% endfor %}
-      </dl>
+      {{ ui.stats(disk.stats) }}
       <div class="diskpanel">{% with parts = disk.parts %}{% include "_diskbar.html" %}{% endwith %}</div>
       {% if disk.note %}<p class="cardnote">{{ disk.note }}</p>{% endif %}
     </details>
@@ -246,31 +198,13 @@
              title="{{ wn | map(attribute='text') | join(' / ') | truncate(160) }}">{{ wn | length }} note{{ 's' if wn | length > 1 else '' }}</a>
           {%- endif %}
         </td>
-        <td class="muted">{{ w.frame_start }} - {{ w.frame_end - 1 }}</td>
-        <td class="num">{{ w.n_frames }}</td>
-        <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
+        {{ ui.window_cells(w) }}
         <td>
-          <span class="chip {{ 'yes' if w.pose_source == 'odometry' else ('partial' if w.pose_source == 'transforms' else 'no') }}">
+          <span class="chip {{ ui.pose_chip(w.pose_source) }}">
             {{ w.pose_source }}
           </span>
         </td>
-        {# How densely the segment behind this window is actually anchored. A
-           segment holding one pose every two seconds is interpolated onto the
-           frame clock exactly like a 10 Hz one and looks no different in the
-           3D view, but the trajectory between its poses is a straight guess. #}
-        <td class="num">
-          {%- if w.pose_rate %}{{ w.n_poses }}
-            <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
-          {%- else %}<span class="muted">-</span>{% endif %}
-        </td>
-        {# The ground truth's attitude against the IMU, the check the 3D view's
-           panel carries, computed the same way before any window is built. #}
-        {%- set att = attitude_per_window.get(w.key) %}
-        <td class="num">
-          {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
-                title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
-          {%- else %}<span class="muted">-</span>{% endif %}
-        </td>
+        {{ ui.gt_cells(w, attitude_per_window.get(w.key)) }}
         <td class="muted">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
                href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
@@ -285,7 +219,8 @@
   {# Last on the page: what a person made of the scene, after everything it holds. #}
   {% include "_notes.html" %}
 
-</main>
+{% endblock %}
+{% block scripts %}
 <script type="module" src="/viewer-static/notes.js"></script>
 <script type="module" src="/viewer-static/swap.js"></script>
 {% if page.signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
@@ -294,5 +229,4 @@
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>
 {% endif %}
-</body>
-</html>
+{% endblock %}

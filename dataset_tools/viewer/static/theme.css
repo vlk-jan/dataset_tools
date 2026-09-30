@@ -60,7 +60,6 @@
    or they would be computed once from the light ones and inherited. */
 :root, #dt-panel, .dt-build {
   --ok-soft: color-mix(in srgb, var(--ok) 18%, var(--panel));
-  --val-soft: color-mix(in srgb, var(--val) 18%, var(--panel));
   --train-soft: color-mix(in srgb, var(--train) 18%, var(--panel));
   --accent-soft: color-mix(in srgb, var(--accent) 22%, var(--panel));
   --ok-line: color-mix(in srgb, var(--ok) 45%, var(--panel));

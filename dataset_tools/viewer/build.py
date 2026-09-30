@@ -53,7 +53,6 @@ logger = logging.getLogger("dataset_tools.viewer.build")
 # (tf_static: front sensors at x = +0.10..+0.17, wheel holders at -0.477).
 CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
 CHASSIS_CENTER = (-0.15, 0.0, 0.0)
-CHASSIS_Z = 0.0
 WHEEL_RADIUS = 0.334
 WHEEL_WIDTH = 0.142
 #: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
@@ -64,6 +63,8 @@ WHEEL_WIDTH = 0.142
 #: which lifts the ground away from the robot standing on it. Weighting by
 #: distance lets each cell be decided by the frames that drove over it.
 HM_BLEND_SIGMA = 3.0
+#: Ground (m) the terrain grid reaches beyond the window's path on every side.
+TERRAIN_MARGIN = 7.0
 
 #: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
 WHEELS = {
@@ -192,7 +193,6 @@ class BuildOptions:
     max_terrain_cells: int = 500_000
     terrain_res: float = 0.1
     cloud_color: str = "height"  # "height" | "intensity"
-    terrain_margin: float = 7.0
 
     def sanitized(self) -> BuildOptions:
         return BuildOptions(
@@ -202,7 +202,6 @@ class BuildOptions:
             max_terrain_cells=int(np.clip(self.max_terrain_cells, 1000, 2_000_000)),
             terrain_res=float(np.clip(self.terrain_res, 0.02, 2.0)),
             cloud_color=self.cloud_color if self.cloud_color in ("height", "intensity") else "height",
-            terrain_margin=float(np.clip(self.terrain_margin, 0.5, 30.0)),
         )
 
     def cache_key(self) -> str:
@@ -273,26 +272,22 @@ class SceneAccess:
         self.probe: SceneProbe = root.probe(scene_id)
         self._cache: dict[str, object] = {}
 
-    def _get(self, key: str, fn):
+    def cached(self, key: str, fn):
+        """Memoise a value on this scene handle: a file's contents, or a
+        summary assembled from several (the scene page's cards). They cost
+        reads on network storage, and paging between the tabs of one scene
+        must not pay for them twice.
+        """
         if key not in self._cache:
             self._cache[key] = fn()
         return self._cache[key]
-
-    def cached(self, key: str, fn):
-        """Memoise a derived value on this scene handle.
-
-        For summaries assembled from several of this scene's files (the scene
-        page's cards): they cost small reads on network storage, and paging
-        between the tabs of one scene must not pay for them twice.
-        """
-        return self._get(key, fn)
 
     def _optional(self, key: str, artefact: str, fn):
         """Load an optional artefact, returning None without complaining when
         the probe already says the scene does not have it."""
         if not self.probe.has(artefact):
             return None
-        return self._get(key, fn)
+        return self.cached(key, fn)
 
     # -- timestamps --------------------------------------------------------
 
@@ -308,11 +303,11 @@ class SceneAccess:
                 ts = np.arange(self.probe.n_frames, dtype=np.float64) * 0.1
             return ts
 
-        return self._get("frame_ts", load)  # type: ignore[return-value]
+        return self.cached("frame_ts", load)  # type: ignore[return-value]
 
     @property
     def pcd_ts(self) -> np.ndarray | None:
-        return self._get("pcd_ts", lambda: L.read_timestamps(self.dir / "pcd_ts.txt"))  # type: ignore[return-value]
+        return self.cached("pcd_ts", lambda: L.read_timestamps(self.dir / "pcd_ts.txt"))  # type: ignore[return-value]
 
     # -- poses -------------------------------------------------------------
 
@@ -371,7 +366,7 @@ class SceneAccess:
                     return L.read_matrix(self.dir / name, (4, 4))
             return None
 
-        return self._get("T_cam", load)  # type: ignore[return-value]
+        return self.cached("T_cam", load)  # type: ignore[return-value]
 
     # -- per-frame directories --------------------------------------------
 
@@ -382,7 +377,7 @@ class SceneAccess:
         for only a prefix (or a subsample) of its frames.
         """
         suffix = self.frame_suffix(kind)
-        return self._get(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
+        return self.cached(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
 
     def frame_suffix(self, kind: str) -> str:
         """The extension of a per-frame file. Fixed, except for the images: a
@@ -398,7 +393,7 @@ class SceneAccess:
                 have = image_format.held(self.dir)
                 return max(have, key=have.get) if have else image_format.DEFAULT
 
-        return self._get("image_suffix", held)  # type: ignore[return-value]
+        return self.cached("image_suffix", held)  # type: ignore[return-value]
 
     def frame_path(self, kind: str, index: int) -> Path:
         return self.dir / kind / f"{index:05d}{self.frame_suffix(kind)}"
@@ -406,7 +401,7 @@ class SceneAccess:
     # -- windows -----------------------------------------------------------
 
     def windows(self, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS) -> list[Window]:
-        return self._get(
+        return self.cached(
             f"windows_{max_frames}_{max_seconds}",
             lambda: windows_for_scene(
                 self.frame_ts,
@@ -445,6 +440,11 @@ class PoseTrack:
     valid: np.ndarray  # (T,) bool
     source: str
     note: str = ""
+
+
+def _hold_last(a: np.ndarray, n: int) -> np.ndarray:
+    """``a`` padded to at least ``n`` rows by repeating its last row."""
+    return np.vstack([a, np.repeat(a[-1:], n - len(a), axis=0)]) if len(a) < n else a
 
 
 def _identity_track(n: int, source: str, note: str) -> PoseTrack:
@@ -543,14 +543,10 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         if len(idx) < 2:
             return _identity_track(n, "none", "transforms.npy too short")
         rel = np.linalg.inv(tf[idx[0]]) @ tf[idx]
-        pos = rel[:, :3, 3]
-        quat = L.mat_to_quat(rel[:, :3, :3])
-        valid = np.ones(len(idx), dtype=bool)
-        if len(idx) < n:  # ragged array vs frame count: pad by holding the last pose
-            pad = n - len(idx)
-            pos = np.vstack([pos, np.repeat(pos[-1:], pad, axis=0)])
-            quat = np.vstack([quat, np.repeat(quat[-1:], pad, axis=0)])
-            valid = np.concatenate([valid, np.zeros(pad, dtype=bool)])
+        # Ragged array vs frame count: pad by holding the last pose, marked invalid.
+        pos = _hold_last(rel[:, :3, 3], n)
+        quat = _hold_last(L.mat_to_quat(rel[:, :3, :3]), n)
+        valid = np.arange(len(pos)) < len(idx)
         track = PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
         return _level_track(track, _gravity_level(access, int(idx[0])))
 
@@ -577,11 +573,9 @@ def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrac
     world = gt_anchor @ rel
     pos, quat = world[:, :3, 3], L.mat_to_quat(world[:, :3, :3])
     n = len(gt.positions)
-    if len(pos) < n:
-        pad = n - len(pos)
-        pos = np.vstack([pos, np.repeat(pos[-1:], pad, axis=0)])
-        quat = np.vstack([quat, np.repeat(quat[-1:], pad, axis=0)])
-    return PoseTrack(pos[:n], quat[:n], np.ones(n, dtype=bool), "transforms", "wheel odometry")
+    return PoseTrack(
+        _hold_last(pos, n)[:n], _hold_last(quat, n)[:n], np.ones(n, dtype=bool), "transforms", "wheel odometry"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -660,8 +654,8 @@ def _make_grid(positions: np.ndarray, opts: BuildOptions) -> TerrainGrid:
     a long traverse is still shown whole)."""
     if len(positions) == 0:
         positions = np.zeros((1, 3))
-    x_min, y_min = positions[:, 0].min() - opts.terrain_margin, positions[:, 1].min() - opts.terrain_margin
-    x_max, y_max = positions[:, 0].max() + opts.terrain_margin, positions[:, 1].max() + opts.terrain_margin
+    x_min, y_min = positions[:, 0].min() - TERRAIN_MARGIN, positions[:, 1].min() - TERRAIN_MARGIN
+    x_max, y_max = positions[:, 0].max() + TERRAIN_MARGIN, positions[:, 1].max() + TERRAIN_MARGIN
     res = opts.terrain_res
     while True:
         nx = max(2, int(math.ceil((x_max - x_min) / res)))
@@ -682,6 +676,51 @@ def _pick(indices: np.ndarray, budget: int) -> np.ndarray:
     return indices[np.unique(sel)]
 
 
+def _place(
+    local: np.ndarray, pose: np.ndarray, ga: np.ndarray | None, frame: int, grid: TerrainGrid
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """One robot-centred, gravity-aligned map's samples in the world grid.
+
+    ``p_world = R_pose @ R_ga.T @ p_map + t_pose``: skipping the ``R_ga.T``
+    would tilt every map by the robot's roll/pitch. Returns ``(world, row, col,
+    inside)``, the last three as :meth:`TerrainGrid.cell_of` gives them.
+    """
+    R = pose[:3, :3]
+    if ga is not None and frame < len(ga):
+        R = R @ np.asarray(ga[frame], dtype=np.float64).T
+    world = local @ R.T + pose[:3, 3]
+    return (world, *grid.cell_of(world[:, 0], world[:, 1]))
+
+
+def read_driven_similarity(path: Path) -> dict[str, Any] | None:
+    """The layers of one ``driven_similarity`` sidecar, or None.
+
+    ``driven`` and ``max_sim`` of one 2-D shape, ``threshold`` (0.9, as trained,
+    when the file does not say) and ``max_sim_geom`` when the file has it.
+    Tolerant the way ``loaders.load_npz_key`` is: a missing or malformed file is
+    "nothing to show", not an error.
+    """
+    if not path.is_file():
+        return None
+    try:
+        with np.load(path) as d:
+            if "driven" not in d.files or "max_sim" not in d.files:
+                return None
+            out = {
+                "driven": np.asarray(d["driven"], dtype=bool),
+                "max_sim": np.asarray(d["max_sim"], dtype=np.float64),
+                "threshold": float(d["threshold"]) if "threshold" in d.files else 0.9,
+            }
+            if "max_sim_geom" in d.files:
+                out["max_sim_geom"] = np.asarray(d["max_sim_geom"], dtype=np.float64)
+    except (OSError, ValueError, KeyError) as exc:
+        logger.warning("unreadable driven_similarity %s: %s", path, exc)
+        return None
+    if out["driven"].ndim != 2 or out["max_sim"].shape != out["driven"].shape:
+        return None
+    return out
+
+
 def splat_height_maps(
     access: SceneAccess,
     grid: TerrainGrid,
@@ -692,9 +731,8 @@ def splat_height_maps(
     """Accumulate per-frame BEV height maps into the world grid.
 
     Each map is robot-centred and *gravity-aligned*, so putting it in the world
-    needs both the robot pose and the inverse of that frame's gravity rotation:
-    ``p_world = R_pose @ R_ga.T @ p_map + t_pose``. Skipping the ``R_ga.T``
-    would tilt every map by the robot's roll/pitch.
+    needs both the robot pose and the inverse of that frame's gravity rotation
+    (:func:`_place`).
 
     Each sample carries a weight falling off with its distance from the robot
     that measured it (:data:`HM_BLEND_SIGMA`), so a cell is decided by the
@@ -738,13 +776,7 @@ def splat_height_maps(
             continue
         local = np.stack([X.ravel()[finite], Y.ravel()[finite], z[finite]], axis=1)
 
-        R = poses[i][:3, :3]
-        t = poses[i][:3, 3]
-        if ga is not None and frame < len(ga):
-            R = R @ np.asarray(ga[frame], dtype=np.float64).T
-        world = local @ R.T + t
-
-        row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
+        world, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
             continue
         r, c = row[inside], col[inside]
@@ -799,26 +831,16 @@ def splat_driven_similarity(
     chosen = _pick(usable, opts.max_hm_frames)
     ga = access.gravity_align
 
-    def load(path):
-        try:
-            with np.load(path) as d:
-                if "driven" not in d.files or "max_sim" not in d.files:
-                    return None
-                return np.asarray(d["driven"], dtype=bool), np.asarray(d["max_sim"], dtype=np.float64)
-        except (OSError, ValueError, KeyError) as exc:
-            logger.warning("unreadable driven_similarity %s: %s", path, exc)
-            return None
-
-    sidecars = _read_all([access.frame_path("driven_similarity", int(frames[i])) for i in chosen], load)
+    sidecars = _read_all(
+        [access.frame_path("driven_similarity", int(frames[i])) for i in chosen], read_driven_similarity
+    )
 
     driven_layer = grid.layers.setdefault("driven", np.zeros((grid.ny, grid.nx), dtype=np.float64))
     drivable_layer = grid.layers.setdefault("drivable", np.zeros((grid.ny, grid.nx), dtype=np.float64))
-    for i, pair in zip(chosen, sidecars, strict=True):
-        if pair is None:
+    for i, sidecar in zip(chosen, sidecars, strict=True):
+        if sidecar is None:
             continue
-        driven, max_sim = pair
-        if driven.ndim != 2 or max_sim.shape != driven.shape:
-            continue
+        driven, max_sim = sidecar["driven"], sidecar["max_sim"]
         frame = int(frames[i])
         xs, ys = L.height_map_cell_centers(driven.shape)
         X, Y = np.meshgrid(xs, ys, indexing="ij")
@@ -831,12 +853,7 @@ def splat_driven_similarity(
         if not keep.any():
             continue
         local = np.stack([X.ravel()[keep], Y.ravel()[keep], np.zeros(int(keep.sum()))], axis=1)
-        R = poses[i][:3, :3]
-        t = poses[i][:3, 3]
-        if ga is not None and frame < len(ga):
-            R = R @ np.asarray(ga[frame], dtype=np.float64).T
-        world = local @ R.T + t
-        row, col, inside = grid.cell_of(world[:, 0], world[:, 1])
+        _, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
             continue
         r, c = row[inside], col[inside]
@@ -932,24 +949,12 @@ def _fill_coarse_nans(coarse: np.ndarray, max_passes: int = 400) -> np.ndarray:
         holes = np.isnan(out)
         if not holes.any():
             break
-        total = np.zeros_like(out)
-        count = np.zeros(out.shape, dtype=np.int32)
-        for shift, axis in ((1, 0), (-1, 0), (1, 1), (-1, 1)):
-            neighbour = np.roll(out, shift, axis=axis)
-            # A rolled edge wraps around; blank that row/column out.
-            if axis == 0:
-                if shift == 1:
-                    neighbour[0, :] = np.nan
-                else:
-                    neighbour[-1, :] = np.nan
-            else:
-                if shift == 1:
-                    neighbour[:, 0] = np.nan
-                else:
-                    neighbour[:, -1] = np.nan
-            valid = ~np.isnan(neighbour)
-            total[valid] += neighbour[valid]
-            count[valid] += 1
+        # The four neighbours of every cell; the NaN border stands for "none".
+        p = np.pad(out, 1, constant_values=np.nan)
+        neighbours = np.stack([p[:-2, 1:-1], p[2:, 1:-1], p[1:-1, :-2], p[1:-1, 2:]])
+        valid = ~np.isnan(neighbours)
+        total = np.where(valid, neighbours, 0.0).sum(axis=0)
+        count = valid.sum(axis=0)
         fillable = holes & (count > 0)
         if not fillable.any():
             break
@@ -1393,12 +1398,11 @@ def build_scene(
     # The box is drawn about the body origin, so the body rides CHASSIS_CENTER
     # ahead of/behind base_link, rotated with the pose; the wheels below undo it.
     chassis_pos = gt.positions + _rotate(gt.quats, np.array(CHASSIS_CENTER, dtype=np.float64))
-    chassis_pos[:, 2] += CHASSIS_Z
     trajectories = [BodyTrajectory("robot", positions=chassis_pos, orientations=gt.quats)]
 
     angles = wheel_angles(access, abs_times)
     for name, (wx, wy, wz, col, sign) in WHEELS.items():
-        hub = np.array([wx, wy, wz - CHASSIS_Z], dtype=np.float64) - np.array(CHASSIS_CENTER, dtype=np.float64)
+        hub = np.array([wx, wy, wz], dtype=np.float64) - np.array(CHASSIS_CENTER, dtype=np.float64)
         offset = np.tile(hub, (T, 1))
         # +-90 deg about x (sign mirrored per side, as in DRIFT's helper).
         q_align = np.array([math.cos(sign * math.pi / 4), math.sin(sign * math.pi / 4), 0.0, 0.0])
@@ -1411,9 +1415,7 @@ def build_scene(
         trajectories.append(BodyTrajectory(name, positions=offset, orientations=quat))
 
     if ghost is not None:
-        ghost_pos = ghost.positions.copy()
-        ghost_pos[:, 2] += CHASSIS_Z
-        trajectories.append(BodyTrajectory("wheel_odom_ghost", positions=ghost_pos, orientations=ghost.quats))
+        trajectories.append(BodyTrajectory("wheel_odom_ghost", positions=ghost.positions, orientations=ghost.quats))
     # `lidar_cloud` deliberately gets *no* trajectory. It is the window's clouds
     # already accumulated in the world frame, so its transform is the identity
     # at every frame -- a per-frame pose that says nothing, costs a blob, and

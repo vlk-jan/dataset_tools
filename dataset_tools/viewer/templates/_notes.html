@@ -12,8 +12,7 @@
   <div class="card notes" id="notes"
        data-scene="{{ scene_id }}"
        data-frames="{{ probe.n_frames }}"
-       data-topics="{{ notes_status.topics | join(',') }}"
-       data-writable="{{ 'yes' if notes_status.writable else 'no' }}">
+       data-topics="{{ notes_status.topics | join(',') }}">
     <header>
       <h2>Notes</h2>
       <span class="scount">{{ notes | length }}</span>

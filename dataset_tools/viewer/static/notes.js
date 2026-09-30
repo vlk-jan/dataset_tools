@@ -14,6 +14,8 @@
  * author and its date, which are the parts nobody can retype.
  */
 
+import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
+
 const card = document.getElementById("notes");
 if (card) setup(card);
 
@@ -32,21 +34,6 @@ function setup(card) {
     msg.classList.toggle("bad", Boolean(bad));
   }
 
-  async function send(url, method, body) {
-    const init = { method, headers: { "Content-Type": "application/json" } };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const response = await fetch(url, init);
-    if (!response.ok) {
-      let detail = `${response.status}`;
-      try {
-        const data = await response.json();
-        if (data && data.detail) detail = data.detail;
-      } catch (error) { /* a non-JSON error body is still a failure */ }
-      throw new Error(detail);
-    }
-    return response.status === 204 ? null : response.json();
-  }
-
   if (form) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -57,7 +44,7 @@ function setup(card) {
       if (!text) return say("A note needs some text.", true);
       say("saving…");
       try {
-        await send(base, "POST", {
+        await noteRequest(base, "POST", {
           frames: [start, end],
           topic: data.get("topic"),
           text,
@@ -67,48 +54,6 @@ function setup(card) {
         say(`Could not save: ${error.message}`, true);
       }
     });
-  }
-
-  /** One frame-number field of the editor's range. */
-  function frameField(value, label) {
-    const input = document.createElement("input");
-    input.type = "number";
-    input.min = "0";
-    if (nFrames) input.max = String(nFrames - 1);
-    input.inputMode = "numeric";
-    input.value = String(value);
-    input.setAttribute("aria-label", label);
-    return input;
-  }
-
-  /**
-   * The topic picker, opened on the note's own topic.
-   *
-   * A topic the server no longer offers is kept as an option rather than
-   * silently rewritten to the first one in the list -- the store renders an
-   * unknown topic verbatim (notes.TOPICS), and an edit to a note's text should
-   * not quietly retag it.
-   */
-  function topicField(current) {
-    const select = document.createElement("select");
-    const topics = (card.dataset.topics || "").split(",").filter(Boolean);
-    if (current && !topics.includes(current)) topics.unshift(current);
-    for (const topic of topics) {
-      const option = document.createElement("option");
-      option.value = option.textContent = topic;
-      option.selected = topic === current;
-      select.append(option);
-    }
-    select.setAttribute("aria-label", "topic");
-    return select;
-  }
-
-  function makeButton(text, className) {
-    const el = document.createElement("button");
-    el.type = "button";
-    el.className = className;
-    el.textContent = text;
-    return el;
   }
 
   /**
@@ -127,9 +72,11 @@ function setup(card) {
 
     const range = document.createElement("div");
     range.className = "noterow";
-    const from = frameField(item.dataset.frameStart, "first frame of the range");
-    const to = frameField(item.dataset.frameEnd, "last frame of the range");
-    const topic = topicField(item.dataset.topic);
+    const last = nFrames ? nFrames - 1 : null;
+    const from = frameField(item.dataset.frameStart, "first frame of the range", last);
+    const to = frameField(item.dataset.frameEnd, "last frame of the range", last);
+    const topics = (card.dataset.topics || "").split(",").filter(Boolean);
+    const topic = topicSelect(topics, item.dataset.topic);
     const fromLabel = document.createElement("label");
     fromLabel.append("frames ", from);
     const toLabel = document.createElement("label");
@@ -171,7 +118,7 @@ function setup(card) {
       }
       say("saving…");
       try {
-        await send(`${base}/${id}`, "PATCH", {
+        await noteRequest(`${base}/${id}`, "PATCH", {
           frames: [start, end],
           topic: topic.value,
           text,
@@ -193,7 +140,7 @@ function setup(card) {
     if (button.dataset.act === "delete") {
       if (!window.confirm("Delete this note?")) return;
       try {
-        await send(`${base}/${id}`, "DELETE");
+        await noteRequest(`${base}/${id}`, "DELETE");
         window.location.reload();
       } catch (error) {
         say(`Could not delete: ${error.message}`, true);

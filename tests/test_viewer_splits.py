@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from helpers_viewer import make_root, write_atlas, write_splits
+from helpers_viewer import make_root, viewer_client, write_atlas, write_splits
 
 from dataset_tools.viewer import index_page, probe, splits
 
@@ -257,7 +257,6 @@ def test_an_index_row_carries_the_mark_the_rim_is_drawn_from(tmp_path):
 
     rows = {r["probe"].scene_id: r for r in index_page.build_index(root, root.probe_all())["rows"]}
     assert rows["0001"]["split"]["which"] == "val"
-    assert rows["0001"]["split"]["label"] == "val"
     assert "held out" in rows["0001"]["split"]["title"]
     # The tooltip names the fold, because the badge is the only place a reader of
     # a scene page would learn which split put the scene where it is.
@@ -334,16 +333,9 @@ def test_the_declaration_is_read_once_per_root(tmp_path):
 
 
 def _split_client(tmp_path, **kwargs):
-    pytest.importorskip("simview")
-    pytest.importorskip("torch")
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
-
     root_path = make_root(tmp_path, scenes=("0000", "0001", "0002"), frames=8)
     write_splits(root_path, **kwargs)
-    return TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    return viewer_client(root_path, tmp_path / "cache")
 
 
 def test_the_rendered_index_carries_the_bands_the_panel_and_the_filter(tmp_path):
@@ -393,12 +385,9 @@ def test_an_unsplit_root_renders_exactly_as_it_did_before(tmp_path):
     pytest.importorskip("simview")
     pytest.importorskip("torch")
     pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=8)
-    html = TestClient(create_app(root_path, cache_dir=tmp_path / "cache")).get("/").text
+    html = viewer_client(root_path, tmp_path / "cache").get("/").text
     assert "splitband" not in html
     assert "data-split" not in html
     assert 'class="splitpanel"' not in html

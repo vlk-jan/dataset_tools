@@ -13,6 +13,7 @@ import os
 import pytest
 from helpers_viewer import (
     make_root,
+    viewer_client,
 )
 
 # --------------------------------------------------------------------------
@@ -22,12 +23,9 @@ from helpers_viewer import (
 
 def _notes_client(tmp_path, **kwargs):
     pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = kwargs.pop("root_path", None) or make_root(tmp_path, frames=12)
-    return root_path, TestClient(create_app(root_path, cache_dir=tmp_path / "cache", **kwargs))
+    return root_path, viewer_client(root_path, tmp_path / "cache", **kwargs)
 
 
 def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
@@ -130,7 +128,6 @@ def test_a_note_is_marked_on_every_window_its_frames_touch():
     assert note.overlaps(8, 20)  # one starting on its last frame
     assert not note.overlaps(0, 4)  # ends exclusive at the note's first frame
     assert not note.overlaps(9, 20)
-    assert note.covers(4) and note.covers(8) and not note.covers(9)
 
 
 def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):

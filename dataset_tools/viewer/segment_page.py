@@ -26,7 +26,7 @@ import numpy as np
 
 from . import geo
 from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
-from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
+from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, band, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
 from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
 from .signals import signal_charts
@@ -105,14 +105,6 @@ def poses_in(access: SceneAccess, seg: Segment) -> tuple[np.ndarray, np.ndarray]
     return ts[take], poses[take]
 
 
-def _rate_class(rate: float | None) -> str:
-    if rate is None:
-        return "none"
-    if rate >= GOOD_POSE_RATE:
-        return "hi"
-    return "mid" if rate >= THIN_POSE_RATE else "lo"
-
-
 def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple[int, int]) -> dict[str, Any]:
     """What the segment *is*: when, how long, how well anchored, why it ended."""
     p = access.probe
@@ -177,7 +169,7 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
         "kind": "segment",
         "title": "Segment",
         "badge": f"{rate:.1f} Hz" if rate else None,
-        "badge_class": _rate_class(rate),
+        "badge_class": band(rate, GOOD_POSE_RATE, THIN_POSE_RATE),
         "badge_title": "ground-truth poses per second inside this segment",
         "stats": stats,
         "note": " ".join(notes),

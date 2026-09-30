@@ -169,16 +169,6 @@ def _chunk_ranges(
     return [(edges[i], edges[i + 1]) for i in range(n)]
 
 
-def _poses_in_chunk(seg: Segment, n_chunks: int) -> int:
-    """A chunk's share of its segment's ground-truth poses.
-
-    The segment file records poses per segment, not per chunk, and the split is
-    even, so an even share is the honest estimate. It exists to give a rate
-    (poses per second), which the split does not change.
-    """
-    return int(round(seg.n_poses / n_chunks)) if n_chunks else seg.n_poses
-
-
 def _playable_frames(frame_ts: np.ndarray | None, n_frames: int) -> int:
     """How many leading frames can actually be played back.
 
@@ -262,7 +252,10 @@ def windows_for_scene(
                         chunk=ci,
                         n_chunks=len(chunks),
                         reason=seg.reason,
-                        n_poses=_poses_in_chunk(seg, len(chunks)),
+                        # The segment file counts poses per segment, not per
+                        # chunk, and the split is even, so an even share is the
+                        # honest estimate; the rate it gives is unchanged.
+                        n_poses=round(seg.n_poses / len(chunks)),
                         t_start=float(frame_ts[cs]),
                         t_end=float(frame_ts[ce - 1]),
                     )

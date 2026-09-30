@@ -18,6 +18,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -27,9 +28,6 @@ from .loaders import count_lines, read_segments, read_text
 from .splits import NO_SPLITS, SceneSplits, read_splits
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
-
-#: "not looked at yet", distinct from "looked, and there is none".
-_UNSET = object()
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
@@ -330,11 +328,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         probe.counts["data_ts"] = count_lines(scene_dir / "data_ts.txt")
     if probe.present.get("pcd_ts"):
         probe.counts["pcd_ts"] = count_lines(scene_dir / "pcd_ts.txt")
-    if probe.present.get("transforms"):
-        shape = _npy_shape(scene_dir / "transforms.npy")
-        if shape:
-            probe.counts["transforms"] = int(shape[0])
-    for key in ("joint_states", "joint_setpoints", "cmd_vel", "gravity_align", "gps"):
+    for key in ("transforms", "joint_states", "joint_setpoints", "cmd_vel", "gravity_align", "gps"):
         if probe.present.get(key):
             shape = _npy_shape(scene_dir / ARTEFACTS_BY_KEY[key].relpath)
             if shape:
@@ -424,6 +418,34 @@ def _first_last_float(path: Path) -> tuple[float, float] | None:
         return None
 
 
+def _read_json(path: Path) -> dict | None:
+    """A JSON object from ``path``; ``None`` when absent, unparseable or not an object."""
+    text = read_text(path, 4_000_000)
+    try:
+        data = json.loads(text) if text else None
+    except json.JSONDecodeError as exc:
+        logger.warning("cannot parse %s: %s", path, exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _scene_csv(path: Path) -> dict[str, dict[str, str]] | None:
+    """A CSV's rows by their ``scene`` column; ``None`` when absent or unreadable."""
+    if not path.is_file():
+        return None
+    rows: dict[str, dict[str, str]] = {}
+    try:
+        with open(path, newline="") as fh:
+            for row in csv.DictReader(fh):
+                key = (row.get("scene") or "").strip()
+                if key:
+                    rows[key] = row
+    except (OSError, csv.Error) as exc:
+        logger.warning("cannot read %s: %s", path.name, exc)
+        return None
+    return rows
+
+
 class DatasetRoot:
     """A dataset root directory plus a cached probe of each scene in it."""
 
@@ -438,11 +460,6 @@ class DatasetRoot:
             logger.info("cleared %s: %d file(s), %.1f MB", self.cache_dir, files, freed / 1e6)
         self._probe_cache: dict[str, SceneProbe] = {}
         self._scene_ids: list[str] | None = None
-        self._csv_rows: dict[str, dict] | None = None
-        self._atlas: dict | None | object = _UNSET
-        self._disk_usage: dict | None | object = _UNSET
-        self._validation: dict | None | object = _UNSET
-        self._splits: SceneSplits | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
         self._probe_dirty = False
@@ -473,13 +490,7 @@ class DatasetRoot:
     # -- root-level metadata ----------------------------------------------
 
     def manifest(self) -> dict | None:
-        text = read_text(self.path / "manifest.json")
-        if not text:
-            return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            return None
+        return _read_json(self.path / "manifest.json")
 
     def splits(self) -> SceneSplits:
         """``splits.json``: which scenes are held out from training, if any.
@@ -491,9 +502,11 @@ class DatasetRoot:
         validation data, because that is a modelling decision and not something
         a directory listing can answer.
         """
-        if self._splits is None:
-            self._splits = read_splits(self.path) or NO_SPLITS
         return self._splits
+
+    @cached_property
+    def _splits(self) -> SceneSplits:
+        return read_splits(self.path) or NO_SPLITS
 
     @property
     def atlas_dir(self) -> Path:
@@ -509,15 +522,11 @@ class DatasetRoot:
         still renders, just without the curated half. Read once per process; the
         file is small and only changes when someone regenerates it by hand.
         """
-        if self._atlas is _UNSET:
-            text = read_text(self.atlas_dir / "atlas.json", 4_000_000)
-            try:
-                data = json.loads(text) if text else None
-            except json.JSONDecodeError as exc:
-                logger.warning("cannot parse atlas/atlas.json: %s", exc)
-                data = None
-            self._atlas = data if isinstance(data, dict) else None
         return self._atlas
+
+    @cached_property
+    def _atlas(self) -> dict | None:
+        return _read_json(self.atlas_dir / "atlas.json")
 
     def disk_usage(self) -> dict | None:
         """``disk_usage.json``: bytes per scene and modality, or ``None``.
@@ -525,15 +534,11 @@ class DatasetRoot:
         Written by ``helhest-disk-usage``, because measuring it walks every
         file in the root. Read once per process, like the atlas.
         """
-        if self._disk_usage is _UNSET:
-            text = read_text(self.path / "disk_usage.json", 4_000_000)
-            try:
-                data = json.loads(text) if text else None
-            except json.JSONDecodeError as exc:
-                logger.warning("cannot parse disk_usage.json: %s", exc)
-                data = None
-            self._disk_usage = data if isinstance(data, dict) else None
         return self._disk_usage
+
+    @cached_property
+    def _disk_usage(self) -> dict | None:
+        return _read_json(self.path / "disk_usage.json")
 
     def disk_usage_scene(self, scene_id: str) -> dict:
         entry = ((self.disk_usage() or {}).get("scenes") or {}).get(scene_id)
@@ -547,22 +552,16 @@ class DatasetRoot:
         their text -- the messages only go to the validator's own output. Read
         once per process, like the atlas; ``None`` when absent or unreadable.
         """
-        if self._validation is _UNSET:
-            rows: dict[str, dict[str, str]] | None = None
-            path = self.path / "validation.csv"
-            if path.is_file():
-                try:
-                    with open(path, newline="") as fh:
-                        rows = {}
-                        for row in csv.DictReader(fh):
-                            key = (row.get("scene") or "").strip()
-                            if key and row.get("status"):
-                                rows[key] = {k: (v or "").strip() for k, v in row.items() if k}
-                except (OSError, csv.Error) as exc:
-                    logger.warning("cannot read validation.csv: %s", exc)
-                    rows = None
-            self._validation = rows
         return self._validation
+
+    @cached_property
+    def _validation(self) -> dict[str, dict[str, str]] | None:
+        rows = _scene_csv(self.path / "validation.csv")
+        if rows is None:
+            return None
+        return {
+            key: {k: (v or "").strip() for k, v in row.items() if k} for key, row in rows.items() if row.get("status")
+        }
 
     def validation_scene(self, scene_id: str) -> dict[str, str]:
         return (self.validation() or {}).get(scene_id, {})
@@ -603,20 +602,11 @@ class DatasetRoot:
 
     def csv_rows(self) -> dict[str, dict]:
         """``scenes.csv`` indexed by scene id ({} when the file is absent)."""
-        if self._csv_rows is None:
-            rows: dict[str, dict] = {}
-            path = self.path / "scenes.csv"
-            if path.is_file():
-                try:
-                    with open(path, newline="") as fh:
-                        for row in csv.DictReader(fh):
-                            key = (row.get("scene") or "").strip()
-                            if key:
-                                rows[key] = row
-                except (OSError, csv.Error) as exc:
-                    logger.warning("cannot read scenes.csv: %s", exc)
-            self._csv_rows = rows
         return self._csv_rows
+
+    @cached_property
+    def _csv_rows(self) -> dict[str, dict]:
+        return _scene_csv(self.path / "scenes.csv") or {}
 
     # -- probing -----------------------------------------------------------
 

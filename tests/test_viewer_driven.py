@@ -12,24 +12,17 @@ import io
 
 import numpy as np
 import pytest
-from helpers_viewer import make_root
+from helpers_viewer import make_root, viewer_client
 
 from dataset_tools.viewer import loaders, probe, render
 
 
 @pytest.fixture
 def driven_client(tmp_path):
-    pytest.importorskip("simview")
-    pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
-
     # Its own subtree: a test that also takes the plain ``client`` shares tmp_path.
     (tmp_path / "driven").mkdir()
     root = make_root(tmp_path / "driven", scenes=("0000",), with_driven_similarity=True)
-    app = create_app(root, cache_dir=tmp_path / "driven_cache")
-    return TestClient(app)
+    return viewer_client(root, tmp_path / "driven_cache")
 
 
 def _sidecar():

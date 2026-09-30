@@ -8,6 +8,7 @@ cleanly when the viewer extra (SimView + torch) is not installed.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,7 @@ from helpers_viewer import (
     CAMERA_INFO,
     CURATED_THUMBS,
     make_root,
+    viewer_client,
     write_atlas,
 )
 
@@ -49,7 +51,7 @@ def sub_of(card, label: str):
 
 
 def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
-    from dataset_tools.viewer.scene_page import read_camera_info
+    from dataset_tools.viewer.loaders import read_camera_info
 
     path = tmp_path / "camera_info.yaml"
     path.write_text(CAMERA_INFO)
@@ -64,7 +66,7 @@ def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
 
 
 def test_camera_info_of_a_missing_or_malformed_file_is_simply_absent(tmp_path):
-    from dataset_tools.viewer.scene_page import read_camera_info
+    from dataset_tools.viewer.loaders import read_camera_info
 
     assert read_camera_info(tmp_path / "nope.yaml") is None
     bad = tmp_path / "bad.yaml"
@@ -308,9 +310,6 @@ def test_a_curated_thumbnail_with_no_stored_file_renders_the_frame_it_names(tmp_
     it and the endpoint renders exactly the same frame at the same width."""
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = make_root(tmp_path)
     atlas_dir = write_atlas(root_path)
@@ -323,7 +322,7 @@ def test_a_curated_thumbnail_with_no_stored_file_renders_the_frame_it_names(tmp_
 
     Image.new("RGB", (16, 10), (200, 30, 30)).save(root_path / "0000" / "images" / "00006.png")
 
-    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    client = viewer_client(root_path, tmp_path / "cache")
     thumb = client.get("/api/scene/0000/thumb/b.jpg")
     assert thumb.status_code == 200
     frame = client.get(f"/api/scene/0000/frame/{CURATED_THUMBS['b']}/image.jpg?w=384")
@@ -367,9 +366,6 @@ def test_the_rendered_file_strip_opens_each_artefact_in_place(atlas_client):
 def test_a_scene_page_on_a_root_with_almost_nothing_still_renders(tmp_path):
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = make_root(
         tmp_path,
@@ -380,7 +376,7 @@ def test_a_scene_page_on_a_root_with_almost_nothing_still_renders(tmp_path):
         with_joints=False,
         with_camera_info=False,
     )
-    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    client = viewer_client(root_path, tmp_path / "cache")
     body = client.get("/scene/0000").text
     assert "<h2>Recording</h2>" in body and "<h2>Ground truth</h2>" in body
     assert "<h2>Proprioception</h2>" not in body  # nothing to fill it
@@ -393,10 +389,10 @@ def test_the_index_and_the_scene_page_share_one_palette():
     import dataset_tools.viewer as viewer  # the package, not the FastAPI app
 
     css = (Path(viewer.__file__).parent / "static" / "style.css").read_text()
-    index_scope = css[css.index("body.atlas {") :].split("}", 1)[0]
+    index_scope = "".join(re.findall(r"body\.atlas[^{}()]*\{([^}]*)\}", css))
     for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line"):
         assert token not in index_scope, f"{token} is redefined for the index"
-    assert "--sans" in index_scope  # only the type stacks are the index's own
+    assert "--display" in index_scope  # only the type stacks are the index's own
     assert '@import url("theme.css")' in css
     assert "--mono" in css[css.index(":root {") :].split("}", 1)[0]
     # The palette is theme.css's: light on :root, and dark redefining every

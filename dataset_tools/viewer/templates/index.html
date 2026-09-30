@@ -1,29 +1,15 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer - {{ root.path.name }}{% endif %}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/viewer-static/style.css">
-<script src="/viewer-static/theme.js"></script>
-{# No web fonts: the viewer runs where there is no route to the internet (the
-   reason Leaflet is vendored), and a request to Google Fonts from every index
-   view is a network dependency for three headings. System stacks throughout. #}
-</head>
-<body class="atlas">
-<header>
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}{% if atlas and atlas.title %}{{ atlas.title }}{% else %}Dataset viewer - {{ root.path.name }}{% endif %}{% endblock %}
+{% block body_class %} class="atlas"{% endblock %}
+{% block header %}
   <h1>Dataset viewer</h1>
   <span class="path">{{ root.path }}</span>
   <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
   {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
-  {% if not simview_ok %}
-  <span class="warn">simview assets missing - 3D views unavailable</span>
-  {% else %}
   <span class="muted">simview {{ simview_version }}</span>
-  {% endif %}
-</header>
-<main>
+{% endblock %}
+{% block main %}
 
   {# Curated content carries rendered numbers, so an atlas copied from an
      earlier release is wrong in a way nothing else on the page reveals. #}
@@ -143,7 +129,7 @@
          neither and the card looks as it always did. #}
       <article class="scene{% if row.split %} split{% endif %}" id="s{{ p.scene_id }}"{% if row.split %} data-split="{{ row.split.which }}"{% endif %}>
         {% if row.split %}
-        <div class="splitband {{ row.split.which }}" title="{{ row.split.title }}">{{ row.split.label }}</div>
+        <div class="splitband {{ row.split.which }}" title="{{ row.split.title }}">{{ row.split.which }}</div>
         {% endif %}
         {% if row.thumbs %}
         <div class="strip">
@@ -171,25 +157,13 @@
           {% if row.spans or row.fill_spans %}
           <div class="bar">
             <div class="track" title="where ground truth exists inside the scene">
-              {% for span in row.spans %}
-              <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-              {% endfor %}
-              {% for span in row.fill_spans %}
-              <i class="fill" title="segment borrowed from an earlier root" style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-              {% endfor %}
+              {{ ui.spans(row.spans, row.fill_spans) }}
             </div>
             <div class="barcap"><span>0</span><span>{{ row.span_label }}</span></div>
           </div>
           {% endif %}
 
-          <dl class="stats">
-            {% for stat in row.stats %}
-            <div>
-              <dt>{{ stat.label }}</dt>
-              <dd>{{ stat.value }}{% if stat.sub %}<small>{{ stat.sub }}</small>{% endif %}</dd>
-            </div>
-            {% endfor %}
-          </dl>
+          {{ ui.stats(row.stats) }}
 
           <div class="chips">
             {# driven_similarity is a DRIFT product most roots lack: shown only where it exists,
@@ -226,7 +200,7 @@
   <footer class="atlas-footer">{{ atlas.footer }}</footer>
   {% endif %}
 
-</main>
+{% endblock %}
+{% block scripts %}
 {% if split_panel %}<script type="module" src="/viewer-static/index.js"></script>{% endif %}
-</body>
-</html>
+{% endblock %}

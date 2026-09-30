@@ -10,19 +10,3 @@ Run it with::
 
 or via the ``helhest-viewer`` console script.
 """
-
-__all__ = ["create_app", "main"]
-
-
-def create_app(*args, **kwargs):
-    """Lazily import the FastAPI app factory (keeps ``import dataset_tools``
-    free of the viewer's heavier optional dependencies)."""
-    from .app import create_app as _create_app
-
-    return _create_app(*args, **kwargs)
-
-
-def main(argv=None):
-    from .__main__ import main as _main
-
-    return _main(argv)

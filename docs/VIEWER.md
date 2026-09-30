@@ -687,12 +687,10 @@ scene into "points" (which has no robot to show).
 ### Working around SimView
 
 `dataset_tools/viewer/static/simview_patch.js` holds the corrections that need
-to reach into SimView's own objects rather than just its CSS. Each block says
-whether it is permanent (something only this dataset can know: which bodies are
-bookkeeping, what the ghost is) or a **stopgap** for an upstream bug. Every
-stopgap is gated on the installed SimView version and stops firing by itself on
-upgrade — a workaround left running over a fixed release would override the
-real fix with a cruder one and hide whether it landed.
+to reach into SimView's own objects rather than just its CSS: things only this
+dataset can know, such as which bodies are bookkeeping and what the ghost is.
+The stopgaps for SimView <= 4.2 bugs were removed with the move to SimView 5,
+which fixes them upstream.
 
 The `lidar_cloud` body deliberately carries no per-frame trajectory: it is
 already accumulated in the window's frame, so a per-frame identity transform
@@ -759,14 +757,10 @@ Dataset roots usually live on contended network storage, so:
 | `/scene/{scene}/frame/{n}` | one frame: its image, its derived tiles and its numbers |
 | `/scene/{scene}/jump?index=N` | the frames tab's jump box: redirects to that frame, clamped to the scene |
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
-| `/api/scenes` | the index as JSON |
-| `/api/scene/{scene}` | one scene's probe, windows and details as JSON |
-| `/api/scene/{scene}/segment/{n}` | one segment's cards, frame range and windows as JSON |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
 | `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
-| `/api/scene/{scene}/frame/{n}/info` | that frame's numbers as JSON: stamps, camera-lidar offset, roll and pitch, which per-frame files it has |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
 | `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |
 | `/api/scene/{scene}/thumb/{slot}.jpg` | one index thumbnail (`a`, `b` or `c`): the stored `atlas/thumbs/` file, else the frame rendered live at 384 px |
@@ -774,7 +768,7 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
 | `/api/scene/{scene}/frame/{n}/driven.png` | that frame's driven cells and feature similarity (`driven_similarity/`) |
 | `/api/scene/{scene}/frame/{n}/cloud.png` | that frame's cloud, top-down |
-| `/api/data/{scene}/{window}/{opts}/...` | the SimView static bundle: `model.json`, `states.json`, `blob/N`, plus `meta.json` and `status` |
+| `/api/data/{scene}/{window}/{opts}/...` | the SimView static bundle: `model.json`, `states.json`, `blob/N`, plus `meta.json` |
 | `/healthz` | liveness, the root path and the scene count |
 
 A per-frame artefact the scene does not have returns `404` rather than a
@@ -811,13 +805,6 @@ what was *asked for*, which does not change when the builder does, so
 `meta.json` carries `build.META_VERSION` and anything older is rebuilt rather
 than served. Without that, a window anyone had already opened would go on
 serving the old metadata forever.
-
-**The robot is missing from the 3D view.** In SimView <= 4.2 an instanced
-mesh's bounding sphere is computed once and cached, so a body is culled as soon
-as its *starting* pose leaves the view frustum -- which reads as the robot
-blinking out somewhere down a long traverse. The viewer turns culling off for
-those bodies (`simview_patch.js`), gated on the SimView version; on a newer
-package SimView handles it and the workaround does not run.
 
 **The terrain looks flat, or blockier than 0.1 m.** Check the panel's build
 line. Without `height_maps/` the terrain is accumulated from the clouds, and

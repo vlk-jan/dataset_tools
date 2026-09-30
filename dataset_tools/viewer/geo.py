@@ -19,7 +19,6 @@ which is why it is never mixed into a window bundle.
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import numpy as np
 
@@ -46,14 +45,9 @@ def is_track(gps: np.ndarray | None) -> bool:
     return gps is not None and gps.ndim == 2 and gps.shape[0] > 0 and gps.shape[1] > LON
 
 
-def slice_time(gps: np.ndarray, t0: float | None = None, t1: float | None = None) -> np.ndarray:
-    """The fixes inside ``[t0, t1]`` (either end optional), in file order."""
-    keep = np.ones(len(gps), dtype=bool)
-    if t0 is not None:
-        keep &= gps[:, T] >= t0
-    if t1 is not None:
-        keep &= gps[:, T] <= t1
-    return gps[keep]
+def slice_time(gps: np.ndarray, t0: float, t1: float) -> np.ndarray:
+    """The fixes inside ``[t0, t1]``, in file order."""
+    return gps[(gps[:, T] >= t0) & (gps[:, T] <= t1)]
 
 
 def decimate(track: np.ndarray, max_points: int) -> np.ndarray:
@@ -128,10 +122,11 @@ def sigma_m(track: np.ndarray) -> float | None:
     return float(np.sqrt(np.median(good))) if good.size else None
 
 
-def locate(gps: np.ndarray, t: float, max_gap: float = MAX_INTERP_GAP) -> list[float] | None:
+def locate(gps: np.ndarray, t: float) -> list[float] | None:
     """``[lat, lon]`` at time ``t``, interpolated between the fixes around it.
 
-    None when ``t`` sits outside the track or in a gap longer than ``max_gap``:
+    None when ``t`` sits outside the track or in a gap longer than
+    :data:`MAX_INTERP_GAP`:
     a straight line drawn across a receiver dropout is a claim about where the
     robot went, and this file does not know that.
     """
@@ -140,11 +135,11 @@ def locate(gps: np.ndarray, t: float, max_gap: float = MAX_INTERP_GAP) -> list[f
     ts = gps[:, T]
     i = int(np.searchsorted(ts, t))
     if i == 0:
-        return [float(gps[0, LAT]), float(gps[0, LON])] if abs(ts[0] - t) <= max_gap else None
+        return [float(gps[0, LAT]), float(gps[0, LON])] if abs(ts[0] - t) <= MAX_INTERP_GAP else None
     if i >= len(ts):
-        return [float(gps[-1, LAT]), float(gps[-1, LON])] if abs(t - ts[-1]) <= max_gap else None
+        return [float(gps[-1, LAT]), float(gps[-1, LON])] if abs(t - ts[-1]) <= MAX_INTERP_GAP else None
     t0, t1 = float(ts[i - 1]), float(ts[i])
-    if t1 - t0 > max_gap:
+    if t1 - t0 > MAX_INTERP_GAP:
         return None
     w = 0.0 if t1 == t0 else (t - t0) / (t1 - t0)
     lat = float(gps[i - 1, LAT] + w * (gps[i, LAT] - gps[i - 1, LAT]))
@@ -159,28 +154,3 @@ def points(track: np.ndarray) -> list[list[float]]:
     these receivers -- and halves the JSON a long scene ships.
     """
     return [[round(float(lat), 7), round(float(lon), 7)] for lat, lon in track[:, [LAT, LON]]]
-
-
-def summarise(track: np.ndarray, max_points: int) -> dict[str, Any]:
-    """Everything one drawn track needs: its points, its extent, its quality."""
-    thinned = decimate(track, max_points)
-    ew, ns = span_m(track)
-    return {
-        "points": points(thinned),
-        "n_points": int(len(thinned)),
-        "n_fixes": int(len(track)),
-        "bounds": bounds(track),
-        "start": [round(float(track[0, LAT]), 7), round(float(track[0, LON]), 7)] if len(track) else None,
-        "end": [round(float(track[-1, LAT]), 7), round(float(track[-1, LON]), 7)] if len(track) else None,
-        "t0": float(track[0, T]) if len(track) else None,
-        "t1": float(track[-1, T]) if len(track) else None,
-        "length_m": round(track_length_m(track), 1),
-        "span_m": [round(ew, 1), round(ns, 1)],
-        "fix": [{"label": label, "share": round(share, 4)} for label, share in fix_shares(track)],
-        "sigma_m": round(sigma, 2) if (sigma := sigma_m(track)) is not None else None,
-        "alt_m": (
-            [round(float(np.nanmin(track[:, ALT])), 1), round(float(np.nanmax(track[:, ALT])), 1)]
-            if len(track) and track.shape[1] > ALT and np.isfinite(track[:, ALT]).any()
-            else None
-        ),
-    }

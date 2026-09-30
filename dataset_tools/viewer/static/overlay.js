@@ -17,6 +17,7 @@
  */
 
 import { centerOnRobot, installSimviewPatches, waitForSimView } from "./simview_patch.js";
+import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
 
 const cfg = window.__dtViewer || {};
 
@@ -28,8 +29,6 @@ const els = {
   prevWindow: document.getElementById("dt-prev-window"),
   nextWindow: document.getElementById("dt-next-window"),
   view: document.getElementById("dt-view"),
-  cloudRow: document.getElementById("dt-cloud-row"),
-  cloud: document.getElementById("dt-cloud"),
   ghostRow: document.getElementById("dt-ghost-row"),
   ghost: document.getElementById("dt-ghost"),
   legend: document.getElementById("dt-legend"),
@@ -258,37 +257,16 @@ function showAttitude(index) {
     `${attitude.gt_pitch[index].toFixed(1)}\u00b0 GT / ${attitude.imu_pitch[index].toFixed(1)}\u00b0 IMU`;
 }
 
-/* Wire the 3D-view toggles to SimView, once it exists.
- *
- * These were once one either/or switch that pushed SimView's global mode to
- * "points", which made the robot vanish whenever the cloud was asked for (a box
- * has no point representation). Cloud and ghost are now independent of that
- * mode and of each other; see simview_patch.js.
+/* Wire the ghost toggle to SimView, once it exists. The point cloud has
+ * SimView's own "Show Point Clouds" checkbox; see simview_patch.js.
  */
 function setupViewToggles() {
   if (!patches) return;
-  const view = els.view;
-  let any = false;
-
-  // `hasCloud` is false on a SimView new enough to own this control itself --
-  // it shows point clouds through its own "Show Point Clouds" checkbox, and a
-  // second one here could only contradict it.
-  if (patches.hasCloud) {
-    any = true;
-    els.cloudRow.hidden = false;
-    els.cloud.addEventListener("change", () => {
-      patches.setCloudVisible(els.cloud.checked);
-      // The terrain surface and the aggregated cloud describe the same ground,
-      // and the surface is drawn over the points.
-      patches.setSurfaceVisible(!els.cloud.checked);
-    });
-  }
   if (patches.hasGhost) {
-    any = true;
     els.ghostRow.hidden = false;
     els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
   }
-  view.hidden = !any;
+  els.view.hidden = !patches.hasGhost;
 }
 
 /* Render the terrain colour-mode legend from the build metadata.
@@ -349,23 +327,6 @@ function seekToFrame(frame) {
   // advances it, so an assignment leaves the view where it was (openInitialView).
   app.animationController.goToTime(meta.times[local]);
   update(true);
-}
-
-/** One note mutation. Throws carrying the server's own reason, which is the
- *  useful half of a refusal ("this root is not writable", not "403"). */
-async function noteRequest(url, method, body) {
-  const init = { method, headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) init.body = JSON.stringify(body);
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    let detail = `${response.status}`;
-    try {
-      const parsed = await response.json();
-      if (parsed && parsed.detail) detail = parsed.detail;
-    } catch (e) { /* the status alone is enough */ }
-    throw new Error(detail);
-  }
-  return response;
 }
 
 /**
@@ -514,10 +475,7 @@ function noteTools(item, note) {
 }
 
 function noteToolButton(glyph, className, label) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `dt-notebtn ${className}`;
-  button.textContent = glyph;
+  const button = makeButton(glyph, `dt-notebtn ${className}`);
   button.title = label;
   // The glyph is decoration to a screen reader, which reads the label instead.
   button.setAttribute("aria-label", label);
@@ -554,18 +512,7 @@ function noteEditor(note) {
   wireNowButton(fromNow, from, from, to, note.frame_start, note.frame_end);
   wireNowButton(toNow, to, from, to, note.frame_start, note.frame_end);
 
-  const topic = document.createElement("select");
-  topic.setAttribute("aria-label", "topic");
-  const topics = ((cfg.notes || {}).topics || []).slice();
-  // A topic the server no longer offers stays on the note: the store renders
-  // an unknown one verbatim, so editing the text must not quietly retag it.
-  if (note.topic && !topics.includes(note.topic)) topics.unshift(note.topic);
-  for (const name of topics) {
-    const option = document.createElement("option");
-    option.value = option.textContent = name;
-    option.selected = name === note.topic;
-    topic.appendChild(option);
-  }
+  const topic = topicSelect((cfg.notes || {}).topics || [], note.topic);
   row.append(fromField, toField, topic);
 
   const text = document.createElement("textarea");
@@ -577,14 +524,8 @@ function noteEditor(note) {
   actions.className = "dt-noteactions";
   const msg = document.createElement("span");
   msg.className = "dt-hint";
-  const save = document.createElement("button");
-  save.type = "button";
-  save.className = "dt-rangebtn dt-save";
-  save.textContent = "Save";
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "dt-rangebtn";
-  cancel.textContent = "Cancel";
+  const save = makeButton("Save", "dt-rangebtn dt-save");
+  const cancel = makeButton("Cancel", "dt-rangebtn");
   actions.append(msg, save, cancel);
 
   cancel.addEventListener("click", () => wrap.replaceWith(renderNote(note)));
@@ -619,24 +560,14 @@ function noteEditor(note) {
 }
 
 function rangeField(value, label) {
-  const input = document.createElement("input");
-  input.type = "number";
-  input.min = "0";
   // The scene's last frame, borrowed from the compose form rather than
   // restated: the server renders it there from the probe, and one bound that
   // is wrong in one place only is worse than none.
-  if (els.noteFrom && els.noteFrom.max) input.max = els.noteFrom.max;
-  input.inputMode = "numeric";
-  input.value = String(value);
-  input.setAttribute("aria-label", label);
-  return input;
+  return frameField(value, label, els.noteFrom && els.noteFrom.max);
 }
 
 function nowButton() {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "dt-nowbtn";
-  button.textContent = "now";
+  const button = makeButton("now", "dt-nowbtn");
   button.title = "Set this end to the frame showing now";
   return button;
 }
@@ -732,7 +663,7 @@ async function setupNotes() {
  * Failure here (no such frame, SimView slow) leaves the window at its start
  * under the stock camera: normal behaviour, never an error.
  */
-function openInitialView() {
+async function openInitialView() {
   if (!meta) return;
   const target = cfg.initialFrame;
   const local =
@@ -742,36 +673,36 @@ function openInitialView() {
   const seekTo =
     local >= 0 && meta.times && local < meta.times.length ? meta.times[local] : null;
 
+  let app;
+  try {
+    app = await waitForSimView(60000);
+  } catch {
+    return;
+  }
+  if (seekTo !== null) app.animationController.goToTime(seekTo);
+
   const deadline = performance.now() + 60000;
-  let seeked = false;
   let centered = false;
   const attempt = () => {
-    const app = window.__debugSimView;
-    if (app && app.animationController && app.store && app.store.length > 0) {
-      if (seekTo !== null && !seeked) {
-        app.animationController.goToTime(seekTo);
-        seeked = true;
-      }
-      // The camera can only be aimed once the robot has a resolved position,
-      // which the seek above (or SimView's own initial draw) is what produces.
-      // Keep waiting if the bodies are not built yet.
-      if (centered || centerOnRobot(app)) {
-        centered = true;
-        // After centring: the carried camera is an offset from the robot.
-        if (restoreCarriedView(app)) {
-          update(true);
-          return;
-        }
+    // The camera can only be aimed once the robot has a resolved position,
+    // which the seek above (or SimView's own initial draw) is what produces.
+    // Keep waiting if the bodies are not built yet.
+    if (centered || centerOnRobot(app)) {
+      centered = true;
+      // After centring: the carried camera is an offset from the robot.
+      if (restoreCarriedView(app)) {
+        update(true);
+        return;
       }
     }
     if (performance.now() < deadline) requestAnimationFrame(attempt);
   };
-  requestAnimationFrame(attempt);
+  attempt();
 }
 
 function tick() {
   // Every branch below is wrapped so that a transient throw -- SimView briefly
-  // mid-rebuild when patches.enforce() pokes it, an unexpected store shape --
+  // mid-rebuild, an unexpected store shape --
   // cannot kill the rAF chain. Before this guard, a single exception anywhere
   // in the loop left `requestAnimationFrame(tick)` unreached and the panel
   // frozen on whatever frame it last showed until a full reload (the "side
@@ -783,13 +714,9 @@ function tick() {
   }
   if (patches) {
     try {
-      // SimView recomputes body visibility from its global mode whenever the
-      // visible batch set or that mode changes, so our per-body wishes have to
-      // be re-asserted rather than set once. Writes nothing when already right.
-      patches.enforce();
       syncLegendHighlight();
     } catch (error) {
-      if (!tick._patchWarned) { console.warn("SimView patch enforce skipped a frame:", error); tick._patchWarned = true; }
+      if (!tick._patchWarned) { console.warn("legend highlight skipped a frame:", error); tick._patchWarned = true; }
     }
   }
   requestAnimationFrame(tick);
@@ -806,9 +733,8 @@ function tick() {
  * stopping the event on our own panel is enough to keep it from reaching them,
  * and the field still gets it -- the target is reached first.
  *
- * This is not a version-gated stopgap like the ones in `simview_patch.js`: it
- * is not reaching into SimView at all, and "the thing you are typing into gets
- * the keystroke" stays right whatever upstream does.
+ * This is not reaching into SimView at all, and "the thing you are typing into
+ * gets the keystroke" stays right whatever upstream does.
  */
 /** Is this node something a person types into? Shared by the two key handlers. */
 function editable(node) {
@@ -885,7 +811,6 @@ function saveCarriedView() {
       gui: Object.fromEntries(guiControllers(app).map((c) => [c.property, c.getValue()])),
       speed: anim ? anim.playbackSpeed : undefined,
       offset: camera.position.clone().sub(controls.target).toArray(),
-      cloud: els.cloud ? els.cloud.checked : undefined,
       ghost: els.ghost ? els.ghost.checked : undefined,
     };
     sessionStorage.setItem(CARRY_KEY, JSON.stringify(state));
@@ -903,7 +828,7 @@ function restoreCarriedView(app) {
     state = null;
   }
   if (!state) return true;
-  // The panel's own cloud/ghost switches are wired once the patches are in.
+  // The panel's own ghost switch is wired once the patches are in.
   if (!app.uiControls || !app.uiControls.gui || !patches) return false;
   try {
     sessionStorage.removeItem(CARRY_KEY);
@@ -932,11 +857,10 @@ function restoreCarriedView(app) {
       camera.position.copy(controls.target).add(camera.position.clone().fromArray(state.offset));
       controls.update();
     }
-    for (const [el, want] of [[els.cloud, state.cloud], [els.ghost, state.ghost]]) {
-      if (el && !el.closest("[hidden]") && typeof want === "boolean" && el.checked !== want) {
-        el.checked = want;
-        el.dispatchEvent(new Event("change"));
-      }
+    const el = els.ghost;
+    if (el && !el.closest("[hidden]") && typeof state.ghost === "boolean" && el.checked !== state.ghost) {
+      el.checked = state.ghost;
+      el.dispatchEvent(new Event("change"));
     }
   } catch (error) {
     console.warn("carried view setup only partly applied:", error);
@@ -1031,7 +955,7 @@ async function main() {
   // A failure here must never take the panel down with it: the per-frame data
   // is the point of this page, the patches are a better 3D view on top of it.
   try {
-    patches = installSimviewPatches(await waitForSimView(), cfg.simviewVersion);
+    patches = installSimviewPatches(await waitForSimView());
     setupViewToggles();
     syncLegendHighlight();
   } catch (error) {

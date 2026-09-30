@@ -37,21 +37,16 @@ def scene_document(scene) -> dict:
     columnar layout packs each body's whole trajectory into one blob -- tens
     per scene, and the layout windowed range-fetching relies on.
     """
-    model_json = scene.model.to_json()
-    states = scene.states
-    try:
-        from simview.columnar import columnarize_states, inline_blob
+    from simview.columnar import columnarize_states, inline_blob
 
-        columnar = columnarize_states(states, model_json, inline_blob)
-        if columnar is not None:
-            states = columnar
-        else:
-            logger.warning(
-                "states could not be packed columnar; falling back to the "
-                "per-frame layout (slower to load, many more blobs)"
-            )
-    except ImportError:  # pragma: no cover - very old/newer simview layout
-        logger.warning("simview.columnar is unavailable; using the per-frame layout")
+    model_json = scene.model.to_json()
+    states = columnarize_states(scene.states, model_json, inline_blob)
+    if states is None:
+        logger.warning(
+            "states could not be packed columnar; falling back to the "
+            "per-frame layout (slower to load, many more blobs)"
+        )
+        states = scene.states
     return {"model": model_json, "states": states}
 
 
@@ -68,18 +63,12 @@ def split_scene_document(doc: dict) -> tuple[dict, object, list[bytes]]:
     blobs: list[bytes] = []
 
     def rewrite(node):
-        if isinstance(node, dict):
-            for key, value in node.items():
-                if isinstance(value, str) and value.startswith(BLOB_PREFIX):
-                    node[key] = _register(value)
-                else:
-                    rewrite(value)
-        elif isinstance(node, list):
-            for i, value in enumerate(node):
-                if isinstance(value, str) and value.startswith(BLOB_PREFIX):
-                    node[i] = _register(value)
-                else:
-                    rewrite(value)
+        items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+        for key, value in items:
+            if isinstance(value, str) and value.startswith(BLOB_PREFIX):
+                node[key] = _register(value)
+            else:
+                rewrite(value)
 
     def _register(value: str) -> str:
         blob_id = len(blobs)
@@ -115,18 +104,13 @@ def write_static_bundle(doc: dict, dest: Path) -> dict:
         (staging / "states.json").write_bytes(json.dumps(states).encode())
         for i, blob in enumerate(blobs):
             (staging / "blob" / str(i)).write_bytes(blob)
-        info = {
-            "blobs": len(blobs),
-            "bytes": sum(len(b) for b in blobs),
-        }
-        (staging / "bundle.json").write_bytes(json.dumps(info).encode())
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
         os.replace(staging, dest)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return info
+    return {"blobs": len(blobs), "bytes": sum(len(b) for b in blobs)}
 
 
 def render_viewer_page(
@@ -152,9 +136,6 @@ def render_viewer_page(
     # SimView 5 hard-codes its asset URLs under "/static/" (4.x spelled them as
     # Jinja url_for expressions); point them at our mount instead.
     page = template.replace('"/static/', f'"{static_prefix.rstrip("/")}/')
-
-    if "{{" in page:
-        logger.warning("simview's index.html has unsubstituted template expressions")
 
     # SimView's config.js refers to a few assets by the document-relative path
     # "static/textures/...", which resolves correctly only when the page is

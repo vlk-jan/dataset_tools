@@ -6,7 +6,7 @@ validity mask and a top-down view of the raw cloud. Everything is rendered on
 demand for one frame at a time, so a 20k-frame scene never costs more than the
 frames actually looked at.
 
-Only numpy and Pillow are used (no matplotlib): the colour maps are small
+Only numpy, Pillow and OpenCV's projection are used (no matplotlib): the colour maps are small
 piecewise-linear look-up tables built once at import.
 """
 
@@ -17,6 +17,7 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from .loaders import HM_RES
@@ -141,14 +142,13 @@ def unit_colors(values: np.ndarray, cmap: str = "turbo") -> np.ndarray:
 # --------------------------------------------------------------------------
 
 
-def _to_png(rgb: np.ndarray, upscale_to: int | None = None) -> bytes:
+def _image(rgb: np.ndarray):
     from PIL import Image
 
-    img = Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
-    if upscale_to:
-        scale = max(1, upscale_to // max(img.width, img.height))
-        if scale > 1:
-            img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
+    return Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+
+
+def _png(img) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=False, compress_level=3)
     return buf.getvalue()
@@ -176,14 +176,12 @@ def _bev_png(rgb: np.ndarray, size: int, res_m: float = HM_RES) -> bytes:
     """
     from PIL import Image
 
-    img = Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+    img = _image(rgb)
     scale = max(1, size // max(img.width, img.height))
     if scale > 1:
         img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
     draw_robot_silhouette(img, px_per_m=scale / res_m)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False, compress_level=3)
-    return buf.getvalue()
+    return _png(img)
 
 
 def render_height_map(hm: np.ndarray, size: int = 384) -> bytes:
@@ -281,12 +279,12 @@ def render_cloud_bev(
     n = size
     rgb = np.zeros((n, n, 3), dtype=np.uint8)
     if cloud.size == 0:
-        return _to_png(rgb)
+        return _png(_image(rgb))
 
     x, y, z = cloud[:, 0], cloud[:, 1], cloud[:, 2]
     keep = (np.abs(x) < extent) & (np.abs(y) < extent)
     if not keep.any():
-        return _to_png(rgb)
+        return _png(_image(rgb))
     x, y, z = x[keep], y[keep], z[keep]
     values = z
     if color_by == "intensity" and cloud.shape[1] > 3:
@@ -317,13 +315,9 @@ def render_cloud_bev(
     for radius in range(5, int(extent) + 1, 5):
         ring = np.abs(dist - radius) < (extent / n)
         rgb[ring] = np.maximum(rgb[ring], [70, 70, 70])
-    from PIL import Image
-
-    img = Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+    img = _image(rgb)
     draw_robot_silhouette(img, px_per_m=n / (2 * extent))
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False, compress_level=3)
-    return buf.getvalue()
+    return _png(img)
 
 
 def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:
@@ -376,36 +370,16 @@ def _project_points(
     K_scaled[:2, :] *= scale
     D = np.asarray(distortion_coeffs, dtype=np.float64).ravel() if distortion_coeffs is not None else None
 
+    project = None
     if distortion_model in ("equidistant", "fisheye") and D is not None and len(D) == 4:
-        try:
-            import cv2
-
-            pts = cam.reshape(-1, 1, 3).astype(np.float64)
-            proj, _ = cv2.fisheye.projectPoints(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
-            proj = proj.reshape(-1, 2)
-            return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
-        except ImportError:
-            R = np.sqrt(cam[:, 0] ** 2 + cam[:, 1] ** 2)
-            theta = np.arctan2(R, cam[:, 2])
-            theta2 = theta**2
-            theta_d = theta * (1.0 + D[0] * theta2 + D[1] * theta2**2 + D[2] * theta2**3 + D[3] * theta2**4)
-            s = np.where(R > 1e-8, theta_d / R, 1.0)
-            xp = cam[:, 0] * s
-            yp = cam[:, 1] * s
-            u = np.round(K_scaled[0, 0] * xp + K_scaled[0, 1] * yp + K_scaled[0, 2]).astype(np.int64)
-            v = np.round(K_scaled[1, 1] * yp + K_scaled[1, 2]).astype(np.int64)
-            return u, v
-
-    if distortion_model in ("plumb_bob", "rational_polynomial") and D is not None and len(D) in (4, 5, 8, 12, 14):
-        try:
-            import cv2
-
-            pts = cam.reshape(-1, 1, 3).astype(np.float64)
-            proj, _ = cv2.projectPoints(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
-            proj = proj.reshape(-1, 2)
-            return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
-        except ImportError:
-            pass
+        project = cv2.fisheye.projectPoints
+    elif distortion_model in ("plumb_bob", "rational_polynomial") and D is not None and len(D) in (4, 5, 8, 12, 14):
+        project = cv2.projectPoints
+    if project is not None:
+        pts = cam.reshape(-1, 1, 3).astype(np.float64)
+        proj, _ = project(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
+        proj = proj.reshape(-1, 2)
+        return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
 
     fx, fy, cx, cy = K_scaled[0, 0], K_scaled[1, 1], K_scaled[0, 2], K_scaled[1, 2]
     u = np.round(fx * cam[:, 0] / cam[:, 2] + cx).astype(np.int64)

@@ -1,22 +1,16 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Scene {{ scene_id }} frame {{ index }} - dataset viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/viewer-static/style.css">
-<script src="/viewer-static/theme.js"></script>
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Scene {{ scene_id }} frame {{ index }} - dataset viewer{% endblock %}
+{% block head %}
 {% if map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
-</head>
-<body>
-<header>
+{% endblock %}
+{% block header %}
   <h1><a href="/">Dataset viewer</a> /
       <a href="/scene/{{ scene_id }}">scene {{ scene_id }}</a> /
       frame {{ index }}</h1>
   <span class="muted">{{ index + 1 }} of {{ probe.n_frames }}</span>
-</header>
-<main>
+{% endblock %}
+{% block main %}
 
   <div class="framenav">
     {% if index > 0 %}
@@ -179,7 +173,7 @@
 
       <div class="card">
         <h2 style="margin-top:0">Look at it</h2>
-        {% if simview_ok and frame_window %}
+        {% if frame_window %}
         <p>
           <a class="btn primary" href="/view/{{ scene_id }}/{{ frame_window }}">Visualise this frame</a>
         </p>
@@ -195,12 +189,10 @@
         </p>
         <p class="muted" style="margin-top:-6px">
           The motion around this frame: {{ details.window.n_frames }} frames from
-          <span class="chip {{ 'yes' if details.window.pose_source == 'odometry' else ('partial' if details.window.pose_source == 'transforms' else 'no') }}">{{ details.window.pose_source }}</span>,
+          <span class="chip {{ ui.pose_chip(details.window.pose_source) }}">{{ details.window.pose_source }}</span>,
           opening at frame {{ index }}.
         </p>
         {% endif %}
-        {% elif not simview_ok %}
-        <p class="warn" style="margin:0">simview's assets are not installed, so no 3D view is available.</p>
         {% else %}
         <p class="warn" style="margin:0">
           This frame is past the end of <code>data_ts.txt</code>, so it has no timestamp
@@ -218,7 +210,8 @@
     </div>
   </div>
 
-</main>
+{% endblock %}
+{% block scripts %}
 <dialog id="zoom" class="zoom" aria-label="Zoomed view">
   <div class="zoomhead">
     <strong class="zoomtitle"></strong>
@@ -264,5 +257,4 @@
 })();
 </script>
 {% endif %}
-</body>
-</html>
+{% endblock %}

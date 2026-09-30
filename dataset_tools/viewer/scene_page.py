@@ -27,6 +27,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import numpy as np
 
@@ -49,9 +50,10 @@ from .index_page import (
     thumb_slots,
     validation_mark,
 )
-from .loaders import read_camera_info, read_text, roll_pitch_from_gravity_align
-from .probe import ARTEFACTS, DatasetRoot
+from .loaders import read_text, roll_pitch_from_gravity_align
+from .probe import ARTEFACTS, DatasetRoot, _npy_shape
 from .signals import signal_charts
+from .windows import describe_marks, describe_reason
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
 
@@ -162,10 +164,7 @@ def _sampled_cloud_points(access: SceneAccess) -> tuple[int, int] | None:
             return None
         index = available[len(available) // 2]
         path = access.frame_path("clouds", index)
-    try:
-        shape = np.load(path, mmap_mode="r").shape
-    except (OSError, ValueError):
-        return None
+    shape = _npy_shape(path)
     return (int(shape[0]), index) if shape else None
 
 
@@ -282,8 +281,6 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
     against; the timeline then falls back to the plain spans, which is all a
     curated-only scene ever had.
     """
-    from .windows import describe_reason
-
     p, segments = access.probe, access.segments
     if not segments or p.start_ts is None or not p.duration or p.duration <= 0:
         return []
@@ -350,8 +347,6 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             raw = a.get("poses_unf") or a.get("poses_raw")
             sub = f"of {fmt_count(raw)} raw" if raw and raw >= poses else None
             stats.append(stat("poses", fmt_count(poses), sub))
-        from .windows import describe_reason
-
         reasons = sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])
         # A filled stretch is not a reason a segment *ended*; it is where its
         # poses came from, and the fill note below says so. Mixing the two read
@@ -392,8 +387,6 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         # Say which fill this root actually holds rather than naming one: v1.3's
         # holes were filled by replaying their bags, v1.2's from v1.1, and a
         # root can carry both.
-        from .windows import describe_marks, describe_reason
-
         filled = [s for s in segments if "fill" in (s.reason or "").lower()]
         # The fill sentence, then what was done to the poses afterwards as a
         # count -- a scene whose fills were refined one at a time would
@@ -716,12 +709,9 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
 
 def _gps_src(scene_id: str, segment, frame: int | None) -> str:
     """The endpoint one map fetches its track from."""
-    query = []
-    if segment is not None:
-        query.append(f"segment={segment.index}")
-    if frame is not None:
-        query.append(f"frame={frame}")
-    return f"/api/scene/{scene_id}/gps.json" + ("?" + "&".join(query) if query else "")
+    params = {"segment": segment.index if segment is not None else None, "frame": frame}
+    query = urlencode({k: v for k, v in params.items() if v is not None})
+    return f"/api/scene/{scene_id}/gps.json" + (f"?{query}" if query else "")
 
 
 def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dict[str, Any] | None:
@@ -872,16 +862,12 @@ _STATE_WORD = {"yes": "present", "partial": "partial", "no": "missing", "optiona
 
 def frame_gaps(names: list[str], n_frames: int) -> list[tuple[int, int]]:
     """The runs of frame indices ``[first, last]`` with no file among ``names`` (``00123.npz``)."""
-    have = {int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isdigit()}
-    gaps: list[tuple[int, int]] = []
-    for i in range(n_frames):
-        if i in have:
-            continue
-        if gaps and gaps[-1][1] == i - 1:
-            gaps[-1] = (gaps[-1][0], i)
-        else:
-            gaps.append((i, i))
-    return gaps
+    have = np.array([int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isdigit()], dtype=int)
+    missing = np.ones(n_frames, dtype=np.int8)
+    missing[have[have < n_frames]] = 0
+    # Where "missing" switches on and off: each run's first index, then one past its last.
+    edges = np.flatnonzero(np.diff(missing, prepend=0, append=0))
+    return [(int(a), int(b) - 1) for a, b in zip(edges[::2], edges[1::2], strict=True)]
 
 
 def _gap_text(gaps: list[tuple[int, int]], shown: int = 6) -> str:
@@ -1015,7 +1001,7 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
 
     def work() -> dict[str, Any]:
         a = root.atlas_scene(access.scene_id)
-        info = read_camera_info(access.dir / "camera_info.yaml") if access.probe.has("camera_info") else None
+        info = access.camera_info
         cards = [
             recording_card(access, a, info),
             ground_truth_card(access, a),
@@ -1031,7 +1017,6 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # the index card is rimmed with, from the same function, so the two
             # pages cannot disagree about a held-out scene.
             "split": split_mark(root, access.scene_id),
-            "camera_info": info,
             # Not one of the four: it sits beside the file inventory, and it is
             # absent -- not empty -- on a scene without GNSS.
             "map": map_card(access),

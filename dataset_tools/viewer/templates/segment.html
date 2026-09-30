@@ -1,21 +1,15 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Scene {{ scene_id }} segment {{ seg.index }} - dataset viewer</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<link rel="stylesheet" href="/viewer-static/style.css">
-<script src="/viewer-static/theme.js"></script>
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Scene {{ scene_id }} segment {{ seg.index }} - dataset viewer{% endblock %}
+{% block head %}
 {% if page.map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
-</head>
-<body>
-<header>
+{% endblock %}
+{% block header %}
   <h1><a href="/">Dataset viewer</a> / <a href="/scene/{{ scene_id }}">scene {{ scene_id }}</a>
     / segment {{ seg.index }}</h1>
   <span class="muted">{{ page.position + 1 }} of {{ page.n_segments }} in this scene</span>
-</header>
-<main>
+{% endblock %}
+{% block main %}
 
   {# Paging between segments in scene order, so a scene can be read segment by
      segment without going back to its window table each time. #}
@@ -31,16 +25,7 @@
 
   {# Three frames from inside this segment, at 10 / 50 / 90 % of it. #}
   {% if page.hero %}
-  <div class="hero">
-    {% for thumb in page.hero %}
-    <a href="{{ thumb.href }}">
-      <figure>
-        <img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async">
-        <figcaption><b>{{ thumb.label }}</b><span>{{ thumb.sub }}</span></figcaption>
-      </figure>
-    </a>
-    {% endfor %}
-  </div>
+  {{ ui.hero(page.hero) }}
   {% endif %}
 
   {# The facts on the left, where the segment happened on the right. Without
@@ -48,22 +33,8 @@
   {% if page.map %}<div class="pair"><div>{% endif %}
     {% for card in page.cards %}
     <div class="card">
-      <header>
-        <h2>{{ card.title }}</h2>
-        {% if card.badge %}
-        <span class="cov {{ card.badge_class }}" title="{{ card.badge_title }}">{{ card.badge }}</span>
-        {% endif %}
-      </header>
-      {% if card.stats %}
-      <dl class="stats">
-        {% for s in card.stats %}
-        <div>
-          <dt>{{ s.label }}</dt>
-          <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
-        </div>
-        {% endfor %}
-      </dl>
-      {% endif %}
+      {{ ui.card_head(card.title, card.badge, card.badge_class, card.badge_title) }}
+      {% if card.stats %}{{ ui.stats(card.stats) }}{% endif %}
       {% if card.note %}<p class="cardnote">{{ card.note }}</p>{% endif %}
     </div>
     {% endfor %}
@@ -89,22 +60,8 @@
     {% for w in page.windows %}
       <tr>
         <td><strong>{{ w.label }}</strong></td>
-        <td class="muted">{{ w.frame_start }} - {{ w.frame_end - 1 }}</td>
-        <td class="num">{{ w.n_frames }}</td>
-        <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
-        <td class="num">
-          {%- if w.pose_rate %}{{ w.n_poses }}
-            <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
-          {%- else %}<span class="muted">-</span>{% endif %}
-        </td>
-        {# The ground truth's attitude against the IMU, the check the 3D view's
-           panel carries, computed the same way before any window is built. #}
-        {%- set att = attitude_per_window.get(w.key) %}
-        <td class="num">
-          {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
-                title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
-          {%- else %}<span class="muted">-</span>{% endif %}
-        </td>
+        {{ ui.window_cells(w) }}
+        {{ ui.gt_cells(w, attitude_per_window.get(w.key)) }}
         <td><a class="btn primary" href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
       </tr>
     {% endfor %}
@@ -134,7 +91,8 @@
     {% include "_notes.html" %}
   {% endwith %}
 
-</main>
+{% endblock %}
+{% block scripts %}
 <script type="module" src="/viewer-static/notes.js"></script>
 <script type="module" src="/viewer-static/swap.js"></script>
 {% if page.signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
@@ -142,5 +100,4 @@
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>
 {% endif %}
-</body>
-</html>
+{% endblock %}

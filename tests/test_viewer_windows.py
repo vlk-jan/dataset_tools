@@ -14,6 +14,7 @@ import pytest
 from helpers_viewer import (
     _write_png,
     make_root,
+    viewer_client,
 )
 
 from dataset_tools.viewer import loaders, probe, windows
@@ -252,12 +253,9 @@ def test_an_untimestamped_frame_is_a_404_and_its_page_says_why(tmp_path):
     does not offer a 3D view it cannot build."""
     pytest.importorskip("simview")
     pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = _root_with_untimestamped_frames(tmp_path)
-    c = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    c = viewer_client(root_path, tmp_path / "cache")
 
     page = c.get("/scene/0000/frame/10")
     assert page.status_code == 200
@@ -274,16 +272,16 @@ def test_every_offered_window_actually_builds(tmp_path):
     """The windows table is a list of buttons; every one of them must work."""
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
 
-    from dataset_tools.viewer.app import create_app
+    from dataset_tools.viewer.build import SceneAccess
+    from dataset_tools.viewer.probe import DatasetRoot
 
     root_path = _root_with_untimestamped_frames(tmp_path)
-    c = TestClient(create_app(root_path, max_frames=4, cache_dir=tmp_path / "cache"))
-    offered = c.get("/api/scene/0000").json()["windows"]
+    c = viewer_client(root_path, tmp_path / "cache", max_frames=4)
+    offered = SceneAccess(DatasetRoot(root_path, cache_dir=tmp_path / "cache"), "0000").windows(4)
     assert offered
     for w in offered:
-        assert c.get(f"/view/0000/{w['key']}").status_code == 200, w["key"]
+        assert c.get(f"/view/0000/{w.key}").status_code == 200, w.key
 
 
 def test_a_cached_bundle_is_not_served_for_a_window_that_has_been_recut(tmp_path):
@@ -296,20 +294,18 @@ def test_a_cached_bundle_is_not_served_for_a_window_that_has_been_recut(tmp_path
     """
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
 
-    from dataset_tools.viewer.app import create_app
     from dataset_tools.viewer.build import BuildOptions
 
     root_path = make_root(tmp_path, frames=8, segments=False, with_transforms=True)
     cache = tmp_path / "cache"
     url = f"/api/data/0000/raw.0/{BuildOptions().cache_key()}/stamp/meta.json"
 
-    first = TestClient(create_app(root_path, max_frames=2, cache_dir=cache)).get(url)
+    first = viewer_client(root_path, cache, max_frames=2).get(url)
     assert first.json()["window"]["frame_end"] == 2
 
     # Same key, same cache, a cap that cuts the scene differently.
-    second = TestClient(create_app(root_path, max_frames=3, cache_dir=cache)).get(url)
+    second = viewer_client(root_path, cache, max_frames=3).get(url)
     assert second.json()["window"]["frame_end"] == 3
     assert second.json()["frames"] == [0, 1, 2]
 

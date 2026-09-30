@@ -1,0 +1,75 @@
+{# Markup the full pages repeat verbatim. Imported as `ui`. #}
+
+{# A dl.stats of {label, value, sub} rows. #}
+{% macro stats(items) -%}
+<dl class="stats">
+  {% for s in items %}
+  <div><dt>{{ s.label }}</dt><dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd></div>
+  {% endfor %}
+</dl>
+{%- endmacro %}
+
+{# A card's title with its .cov badge on the right. #}
+{% macro card_head(title, badge, badge_class, badge_title) -%}
+<header>
+  <h2>{{ title }}</h2>
+  {% if badge %}
+  <span class="cov {{ badge_class }}" title="{{ badge_title }}">{{ badge }}</span>
+  {% endif %}
+</header>
+{%- endmacro %}
+
+{# Three frames sampled at 10 / 50 / 90 %, each opening the frame it was cut from. #}
+{% macro hero(thumbs, fallback_href="") -%}
+<div class="hero">
+  {% for thumb in thumbs %}
+  <a href="{{ thumb.href or fallback_href }}">
+    <figure>
+      <img src="{{ thumb.url }}" alt="{{ thumb.alt }}" loading="lazy" decoding="async">
+      <figcaption><b>{{ thumb.label }}</b><span>{{ thumb.sub }}</span></figcaption>
+    </figure>
+  </a>
+  {% endfor %}
+</div>
+{%- endmacro %}
+
+{# Ground-truth spans as fractions of the scene, inside a .track. #}
+{% macro spans(own, borrowed) -%}
+{% for span in own %}
+<i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+{% endfor %}
+{% for span in borrowed %}
+<i class="fill" title="segment borrowed from an earlier root" style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
+{% endfor %}
+{%- endmacro %}
+
+{# The chip class for a window's pose source. #}
+{% macro pose_chip(source) -%}
+{{ 'yes' if source == 'odometry' else ('partial' if source == 'transforms' else 'no') }}
+{%- endmacro %}
+
+{# A window table's Frames / Count / Duration cells. #}
+{% macro window_cells(w) -%}
+<td class="muted">{{ w.frame_start }} - {{ w.frame_end - 1 }}</td>
+<td class="num">{{ w.n_frames }}</td>
+<td class="num">{{ "%.1f s"|format(w.duration) }}</td>
+{%- endmacro %}
+
+{# A window table's GT poses and GT attitude cells. How densely the segment
+   behind the window is anchored: one pose every two seconds is interpolated
+   onto the frame clock exactly like a 10 Hz one and looks no different in the
+   3D view, but the trajectory between its poses is a straight guess. The
+   attitude is the ground truth's against the IMU, the check the 3D view's
+   panel carries, computed the same way before any window is built. #}
+{% macro gt_cells(w, att) -%}
+<td class="num">
+  {%- if w.pose_rate %}{{ w.n_poses }}
+    <small class="{{ 'warn' if w.pose_rate < 2 else 'muted' }}">{{ "%.1f Hz"|format(w.pose_rate) }}</small>
+  {%- else %}<span class="muted">-</span>{% endif %}
+</td>
+<td class="num">
+  {%- if att %}<span class="chip {{ {'ok': 'yes', 'warn': 'partial', 'bad': 'bad'}[att.band] }}"
+        title="{{ att.title }}">{{ "%.1f°"|format(att.median) }}</span>
+  {%- else %}<span class="muted">-</span>{% endif %}
+</td>
+{%- endmacro %}

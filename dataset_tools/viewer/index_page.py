@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any
 
 from .probe import DatasetRoot, SceneProbe
-from .splits import SPLIT_LABELS, SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
+from .splits import SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
 
 #: Thumbnail slots and where in a scene they sample it when the atlas does not
 #: say. A curated root names the frame each slot was cut from, so the picture,
@@ -34,12 +34,17 @@ COVERAGE_MID = 0.5
 DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "driven_similarity", "other")
 
 
-def coverage_class(coverage: float | None) -> str:
-    if coverage is None:
+def band(value: float | None, high: float, mid: float) -> str:
+    """``hi`` / ``mid`` / ``lo`` against two thresholds, ``none`` when unknown."""
+    if value is None:
         return "none"
-    if coverage >= COVERAGE_HIGH:
+    if value >= high:
         return "hi"
-    return "mid" if coverage >= COVERAGE_MID else "lo"
+    return "mid" if value >= mid else "lo"
+
+
+def coverage_class(coverage: float | None) -> str:
+    return band(coverage, COVERAGE_HIGH, COVERAGE_MID)
 
 
 def fmt_duration(seconds: float | None) -> str:
@@ -212,7 +217,6 @@ def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[st
         {
             "url": f"/api/scene/{scene_id}/thumb/{slot}.jpg",
             "alt": f"scene {scene_id} frame {thumb_index(atlas_entry, slot, probe.n_frames)}",
-            "stored": bool(stored),
         }
         for slot in slots
     ]
@@ -237,7 +241,6 @@ def split_mark(root: DatasetRoot, scene_id: str) -> dict[str, str] | None:
     )
     return {
         "which": which,
-        "label": SPLIT_LABELS[which],
         "title": f"{SPLIT_TITLES[which]}{f' ({where})' if where else ''}",
     }
 
@@ -322,7 +325,6 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
         "probe": probe,
         "split": split_mark(root, probe.scene_id),
         "validation": validation_mark(root.validation_scene(probe.scene_id)),
-        "csv": root.csv_rows().get(probe.scene_id, {}),
         "atlas": a,
         "description": a.get("description"),
         "date": a.get("date"),
@@ -344,19 +346,15 @@ def _derived_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     segments = sum(p.n_segments for p in probes)
     covered = [p.segment_coverage for p in probes if p.segment_coverage is not None]
     totals = [
-        {"label": "scenes", "value": str(len(probes)), "sub": None},
-        {"label": "recorded", "value": fmt_duration(seconds), "sub": None},
-        {"label": "frames", "value": fmt_count(frames), "sub": None},
+        stat("scenes", str(len(probes))),
+        stat("recorded", fmt_duration(seconds)),
+        stat("frames", fmt_count(frames)),
     ]
     if segments:
-        totals.append({"label": "GT segments", "value": fmt_count(segments), "sub": None})
+        totals.append(stat("GT segments", fmt_count(segments)))
     if covered:
         totals.append(
-            {
-                "label": "GT coverage",
-                "value": f"{sum(covered) / len(covered) * 100:.0f}%",
-                "sub": f"mean over {len(covered)} scenes",
-            }
+            stat("GT coverage", f"{sum(covered) / len(covered) * 100:.0f}%", f"mean over {len(covered)} scenes")
         )
     return totals
 
@@ -506,7 +504,6 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
         "parts": [
             {
                 "which": which,
-                "label": SPLIT_LABELS[which],
                 "name": SPLIT_NAMES[which],
                 "title": SPLIT_TITLES[which],
                 "count": tally[which],

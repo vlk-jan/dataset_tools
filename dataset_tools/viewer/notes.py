@@ -27,6 +27,7 @@ vanishing.
 
 from __future__ import annotations
 
+import getpass
 import json
 import logging
 import os
@@ -77,9 +78,6 @@ class Note:
     @property
     def n_frames(self) -> int:
         return self.frame_end - self.frame_start + 1
-
-    def covers(self, index: int) -> bool:
-        return self.frame_start <= index <= self.frame_end
 
     def overlaps(self, start: int, end: int) -> bool:
         """Does this note touch the half-open frame range ``[start, end)``?
@@ -244,7 +242,6 @@ class NoteStore:
         return {
             "enabled": self.enabled,
             "writable": self.writable,
-            "external": self.external,
             "dir": str(self.dir),
             "reason": self.reason,
             "author": self.author,
@@ -309,12 +306,6 @@ class NoteStore:
             if notes:
                 out[stem] = notes
         return out
-
-    def get(self, scene_id: str, note_id: str) -> Note | None:
-        for note in self.list(scene_id):
-            if note.id == note_id:
-                return note
-        return None
 
     def stale_version(self, scene_id: str) -> str | None:
         """The dataset version a scene's notes were written against, when it is
@@ -454,11 +445,9 @@ class NoteStore:
 
 
 def _fresh_id(taken: set[str]) -> str:
-    for _ in range(16):
-        candidate = secrets.token_hex(3)
-        if candidate not in taken:
-            return candidate
-    return secrets.token_hex(8)  # pragma: no cover - 16 collisions in a row
+    while (candidate := secrets.token_hex(3)) in taken:
+        pass
+    return candidate
 
 
 def _clamp_range(start: int, end: int, n_frames: int | None) -> tuple[int, int]:
@@ -479,8 +468,7 @@ def _clamp_range(start: int, end: int, n_frames: int | None) -> tuple[int, int]:
 
 def _default_author() -> str:
     """Who a note is from when nothing said: the user running the viewer."""
-    for key in ("USER", "USERNAME", "LOGNAME"):
-        value = os.environ.get(key)
-        if value:
-            return _clean_author(value)
-    return "anonymous"
+    try:
+        return _clean_author(getpass.getuser()) or "anonymous"
+    except (OSError, KeyError):  # no login name anywhere
+        return "anonymous"

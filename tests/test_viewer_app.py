@@ -8,13 +8,13 @@ cleanly when the viewer extra (SimView + torch) is not installed.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pytest
 from helpers_viewer import (
     _write_png,
     make_root,
+    viewer_client,
 )
 
 from dataset_tools.viewer import loaders, probe, render, windows
@@ -24,7 +24,6 @@ from dataset_tools.viewer import loaders, probe, render, windows
 # --------------------------------------------------------------------------
 
 
-@pytest.fixture
 def test_index_and_scene_pages_render(client):
     r = client.get("/")
     assert r.status_code == 200
@@ -36,14 +35,7 @@ def test_index_and_scene_pages_render(client):
 
 def test_unknown_scene_is_a_404(client):
     assert client.get("/scene/9999").status_code == 404
-    assert client.get("/api/scene/9999").status_code == 404
-
-
-def test_scene_api_lists_windows_and_missing_files(client):
-    data = client.get("/api/scene/0000").json()
-    assert data["probe"]["n_frames"] == 12
-    assert "cmd_vel" in data["probe"]["missing"]
-    assert any(w["pose_source"] == "odometry" for w in data["windows"])
+    assert client.get("/api/scene/9999/gps.json").status_code == 404
 
 
 def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
@@ -113,9 +105,6 @@ def test_per_frame_endpoints_serve_images_and_404_past_the_end(client):
     assert client.get("/api/scene/0000/frame/0/validity.png").status_code == 200
     assert client.get("/api/scene/0000/frame/0/cloud.png").status_code == 200
     assert client.get("/api/scene/0000/frame/9999/image.jpg").status_code == 404
-    info = client.get("/api/scene/0000/frame/3/info").json()
-    assert info["frame"] == 3
-    assert "timestamp" in info
 
 
 def test_the_cloud_is_projected_into_the_image_only_where_the_calibration_allows(client, tmp_path):
@@ -164,9 +153,6 @@ def test_a_scene_without_optional_files_still_builds(tmp_path):
     proprioception, no wheel odometry -- the window must still build."""
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = make_root(
         tmp_path,
@@ -176,7 +162,7 @@ def test_a_scene_without_optional_files_still_builds(tmp_path):
         with_gravity=False,
         with_joints=False,
     )
-    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    client = viewer_client(root_path, tmp_path / "cache")
     opts = "40-160000-80-500000-0.1-height"
     meta = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
     assert meta.status_code == 200, meta.text
@@ -245,12 +231,9 @@ def test_the_frame_page_states_what_the_frame_has(client):
 def test_a_frame_with_no_ground_truth_pose_still_has_a_page(tmp_path):
     pytest.importorskip("simview")
     pytest.importorskip("torch")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = make_root(tmp_path, segments=False, with_height_maps=False)
-    client = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    client = viewer_client(root_path, tmp_path / "cache")
     r = client.get("/scene/0000/frame/4")
     assert r.status_code == 200
     assert "No ground-truth pose" in r.text
@@ -464,7 +447,7 @@ def test_the_overlay_offers_the_cloud_and_the_ghost_as_separate_toggles(client):
     """The old control was one either/or switch that put SimView in "points"
     mode, which hid the robot. They are independent checkboxes now."""
     page = client.get("/view/0000/seg000").text
-    assert 'id="dt-cloud"' in page and 'id="dt-ghost"' in page
+    assert 'id="dt-ghost"' in page
     assert "dt-seg" not in page  # the either/or switch is gone
     # Each toggle says what it is; the ghost is the one nobody recognises.
     assert "wheel-odometry ghost" in page
@@ -480,39 +463,10 @@ def test_the_viewer_page_installs_the_simview_patches(client):
     patch = client.get("/viewer-static/simview_patch.js")
     assert patch.status_code == 200
     body = patch.text
-    # The stopgaps have to stay findable and deletable as whole blocks.
-    for marker in (
-        "STOPGAP for simview <= 4.2: origin-anchored frustum culling",
-        'STOPGAP for simview <= 4.2: the "points" body-visualization mode',
-        "STOPGAP for simview <= 4.2.0: ScalarPlotter plots never draw (3 causes)",
-    ):
-        at = body.find(marker)
-        assert at >= 0, marker
-        # Each one has to announce, right there, that it is deletable.
-        assert "Delete this block on upgrade" in body[at : at + 400], marker
-    # And the permanent parts name the bodies they are about.
+    # simview 5 fixed every upstream bug the old stopgaps papered over.
+    assert "STOPGAP" not in body and "versionAtMost" not in body
+    # The patches name the bodies they are about.
     assert "lidar_cloud" in body and "wheel_odom_ghost" in body
-
-
-def test_the_stopgaps_switch_themselves_off_when_simview_is_upgraded(client):
-    """A workaround left running over a fixed SimView would override the real
-    fix, so each one is gated on the version the page reports."""
-    from dataset_tools.viewer.app import _simview_version
-
-    page = client.get("/view/0000/seg000").text
-    assert f'"simviewVersion": "{_simview_version()}"' in page
-
-    body = client.get("/viewer-static/simview_patch.js").text
-    assert 'LAST_SIMVIEW_NEEDING_STOPGAPS = "4.2.0"' in body
-    # The two SimView has fixed are behind the gate...
-    gated = body[body.index("const stopgaps = versionAtMost") :]
-    assert "stopgapOriginCulling(app);" in gated.split("hideHousekeepingBodies")[0]
-    assert "stopgapDropPointsMode(app);" in gated.split("hideHousekeepingBodies")[0]
-    # ...and the scalar-plot one is now gated with them (simview 4.2.1 fixes it),
-    # so on a newer package none of the three run and simview handles them.
-    assert "if (stopgaps) stopgapScalarXScale(app);" in body
-    # It still adopts each chart once and only pins a still-null x scale.
-    assert "if (_dtScalarFixed.has(chart)) continue;" in body
 
 
 def test_the_initial_frame_is_opened_through_simviews_own_seek(client):
@@ -591,9 +545,8 @@ def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
     through the frames that exist, so a frame's page is its position in that
     list, not its own number."""
     pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
 
-    from dataset_tools.viewer.app import FRAMES_PER_PAGE, create_app
+    from dataset_tools.viewer.app import FRAMES_PER_PAGE
 
     # A sparse scene: only every 40th frame has an image on disk.
     root_path = make_root(tmp_path, frames=12, segments=False)
@@ -606,7 +559,7 @@ def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
         if int(stale.stem) % 40:
             stale.unlink()
 
-    c = TestClient(create_app(root_path, cache_dir=tmp_path / "cache"))
+    c = viewer_client(root_path, tmp_path / "cache")
     body = c.get("/scene/0000/frame/560").text
     assert f"tab=frames&amp;page={560 // FRAMES_PER_PAGE}" not in body
     assert "tab=frames&amp;page=0" in body  # 15 sparse frames: all on page 0
@@ -650,21 +603,24 @@ def test_the_bundle_stamp_covers_every_module_that_shapes_a_bundle(client):
         assert f'"{module}"' in source, module
 
 
-def test_the_status_endpoint_agrees_with_what_a_fetch_would_do(client, tmp_path):
-    """Reporting "ready" for a bundle an upgrade has superseded promises a
-    fetch that in fact blocks on a full rebuild."""
-    opts = "40-160000-80-500000-0.1-height"
-    base = f"/api/data/0000/seg000/{opts}/x"
-    assert client.get(f"{base}/status").json()["ready"] is False
-    client.get(f"{base}/meta.json")
-    status = client.get(f"{base}/status").json()
-    assert status["ready"] is True
+def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(client, tmp_path):
+    """The test every fetch makes before serving a cached bundle: an upgrade
+    or a recut window has to rebuild it, not serve it."""
+    from dataset_tools.viewer.app import _bundle_is_current
 
-    meta = Path(status["path"]) / "meta.json"
+    opts = "40-160000-80-500000-0.1-height"
+    client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
+    (meta,) = tmp_path.rglob(f"0000/seg000/{opts}/meta.json")
+    stored = json.loads(meta.read_text())["window"]
+    window = windows.Window("seg000", "segment", "", stored["frame_start"], stored["frame_end"], "odometry")
+    assert _bundle_is_current(meta.parent, window)
+    assert not _bundle_is_current(meta.parent, None)
+    assert not _bundle_is_current(tmp_path / "nowhere", window)
+
     stale = json.loads(meta.read_text())
     stale["meta_version"] = 0
     meta.write_text(json.dumps(stale))
-    assert client.get(f"{base}/status").json()["ready"] is False
+    assert not _bundle_is_current(meta.parent, window)
 
 
 def test_a_bundle_key_that_is_not_canonical_is_refused(client):
@@ -677,30 +633,12 @@ def test_a_bundle_key_that_is_not_canonical_is_refused(client):
     assert client.get("/api/data/0000/seg000/40-160000-80-500000-0.1-height/x/meta.json").status_code == 200
 
 
-def test_the_viewer_starts_and_says_so_when_simview_is_missing(tmp_path, monkeypatch):
-    pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-    from helpers_viewer import make_root
-
-    from dataset_tools.viewer import app as appmod
-
-    monkeypatch.setattr(appmod, "_simview_static_dir", lambda: None)
-    root_path = make_root(tmp_path, scenes=("0000",), frames=4)
-    client = TestClient(appmod.create_app(root_path, cache_dir=tmp_path / "cache"))
-    r = client.get("/")
-    assert r.status_code == 200
-    assert "3D views unavailable" in r.text
-
-
 def test_an_empty_root_says_what_a_scene_is(tmp_path):
     pytest.importorskip("fastapi")
-    from fastapi.testclient import TestClient
-
-    from dataset_tools.viewer.app import create_app
 
     root_path = tmp_path / "root"
     (root_path / "run_2024_05_01").mkdir(parents=True)
-    r = TestClient(create_app(root_path, cache_dir=tmp_path / "cache")).get("/")
+    r = viewer_client(root_path, tmp_path / "cache").get("/")
     assert r.status_code == 200
     assert "No scenes found" in r.text and "0000" in r.text
 
@@ -719,24 +657,6 @@ def test_a_loopback_viewer_answers_only_to_loopback_hosts(tmp_path):
     assert TestClient(app, base_url="http://evil.example").get("/").status_code == 400
     assert TestClient(app, base_url="http://127.0.0.1:8080").get("/").status_code == 200
     assert TestClient(app, base_url="http://localhost").get("/healthz").status_code == 200
-
-
-def test_the_scene_page_does_not_read_arrays_it_never_renders(client, tmp_path):
-    """`_scene_details` loads joint_states/cmd_vel whole (no memory map) and
-    the scene template renders none of it -- the four cards carry the same
-    facts, read strided. It stays what /api/scene/{id} returns."""
-    from dataset_tools.viewer import app as appmod
-
-    calls = []
-    original = appmod._scene_details
-    appmod._scene_details = lambda access: (calls.append(access.scene_id), original(access))[1]
-    try:
-        assert client.get("/scene/0000").status_code == 200
-        assert calls == []
-        assert client.get("/api/scene/0000").status_code == 200
-        assert calls == ["0000"]
-    finally:
-        appmod._scene_details = original
 
 
 # --------------------------------------------------------------------------
@@ -759,25 +679,22 @@ def test_a_root_without_gps_has_no_map_anywhere(client):
 
 def test_the_track_endpoint_serves_what_the_map_draws(gps_client):
     data = gps_client.get("/api/scene/0000/gps.json").json()
-    assert data["scope"] == "scene"
-    assert data["n_fixes"] == 48 and len(data["points"]) == 48
+    assert set(data) == {"points", "bounds", "marker", "context"}
+    assert len(data["points"]) == 48
     assert data["bounds"][0][0] < data["bounds"][1][0]  # south of north
-    assert data["fix"][0]["label"] == "RTK / GBAS"
-    assert data["sigma_m"] == 0.5  # sqrt(0.09 + 0.16)
     assert data["marker"] is None and data["context"] is None
 
 
 def test_a_long_track_is_thinned_before_it_is_shipped(gps_client):
     data = gps_client.get("/api/scene/0000/gps.json?max_points=10").json()
-    assert data["n_fixes"] == 48 and len(data["points"]) <= 11
-    # The numbers still describe every fix, not the ten that were drawn.
-    assert data["n_points"] < data["n_fixes"]
+    assert len(data["points"]) <= 11
+    # The bounds still describe every fix, not the ten that were drawn.
+    assert data["bounds"] == gps_client.get("/api/scene/0000/gps.json").json()["bounds"]
 
 
 def test_a_segments_track_comes_with_the_rest_of_the_scene_behind_it(gps_client):
     data = gps_client.get("/api/scene/0000/gps.json?segment=1").json()
-    assert data["scope"] == "segment 1"
-    assert 0 < data["n_fixes"] < 48
+    assert 0 < len(data["points"]) < 48
     assert data["context"], "the whole scene, faint, for context"
     assert gps_client.get("/api/scene/0000/gps.json?segment=7").status_code == 404
 
@@ -810,8 +727,7 @@ def test_a_scene_handle_follows_the_directory_while_it_is_being_written(client, 
     import numpy as np
 
     scene = tmp_path / "root" / "0000"
-    before = client.get("/api/scene/0000").json()
-    assert "gps" in before["probe"]["missing"]
+    assert client.get("/api/scene/0000/gps.json").status_code == 404
     gps = np.zeros((4, 8))
     gps[:, 0] = np.loadtxt(scene / "data_ts.txt")[:4]
     gps[:, 1], gps[:, 2] = 50.1, 14.4
@@ -819,8 +735,6 @@ def test_a_scene_handle_follows_the_directory_while_it_is_being_written(client, 
     # The probe is keyed by the directory's mtime; make sure it moved.
     stat = scene.stat()
     os.utime(scene, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
-    after = client.get("/api/scene/0000").json()
-    assert "gps" not in after["probe"]["missing"]
     assert client.get("/api/scene/0000/gps.json").status_code == 200
 
 
@@ -829,39 +743,34 @@ def test_opening_a_window_builds_the_next_one_in_the_background(tmp_path):
     built that nobody asked for."""
     import time
 
-    from fastapi.testclient import TestClient
     from helpers_viewer import make_root
-
-    from dataset_tools.viewer.app import create_app
 
     opts = "40-160000-80-500000-0.1-height"
 
-    def ready(client, key):
-        return client.get(f"/api/data/0000/{key}/{opts}/x/status").json()["ready"]
+    def ready(cache, key):
+        # meta.json is written last, once the bundle is in place.
+        return any(cache.rglob(f"0000/{key}/{opts}/meta.json"))
 
     root_path = make_root(tmp_path, scenes=("0000",), frames=12)
-    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache")) as client:
-        assert not ready(client, "seg001")
+    with viewer_client(root_path, tmp_path / "cache") as client:
+        assert not ready(tmp_path / "cache", "seg001")
         assert client.get("/view/0000/seg000").status_code == 200
         deadline = time.time() + 30
-        while not ready(client, "seg001") and time.time() < deadline:
+        while not ready(tmp_path / "cache", "seg001") and time.time() < deadline:
             time.sleep(0.2)
-        assert ready(client, "seg001")
+        assert ready(tmp_path / "cache", "seg001")
 
-    with TestClient(create_app(root_path, cache_dir=tmp_path / "cache2", prefetch=False)) as client:
+    with viewer_client(root_path, tmp_path / "cache2", prefetch=False) as client:
         assert client.get("/view/0000/seg000").status_code == 200
         time.sleep(1.0)
-        assert not ready(client, "seg001")
+        assert not ready(tmp_path / "cache2", "seg001")
 
 
 def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
-    from fastapi.testclient import TestClient
     from test_viewer_index import VALIDATION_CSV
 
-    from dataset_tools.viewer.app import create_app
-
     (tmp_path / "root" / "validation.csv").write_text(VALIDATION_CSV)
-    fresh = TestClient(create_app(tmp_path / "root", cache_dir=tmp_path / "cache"))
+    fresh = viewer_client(tmp_path / "root", tmp_path / "cache")
     index = fresh.get("/").text
     assert 'class="chip yes validated"' in index and ">validated ok<" in index
     assert 'class="chip partial validated"' in index and ">2 warnings<" in index

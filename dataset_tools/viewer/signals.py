@@ -171,6 +171,13 @@ def time_ticks(duration: float, offset: float = 0.0) -> list[dict[str, Any]]:
     return out
 
 
+def _speed(ts: np.ndarray, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Speed between consecutive samples, at their midpoints; sub-millisecond steps are dropped."""
+    dt = np.diff(ts)
+    ok = dt > 1e-3
+    return (ts[1:][ok] + ts[:-1][ok]) / 2, np.linalg.norm(np.diff(xy, axis=0), axis=1)[ok] / dt[ok]
+
+
 def _gt_speed(access: SceneAccess, t0: float, t1: float) -> tuple[np.ndarray, np.ndarray] | None:
     """Ground-truth ground speed, differentiated inside each segment only.
 
@@ -192,12 +199,9 @@ def _gt_speed(access: SceneAccess, t0: float, t1: float) -> tuple[np.ndarray, np
         take = (ts >= s0) & (ts <= s1)
         if take.sum() < 2:
             continue
-        st, sxy = ts[take], xy[take]
-        dt = np.diff(st)
-        ok = dt > 1e-3
-        speed = np.linalg.norm(np.diff(sxy, axis=0), axis=1)[ok] / dt[ok]
+        mid, speed = _speed(ts[take], xy[take])
         speed[speed > MAX_GT_SPEED] = np.nan
-        out_t.append((st[1:][ok] + st[:-1][ok]) / 2)
+        out_t.append(mid)
         out_v.append(speed)
     if not out_t:
         return None
@@ -212,11 +216,7 @@ def _frame_speed(access: SceneAccess) -> tuple[np.ndarray, np.ndarray] | None:
     n = min(len(tf), len(ts))
     if n < 2:
         return None
-    xy = np.asarray(tf[:n, :2, 3])
-    dt = np.diff(ts[:n])
-    ok = dt > 1e-3
-    speed = np.linalg.norm(np.diff(xy, axis=0), axis=1)[ok] / dt[ok]
-    return (ts[1:n][ok] + ts[: n - 1][ok]) / 2, speed
+    return _speed(ts[:n], np.asarray(tf[:n, :2, 3]))
 
 
 def signal_charts(
@@ -376,7 +376,6 @@ def signal_charts(
     ]
     return {
         "charts": charts,
-        "t0": t0,
         "duration": t1 - t0,
         "offset": offset,
         "ticks": time_ticks(t1 - t0, offset),

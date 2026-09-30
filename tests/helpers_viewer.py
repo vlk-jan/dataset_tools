@@ -15,6 +15,17 @@ import numpy as np
 import pytest
 
 
+def viewer_client(root: Path, cache_dir: Path, **app_kw):
+    """A TestClient over ``root``; skips when the viewer extra is absent."""
+    for mod in ("simview", "torch", "fastapi"):
+        pytest.importorskip(mod)
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.app import create_app
+
+    return TestClient(create_app(root, cache_dir=cache_dir, **app_kw))
+
+
 def _write_png(path: Path, size=(16, 10)) -> None:
     pytest.importorskip("PIL")
     from PIL import Image

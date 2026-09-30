@@ -47,11 +47,6 @@
 .dt-winstep-off { opacity: 0.35; cursor: default; }
 .dt-winstep-off:hover { background: var(--panel-2); color: var(--fg-2); }
 
-.dt-badge { padding: 0 6px; border-radius: 9px; border: 1px solid var(--line); font-size: 10.5px; }
-.dt-odometry { color: var(--ok); border-color: var(--ok-line); }
-.dt-transforms { color: var(--warn); border-color: var(--warn-line); }
-.dt-none, .dt-none.dt-badge { color: color-mix(in srgb, var(--bad) 55%, var(--muted)); border-color: color-mix(in srgb, var(--bad) 25%, var(--panel)); }
-
 /* One toggle for both directions, riding the panel's own left edge at its
    vertical middle.
 
@@ -91,8 +86,8 @@
 .dt-hint code { font-size: 10px; color: var(--muted); }
 
 /* 3D-view options: compact switches. The full explanation is a hover tooltip
-   (title=) on each row rather than always-on prose -- these toggle things (an
-   aggregated cloud, a drift ghost) most viewers leave alone. */
+   (title=) on each row rather than always-on prose -- these toggle things (a
+   drift ghost) most viewers leave alone. */
 .dt-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .dt-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .dt-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -219,9 +214,6 @@
 .dt-rangebtn {
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
   color: var(--muted); font: inherit; font-size: 10.5px; padding: 2px 7px; cursor: pointer;
-}
-.dt-rangebtn b {
-  color: var(--fg-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .dt-rangebtn:hover { border-color: var(--accent-line); }
 .dt-noterange select {
