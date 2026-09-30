@@ -104,13 +104,12 @@
     {% endfor %}
   </div>
 
-  {# The file inventory, then what those files weigh (only on a root with a
-     disk_usage.json) and the map (only on a scene that carries gps.npy), side
-     by side: a quarter, a quarter and a half with all three. With neither the
-     wrapper does not exist, so the inventory is the full-width strip it has
-     always been. #}
-  {% set wrapped = page.map or page.disk %}
-  {% if wrapped %}<div class="pair{{ ' withmap' if page.map }}{{ ' withdisk' if page.disk }}">{% endif %}
+  {# The file inventory -- with what those files weigh folded under it, on a
+     root with a disk_usage.json -- and the map (only on a scene that carries
+     gps.npy) beside it, half and half.
+     Without the map the wrapper does not exist, so the inventory is the
+     full-width strip it has always been. #}
+  {% if page.map %}<div class="pair withmap">{% endif %}
 
   {# Every entry opens: what the file holds, how much of it this scene has and
      what the dataset does with it, shown in place under the strip. Coloured by
@@ -176,29 +175,25 @@
       <span class="chip no">missing</span> <span class="chip optional">not written</span>
       &mdash; click any entry to read what it holds.
     </p>
+    {% if page.disk %}
+    {% set disk = page.disk %}
+    <details class="matrix diskusage">
+      <summary>Disk usage &middot; {{ disk.stats[0].value }}</summary>
+      <dl class="stats">
+        {% for s in disk.stats %}
+        <div><dt>{{ s.label }}</dt><dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd></div>
+        {% endfor %}
+      </dl>
+      <div class="diskpanel">{% with parts = disk.parts %}{% include "_diskbar.html" %}{% endwith %}</div>
+      {% if disk.note %}<p class="cardnote">{{ disk.note }}</p>{% endif %}
+    </details>
+    {% endif %}
   </div>
-
-  {% if page.disk %}
-  {% set disk = page.disk %}
-  <div class="card disk">
-    <header><h2>Disk usage</h2></header>
-    <dl class="stats">
-      {% for s in disk.stats %}
-      <div>
-        <dt>{{ s.label }}</dt>
-        <dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd>
-      </div>
-      {% endfor %}
-    </dl>
-    <div class="diskpanel">{% with parts = disk.parts %}{% include "_diskbar.html" %}{% endwith %}</div>
-    {% if disk.note %}<p class="cardnote">{{ disk.note }}</p>{% endif %}
-  </div>
-  {% endif %}
 
   {% if page.map %}
   {% with map = page.map %}{% include "_map.html" %}{% endwith %}
+  </div>
   {% endif %}
-  {% if wrapped %}</div>{% endif %}
 
   {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
 

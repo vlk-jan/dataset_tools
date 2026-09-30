@@ -995,7 +995,7 @@ def file_groups(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
-    """The file card's badge and its line naming what is missing or short."""
+    """The file card's badge, and a line naming what is missing (the badge counts what is short)."""
     missing = [e["shown"] for e in entries if e["state"] == "no"]
     partial = [e["shown"] for e in entries if e["state"] == "partial"]
     bits = [f"{len(missing)} missing"] * bool(missing) + [f"{len(partial)} partial"] * bool(partial)
@@ -1003,8 +1003,6 @@ def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     if missing:
         what = "it" if len(missing) == 1 else "they"
         lines.append(f"Missing: {', '.join(missing)} — the viewer leaves out whatever {what} would have shown.")
-    if partial:
-        lines.append(f"Short of frames: {', '.join(partial)} — open one to see which frames have no file.")
     return {
         "badge": " · ".join(bits) or "complete",
         "badge_class": "lo" if bits else "hi",

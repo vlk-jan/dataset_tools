@@ -360,6 +360,9 @@ details.matrix summary {
 }
 details.matrix summary:hover { color: var(--fg); }
 details.matrix pre { margin: 6px 0 0; background: var(--shade); }
+/* Disk usage, folded at the foot of the file card. */
+details.diskusage { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+details.diskusage dl.stats { margin-top: 8px; }
 .files .chips { margin-top: 0; }
 /* The inventory, one row per what the files are for. */
 .filegroups { display: grid; gap: 8px; margin-top: 10px; }
@@ -593,24 +596,10 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   align-items: stretch;
 }
 .pair > .card { display: flex; flex-direction: column; min-width: 0; }
-/* With the disk card: files, disk and map at a quarter, a quarter and a half;
-   without the map the inventory keeps most of the row. Narrower, the map drops
-   under the other two, then everything stacks. */
-.pair.withdisk { grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr); }
-.pair.withmap.withdisk { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); }
-@media (max-width: 1200px) {
-  .pair.withmap.withdisk { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pair.withmap.withdisk > .map { grid-column: 1 / -1; }
-}
-@media (max-width: 760px) {
-  .pair.withdisk, .pair.withmap.withdisk { grid-template-columns: minmax(0, 1fr); }
-}
-.pair > .card.disk > .cardnote { margin-top: auto; padding-top: 12px; }
-/* Beside the disk card the row is as tall as the file inventory, and a map box
-   stretched to match is taller than the tiles Leaflet loaded for it. The box
-   keeps its own height and the card's foot note takes the slack instead. */
-.pair.withdisk > .map > .mapbox { flex: none; height: 300px; }
-.pair.withdisk > .map > .cardnote { margin-top: auto; padding-top: 12px; }
+/* Files and map half and half. The map stretches to the inventory's height
+   (map.js re-lays it out as it grows). */
+.pair.withmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1100px) { .pair.withmap { grid-template-columns: minmax(0, 1fr); } }
 /* The strip no longer runs to the bottom of the card: an opened file panel
    follows it, and the note is what holds the card's foot instead. */
 .pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }

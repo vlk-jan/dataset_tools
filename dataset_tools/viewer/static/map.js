@@ -67,6 +67,9 @@ async function draw(el) {
   }
 
   const map = L.map(el, { scrollWheelZoom: false, zoomSnap: 0.5 });
+  // The box stretches with the card beside it (a file panel opening); Leaflet
+  // only notices window resizes on its own.
+  new ResizeObserver(() => map.invalidateSize()).observe(el);
   /* The page scrolls under the pointer until the map is deliberately clicked;
      a map that grabs the wheel makes a page it is embedded in unscrollable. */
   map.once("focus click", () => map.scrollWheelZoom.enable());
