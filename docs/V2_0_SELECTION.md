@@ -163,7 +163,7 @@ bags (09-14 `10_41_58`/`13_37_17`/`16_28_23`, 09-11 `16_20_36`, 09-18
 `12_56_00`/`16_11_48`/`16_23_23`, short 09-18 evening bags); the 09-08
 robotour-stack bags (no proprioception) and `14_18_12` (no Odin), as before.
 
-## 5. Build (done: `/mnt/personal/vlkjan6/HELHEST_v2_0`, finalized 2026-09-26; Temesvár added 2026-09-29, §7)
+## 5. Build (done: `/mnt/personal/vlkjan6/HELHEST_v2_0`, finalized 2026-09-26; Temešvár added 2026-09-29, §7)
 
 ```bash
 cd ~/projects/dataset_tools && mkdir -p slurm/slurm_out
@@ -213,7 +213,7 @@ written by hand afterwards, as for the beta.
    ids; anything that names beta scenes must not be pointed at v2.0.
    *Answer: yes, from 0000.*
 
-## 7. Added 2026-09-29: the Temesvár field test of 2026-09-28 (scenes 0005–0011)
+## 7. Added 2026-09-29: the Temešvár field test of 2026-09-28 (scenes 0005–0011)
 
 Eleven bags, 36 GB, 32 min of recording in `/data/helhest/26-09-28-temesvar`,
 surveyed as rows 54–64 of `docs/v2_inventory.csv` (RCI job 11717950). All on
@@ -238,7 +238,7 @@ pines; a reed bed taller than the robot.
 | 18_02_56 | 18 | — | | | lawn at dusk; dropped as too short (user, 2026-09-29) |
 | 18_03_45 | 33 | — | | | same; dropped |
 
-None of the Temesvár scenes has a `cmd_vel.npy`: the session was driven
+None of the Temešvár scenes has a `cmd_vel.npy`: the session was driven
 manually from the joystick, which does not publish `/cmd_vel` (only the
 autonomy stack does). `joint_setpoints.npy` holds the commanded wheel rates.
 
@@ -290,10 +290,10 @@ wheel centres from `/robot_description`, **radius 0.334 m, the measured
 rolling scale** (path over integrated wheel rotation 0.334 on made surfaces,
 0.327 pooled; ground-truth speed over wheel rate 0.336), not the URDF's 0.36.
 By label count the root is 58 % made surfaces, 27.6 % Lipník and 14.4 %
-Temesvár. The laptop mirror of the root leaves `proprio_labels/` out on
+Temešvár. The laptop mirror of the root leaves `proprio_labels/` out on
 purpose.
 
-## 8. HELHEST v2.1 (2026-09-29): v2.0 linked, plus the Temesvár session of 2026-09-29
+## 8. HELHEST v2.1 (2026-09-29): v2.0 linked, plus the Temešvár session of 2026-09-29
 
 `/mnt/personal/vlkjan6/HELHEST_v2_1`, bag list `docs/v2_1_bags.csv` (the twelve
 rows of v2.0 followed by six new ones). v2.0 was not extended in place because
