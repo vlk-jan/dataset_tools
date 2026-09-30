@@ -109,7 +109,9 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #:    that no longer means what its legend says.
 #: 8: wheel radius 0.36 -> 0.334 m, so cached bundles draw the old wheels.
 #: 9: ``wheel_slip_*`` scalars (setpoint minus measured), so a cached bundle's
-#:    plot list is short of them.
+#:    plot list is short of them; and ``attitude`` carries its ``band`` (ok /
+#:    warn / bad), the verdict the window tables show, so the panel and the
+#:    tables cannot disagree.
 META_VERSION = 9
 
 #: What each terrain colour mode means, in the viewer's own terms.
@@ -1012,11 +1014,7 @@ def build_scalars(
             roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
             scalars["roll_deg_gt"] = np.degrees(roll)
             scalars["pitch_deg_gt"] = np.degrees(pitch)
-            # Angle between the two up axes: the tilt disagreement itself,
-            # free of yaw and of the wrap a per-angle difference would hit
-            # near +-180 deg (a robot on its back).
-            cos = np.clip(np.sum(R_gt[:, 2, :] * R_imu[:, 2, :], axis=1), -1.0, 1.0)
-            scalars["attitude_error_deg"] = np.degrees(np.arccos(cos))
+            scalars["attitude_error_deg"] = attitude_error_deg(R_gt, R_imu)
 
     js = access.joint_states
     if js is not None and js.ndim == 2 and js.shape[1] >= 10:
@@ -1056,6 +1054,65 @@ def build_scalars(
 ATTITUDE_BANDS = {"ok": 10.0, "warn": 20.0}
 
 
+def attitude_error_deg(R_gt: np.ndarray, R_imu: np.ndarray) -> np.ndarray:
+    """Angle (degrees) between the two rotations' up axes, per frame.
+
+    The tilt disagreement itself, free of yaw and of the wrap a per-angle
+    difference would hit near +-180 deg (a robot on its back). Row 2 of either
+    rotation is the world's up axis in body coordinates, which is what makes
+    the same reader work on the ground truth and on ``gravity_align.npy``.
+    One function for the panel's per-frame plot and the window tables' verdict.
+    """
+    cos = np.clip(np.sum(R_gt[:, 2, :] * R_imu[:, 2, :], axis=1), -1.0, 1.0)
+    return np.degrees(np.arccos(cos))
+
+
+def attitude_band(median_deg: float) -> str:
+    """``ok`` / ``warn`` / ``bad`` for a window's median tilt gap (:data:`ATTITUDE_BANDS`)."""
+    if median_deg < ATTITUDE_BANDS["ok"]:
+        return "ok"
+    return "warn" if median_deg < ATTITUDE_BANDS["warn"] else "bad"
+
+
+def window_attitude(access: SceneAccess, window: Window) -> dict | None:
+    """The ground-truth-versus-IMU verdict for one window, without a build.
+
+    The panel computes this inside the bundle, which exists only once someone
+    has opened the window. The tables listing a scene's windows want it before
+    that -- it is the one number that says which segments are worth opening --
+    so the same comparison is run here on the window's own frames: the poses
+    interpolated onto the frame clock and levelled exactly as a build does
+    (:func:`resolve_poses`), against ``gravity_align.npy``. Numpy only, no
+    torch, and cached on the scene handle. None for anything but a segment
+    window, and for a scene with no gravity alignment to compare against.
+    """
+    if window.kind != "segment" or not access.probe.has("gravity_align"):
+        return None
+
+    def work() -> dict | None:
+        ga = access.gravity_align
+        frame_ts = access.frame_ts
+        if ga is None or frame_ts is None or not len(frame_ts):
+            return None
+        frames = np.arange(window.frame_start, min(window.frame_end, len(frame_ts)))
+        if len(frames) == 0:
+            return None
+        gt = resolve_poses(access, window, frame_ts[frames])
+        if gt.source != "odometry":
+            return None
+        R_gt = L.poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
+        R_imu = np.asarray(ga)[np.clip(frames, 0, len(ga) - 1)]
+        err = attitude_error_deg(R_gt, R_imu)
+        median = float(np.median(err))
+        return {
+            "median": round(median, 2),
+            "p95": round(float(np.percentile(err, 95)), 2),
+            "band": attitude_band(median),
+        }
+
+    return access.cached(f"attitude_{window.key}", work)
+
+
 def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
     """The GT-vs-IMU attitude comparison the side panel reads, or None.
 
@@ -1078,6 +1135,7 @@ def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
         "median_error": round(float(np.median(err)), 2),
         "p95_error": round(float(np.percentile(err, 95)), 2),
         "bands": ATTITUDE_BANDS,
+        "band": attitude_band(float(np.median(err))),
     }
 
 

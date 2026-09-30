@@ -522,6 +522,15 @@ has actually failed sits above 40°. The bands (`build.ATTITUDE_BANDS`) travel i
 large honestly — a jolt the IMU catches and the interpolated ground truth smooths
 over — so the verdict is taken from the window, not the frame.
 
+The same verdict sits in the window tables of the scene page and the segment
+page, as a **GT attitude** column: the median gap in degrees, green, amber or
+red on the same bands. It is computed before any window is built, from the
+same code (`build.window_attitude` interpolates and levels the poses exactly as
+a build does, then `build.attitude_error_deg` reads the gap), so the number in
+the table is the number the panel will show once the window is opened. A
+scene with more than 200 windows on one page shows dashes instead, and a
+window with no ground truth or no `gravity_align.npy` has nothing to compare.
+
 A window splats ~80 height maps 12.8 m across along a path a few tens of metres
 long, so every terrain cell is covered by dozens of them. Their contributions
 are weighted by how far the sample sat from the robot that measured it

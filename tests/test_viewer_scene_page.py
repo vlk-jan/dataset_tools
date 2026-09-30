@@ -507,3 +507,12 @@ def test_a_malformed_report_costs_its_part_and_says_so(tmp_path):
     assert value_of(card, "frame clock") is not None
     assert value_of(card, "cost") is None
     assert card["warn"] == "gnss_guard.txt could not be read; tf_pins.txt could not be read"
+
+
+def test_the_window_tables_carry_the_attitude_verdict(client):
+    for url in ("/scene/0000", "/scene/0000/segment/0"):
+        text = client.get(url).text
+        assert "GT attitude" in text
+        # The fixture's ground truth is level and so is its IMU: a green 0.0°.
+        assert "median tilt gap" in text
+        assert 'class="chip yes"' in text and "0.0°" in text

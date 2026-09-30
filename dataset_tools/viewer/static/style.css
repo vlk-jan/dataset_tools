@@ -66,6 +66,8 @@ td.num small { display: block; font-size: 12px; font-family: var(--mono); }
 .chip.yes { color: var(--ok); border-color: #2f6b4f; }
 .chip.no { color: #8a6060; border-color: #5a3a3a; text-decoration: line-through; }
 .chip.partial { color: var(--warn); border-color: #6b5a2f; }
+/* A verdict that failed, as opposed to a file that is absent: red, not struck through. */
+.chip.bad { color: var(--bad); border-color: #6b3a3a; }
 .card {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;

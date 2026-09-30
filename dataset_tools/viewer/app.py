@@ -50,7 +50,7 @@ from .loaders import load_cloud, load_npz_key, read_text, roll_pitch_from_gravit
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape
 from .scene_page import build_scene_page, map_card
-from .segment_page import build_segment_page
+from .segment_page import attitude_per_window, build_segment_page
 from .segment_page import find as find_segment
 from .windows import (
     DEFAULT_MAX_FRAMES,
@@ -372,6 +372,9 @@ def create_app(
                 # Which windows a note lands in, so the table says where the
                 # flagged stretches are without anyone reading every note.
                 "notes_per_window": _notes_per_window(scene_notes, windows),
+                # How far each window's ground truth has wandered from the
+                # IMU, so the segments worth opening are told apart here.
+                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, windows),
             },
         )
 
@@ -412,6 +415,7 @@ def create_app(
                 "notes": [n for n in scene_notes if n.overlaps(lo, hi)],
                 "notes_status": notes_store.status(),
                 "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
+                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, detail["windows"]),
             },
         )
 
