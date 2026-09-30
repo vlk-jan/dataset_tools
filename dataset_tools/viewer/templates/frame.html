@@ -188,7 +188,6 @@
           A static 3D scene of this frame alone: the robot at
           {% if details.segment %}its ground-truth pose{% else %}the origin{% endif %},
           this frame's height map as terrain (its cloud when there is no map) and its cloud as points.
-          Nothing moves - there is one state to look at.
         </p>
         {% if details.window %}
         <p>
@@ -198,7 +197,7 @@
         <p class="muted" style="margin-top:-6px">
           The motion around this frame: {{ details.window.n_frames }} frames from
           <span class="chip {{ 'yes' if details.window.pose_source == 'odometry' else ('partial' if details.window.pose_source == 'transforms' else 'no') }}">{{ details.window.pose_source }}</span>,
-          opening at frame {{ index }} (offset {{ details.window.offset }} inside the window).
+          opening at frame {{ index }}.
         </p>
         {% endif %}
         {% elif not simview_ok %}

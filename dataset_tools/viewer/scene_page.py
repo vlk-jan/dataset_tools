@@ -702,12 +702,7 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
     ):
         if row.get(key):
             stats.append(stat(label, row[key], unit))
-    note = "Counts only: the file holds how many findings, not what they said. "
-    note += (
-        f"For the messages, run helhest-validate {access.scene_id} on the root."
-        if mark["cls"] != "yes"
-        else "Nothing was found."
-    )
+    note = f"For the messages, run helhest-validate {access.scene_id} on the root." if mark["cls"] != "yes" else None
     return {
         "kind": "validation",
         "title": "Validation",
@@ -1001,8 +996,7 @@ def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     bits = [f"{len(missing)} missing"] * bool(missing) + [f"{len(partial)} partial"] * bool(partial)
     lines = []
     if missing:
-        what = "it" if len(missing) == 1 else "they"
-        lines.append(f"Missing: {', '.join(missing)} - the viewer leaves out whatever {what} would have shown.")
+        lines.append(f"Missing: {', '.join(missing)}.")
     return {
         "badge": " · ".join(bits) or "complete",
         "badge_class": "lo" if bits else "hi",

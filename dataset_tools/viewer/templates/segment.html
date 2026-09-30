@@ -77,10 +77,6 @@
   {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
 
   <h2>3D views - {{ page.windows|length }}</h2>
-  <p class="muted" style="margin-top:-4px">
-    One window per buildable chunk of this segment; a long segment is cut into
-    parts so that building one reads a bounded number of files.
-  </p>
   {% if page.windows %}
   <table>
     <thead>

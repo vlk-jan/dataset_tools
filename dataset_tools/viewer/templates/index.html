@@ -43,12 +43,7 @@
       {%- if atlas and atlas.title %}{{ atlas.title }}
       {%- else %}{{ root.path.name }}{% endif -%}
     </h2>
-    <p class="lede">
-      {%- if atlas and atlas.intro %}{{ atlas.intro }}
-      {%- else %}Every scene below is probed from the files on disk: the viewer shows what a
-      scene actually has and says so when something is absent. Nothing here is specific to
-      one sensor rig.{% endif -%}
-    </p>
+    {% if atlas and atlas.intro %}<p class="lede">{{ atlas.intro }}</p>{% endif %}
 
     <dl class="totals">
       {% for total in totals %}

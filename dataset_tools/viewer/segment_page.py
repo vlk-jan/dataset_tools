@@ -157,9 +157,8 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
         stats.append(stat("per-frame files", " · ".join(missing), "inside this segment"))
     if any(m.startswith("height_map") for m in missing) and p.counts.get("clouds", 0) == p.n_frames:
         notes.append(
-            "A frame whose sweep has too few returns left after the ground-plane clip gets no height map - "
-            "the builder refuses to interpolate a surface out of nothing. The cloud is still there, and the "
-            "missing maps are frames the lidar could not see enough of, not frames that were skipped."
+            "A frame whose sweep has too few returns left after the ground-plane clip gets no height map; "
+            "its cloud is still there."
         )
 
     reason = describe_reason(seg.reason)
@@ -227,10 +226,8 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
             gap = abs(along - path)
             if gap > GNSS_MISMATCH_M and gap > GNSS_MISMATCH_FRAC * max(path, along):
                 notes.append(
-                    f"The GNSS track and the ground truth disagree by {gap:.0f} m over this segment: the "
-                    "receiver's position and the poses do not describe the same driving, which is a flag on "
-                    "the segment - a fabricated stretch or a lost fix - rather than a measurement error to "
-                    "average away."
+                    f"The GNSS track and the ground truth disagree by {gap:.0f} m over this segment - "
+                    "a fabricated stretch or a lost fix."
                 )
             else:
                 notes.append(
