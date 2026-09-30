@@ -363,3 +363,37 @@ frames matched; 489.4 GB of PNG became 119.0 GB of JPEG (4.1×). In scenes
 every other entry of those scenes is still a link, so **deleting v2.0 would
 leave them with their images and nothing else**. v2.0 itself is unchanged and
 stays PNG. v2.1 now stores 126.6 GB itself and reaches 38.0 GB through links.
+
+## 10. HELHEST v2.2 (2026-09-30): the v2.1 bags with the Odin1 extrinsics pinned
+
+While chasing the 7 cm between the lidar ground and the wheel bottoms (§7,
+`open_items`) it turned out that the Odin1 publishes its lidar-to-IMU and
+lidar-to-camera extrinsics on `/tf_static` as a running estimate: read out of
+the 42 bags of the 2026-09-14 firmware (`docs/odin_tf_static_2026-09-30.txt`),
+`imu_link -> odin1_lidar` spans about 3 cm per axis between the 10th and 90th
+percentile and half a degree of pitch, and one bag changes it seven times in
+its first minutes. The URDF mount `base_link -> odin1_base_link` is fixed at
+(0.10, 0, 0.10). v2.0 and v2.1 used whatever each bag published, so the same
+ground stood up to 3.5 cm higher in one scene than the next.
+
+Since `f90c4c5` the extractor replaces both edges with the per-axis median
+(`dataset_tools/tf_pins.py`, `--tf_pins on|off`, record per scene in
+`tf_pins.txt`): lidar in IMU (0.011, 0.024, 0.006) m, rpy (−0.29, −0.53,
+0.12)°; camera in lidar (−0.010, 0.039, 0.014) m, rpy (0.40, 0.04, 0.06)°.
+The pin is the driver's estimate made constant, not a measurement; the user
+measured the housing centre about 0.136 m above `base_link`, against 0.106 m
+in the pinned chain, and 4–5 cm between lidar ground and wheel bottoms remain
+unexplained (axle height and Odin centre still to be measured on the robot).
+
+**v2.2** (`/mnt/personal/vlkjan6/HELHEST_v2_2`, `docs/v2_2_bags.csv` = the
+18 bags of v2.1) was extracted in one run at `d8c3b06`, RCI job 11722782,
+every scene real files, images as the camera's JPEG straight from the
+extractor, height maps in the same task. 133,060 frames, the same count as
+v2.1 in every scene (the guard and the clock are unchanged); 130,912 maps
+against 130,859, the difference being frames at the `min_points` edge whose
+cloud moved by the pin. The bags' own lidar offsets from the pin were 10–35 mm;
+only 0010 exceeds 30 mm and is flagged `far`. 164.4 GB (images 119.3, clouds
+40.3, maps 4.4). No `keyframes.lst` and no proprio labels yet; v2.1's do not
+transfer (the clouds under them sit at a different height, and the map sets
+differ). The manifest carries a `derived.driven_similarity` placeholder for
+the viewer session's product. v2.0 and v2.1 are unchanged.
