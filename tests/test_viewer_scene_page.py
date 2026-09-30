@@ -231,17 +231,20 @@ def test_a_scene_with_no_segment_file_still_draws_its_curated_timeline(tmp_path)
 
 
 def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
-    page = scene_page(tmp_path, make_root(tmp_path, with_cmd_vel=False))
+    page = scene_page(tmp_path, make_root(tmp_path, with_cmd_vel=False, with_transforms=False))
     entries = {f["key"]: f for f in page["files"]}
     assert entries["odometry"]["state"] == "yes" and "ground truth" in entries["odometry"]["purpose"].lower()
     assert entries["odometry"]["relpath"] == "odometry.txt"
     assert entries["images"]["relpath"] == "images" and entries["images"]["group"] == "Per frame"
     # An absent file keeps its entry: the page says what the scene is missing,
     # and tells a missing file from one that is only written sometimes.
-    assert entries["cmd_vel"]["state"] == "no" and entries["cmd_vel"]["purpose"]
+    assert entries["transforms"]["state"] == "no" and entries["transforms"]["purpose"]
     assert entries["tf_pins"]["state"] == "optional"
+    # Teleoperated scenes have no cmd_vel: normal, not missing.
+    assert entries["cmd_vel"]["state"] == "optional"
     assert page["files_summary"]["badge"].endswith("missing")
-    assert "cmd_vel.npy" in page["files_summary"]["lines"][0]
+    assert "transforms.npy" in page["files_summary"]["lines"][0]
+    assert "cmd_vel.npy" not in page["files_summary"]["lines"][0]
     assert "tf_pins.txt" not in page["files_summary"]["lines"][0]
     # Per-frame things are counted against the frame count, not shown bare.
     assert entries["images"]["stats"][0]["label"] == "frames"

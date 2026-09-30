@@ -372,8 +372,6 @@ details.diskusage dl.stats { margin-top: 8px; }
   display: block; margin-bottom: 3px;
   font: 500 10.5px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
-.files .cardnote.legend { color: var(--muted); line-height: 1.9; }
-.files .cardnote.legend .chip { font: 400 11px var(--mono); padding: 0 6px; }
 
 /* The inventory strip is a set of toggles, and the entry that is open reads
    out below it: what the file holds, what the dataset does with it, and

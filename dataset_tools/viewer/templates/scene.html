@@ -170,10 +170,6 @@
     </div>
     {% endfor %}{% endfor %}
     {% for line in fs.lines %}<p class="cardnote warn">{{ line }}</p>{% endfor %}
-    <p class="cardnote legend">
-      <span class="chip yes">present</span> <span class="chip partial">short of frames</span>
-      <span class="chip no">missing</span> <span class="chip optional">not written</span>
-    </p>
     {% if page.disk %}
     {% set disk = page.disk %}
     <details class="matrix diskusage">

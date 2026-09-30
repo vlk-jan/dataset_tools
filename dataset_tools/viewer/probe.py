@@ -163,7 +163,8 @@ ARTEFACT_PURPOSE: dict[str, str] = {
     ),
     "cmd_vel": (
         "The twist commanded to the base -- the driver's intent, before the wheel controllers act "
-        "on it. Commanded speed on the proprioception card is read from here."
+        "on it. Commanded speed on the proprioception card is read from here. Published by the "
+        "autonomy stack, so a scene where the robot was teleoperated has none."
     ),
     "gps": (
         "Raw GNSS fixes: timestamp, latitude, longitude, altitude, fix status and covariance. Used "
@@ -219,9 +220,12 @@ ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
 
 #: Artefacts a complete scene may well not have: a DRIFT product, the older
-#: extrinsic, and the extractor's reports that are only written when their step
+#: extrinsic, cmd_vel (autonomy only, none when teleoperated), and the
+#: extractor's reports that are only written when their step
 #: ran. Their absence is shown, but not as something missing.
-OPTIONAL_ARTEFACTS = frozenset({"driven_similarity", "T_cam_to_lidar", "time_align", "gnss_guard", "tf_pins"})
+OPTIONAL_ARTEFACTS = frozenset(
+    {"driven_similarity", "T_cam_to_lidar", "cmd_vel", "time_align", "gnss_guard", "tf_pins"}
+)
 
 
 @dataclass
