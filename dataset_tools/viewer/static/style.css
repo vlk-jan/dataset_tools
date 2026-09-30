@@ -45,6 +45,8 @@ td.num small { display: block; font-size: 12px; font-family: var(--mono); }
 .chip.yes { color: var(--ok); border-color: var(--ok-line); }
 .chip.no { color: color-mix(in srgb, var(--bad) 55%, var(--muted)); border-color: color-mix(in srgb, var(--bad) 25%, var(--panel)); text-decoration: line-through; }
 .chip.partial { color: var(--warn); border-color: var(--warn-line); }
+/* Absent where absence is normal (probe.OPTIONAL_ARTEFACTS): quiet, not struck through. */
+.chip.optional { color: var(--muted); border-style: dashed; opacity: .8; }
 /* A verdict that failed, as opposed to a file that is absent: red, not struck through. */
 .chip.bad { color: var(--bad); border-color: var(--bad-line); }
 .card {
@@ -359,6 +361,14 @@ details.matrix summary {
 details.matrix summary:hover { color: var(--fg); }
 details.matrix pre { margin: 6px 0 0; background: var(--shade); }
 .files .chips { margin-top: 0; }
+/* The inventory, one row per what the files are for. */
+.filegroups { display: grid; gap: 8px; margin-top: 10px; }
+.fgtitle {
+  display: block; margin-bottom: 3px;
+  font: 500 10.5px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+}
+.files .cardnote.legend { color: var(--muted); line-height: 1.9; }
+.files .cardnote.legend .chip { font: 400 11px var(--mono); padding: 0 6px; }
 
 /* The inventory strip is a set of toggles, and the entry that is open reads
    out below it: what the file holds, what the dataset does with it, and
@@ -377,15 +387,25 @@ button.chip[aria-expanded="true"] {
   margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line);
   border-radius: 6px; background: var(--shade);
 }
-.fileinfo h3 {
-  margin: 0; font-size: 14px; font-weight: 600;
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+.fileinfo > header {
+  display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
 }
-.fileinfo h3 code { font-size: 12px; color: var(--muted); }
-.fileinfo p { margin: 6px 0 0; font-size: 13.5px; max-width: 78ch; }
-.fileinfo .kv { margin: 10px 0 0; font-size: 12.5px; row-gap: 2px; }
-.fileinfo .kv dt { font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-.fileinfo .kv dd { font-variant-numeric: normal; overflow-wrap: anywhere; }
+.fileinfo h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.fileinfo > header .chip { margin-left: auto; font: 400 11px var(--mono); padding: 0 7px; }
+.fileinfo .filepath {
+  display: block; margin-top: 2px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+}
+.fileinfo dl.stats { margin-top: 10px; }
+.fileinfo p { margin: 8px 0 0; font-size: 13.5px; max-width: 78ch; }
+.fileinfo p.holds { font-size: 13px; color: var(--muted); }
+.fileinfo p.holds span {
+  font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-right: 6px;
+}
+.fileinfo .bar { margin-top: 10px; }
+/* Coverage of a per-frame directory: green where a frame has its file, the
+   gaps in orange -- at least a pixel, however short. */
+.bar .track.cover { background: var(--ok); height: 10px; border-radius: 2px; }
+.bar .track.cover i { background: var(--warn); min-width: 1px; }
 
 /* ------------------------------------------------- scene tabs & frame pages */
 /* A region being swapped in place (swap.js) dims until the new one lands. */
@@ -594,7 +614,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 /* The strip no longer runs to the bottom of the card: an opened file panel
    follows it, and the note is what holds the card's foot instead. */
 .pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }
-.pair > .card.files > .cardnote { margin-top: auto; padding-top: 12px; }
+.pair > .card.files > .cardnote:first-of-type { margin-top: auto; padding-top: 12px; }
 
 .mapbox {
   flex: 1;

@@ -20,6 +20,8 @@ from helpers_viewer import (
 )
 
 from dataset_tools.viewer import probe
+from dataset_tools.viewer.probe import ARTEFACTS
+from dataset_tools.viewer.scene_page import frame_gaps
 
 # --------------------------------------------------------------------------
 # the scene page: four cards assembled from probe + atlas + a few small files
@@ -231,14 +233,27 @@ def test_a_scene_with_no_segment_file_still_draws_its_curated_timeline(tmp_path)
 def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
     page = scene_page(tmp_path, make_root(tmp_path, with_cmd_vel=False))
     entries = {f["key"]: f for f in page["files"]}
-    assert entries["odometry"]["present"] and "ground truth" in entries["odometry"]["purpose"].lower()
+    assert entries["odometry"]["state"] == "yes" and "ground truth" in entries["odometry"]["purpose"].lower()
     assert entries["odometry"]["relpath"] == "odometry.txt"
-    # An absent file keeps its entry: the page says what the scene is missing.
-    assert entries["cmd_vel"]["present"] is False and entries["cmd_vel"]["purpose"]
-    # Counted things carry a unit, so a bare number is never shown alone.
-    assert entries["images"]["count"] and entries["images"]["count_unit"] == "files"
-    assert entries["data_ts"]["count_unit"] == "lines"
-    assert entries["transforms"]["count_unit"] == "rows"
+    assert entries["images"]["shown"] == "images/" and entries["images"]["group"] == "Per frame"
+    # An absent file keeps its entry: the page says what the scene is missing,
+    # and tells a missing file from one that is only written sometimes.
+    assert entries["cmd_vel"]["state"] == "no" and entries["cmd_vel"]["purpose"]
+    assert entries["tf_pins"]["state"] == "optional"
+    assert page["files_summary"]["badge"].endswith("missing")
+    assert "cmd_vel.npy" in page["files_summary"]["lines"][0]
+    assert "tf_pins.txt" not in page["files_summary"]["lines"][0]
+    # Per-frame things are counted against the frame count, not shown bare.
+    assert entries["images"]["stats"][0]["label"] == "frames"
+    assert entries["images"]["stats"][0]["sub"] == "every frame"
+    # Every artefact is in exactly one group.
+    assert sorted(entries) == sorted(a.key for a in ARTEFACTS)
+
+
+def test_frame_gaps_are_runs_of_missing_indices():
+    names = ["00000.npz", "00001.npz", "00004.npz", "notes.txt", "00006.npz"]
+    assert frame_gaps(names, 8) == [(2, 3), (5, 5), (7, 7)]
+    assert frame_gaps(names[:2], 2) == []
 
 
 def test_the_card_never_claims_more_raw_poses_than_the_scene_has(tmp_path):

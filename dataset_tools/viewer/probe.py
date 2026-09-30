@@ -218,6 +218,11 @@ ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 #: Directories whose file count is worth knowing on the index page.
 COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
 
+#: Artefacts a complete scene may well not have: a DRIFT product, the older
+#: extrinsic, and the extractor's reports that are only written when their step
+#: ran. Their absence is shown, but not as something missing.
+OPTIONAL_ARTEFACTS = frozenset({"driven_similarity", "T_cam_to_lidar", "time_align", "gnss_guard", "tf_pins"})
+
 
 @dataclass
 class SceneProbe:
@@ -250,6 +255,19 @@ class SceneProbe:
 
     def has(self, key: str) -> bool:
         return bool(self.present.get(key))
+
+    def state(self, key: str) -> str:
+        """How the scene holds one artefact -- the one rule every page colours its chips by.
+
+        ``yes``; ``partial``, a per-frame directory with fewer files than the
+        scene has frames; ``no``, absent; or ``optional``, absent where that is
+        normal (``OPTIONAL_ARTEFACTS``).
+        """
+        if not self.has(key):
+            return "optional" if key in OPTIONAL_ARTEFACTS else "no"
+        if key in COUNTED_DIRS and self.n_frames and self.counts.get(key, 0) < self.n_frames:
+            return "partial"
+        return "yes"
 
     def to_json(self) -> dict:
         d = asdict(self)

@@ -119,4 +119,3 @@ def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path
     px_fish = np.asarray(Image.open(io.BytesIO(jpeg_fish)).convert("RGB"))
     assert px_fish[50, 179].sum() > 100
     assert px_fish[50, 200].sum() < 30
-

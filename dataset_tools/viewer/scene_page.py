@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ from .index_page import (
     fmt_count,
     fmt_disk_rate,
     fmt_duration,
+    fmt_share,
     segment_timeline,
     split_mark,
     stat,
@@ -47,7 +49,7 @@ from .index_page import (
     thumb_slots,
     validation_mark,
 )
-from .loaders import _scalar, read_camera_info, read_text, roll_pitch_from_gravity_align
+from .loaders import read_camera_info, read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS, DatasetRoot
 from .signals import signal_charts
 
@@ -855,35 +857,161 @@ def file_sizes(access: SceneAccess) -> dict[str, int]:
     return {k: v for k, v in sizes.items() if isinstance(v, int)}
 
 
-def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
-    """The file inventory, each entry carrying what it is and what it is for.
+#: The file card's rows: what each artefact is for, in the order a reader asks.
+FILE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Per frame", ("images", "clouds", "height_maps", "height_masks", "driven_similarity",
+                   "data_ts", "pcd_ts", "transforms", "gravity_align")),
+    ("Ground truth", ("odometry", "odometry_segments")),
+    ("Robot & GNSS", ("joint_states", "joint_setpoints", "cmd_vel", "gps")),
+    ("Calibration", ("camera_intrinsics", "camera_info", "T_cam_to_base", "T_cam_to_lidar")),
+    ("Extraction", ("source_bag", "time_align", "gnss_guard", "tf_pins")),
+)  # fmt: skip
 
-    The chips used to say only a path and a count, with the rest in a tooltip
-    that a touch device never shows at all. Everything a reader needs about one
-    artefact is assembled here instead, so the page can open it in place: no
-    extra request, and nothing read off disk that the probe did not already
-    have.
+#: Arrays with one row per frame, whose count is read against the frame count.
+_PER_FRAME_FILES = ("data_ts", "pcd_ts", "transforms", "gravity_align")
+#: Arrays on their own clock, whose count is read as a rate over the scene.
+_TIME_SERIES = ("joint_states", "joint_setpoints", "cmd_vel", "gps")
+
+_STATE_WORD = {"yes": "present", "partial": "partial", "no": "missing", "optional": "not written"}
+
+
+def frame_gaps(names: list[str], n_frames: int) -> list[tuple[int, int]]:
+    """The runs of frame indices ``[first, last]`` with no file among ``names`` (``00123.npz``)."""
+    have = {int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isdigit()}
+    gaps: list[tuple[int, int]] = []
+    for i in range(n_frames):
+        if i in have:
+            continue
+        if gaps and gaps[-1][1] == i - 1:
+            gaps[-1] = (gaps[-1][0], i)
+        else:
+            gaps.append((i, i))
+    return gaps
+
+
+def _gap_text(gaps: list[tuple[int, int]], shown: int = 6) -> str:
+    runs = [f"{a}" if a == b else f"{a}–{b}" for a, b in gaps[:shown]]
+    more = len(gaps) - shown
+    return ", ".join(runs) + (f" and {more} more gap{'s' if more > 1 else ''}" if more > 0 else "")
+
+
+def _coverage(access: SceneAccess, art: Any, count: int) -> dict[str, Any] | None:
+    """Where a per-frame directory has no file: a bar of the gaps and a line naming them.
+
+    One listing of the directory, only for one that is short of frames; the
+    page is cached, so it is paid once per scene.
+    """
+    n = access.probe.n_frames
+    try:
+        gaps = frame_gaps(os.listdir(access.dir / art.relpath), n)
+    except OSError:
+        return None
+    if not gaps:
+        return None
+    # A lone missing frame is far under a pixel wide; the mark keeps a minimum
+    # width in CSS, and runs a pixel apart are drawn as one.
+    marks: list[list[float]] = []
+    for a, b in gaps:
+        left, right = a / n * 100, (b + 1) / n * 100
+        if marks and left - marks[-1][1] < 0.3:
+            marks[-1][1] = right
+        else:
+            marks.append([left, right])
+    return {
+        "marks": [{"left": lo, "width": hi - lo} for lo, hi in marks],
+        "text": _gap_text(gaps),
+        "n_missing": n - count,
+    }
+
+
+def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
+    """The file inventory in group order, each entry carrying what it is and what it is for.
+
+    Everything a reader needs about one artefact is assembled here, so the page
+    can open it in place with no extra request: whether the scene has it (by
+    ``SceneProbe.state``, the rule the index page colours by too), how much of
+    it, and where it is.
     """
     p = access.probe
     sizes = file_sizes(access)
-    entries: list[dict[str, Any]] = []
-    for art in ARTEFACTS:
-        count = p.counts.get(art.key)
-        entries.append(
-            {
-                "key": art.key,
-                "label": art.label,
-                "relpath": art.relpath,
-                "kind": "directory" if art.kind == "dir" else "file",
-                "present": p.has(art.key),
-                "count": count,
-                "count_unit": art.count_unit,
-                "size": fmt_bytes(sizes[art.relpath]) if p.has(art.key) and art.relpath in sizes else None,
-                "shape": art.description,
-                "purpose": art.purpose,
-            }
-        )
-    return entries
+    by_key = {art.key: art for art in ARTEFACTS}
+    grouped = {k for _, keys in FILE_GROUPS for k in keys}
+    groups = [*FILE_GROUPS, ("Other", tuple(k for k in by_key if k not in grouped))]
+    out: list[dict[str, Any]] = []
+    for title, keys in groups:
+        for art in (by_key[k] for k in keys if k in by_key):
+            state = p.state(art.key)
+            count = p.counts.get(art.key)
+            size = sizes.get(art.relpath) if p.has(art.key) else None
+            stats: list[dict[str, Any]] = []
+            coverage = None
+            if count is not None and (art.kind == "dir" or art.key in _PER_FRAME_FILES) and p.n_frames:
+                share = count / p.n_frames
+                stats.append(
+                    stat(
+                        "frames",
+                        f"{count:,} of {p.n_frames:,}",
+                        (
+                            "every frame"
+                            if count >= p.n_frames
+                            else f"{fmt_share(share)}, {p.n_frames - count:,} without one"
+                        ),
+                    )
+                )
+                if state == "partial":
+                    coverage = _coverage(access, art, count)
+            elif count is not None:
+                rate = (
+                    f"≈ {count / p.duration:.1f} Hz over the scene" if art.key in _TIME_SERIES and p.duration else None
+                )
+                stats.append(stat(art.count_unit, f"{count:,}", rate))
+            if size is not None:
+                each = f"{fmt_bytes(size / count)} per file" if art.kind == "dir" and count else None
+                stats.append(stat("on disk", fmt_bytes(size), each))
+            out.append(
+                {
+                    "key": art.key,
+                    "label": art.label,
+                    "relpath": art.relpath,
+                    "shown": art.relpath + ("/" if art.kind == "dir" else ""),
+                    "group": title,
+                    "present": p.has(art.key),
+                    "size": fmt_bytes(size) if size is not None else None,
+                    "state": state,
+                    "state_word": _STATE_WORD[state],
+                    "stats": stats,
+                    "coverage": coverage,
+                    "shape": art.description,
+                    "purpose": art.purpose,
+                }
+            )
+    return out
+
+
+def file_groups(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The inventory as the card's rows, in ``FILE_GROUPS`` order."""
+    titles = list(dict.fromkeys(e["group"] for e in entries))
+    return [{"title": t, "entries": [e for e in entries if e["group"] == t]} for t in titles]
+
+
+def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """The file card's badge and its line naming what is missing or short."""
+    missing = [e["shown"] for e in entries if e["state"] == "no"]
+    partial = [e["shown"] for e in entries if e["state"] == "partial"]
+    bits = [f"{len(missing)} missing"] * bool(missing) + [f"{len(partial)} partial"] * bool(partial)
+    lines = []
+    if missing:
+        what = "it" if len(missing) == 1 else "they"
+        lines.append(f"Missing: {', '.join(missing)} — the viewer leaves out whatever {what} would have shown.")
+    if partial:
+        lines.append(f"Short of frames: {', '.join(partial)} — open one to see which frames have no file.")
+    return {
+        "badge": " · ".join(bits) or "complete",
+        "badge_class": "lo" if bits else "hi",
+        "lines": lines,
+        "present": sum(e["state"] in ("yes", "partial") for e in entries),
+        "total": len(entries),
+    }
 
 
 def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
@@ -920,7 +1048,9 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             "disk": disk_card(access),
             # The inventory strip: one entry per artefact the viewer knows,
             # present or not, each with the prose the page opens under it.
-            "files": file_entries(access),
+            "files": (files := file_entries(access)),
+            "file_groups": file_groups(files),
+            "files_summary": file_summary(files),
             # The same arrays over time, on the frame clock's own span.
             "signals": scene_signals(access),
         }

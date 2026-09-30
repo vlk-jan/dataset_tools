@@ -199,19 +199,18 @@
           <div class="chips">
             {# driven_similarity is a DRIFT product most roots lack: shown only where it exists,
                so a root without it looks exactly as it always did. #}
+            {# Coloured by SceneProbe.state, the same rule as the scene page's file card. #}
             {% for key in ("images", "clouds", "height_maps", "height_masks", "driven_similarity") %}
-              {% set count = p.counts.get(key, 0) %}
-              {% if key == "driven_similarity" and not p.present.get(key) %}
-              {% elif not p.present.get(key) %}
-                <span class="chip no">{{ key }}</span>
-              {% elif p.n_frames and count < p.n_frames %}
+              {% set st = p.state(key) %}
+              {% if st == "partial" %}
+                {% set count = p.counts.get(key, 0) %}
                 <span class="chip partial" title="{{ count }} of {{ p.n_frames }} frames">{{ key }} {{ count }}/{{ p.n_frames }}</span>
-              {% else %}
-                <span class="chip yes">{{ key }}</span>
+              {% elif st != "optional" %}
+                <span class="chip {{ st }}">{{ key }}</span>
               {% endif %}
             {% endfor %}
             {% for key in ("odometry", "joint_states", "joint_setpoints", "cmd_vel", "gravity_align") %}
-              <span class="chip {{ 'yes' if p.present.get(key) else 'no' }}">{{ key.replace('_', ' ') }}</span>
+              <span class="chip {{ p.state(key) }}">{{ key.replace('_', ' ') }}</span>
             {% endfor %}
             {# What helhest-validate made of the scene, when validation.csv sits at the root. #}
             {% if row.validation %}

@@ -112,41 +112,69 @@
   {% set wrapped = page.map or page.disk %}
   {% if wrapped %}<div class="pair{{ ' withmap' if page.map }}{{ ' withdisk' if page.disk }}">{% endif %}
 
-  {# Every entry opens: what the file holds and what the dataset does with it,
-     shown in place under the strip. Without JavaScript the chips are still
-     buttons that do nothing and every panel stays where it is -- readable, in
-     order, at the bottom of the card. #}
+  {# Every entry opens: what the file holds, how much of it this scene has and
+     what the dataset does with it, shown in place under the strip. Coloured by
+     SceneProbe.state, the rule the index page uses too. Without JavaScript the
+     chips are buttons that do nothing and every panel stays where it is --
+     readable, in order, at the bottom of the card. #}
+  {% set fs = page.files_summary %}
   <div class="card files">
     <header>
-      <h2>Files present</h2>
-      <span class="scount">{{ probe.present.values() | select | list | length }} of {{ artefacts | length }}</span>
+      <h2>Files</h2>
+      <span class="cov {{ fs.badge_class }}" title="{{ fs.present }} of {{ fs.total }} entries on disk">{{ fs.badge }}</span>
     </header>
-    <div class="chips" id="filechips">
-    {% for f in page.files %}
-      <button type="button" class="chip {{ 'yes' if f.present else 'no' }}"
-              data-file="{{ f.key }}" aria-expanded="false" aria-controls="fileinfo-{{ f.key }}">
-        {{ f.relpath }}{% if f.count %} ({{ f.count }}){% endif %}
-      </button>
+    <div class="filegroups" id="filechips">
+    {% for g in page.file_groups %}
+      <div class="filegroup">
+        <span class="fgtitle">{{ g.title }}</span>
+        <div class="chips">
+        {% for f in g.entries %}
+          <button type="button" class="chip {{ f.state }}" title="{{ f.label }}: {{ f.state_word }}"
+                  data-file="{{ f.key }}" aria-expanded="false" aria-controls="fileinfo-{{ f.key }}">{{ f.shown }}</button>
+        {% endfor %}
+        </div>
+      </div>
     {% endfor %}
     </div>
-    {% for f in page.files %}
+    {% for g in page.file_groups %}{% for f in g.entries %}
     <div class="fileinfo" id="fileinfo-{{ f.key }}" data-fileinfo>
-      <h3>{{ f.label }} <code>{{ f.relpath }}</code></h3>
-      <p>{{ f.purpose or f.shape }}</p>
-      <dl class="kv">
-        <dt>in this scene</dt>
-        <dd>
-          {%- if f.present %}present{% if f.count %}, {{ "{:,}".format(f.count) }} {{ f.count_unit }}{% endif %}
-          {%- else %}absent &mdash; the viewer omits whatever it would have contributed{% endif %}
-        </dd>
-        <dt>holds</dt><dd>{{ f.shape }}</dd>
-        <dt>on disk</dt><dd><code>{{ scene_id }}/{{ f.relpath }}</code> ({{ f.kind }}{% if f.size %}, {{ f.size }}{% endif %})</dd>
+      <header>
+        <h3>{{ f.label }}</h3>
+        <span class="chip {{ f.state }}">{{ f.state_word }}</span>
+      </header>
+      <code class="filepath">{{ scene_id }}/{{ f.shown }}</code>
+      {% if f.stats %}
+      <dl class="stats">
+        {% for s in f.stats %}
+        <div><dt>{{ s.label }}</dt><dd>{{ s.value }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</dd></div>
+        {% endfor %}
       </dl>
+      {% endif %}
+      {% if f.coverage %}
+      <div class="bar">
+        <div class="track cover" title="frames with no file, in orange">
+          {% for m in f.coverage.marks %}
+          <i style="left:{{ "%.3f"|format(m.left) }}%;width:{{ "%.3f"|format(m.width) }}%"></i>
+          {% endfor %}
+        </div>
+        <div class="barcap"><span>frame 0</span><span>{{ probe.n_frames - 1 }}</span></div>
+        <p class="barhint">No file for frame {{ f.coverage.text }}.</p>
+      </div>
+      {% endif %}
+      <p class="holds"><span>holds</span> {{ f.shape }}</p>
+      {% if f.purpose %}<p>{{ f.purpose }}</p>{% endif %}
+      {% if f.state == "no" %}
+      <p class="cardnote warn">Not in this scene: the viewer leaves out whatever it would have shown.</p>
+      {% elif f.state == "optional" %}
+      <p class="cardnote">Not in this scene, which is normal: it is only written when its step ran.</p>
+      {% endif %}
     </div>
-    {% endfor %}
-    <p class="cardnote">
-      Struck-through entries are absent from this scene; the viewer simply omits
-      whatever they would have contributed. Click any entry to read what it holds.
+    {% endfor %}{% endfor %}
+    {% for line in fs.lines %}<p class="cardnote warn">{{ line }}</p>{% endfor %}
+    <p class="cardnote legend">
+      <span class="chip yes">present</span> <span class="chip partial">short of frames</span>
+      <span class="chip no">missing</span> <span class="chip optional">not written</span>
+      &mdash; click any entry to read what it holds.
     </p>
   </div>
 
