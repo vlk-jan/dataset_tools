@@ -45,6 +45,8 @@
       apply(t);
     });
     header.append(btn);
+    new ResizeObserver(() =>
+      html.style.setProperty("--headh", `${header.offsetHeight}px`)).observe(header);
     apply(current());
   });
 })();
