@@ -76,10 +76,6 @@
 
   {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
 
-  {% with notes_scope = "segment", note_range = [page.frames[0], page.frames[1] - 1] %}
-    {% include "_notes.html" %}
-  {% endwith %}
-
   <h2>3D views &mdash; {{ page.windows|length }}</h2>
   <p class="muted" style="margin-top:-4px">
     One window per buildable chunk of this segment; a long segment is cut into
@@ -137,6 +133,11 @@
     {% include "_frames.html" %}
   {% endwith %}
   </div>
+
+  {# Last on the page, as on the scene page. #}
+  {% with notes_scope = "segment", note_range = [page.frames[0], page.frames[1] - 1] %}
+    {% include "_notes.html" %}
+  {% endwith %}
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>

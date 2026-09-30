@@ -174,8 +174,6 @@
 
   {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
 
-  {% include "_notes.html" %}
-
   {# The tabs and the frame strip's pager swap this region in place (swap.js):
      a click fetches the same page with the new query and replaces only what is
      inside here, so the cards above and the scroll position stay where they
@@ -268,6 +266,9 @@
 
   {% endif %}
   </div>
+
+  {# Last on the page: what a person made of the scene, after everything it holds. #}
+  {% include "_notes.html" %}
 
 </main>
 <script type="module" src="/viewer-static/notes.js"></script>

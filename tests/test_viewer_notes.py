@@ -343,3 +343,10 @@ def test_the_notes_page_says_so_when_notes_are_off(tmp_path):
     assert page.status_code == 200 and "Notes are off" in page.text
     assert client.get("/api/notes").json()["n_notes"] == 0
     assert 'href="/notes"' not in client.get("/").text
+
+
+def test_notes_are_the_last_box_on_the_scene_and_segment_pages(client):
+    for url, last_before in (("/scene/0000", 'id="tabpanel"'), ("/scene/0000/segment/1", 'id="framestrip"')):
+        body = client.get(url).text
+        main = body[: body.index("</main>")]
+        assert main.index(last_before) < main.index('id="notes"')
