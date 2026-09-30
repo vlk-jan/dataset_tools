@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 
+from . import geo
 from .build import SceneAccess
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, fmt_count, fmt_duration, stat
 from .loaders import Segment, roll_pitch_from_gravity_align
@@ -38,6 +39,15 @@ THIN_POSE_RATE = 2.0
 
 #: A segment anchored at least this densely is anchored well.
 GOOD_POSE_RATE = 5.0
+
+#: The GNSS track and the ground-truth path over the same span are flagged as
+#: disagreeing when they differ by BOTH this fraction and this many metres. The
+#: fraction alone cries wolf on a segment where the robot barely moved (a 2 m
+#: receiver wander is 200 % of a 1 m path); the metres alone would miss a
+#: fabricated stretch inside a long segment. The receiver's sigma is well under
+#: a metre on either rig, so 5 m over 25 % is a different drive, not noise.
+GNSS_MISMATCH_FRAC = 0.25
+GNSS_MISMATCH_M = 5.0
 
 
 def find(access: SceneAccess, index: int) -> tuple[int, Segment] | None:
@@ -202,6 +212,29 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
         stats.append(stat("net displacement", f"{net:.0f} m", sub))
         climb = float(xyz[:, 2].max() - xyz[:, 2].min())
         stats.append(stat("z range", f"{climb:.1f} m", "as the ground truth has it"))
+        # The receiver's own position over the same span. It is not ground
+        # truth, and that is what makes agreement a check: the two come from
+        # different devices, so a path the fixes do not describe is a flag on
+        # the segment (a fabricated stretch, a lost fix), not noise to average.
+        gps = access.gps
+        fixes = geo.slice_time(gps, seg.start_ts, seg.end_ts) if geo.is_track(gps) else None
+        if fixes is not None and len(fixes) >= 2:
+            along = geo.track_length_m(fixes)
+            stats.append(
+                stat("GNSS track", f"{along:.0f} m", f"{along / path * 100:.0f}% of the GT path" if path > 0 else None)
+            )
+            gap = abs(along - path)
+            if gap > GNSS_MISMATCH_M and gap > GNSS_MISMATCH_FRAC * max(path, along):
+                notes.append(
+                    f"The GNSS track and the ground truth disagree by {gap:.0f} m over this segment: the "
+                    "receiver's position and the poses do not describe the same driving, which is a flag on "
+                    "the segment -- a fabricated stretch or a lost fix -- rather than a measurement error to "
+                    "average away."
+                )
+            else:
+                notes.append(
+                    "The GNSS fixes are the receiver's own position, not ground truth; their agreement is a check."
+                )
     else:
         notes.append("No ground-truth poses could be read for this segment.")
 
