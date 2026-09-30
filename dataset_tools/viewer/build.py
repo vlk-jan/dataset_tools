@@ -144,7 +144,9 @@ TERRAIN_COLOR_MODE_HELP = {
         "1 where a wheel of the robot rolled over the cell, by DRIFT's own "
         "reckoning: the wheel-bottom contacts of the ground-truth path, "
         "rasterised per keyframe and united over the window. 0 everywhere "
-        "else, including terrain the robot merely saw."
+        "else, including terrain the robot merely saw. The wheels are those "
+        "of the model the checkpoint trained under (the sidecar's `robot`), "
+        "not necessarily the rig's own radius."
     ),
     "drivable": (
         "How closely the cell's terrain feature matches something the robot "

@@ -537,8 +537,10 @@ the panel's **terrain colour modes** legend), so the names in SimView's own
 
 A root DRIFT has written `driven_similarity/` into offers two more modes.
 `driven` is 1 where a wheel rolled over the cell -- the wheel-bottom contacts of
-the ground-truth path, rasterised per keyframe by DRIFT and united over the
-window -- and 0 everywhere else, terrain the robot merely saw included.
+the ground-truth path, rasterised per keyframe by DRIFT with the wheel geometry
+of the model its checkpoint trained under (the sidecar's `robot`; on v2 roots
+that is r 0.360 m where the rig measures 0.334) and united over the window --
+and 0 everywhere else, terrain the robot merely saw included.
 `drivable` is each cell's highest cosine similarity, over the window's
 keyframes, between its pre-head SeTProP feature and any driven cell's: 1 on the
 path itself, and above the threshold the sidecar records (0.9, as DRIFT trained)
