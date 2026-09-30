@@ -38,8 +38,8 @@
     <div class="framemain">
       {% if details.present.images %}
       <figure class="bigoverlay">
-        <img class="bigframe" id="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
-             alt="scene {{ scene_id }} frame {{ index }}">
+        <img class="bigframe zoomable" id="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
+             alt="scene {{ scene_id }} frame {{ index }}" tabindex="0" title="Click for a bigger copy">
         {# The calibration check: this frame's cloud on this frame's picture,
            swapped in over the same image by the button. Only where the scene
            has T_cam_to_base.txt and K and the frame has both files --
@@ -74,8 +74,13 @@
             {% endif %}
           </figcaption>
           {% if details.present.get(kind) %}
-          <img src="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}"
-               alt="{{ label }} for frame {{ index }}" loading="lazy" decoding="async">
+          {# Click for a bigger copy; the three height-map grids zoom into a
+             probe that reads the cell under the pointer (grid.json). #}
+          <img class="zoomable" src="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}"
+               data-zoom="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}?size={{ 768 if kind == 'clouds' else 1024 }}"
+               {% if kind != "clouds" %}data-grid="/api/scene/{{ scene_id }}/frame/{{ index }}/grid.json"{% endif %}
+               alt="{{ label }} for frame {{ index }}" loading="lazy" decoding="async" tabindex="0"
+               title="Click for a bigger copy{{ '' if kind == 'clouds' else ' with a cell probe' }}">
           {% else %}
           <div class="absent"><span class="muted">absent for this frame</span></div>
           {% endif %}
@@ -83,6 +88,15 @@
         {% endif %}
         {% endfor %}
       </div>
+
+      {# The scene's signals over the seconds around this frame; the accent line
+         is this frame. A click on a chart opens the frame under the pointer. #}
+      {% if signals %}
+      <div class="framesignals" style="--now: {{ '%.3f'|format(signals.now) }}%">
+        {% include "_signals.html" %}
+      </div>
+      {% endif %}
+
     </div>
 
     <div class="frameside">
@@ -109,6 +123,22 @@
           {% if details.roll_deg is defined %}
           <dt>Roll / pitch</dt><dd>{{ details.roll_deg }}&deg; / {{ details.pitch_deg }}&deg;
             <span class="muted">gravity_align</span></dd>
+          {% endif %}
+          {% set m = details.motion or {} %}
+          {% if m.gt_speed is defined %}
+          <dt>Speed</dt><dd>{{ "%.2f"|format(m.gt_speed) }} m/s
+            <span class="muted">ground truth</span></dd>
+          <dt>Turning</dt><dd>{{ "%+.1f"|format(m.gt_yaw_rate) }}&deg;/s
+            <span class="muted">{{ "left" if m.gt_yaw_rate > 0 else "right" }}</span></dd>
+          {% endif %}
+          {% if m.odom_speed is defined %}
+          <dt>{{ "Odometry speed" if m.gt_speed is defined else "Speed" }}</dt>
+          <dd>{{ "%.2f"|format(m.odom_speed) }} m/s <span class="muted">robot odometry</span></dd>
+          {% endif %}
+          {% if m.gnss %}
+          <dt>GNSS</dt><dd>{{ m.gnss.status }}
+            {%- if m.gnss.sigma is defined %}, &plusmn;{{ "%.2f"|format(m.gnss.sigma) }} m{% endif %}
+            <span class="muted">alt {{ m.gnss.alt }} m</span></dd>
           {% endif %}
         </dl>
         <div style="margin-top:10px">
@@ -184,10 +214,32 @@
       {# Where the robot was standing when this frame was taken -- only on a
          scene that carries gps.npy. #}
       {% if map %}{% include "_map.html" %}{% endif %}
+      {% with notes_scope = "frame", note_range = [index, index] %}
+        {% include "_notes.html" %}
+      {% endwith %}
     </div>
   </div>
 
 </main>
+<dialog id="zoom" class="zoom" aria-label="Zoomed view">
+  <div class="zoomhead">
+    <strong class="zoomtitle"></strong>
+    <span class="muted zoomhint" hidden>hover to read a cell &middot; click to pin it &middot; arrow keys move the pin</span>
+    {% if details.overlay %}
+    <button type="button" class="btn zoomcloud" id="zoomcloud" aria-pressed="false" hidden
+            title="Project this frame's lidar cloud onto the image">Cloud on image</button>
+    {% endif %}
+    <form method="dialog"><button class="btn" aria-label="Close">&times;</button></form>
+  </div>
+  <div class="zoomstage">
+    <img alt="">
+    <div class="zoomcell" hidden></div>
+  </div>
+  <output class="zoomread" hidden></output>
+</dialog>
+<script src="/viewer-static/zoom.js" defer></script>
+<script type="module" src="/viewer-static/notes.js"></script>
+{% if signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
 {% if map %}
 <script src="/viewer-static/vendor/leaflet.js"></script>
 <script type="module" src="/viewer-static/map.js"></script>

@@ -352,6 +352,8 @@ def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> byte
 #: Returns closer to the camera than this (metres, along its optical axis) are
 #: not drawn: they are the robot's own body, or behind the lens.
 OVERLAY_MIN_DEPTH = 0.1
+#: Narrowest overlay that gets the depth legend drawn in (pixels).
+LEGEND_MIN_WIDTH = 480
 
 
 def _project_points(
@@ -394,11 +396,7 @@ def _project_points(
             v = np.round(K_scaled[1, 1] * yp + K_scaled[1, 2]).astype(np.int64)
             return u, v
 
-    if (
-        distortion_model in ("plumb_bob", "rational_polynomial")
-        and D is not None
-        and len(D) in (4, 5, 8, 12, 14)
-    ):
+    if distortion_model in ("plumb_bob", "rational_polynomial") and D is not None and len(D) in (4, 5, 8, 12, 14):
         try:
             import cv2
 
@@ -465,7 +463,10 @@ def render_cloud_on_image(
         if len(z):
             # Far to near, so where dots overlap the nearer return is on top.
             order = np.argsort(-z)
-            u, v, colors = u[order], v[order], colorize(z[order], cmap="turbo")
+            # The span colorize would pick by itself, taken here so the legend can say it.
+            near, far = (float(q) for q in np.percentile(z, (2, 98)))
+            far = max(far, near + 0.1)
+            u, v, colors = u[order], v[order], colorize(z[order], near, far, cmap="turbo")
             # A 3x3 dot per return, painted in nine vectorised strokes rather
             # than one Pillow call per point: a cloud has tens of thousands.
             for dy in (-1, 0, 1):
@@ -474,6 +475,41 @@ def render_cloud_on_image(
                     ok = (uu >= 0) & (uu < w) & (vv >= 0) & (vv < h)
                     rgb[vv[ok], uu[ok]] = colors[ok]
 
+            if w >= LEGEND_MIN_WIDTH:  # smaller, the legend would cover the picture
+                _draw_depth_legend(rgb, near, far)
+
     buf = io.BytesIO()
     Image.fromarray(rgb, mode="RGB").save(buf, format="JPEG", quality=quality, optimize=False)
     return buf.getvalue()
+
+
+def _draw_depth_legend(rgb: np.ndarray, near: float, far: float) -> None:
+    """Paint the depth colour bar into the image's bottom-left corner, in place.
+
+    Drawn into the picture rather than beside it because the span is this
+    frame's own (2nd-98th percentile of its depths) and the picture is all the
+    page swaps in; it also comes along into the zoomed copy.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+
+    h, w = rgb.shape[:2]
+    s = max(1.0, w / 1280)  # legend scale: the same share of the frame at any width
+    bar_w, bar_h, pad = round(220 * s), round(12 * s), round(8 * s)
+    font = ImageFont.load_default(size=round(14 * s))
+    line = round(18 * s)
+    # The far end is the 98th percentile, not the farthest return: everything
+    # beyond it is the same dark red, and "+" says so.
+    left, right = f"{near:.1f} m", f"{far:.1f} m+"
+    img = Image.fromarray(rgb)
+    draw = ImageDraw.Draw(img, "RGBA")
+    x0, y0 = pad, h - 3 * pad - 2 * line - bar_h
+    draw.rectangle([x0, y0 - pad, x0 + bar_w + 2 * pad, h - pad], fill=(0, 0, 0, 160))
+    draw.text((x0 + pad, y0), "lidar depth from camera", fill=(255, 255, 255, 255), font=font)
+    ramp = np.repeat(LUTS["turbo"][np.linspace(0, 255, bar_w).astype(int)][None], bar_h, axis=0)
+    img.paste(Image.fromarray(ramp), (x0 + pad, y0 + line + pad // 2))
+    y_num = y0 + line + pad + bar_h
+    draw.text((x0 + pad, y_num), left, fill=(255, 255, 255, 255), font=font)
+    draw.text(
+        (x0 + pad + bar_w - draw.textlength(right, font=font), y_num), right, fill=(255, 255, 255, 255), font=font
+    )
+    rgb[:] = np.asarray(img)

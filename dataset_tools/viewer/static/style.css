@@ -455,6 +455,44 @@ button.chip[aria-expanded="true"] {
   border: 1px dashed var(--line); border-radius: 4px; font-size: 13px; text-align: center;
 }
 .frameside .card h2 { font-size: 16px; }
+.zoomable { cursor: zoom-in; }
+/* The frame page's signals: the frame itself, as a line through every chart. */
+.framesignals .sig .plot::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: var(--now);
+  border-left: 2px solid var(--accent); pointer-events: none;
+}
+/* The frame page's zoom (zoom.js): one picture as big as the window allows, and
+   on the height-map grids a probe -- the outlined cell and its values below. */
+.zoom {
+  max-width: 96vw; max-height: 96vh; padding: 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); color: var(--fg);
+}
+.zoom::backdrop { background: rgb(0 0 0 / 0.6); }
+.zoomhead { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.zoomhead form { margin-left: auto; }
+.zoomhead .btn { font: inherit; cursor: pointer; }
+.zoomhead .zoomcloud { margin-left: auto; }
+.zoomhead .zoomcloud[hidden] { display: none; }
+.zoomhead .zoomcloud:not([hidden]) + form { margin-left: 0; }
+.zoomhint { font-size: 13px; }
+.zoomstage { position: relative; width: fit-content; margin: 0 auto; }
+.zoomstage img { display: block; max-width: 92vw; max-height: calc(96vh - 170px); border-radius: 4px; }
+/* The BEV tiles are square: fill the window rather than stop at the render's size. */
+.zoomstage img.bev { width: min(calc(96vh - 170px), 92vw); height: auto; image-rendering: pixelated; cursor: crosshair; }
+/* The camera image magnifies inside its own box (zoom.js): the frame stays put
+   and the picture moves under it. */
+.zoomstage.photo { overflow: hidden; }
+.zoomstage.photo img { transform-origin: 0 0; touch-action: none; }
+.zoomstage.photo.zoomed { cursor: grab; }
+.zoomstage.photo.dragging { cursor: grabbing; }
+.zoomstage.photo.dragging img { user-select: none; }
+.zoomcell {
+  position: absolute; pointer-events: none; box-sizing: border-box;
+  outline: 2px solid #fff; box-shadow: 0 0 0 3px rgb(0 0 0 / 0.7);
+}
+.zoomcell.pinned { outline-color: var(--accent); }
+.zoomread { display: block; white-space: pre-line; font: 14px/1.5 var(--mono); margin-top: 8px; min-height: 4.5em; }
+.zoomread[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ notes
    Reviewer notes on the scene page: what a person found, pinned to a frame

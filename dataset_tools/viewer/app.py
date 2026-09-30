@@ -46,12 +46,21 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
-from .loaders import load_cloud, load_npz_key, read_text, roll_pitch_from_gravity_align
+from .loaders import (
+    HM_EXTENT,
+    HM_RES,
+    VALIDITY_LABELS,
+    load_cloud,
+    load_npz_key,
+    read_text,
+    roll_pitch_from_gravity_align,
+)
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape
 from .scene_page import build_scene_page, map_card
 from .segment_page import attitude_per_window, build_segment_page
 from .segment_page import find as find_segment
+from .signals import MAX_GT_SPEED, signal_charts
 from .windows import (
     DEFAULT_MAX_FRAMES,
     DEFAULT_MAX_SECONDS,
@@ -101,6 +110,8 @@ class _ImmutableStatic(StaticFiles):
 logger = logging.getLogger("dataset_tools.viewer.app")
 
 HERE = Path(__file__).parent
+#: Pixel size of a frame-page BEV tile; the page's zoom asks for up to 1536.
+TILE_SIZE = 384
 #: Per-frame renders of files that never change once extracted.
 DAY_CACHE = {"Cache-Control": "public, max-age=86400"}
 #: The shapes a window key (``windows.py``) and a build-options key
@@ -456,6 +467,7 @@ def create_app(
         # Where this frame was, when the recording says: the scene's track with
         # a marker on it. None without gps.npy, and the page then has no map.
         frame_map = await run_in_threadpool(map_card, access, None, index)
+        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return templates.TemplateResponse(
             request=request,
             name="frame.html",
@@ -468,6 +480,11 @@ def create_app(
                 "simview_ok": simview_ok,
                 "frame_window": single.key if single is not None else None,
                 "map": frame_map,
+                "signals": await run_in_threadpool(_frame_signals, access, details.get("timestamp")),
+                # Only the notes whose range holds this frame.
+                "notes": [n for n in scene_notes if n.overlaps(index, index)],
+                "notes_status": notes_store.status(),
+                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
             },
         )
 
@@ -716,30 +733,43 @@ def create_app(
             raise HTTPException(404, f"no image to thumbnail for scene {scene_id}")
         return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
 
+    # ``size`` is the tile's pixel size: the frame page's tiles ask for the
+    # default, its click-to-zoom asks for a bigger copy of the same picture.
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
-    async def api_frame_heightmap(scene_id: str, index: int):
+    async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_maps", "height_map", render.render_height_map)
+        return await _npz_png(access, index, "height_maps", "height_map", render.render_height_map, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
-    async def api_frame_validity(scene_id: str, index: int):
+    async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_masks", "validity", render.render_validity)
+        return await _npz_png(access, index, "height_masks", "validity", render.render_validity, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
-    async def api_frame_driven(scene_id: str, index: int):
+    async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _driven_png(access, index)
+        return await _driven_png(access, index, size)
+
+    @app.get("/api/scene/{scene_id}/frame/{index}/grid.json")
+    async def api_frame_grid(scene_id: str, index: int):
+        """The frame's BEV layers as numbers, for the zoomed tile's probe."""
+        access = _access_or_404(state, scene_id)
+        grid = await run_in_threadpool(_frame_grid, access, index)
+        if grid is None:
+            raise HTTPException(404, f"no BEV grid for frame {index}")
+        return Response(json.dumps(grid, separators=(",", ":")), media_type="application/json", headers=DAY_CACHE)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
-    async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
+    async def api_frame_cloud(
+        scene_id: str, index: int, color: str = "z", size: int = Query(TILE_SIZE, ge=128, le=1536)
+    ):
         access = _access_or_404(state, scene_id)
 
         def work():
             cloud = load_cloud(access.frame_path("clouds", index))
             if cloud is None:
                 return None
-            return render.render_cloud_bev(cloud, color_by=color)
+            return render.render_cloud_bev(cloud, size=size, color_by=color)
 
         data = await run_in_threadpool(work)
         if data is None:
@@ -1120,10 +1150,10 @@ async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key
         logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
 
-async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
+async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer, size: int) -> Response:
     def work():
         arr = load_npz_key(access.frame_path(kind, index), key)
-        return None if arr is None else renderer(arr)
+        return None if arr is None else renderer(arr, size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
@@ -1131,7 +1161,7 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, rendere
     return Response(data, media_type="image/png", headers=DAY_CACHE)
 
 
-async def _driven_png(access: SceneAccess, index: int) -> Response:
+async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
     """The driven-similarity tile: three keys of one small npz, one image."""
 
     def work():
@@ -1139,7 +1169,7 @@ async def _driven_png(access: SceneAccess, index: int) -> Response:
         if sidecar is None:
             return None
         driven, max_sim, threshold = sidecar
-        return render.render_driven_similarity(driven, max_sim, threshold)
+        return render.render_driven_similarity(driven, max_sim, threshold, size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
@@ -1170,6 +1200,57 @@ def _read_driven_sidecar(path: Path):
     if driven.ndim != 2 or max_sim.shape != driven.shape:
         return None
     return driven, max_sim, threshold
+
+
+def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
+    """Every BEV layer of one frame, flattened, for the probe on a zoomed tile.
+
+    The layers keep the files' own ``[row=x forward, col=y left]`` layout,
+    row-major; the page flips them the way the tiles are drawn. A layer whose
+    shape disagrees with the height map's is left out rather than misread, and
+    NaN goes out as null (JSON has no NaN). None when the frame has no layer.
+    """
+    layers: dict[str, np.ndarray] = {}
+    out: dict[str, Any] = {"res": HM_RES, "x0": HM_EXTENT[0], "validity_labels": VALIDITY_LABELS}
+    hm = (
+        load_npz_key(access.frame_path("height_maps", index), "height_map") if access.probe.has("height_maps") else None
+    )
+    if hm is not None:
+        layers["height"] = hm
+        finite = hm[np.isfinite(hm)]
+        if finite.size:
+            # The same 2nd-98th percentile span render.colorize stretches the tile over.
+            out["height_range"] = [round(float(np.percentile(finite, q)), 3) for q in (2, 98)]
+    if access.probe.has("height_masks"):
+        validity = load_npz_key(access.frame_path("height_masks", index), "validity")
+        if validity is not None:
+            layers["validity"] = validity
+    if access.probe.has("driven_similarity"):
+        path = access.frame_path("driven_similarity", index)
+        sidecar = _read_driven_sidecar(path)
+        if sidecar is not None:
+            layers["driven"], layers["max_sim"], out["threshold"] = sidecar
+            try:
+                with np.load(path) as d:
+                    if "max_sim_geom" in d.files:
+                        layers["max_sim_geom"] = np.asarray(d["max_sim_geom"], dtype=np.float64)
+            except (OSError, ValueError):
+                pass
+    if not layers:
+        return None
+    shape = next(iter(layers.values())).shape
+    if len(shape) != 2:
+        return None
+    out["rows"], out["cols"] = shape
+    out["layers"] = {}
+    for name, arr in layers.items():
+        if arr.shape != shape:
+            continue
+        vals = np.round(np.asarray(arr, dtype=np.float64), 3)
+        flat = vals.ravel().astype(object)
+        flat[~np.isfinite(vals.ravel())] = None
+        out["layers"][name] = flat.tolist()
+    return out
 
 
 def _overlay_possible(access: SceneAccess) -> bool:
@@ -1437,6 +1518,9 @@ def _frame_details(
     else:
         details["segment"] = None
 
+    if "timestamp" in details:
+        details["motion"] = _frame_motion(access, index, details["timestamp"], seg)
+
     best = _window_of_frame(access, index, max_frames, max_seconds)
     if best is not None:
         details["window"] = {
@@ -1450,6 +1534,74 @@ def _frame_details(
     else:
         details["window"] = None
     return details
+
+
+#: How much of the recording either side of a frame its signal charts cover (s).
+FRAME_SIGNAL_SECONDS = 15.0
+
+#: The span a frame's speed and turn rate are differenced over, either side (s):
+#: a few 10 Hz poses, so one noisy pose does not make the number.
+FRAME_MOTION_HALF = 0.25
+
+
+def _frame_signals(access: SceneAccess, t: float | None) -> dict[str, Any] | None:
+    """The scene's signal charts over the seconds around one frame, and where it sits.
+
+    ``now`` is the frame's position across the charts in percent; the span is
+    clipped to the recording, so near either end the frame is off centre.
+    """
+    ts = access.frame_ts
+    if t is None or ts is None or len(ts) < 2:
+        return None
+    t0, t1 = max(float(ts[0]), t - FRAME_SIGNAL_SECONDS), min(float(ts[-1]), t + FRAME_SIGNAL_SECONDS)
+    # Times read from the scene's start, as "Into the scene" does, not from the charts' edge.
+    signals = signal_charts(access, t0, t1, offset=t0 - float(ts[0]))
+    if signals is not None:
+        signals["now"] = (t - t0) / (t1 - t0) * 100
+    return signals
+
+
+def _frame_motion(access: SceneAccess, index: int, t: float, seg) -> dict[str, Any]:
+    """How the robot was moving at one frame, and what the GNSS said there.
+
+    Ground-truth speed and turn rate are differenced across the poses within
+    :data:`FRAME_MOTION_HALF` of the frame and never outside its own segment
+    (two segments share no anchor); the robot's own odometry across the frames
+    either side. Each number is left out where its source has nothing there.
+    """
+    out: dict[str, Any] = {}
+    odom = access.odometry
+    if odom is not None and seg is not None:
+        ots, poses = odom
+        take = (ots >= max(seg.start_ts, t - FRAME_MOTION_HALF)) & (ots <= min(seg.end_ts, t + FRAME_MOTION_HALF))
+        if take.sum() >= 2:
+            order = np.argsort(ots[take], kind="stable")
+            st, sp = ots[take][order], poses[take][order]
+            dt = float(st[-1] - st[0])
+            speed = float(np.linalg.norm(sp[-1, :2, 3] - sp[0, :2, 3])) / dt if dt > 0.05 else None
+            if speed is not None and speed <= MAX_GT_SPEED:
+                yaw = np.arctan2(sp[[0, -1], 1, 0], sp[[0, -1], 0, 0])
+                dyaw = (yaw[1] - yaw[0] + np.pi) % (2 * np.pi) - np.pi
+                out["gt_speed"] = round(speed, 2)
+                out["gt_yaw_rate"] = round(float(np.degrees(dyaw)) / dt, 1)
+    tf, ts = access.transforms, access.frame_ts
+    if tf is not None and ts is not None and np.ndim(tf) == 3:
+        lo, hi = max(0, index - 1), min(len(tf), len(ts)) - 1
+        hi = min(hi, index + 1)
+        if hi > lo and ts[hi] - ts[lo] > 1e-3:
+            out["odom_speed"] = round(float(np.linalg.norm(tf[hi][:2, 3] - tf[lo][:2, 3]) / (ts[hi] - ts[lo])), 2)
+    gps = access.gps
+    if geo.is_track(gps) and gps.shape[1] > geo.STATUS:
+        k = int(np.argmin(np.abs(gps[:, geo.T] - t)))
+        if abs(gps[k, geo.T] - t) <= geo.MAX_INTERP_GAP:
+            status = int(gps[k, geo.STATUS])
+            fix = {"status": geo.FIX_LABELS.get(status, str(status)), "alt": round(float(gps[k, geo.ALT]), 1)}
+            if gps.shape[1] >= geo.COV.stop:
+                horiz = float(gps[k, geo.COV.start] + gps[k, geo.COV.start + 1])
+                if horiz > 0:
+                    fix["sigma"] = round(float(np.sqrt(horiz)), 2)
+            out["gnss"] = fix
+    return out
 
 
 def _window_of_frame(access: SceneAccess, index: int, max_frames: int, max_seconds: float) -> Window | None:

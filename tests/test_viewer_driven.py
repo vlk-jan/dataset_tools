@@ -203,3 +203,29 @@ def test_the_window_s_metadata_carries_the_layers_and_the_availability(driven_cl
 def test_the_index_lists_the_modality_only_where_it_exists(driven_client, client):
     assert "driven &amp; similar" in driven_client.get("/").text or "driven_similarity" in driven_client.get("/").text
     assert "driven_similarity" not in client.get("/").text
+
+
+def test_the_grid_the_zoom_probe_reads_keeps_the_files_layout(driven_client):
+    g = driven_client.get("/api/scene/0000/frame/0/grid.json").json()
+    assert (g["rows"], g["cols"], g["res"], g["x0"]) == (128, 128, 0.1, -6.4)
+    at = lambda name, i, j: g["layers"][name][i * g["cols"] + j]  # noqa: E731
+    # [row=x, col=y], row-major: the helper's height rises with the row only.
+    assert at("height", 100, 5) == 1.0 and at("height", 100, 120) == 1.0
+    assert at("validity", 10, 64) == 0 and at("validity", 100, 64) == 2
+    assert g["validity_labels"]["2"] == "measured"
+    assert at("driven", 63, 63) == 1 and at("driven", 0, 0) == 0
+    assert at("max_sim", 73, 64) == 1.0 and g["threshold"] == pytest.approx(0.9)
+    assert "max_sim_geom" not in g["layers"]
+    assert driven_client.get("/api/scene/0000/frame/9999/grid.json").status_code == 404
+
+
+def test_the_zoom_asks_for_bigger_tiles_within_bounds(driven_client):
+    import io
+
+    from PIL import Image
+
+    r = driven_client.get("/api/scene/0000/frame/0/heightmap.png?size=1024")
+    assert Image.open(io.BytesIO(r.content)).size == (1024, 1024)
+    assert driven_client.get("/api/scene/0000/frame/0/cloud.png?size=99999").status_code == 422
+    page = driven_client.get("/scene/0000/frame/0").text
+    assert 'data-grid="/api/scene/0000/frame/0/grid.json"' in page and "zoom.js" in page

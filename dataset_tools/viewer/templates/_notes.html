@@ -1,4 +1,4 @@
-{# The reviewer-notes card, shared by the scene and segment pages.
+{# The reviewer-notes card, shared by the scene, segment and frame pages.
 
    Always rendered, even when there are none and even when they cannot be
    written: "nothing noted yet" and "this root is read-only" are both worth
@@ -93,9 +93,9 @@
     {% elif notes_status.enabled %}
     <p class="cardnote warn">Notes here are read-only: {{ notes_status.reason }}</p>
     {% endif %}
-    {% if scope == "segment" %}
+    {% if scope in ("segment", "frame") %}
     <p class="cardnote">
-      Only the notes whose frames touch this segment are listed;
+      Only the notes whose frames touch this {{ scope }} are listed;
       <a href="/scene/{{ scene_id }}#notes">the scene page</a> has all of them,
       and <a href="/notes">all notes in this root</a> are listed by topic.
     </p>

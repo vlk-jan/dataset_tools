@@ -879,3 +879,19 @@ def test_the_tabs_and_frame_strips_swap_in_place(client):
     segment = client.get("/scene/0000/segment/0").text
     assert 'id="framestrip" data-swap' in segment and "/viewer-static/swap.js" in segment
     assert client.get("/viewer-static/swap.js").status_code == 200
+
+
+def test_the_frame_page_reads_the_motion_signals_and_notes_at_that_frame(gps_client):
+    # The helper drives 0.3 m forward and 0.02 m left per 0.1 s frame, turning 0.05 rad left.
+    page = gps_client.get("/scene/0000/frame/3").text
+    assert "3.01 m/s" in page  # ground truth, differenced inside segment 0
+    assert "+28.6&deg;/s" in page and ">left<" in page
+    assert "robot odometry" in page and "GNSS</dt>" in page
+    # The signals card around the frame, with the frame drawn through it.
+    assert "data-signals" in page and "--now:" in page and "charts.js" in page
+    # Notes: only the ones whose range holds this frame, and the form pinned to it.
+    gps_client.post("/api/scene/0000/notes", json={"frames": [2, 4], "text": "covers three"})
+    gps_client.post("/api/scene/0000/notes", json={"frames": [8, 9], "text": "elsewhere"})
+    page = gps_client.get("/scene/0000/frame/3").text
+    assert "covers three" in page and "elsewhere" not in page
+    assert 'name="frame_start" min="0" max="11"' in page and 'value="3"' in page
