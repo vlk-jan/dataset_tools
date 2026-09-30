@@ -642,6 +642,31 @@ def create_app(
             raise HTTPException(404, f"no image for frame {index}")
         return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
 
+    @app.get("/api/scene/{scene_id}/frame/{index}/overlay.jpg")
+    async def api_frame_overlay(scene_id: str, index: int, w: int = Query(1280, ge=64, le=1920)):
+        """The frame's cloud projected into its image: a check on the extrinsic.
+
+        404 rather than a bare picture when the scene cannot support it -- no
+        ``T_cam_to_base.txt`` (a v1 root's ``T_cam_to_lidar.txt`` is in the
+        lidar frame and would draw the cloud in the wrong place), no ``K``, or
+        no image or cloud for this frame.
+        """
+        access = _access_or_404(state, scene_id)
+        if not _overlay_possible(access):
+            raise HTTPException(404, f"scene {scene_id} has no camera calibration to project with")
+
+        def work():
+            image = access.frame_path("images", index)
+            cloud = load_cloud(access.frame_path("clouds", index))
+            if cloud is None or not image.is_file():
+                return None
+            return _safe_render(render.render_cloud_on_image, image, cloud, access.K, access.T_cam, w)
+
+        data = await run_in_threadpool(work)
+        if data is None:
+            raise HTTPException(404, f"no image and cloud to overlay for frame {index}")
+        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
+
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
         """One index thumbnail: the curated file if the root has one, else a live frame.
@@ -1091,6 +1116,19 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, rendere
     return Response(data, media_type="image/png", headers=DAY_CACHE)
 
 
+def _overlay_possible(access: SceneAccess) -> bool:
+    """Can this scene's clouds be drawn on its images at all?
+
+    Needs ``K`` and ``T_cam_to_base.txt`` specifically: ``access.T_cam`` falls
+    back to a v1 root's ``T_cam_to_lidar.txt``, which is the camera in the raw
+    lidar frame, not the base frame the clouds are in.
+    """
+    p = access.probe
+    if not (p.has("images") and p.has("clouds") and p.has("camera_intrinsics") and p.has("T_cam_to_base")):
+        return False
+    return access.K is not None and access.T_cam is not None
+
+
 def _safe_render(fn, *args):
     try:
         return fn(*args)
@@ -1297,6 +1335,8 @@ def _frame_details(
     for kind in ("images", "clouds", "height_maps", "height_masks"):
         present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
     details["present"] = present
+    # The cloud-on-image check needs both per-frame files and the calibration.
+    details["overlay"] = present["images"] and present["clouds"] and _overlay_possible(access)
 
     if present["clouds"]:
         shape = _npy_shape(access.frame_path("clouds", index))

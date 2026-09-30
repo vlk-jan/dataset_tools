@@ -37,6 +37,23 @@
       <div class="card"><span class="muted">This frame has no camera image on disk.</span></div>
       {% endif %}
 
+      {# The calibration check: this frame's cloud on this frame's picture.
+         Only where the scene has T_cam_to_base.txt and K and the frame has
+         both files -- otherwise nothing, rather than a broken image. #}
+      {% if details.overlay %}
+      <figure class="bigoverlay">
+        <img class="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/overlay.jpg?w=1280"
+             alt="scene {{ scene_id }} frame {{ index }}, lidar cloud projected into the camera image"
+             loading="lazy" decoding="async">
+        <figcaption class="muted">
+          <b>Cloud on image.</b> Every lidar return of this frame projected through
+          <code>camera_intrinsics.txt</code> and <code>T_cam_to_base.txt</code>, coloured by
+          depth (blue near, red far). Pinhole only, distortion ignored. If the road lands beside
+          the road, or a trunk a metre from its picture, the extrinsic is wrong.
+        </figcaption>
+      </figure>
+      {% endif %}
+
       <div class="tiles">
         {% for kind, endpoint, label in (
              ("height_maps", "heightmap.png", "Height map"),

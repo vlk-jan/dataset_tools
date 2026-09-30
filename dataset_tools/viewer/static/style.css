@@ -446,6 +446,12 @@ button.chip[aria-expanded="true"] {
 .bigframe {
   width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: #0d0f13;
 }
+/* The cloud-on-image check under the big frame: the same width as the frame,
+   with what it is said under it rather than left to be guessed. */
+.bigoverlay { margin: 12px 0 0; }
+.bigoverlay figcaption { font-size: 13px; margin-top: 6px; max-width: 100ch; }
+.bigoverlay figcaption b { color: var(--fg); font-weight: 600; }
+.bigoverlay figcaption code { font-size: 12px; }
 .framemain .tiles {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px; margin-top: 12px;

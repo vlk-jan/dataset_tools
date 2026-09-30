@@ -118,6 +118,19 @@ def test_per_frame_endpoints_serve_images_and_404_past_the_end(client):
     assert "timestamp" in info
 
 
+def test_the_cloud_is_projected_into_the_image_only_where_the_calibration_allows(client, tmp_path):
+    r = client.get("/api/scene/0000/frame/0/overlay.jpg")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/scene/0000/frame/9999/overlay.jpg").status_code == 404
+    page = client.get("/scene/0000/frame/0").text
+    assert "overlay.jpg" in page and "Cloud on image" in page
+    # A v1 root has T_cam_to_lidar.txt only, which is the wrong frame to project from.
+    scene = tmp_path / "root" / "0001"
+    (scene / "T_cam_to_base.txt").rename(scene / "T_cam_to_lidar.txt")
+    assert client.get("/api/scene/0001/frame/0/overlay.jpg").status_code == 404
+    assert "overlay.jpg" not in client.get("/scene/0001/frame/0").text
+
+
 def test_viewer_page_wires_the_static_base_and_defers_simview(client):
     r = client.get("/view/0000/seg000")
     assert r.status_code == 200
