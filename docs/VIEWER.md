@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer needs Python 3.12+ and pulls in
-[SimView](https://pypi.org/project/simview/) (`>=4.2.1,<5`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=5.0.0`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. The 3.12 floor is
 SimView's, not ours — the extraction tools still run on 3.10, so keep the viewer
 in its own virtualenv when the extraction venv is older:
@@ -643,6 +643,7 @@ Dataset roots usually live on contended network storage, so:
 | `/scene/{scene}` | one scene's inventory, window list and calibration |
 | `/scene/{scene}/segment/{n}` | one ground-truth segment: what it is, what happened inside it, where |
 | `/scene/{scene}/frame/{n}` | one frame: its image, its derived tiles and its numbers |
+| `/scene/{scene}/jump?index=N` | the frames tab's jump box: redirects to that frame, clamped to the scene |
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scenes` | the index as JSON |
 | `/api/scene/{scene}` | one scene's probe, windows and details as JSON |
@@ -650,7 +651,9 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
-| `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
+| `/api/scene/{scene}/frame/{n}/info` | that frame's numbers as JSON: stamps, camera-lidar offset, roll and pitch, which per-frame files it has |
+| `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
+| `/api/scene/{scene}/thumb/{slot}.jpg` | one index thumbnail (`a`, `b` or `c`): the stored `atlas/thumbs/` file, else the frame rendered live at 384 px |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
 | `/api/scene/{scene}/frame/{n}/cloud.png` | that frame's cloud, top-down |
@@ -723,7 +726,10 @@ somewhere else (they then no longer travel with the dataset) or `--no-notes` to
 switch the feature off. `/healthz` reports the same state under `notes`.
 
 **A scene changed on disk and the index still shows the old numbers.** The
-probe cache is keyed by each scene directory's mtime and refreshes itself; to
+probe cache is keyed by each scene directory's mtime and refreshes itself, and
+the scene list is re-read on every index render, so a scene an array job
+finishes while the viewer runs appears without a restart. Only `manifest.json`,
+`atlas/`, `splits.json` and `disk_usage.json` are read once per process. To
 force a full rebuild, start once with `--clear-cache`. That removes only what
 the viewer wrote -- `probe_cache.json` and `bundles/` -- so it is safe even
 when `--cache-dir` points at a directory holding something else. To clear every

@@ -788,3 +788,24 @@ def test_the_map_sits_beside_the_files_card_when_there_is_a_track(gps_client):
 def test_the_frame_page_marks_the_frame_it_is_showing(gps_client):
     page = gps_client.get("/scene/0000/frame/6").text
     assert 'data-src="/api/scene/0000/gps.json?frame=6"' in page
+
+
+def test_a_scene_handle_follows_the_directory_while_it_is_being_written(client, tmp_path):
+    """A scene an array job is still writing gains files while it is looked at."""
+    import os
+
+    import numpy as np
+
+    scene = tmp_path / "root" / "0000"
+    before = client.get("/api/scene/0000").json()
+    assert "gps" in before["probe"]["missing"]
+    gps = np.zeros((4, 8))
+    gps[:, 0] = np.loadtxt(scene / "data_ts.txt")[:4]
+    gps[:, 1], gps[:, 2] = 50.1, 14.4
+    np.save(scene / "gps.npy", gps)
+    # The probe is keyed by the directory's mtime; make sure it moved.
+    stat = scene.stat()
+    os.utime(scene, ns=(stat.st_atime_ns, stat.st_mtime_ns + 2_000_000_000))
+    after = client.get("/api/scene/0000").json()
+    assert "gps" not in after["probe"]["missing"]
+    assert client.get("/api/scene/0000/gps.json").status_code == 200

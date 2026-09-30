@@ -437,7 +437,6 @@ button.chip[aria-expanded="true"] {
 .framelabel small { color: var(--muted); font-size: 11.5px; }
 
 .pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
-.btn.disabled { color: var(--muted); border-style: dashed; }
 
 .framenav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }

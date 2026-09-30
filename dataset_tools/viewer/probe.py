@@ -347,16 +347,25 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
 
 
 def _first_last_float(path: Path) -> tuple[float, float] | None:
-    """First and last parseable float in a text file, without reading it all."""
+    """First and last parseable float in a text file, without reading it all.
+
+    Blank and ``#`` lines are skipped at both ends, as ``loaders.read_timestamps``
+    skips them, so a header comment does not cost a scene its duration.
+    """
+
+    def data_lines(chunk: bytes) -> list[str]:
+        lines = chunk.decode("utf-8", "replace").splitlines()
+        return [ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+
     try:
         size = path.stat().st_size
         with open(path, "rb") as fh:
-            first = fh.readline().decode("utf-8", "replace").strip()
-            tail_start = max(0, size - 4096)
-            fh.seek(tail_start)
-            tail = fh.read().decode("utf-8", "replace").strip().splitlines()
-        last = tail[-1].strip() if tail else first
-        return float(first.split()[0]), float(last.split()[0])
+            head = data_lines(fh.read(4096))
+            fh.seek(max(0, size - 4096))
+            tail = data_lines(fh.read())
+        if not head:
+            return None
+        return float(head[0].split()[0]), float((tail or head)[-1].split()[0])
     except (OSError, ValueError, IndexError):
         return None
 
@@ -399,7 +408,10 @@ class DatasetRoot:
         return self._scene_ids
 
     def scene_dir(self, scene_id: str) -> Path:
-        if not scene_id.isdigit() or scene_id not in self.scene_ids():
+        # A scene that appeared after the list was taken -- an array job still
+        # writing the root -- is looked for once more before being refused.
+        known = scene_id.isdigit() and (scene_id in self.scene_ids() or scene_id in self.scene_ids(refresh=True))
+        if not known:
             raise KeyError(f"unknown scene {scene_id!r}")
         return self.path / scene_id
 
@@ -556,8 +568,13 @@ class DatasetRoot:
         scene, so the first index render of a 43-scene root serialised it 43
         times -- quadratic in the number of scenes, for one file that only has
         to be right at the end.
+
+        The scene list is always re-read: one listing of the root, so a scene
+        an array job finished after the viewer started shows up on the next
+        index render rather than after a restart. Each scene's probe still
+        stands while its directory's mtime does.
         """
-        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=refresh)]
+        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=True)]
         self.save_probe_cache()
         return probes
 

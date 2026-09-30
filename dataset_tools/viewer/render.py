@@ -284,11 +284,19 @@ def render_cloud_bev(
 
 
 def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:
-    """Downscaled JPEG of a camera frame (the PNGs are 1280x800 and slow to
-    ship one per playback frame)."""
+    """JPEG of a camera frame, downscaled to at most ``width`` pixels across.
+
+    The frames are 1280x800 and one is shipped per playback frame, so the
+    panel asks for them small. A root that holds the camera's own JPEG
+    (``images.extension: jpg``, roots made from 2026-09-29) is served the file
+    as it is whenever no downscale is needed: re-encoding it would only cost
+    CPU and a generation of JPEG loss.
+    """
     from PIL import Image
 
     with Image.open(path) as img:
+        if img.format == "JPEG" and not (width and img.width > width):
+            return path.read_bytes()
         img = img.convert("RGB")
         if width and img.width > width:
             height = max(1, round(img.height * width / img.width))

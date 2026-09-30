@@ -14,6 +14,8 @@ optional `odom_recorder` node needs `rclpy`.
 | `dataset_tools/validate_scene.py` | `helhest-validate` | check extracted scenes |
 | `dataset_tools/sort_bag.py` | `helhest-sort-bag` | rewrite a bag sorted by header stamp |
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
+| `dataset_tools/disk_usage.py` | `helhest-disk-usage` | bytes per scene, modality and file, for the viewer's disk-usage panels |
+| `dataset_tools/image_format.py` | `helhest-image-format` | declare (or read back) whether a root's images are the camera's JPEG or a PNG |
 | `dataset_tools/odom_node.py` | `ros2 run dataset_tools odom_recorder` | record odometry to a text trajectory |
 
 ## Quickstart: from a recording to the viewer

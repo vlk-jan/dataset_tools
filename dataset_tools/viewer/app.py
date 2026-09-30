@@ -23,6 +23,8 @@ network storage, and a slow read must not block the event loop serving the page.
 from __future__ import annotations
 
 import asyncio
+import bisect
+import hashlib
 import json
 import logging
 import re
@@ -33,8 +35,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import numpy as np
 from fastapi import Body, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -43,8 +46,9 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene
 from .index_page import THUMB_SLOTS, build_index, thumb_index
+from .loaders import load_cloud, load_npz_key, read_text, roll_pitch_from_gravity_align
 from .notes import NoteStore, NotesUnavailable
-from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot
+from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape
 from .scene_page import build_scene_page, map_card
 from .segment_page import build_segment_page
 from .segment_page import find as find_segment
@@ -171,11 +175,21 @@ class ViewerState:
 
     def access(self, scene_id: str) -> SceneAccess:
         """A cached per-scene handle. Bounded so a long session browsing many
-        scenes does not accumulate every scene's arrays in memory."""
-        if scene_id in self._access:
+        scenes does not accumulate every scene's arrays in memory.
+
+        Dropped when the scene directory has changed since the handle was
+        made: a scene still being written gains height maps and a timestamp
+        file while it is looked at, and a handle from before that would keep
+        serving the old frame list. ``root.probe`` is one ``stat`` while the
+        mtime holds, so the check costs nothing on a finished root.
+        """
+        cached = self._access.get(scene_id)
+        if cached is not None and self.root.probe(scene_id) is cached.probe:
             self._access_order.remove(scene_id)
             self._access_order.append(scene_id)
-            return self._access[scene_id]
+            return cached
+        if cached is not None:
+            self._access_order.remove(scene_id)
         access = SceneAccess(self.root, scene_id)
         self._access[scene_id] = access
         self._access_order.append(scene_id)
@@ -274,8 +288,6 @@ def create_app(
     # browser that cached the old response (with any freshness lifetime) would
     # mix stale trajectory blobs with fresh model.json. A new stamp on every
     # code change makes previously cached entries unaddressable.
-    import hashlib
-
     _h = hashlib.sha1()
     # Every module whose output ends up inside a bundle, not just the three
     # that write it: a change to how windows are cut (windows.py), how poses
@@ -400,8 +412,6 @@ def create_app(
     @app.get("/scene/{scene_id}/jump")
     async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
         """The frames tab's jump box: clamp to the scene and go to that frame."""
-        from fastapi.responses import RedirectResponse
-
         access = _access_or_404(state, scene_id)
         last = max(0, access.probe.n_frames - 1)
         return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
@@ -652,7 +662,6 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, color: str = "z"):
         access = _access_or_404(state, scene_id)
-        from .loaders import load_cloud
 
         def work():
             cloud = load_cloud(access.frame_path("clouds", index))
@@ -889,8 +898,6 @@ def _defer_main_script(page: str) -> str:
     recording its URL lets the overlay insert it after the build is ready --
     the front-end itself is untouched and runs exactly as it normally does.
     """
-    import re
-
     match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
     if not match:
         logger.warning("could not find simview's main.js script tag; loading it inline")
@@ -1034,8 +1041,6 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
 
 async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer) -> Response:
-    from .loaders import load_npz_key
-
     def work():
         arr = load_npz_key(access.frame_path(kind, index), key)
         return None if arr is None else renderer(arr)
@@ -1056,10 +1061,6 @@ def _safe_render(fn, *args):
 
 def _scene_details(access: SceneAccess) -> dict[str, Any]:
     """Small, cheap, human-facing extras for the scene page."""
-    import numpy as np
-
-    from .loaders import read_text
-
     details: dict[str, Any] = {}
     if access.K is not None:
         details["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()
@@ -1184,8 +1185,6 @@ def _page_of_frame(access: SceneAccess, index: int) -> int:
     directory the browser pages through the frames that *exist*, so a frame's
     page is its position in that list, not its own number.
     """
-    import bisect
-
     indices = _frame_indices(access)
     if not indices:
         return 0
@@ -1234,10 +1233,6 @@ def _frame_details(
     the per-frame artefacts. No cloud, image or height map is decoded here --
     those are separate requests the browser makes for itself.
     """
-    import numpy as np
-
-    from .probe import _npy_shape
-
     probe = access.probe
     details: dict[str, Any] = {
         "index": index,
@@ -1271,8 +1266,6 @@ def _frame_details(
 
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
-        from .loaders import roll_pitch_from_gravity_align
-
         roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
         details["roll_deg"] = round(float(np.degrees(roll[0])), 2)
         details["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)
@@ -1314,9 +1307,7 @@ def _frame_details(
 
 
 def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
-    """Per-frame numbers for the overlay's readout."""
-    import numpy as np
-
+    """Per-frame numbers, as JSON, for anything that wants them without a page."""
     info: dict[str, Any] = {"frame": index}
     ts = access.frame_ts
     if ts is not None and 0 <= index < len(ts):
@@ -1328,8 +1319,6 @@ def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
             info["camera_lidar_offset_ms"] = round((info["timestamp"] - float(pcd[index])) * 1000, 2)
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
-        from .loaders import roll_pitch_from_gravity_align
-
         roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
         info["roll_deg"] = round(float(np.degrees(roll[0])), 2)
         info["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)

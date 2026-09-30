@@ -125,3 +125,25 @@ def test_a_root_of_camera_jpegs_is_counted_and_found(tmp_path):
     assert access.frame_path("images", 3).name == "00003.jpg" and access.frame_path("images", 3).is_file()
     assert access.frame_path("clouds", 3).name == "00003.npy"
     assert len(access.available_frames("images")) == 12
+
+
+def test_a_header_comment_in_data_ts_does_not_cost_the_scene_its_duration(tmp_path):
+    root_path = make_root(tmp_path, frames=12)
+    ts_file = root_path / "0000" / "data_ts.txt"
+    ts_file.write_text("# seconds, Unix epoch\n\n" + ts_file.read_text())
+    p = probe.probe_scene(root_path / "0000")
+    assert p.n_frames == 12
+    assert p.duration is not None and abs(p.duration - 1.1) < 1e-6
+
+
+def test_a_scene_added_after_startup_is_found_without_a_restart(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000",))
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert [p.scene_id for p in root.probe_all()] == ["0000"]
+    # An array job finishes another scene while the viewer is up.
+    make_root(tmp_path, scenes=("0001",))
+    assert [p.scene_id for p in root.probe_all()] == ["0000", "0001"]
+    # And a direct request for it resolves without the index having been visited first.
+    again = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache2")
+    make_root(tmp_path, scenes=("0002",))
+    assert again.scene_dir("0002") == root_path / "0002"

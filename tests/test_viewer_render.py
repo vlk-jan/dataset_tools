@@ -7,6 +7,8 @@ cleanly when the viewer extra (SimView + torch) is not installed.
 
 from __future__ import annotations
 
+import io
+
 import numpy as np
 import pytest
 
@@ -47,3 +49,17 @@ def test_renderers_produce_valid_images():
         assert Image.open(io.BytesIO(data)).size[0] > 0
     cloud = np.random.default_rng(1).normal(size=(500, 4))
     assert Image.open(io.BytesIO(render.render_cloud_bev(cloud))).size[0] > 0
+
+
+def test_the_cameras_own_jpeg_is_served_untouched_when_no_downscale_is_needed(tmp_path):
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    from dataset_tools.viewer import render
+
+    path = tmp_path / "00000.jpg"
+    Image.new("RGB", (64, 40), (40, 80, 120)).save(path, format="JPEG", quality=95)
+    assert render.render_camera_image(path, width=640) == path.read_bytes()
+    smaller = render.render_camera_image(path, width=32)
+    assert smaller != path.read_bytes()
+    assert Image.open(io.BytesIO(smaller)).size == (32, 20)
