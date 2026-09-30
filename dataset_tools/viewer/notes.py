@@ -285,6 +285,31 @@ class NoteStore:
         notes.sort(key=lambda n: (n.frame_start, n.frame_end))
         return notes
 
+    def list_all(self) -> dict[str, list[Note]]:
+        """Every scene's notes, keyed by scene id, in scene order.
+
+        One listing of the notes directory, then :meth:`list` per file it
+        names -- so a scene whose file is malformed drops out with the same
+        warning it would give on its own page, and a file that is not a
+        scene's (``NNNN.json`` is the only shape written) is left alone.
+        ``{}`` when notes are off or nothing has been written yet.
+        """
+        if not self.enabled:
+            return {}
+        try:
+            names = os.listdir(self.dir)
+        except OSError:
+            return {}
+        out: dict[str, list[Note]] = {}
+        for name in sorted(names):
+            stem, ext = os.path.splitext(name)
+            if ext != ".json" or not stem.isdigit():
+                continue
+            notes = self.list(stem)
+            if notes:
+                out[stem] = notes
+        return out
+
     def get(self, scene_id: str, note_id: str) -> Note | None:
         for note in self.list(scene_id):
             if note.id == note_id:

@@ -839,3 +839,19 @@ def test_opening_a_window_builds_the_next_one_in_the_background(tmp_path):
         assert client.get("/view/0000/seg000").status_code == 200
         time.sleep(1.0)
         assert not ready(client, "seg001")
+
+
+def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
+    from fastapi.testclient import TestClient
+    from test_viewer_index import VALIDATION_CSV
+
+    from dataset_tools.viewer.app import create_app
+
+    (tmp_path / "root" / "validation.csv").write_text(VALIDATION_CSV)
+    fresh = TestClient(create_app(tmp_path / "root", cache_dir=tmp_path / "cache"))
+    index = fresh.get("/").text
+    assert 'class="chip yes validated"' in index and ">validated ok<" in index
+    assert 'class="chip partial validated"' in index and ">2 warnings<" in index
+    assert "<dt>validated</dt>" in index
+    scene = fresh.get("/scene/0001").text
+    assert "<h2>Validation</h2>" in scene and "run helhest-validate 0001" in scene

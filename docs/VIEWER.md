@@ -330,6 +330,20 @@ page gets a **Disk usage** card (total, per frame, the same bar) and each entry
 in its file inventory shows its size. Like the atlas, the file is read once per
 process, so restart the viewer after a rescan.
 
+## Validation: what `helhest-validate` made of each scene
+
+`helhest-validate <root> --csv <root>/validation.csv` (which is what
+`slurm/finalize_v2.sh` runs) leaves the validator's table at the root. When it
+is there, every index card gets a chip -- `validated ok`, `N warnings` or `N
+errors`, with the row's numbers in its tooltip -- the masthead counts how the
+scenes fared, and the scene page gets a **Validation** card with the status,
+the counts and the numbers behind them (max step, max tilt, sync offset,
+non-finite fraction). The file carries *counts* of findings, not their text:
+the messages only go to the validator's own output, and the card says so
+rather than pretending. A scene the file does not mention gets no chip, and a
+root without the file looks exactly as before. Like the atlas, the file is
+read once per process.
+
 ## The train/val split: which scenes a model is scored on
 
 A root may carry a `splits.json` naming the scenes held out from training. When
@@ -497,6 +511,15 @@ opening the root: looking at a dataset leaves it as it was found.
 extraction does. Each notes file records the `dataset_version` it was written
 against, and the scene page says so when that stops matching `manifest.json` —
 the same check, for the same reason, as the atlas's.
+
+**Reading them back.** `/notes` lists every note in the root on one page,
+grouped by topic and ordered by scene and frame inside each, with `?topic=`
+narrowing it to one topic: a review campaign's to-do list. Each entry links to
+its scene, to its first frame and, where the frame sits in a window, to the 3D
+view opened on it. A notes file whose scene is no longer in the root is listed
+and marked as such rather than dropped: it is a person's work, and a scene
+renumbered out from under it is exactly the case worth seeing. `/api/notes`
+returns the same as JSON. With `--no-notes` the page says notes are off.
 
 Notes are served from their own endpoint and are never folded into a window
 bundle. A bundle URL carries a content stamp and its `meta.json` is cached per
@@ -669,6 +692,7 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/segment/{n}` | one segment's cards, frame range and windows as JSON |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
+| `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/info` | that frame's numbers as JSON: stamps, camera-lidar offset, roll and pitch, which per-frame files it has |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |

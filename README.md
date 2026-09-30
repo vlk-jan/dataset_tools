@@ -270,6 +270,8 @@ is computed from it.
 
 Structural problems are **errors** (exit code `1`); data-quality observations
 (NaNs, jumps, extreme tilt) are **warnings** — `--strict` makes them fail too.
+Written to `<root>/validation.csv`, the report is shown by the viewer: a chip
+per scene on the index and a card on the scene page.
 Thresholds: `--max-jump` (m), `--max-tilt` (deg), `--max-nan`, `--max-sync` (s);
 `--sample-clouds N` sets how many clouds are opened per scene (default 8, keeps
 the check fast on network storage).
