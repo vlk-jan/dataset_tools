@@ -115,7 +115,9 @@ def make_root(
             gps[:, 4] = 2  # RTK / GBAS
             gps[:, 5:8] = [0.09, 0.16, 0.25]
             np.save(d / "gps.npy", gps)
-        np.savetxt(d / "camera_intrinsics.txt", np.eye(3) * 700.0)
+        # A plausible pinhole for a 1280x800 camera, so the cloud-on-image
+        # projection has somewhere to land.
+        np.savetxt(d / "camera_intrinsics.txt", [[700.0, 0.0, 640.0], [0.0, 700.0, 400.0], [0.0, 0.0, 1.0]])
         np.savetxt(d / "T_cam_to_base.txt", np.eye(4))
         if with_camera_info:
             (d / "camera_info.yaml").write_text(CAMERA_INFO)

@@ -173,8 +173,24 @@ driving. Below 2 Hz the rate is flagged.
 | `joint_states.npy` | wheel spin animation + velocity/effort plots |
 | `joint_setpoints.npy` | commanded wheel-velocity plots |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
-| `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic |
+| `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic; and, on a frame page, the frame's cloud projected into its image (below) |
 | `gps.npy` | the map, on the scene, segment and frame pages |
+
+## The cloud on the image: a check on the extrinsic
+
+A frame page whose scene carries both `camera_intrinsics.txt` and
+`T_cam_to_base.txt` shows a second copy of the camera frame under the first,
+with every lidar return of that frame projected into it and coloured by depth
+(`/api/scene/{scene}/frame/{n}/overlay.jpg`). It is a calibration check: a
+road that lands beside the road, or a trunk that lands a metre from its
+picture, is a wrong extrinsic -- the error that shifted every v1 cloud by
+0.34 m, and the one the Odin1's own extrinsic estimate wanders by between
+boots. Metres of error are pixels of misalignment at any range, which is why
+the projection is a plain pinhole: the distortion model in `camera_info.yaml`
+is ignored, since both rigs' coefficients move a few pixels at the image edge
+and what is being looked for is far larger. A root that has only
+`T_cam_to_lidar.txt` (v1) gets no overlay: that matrix is the camera in the raw
+lidar frame, not the base frame the clouds are in.
 
 ## The scene page's two strips
 
@@ -651,6 +667,7 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
+| `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
 | `/api/scene/{scene}/frame/{n}/cloud.png` | that frame's cloud, top-down |
