@@ -494,6 +494,15 @@ extraction does. Each notes file records the `dataset_version` it was written
 against, and the scene page says so when that stops matching `manifest.json` —
 the same check, for the same reason, as the atlas's.
 
+**Reading them back.** `/notes` lists every note in the root on one page,
+grouped by topic and ordered by scene and frame inside each, with `?topic=`
+narrowing it to one topic: a review campaign's to-do list. Each entry links to
+its scene, to its first frame and, where the frame sits in a window, to the 3D
+view opened on it. A notes file whose scene is no longer in the root is listed
+and marked as such rather than dropped: it is a person's work, and a scene
+renumbered out from under it is exactly the case worth seeing. `/api/notes`
+returns the same as JSON. With `--no-notes` the page says notes are off.
+
 Notes are served from their own endpoint and are never folded into a window
 bundle. A bundle URL carries a content stamp and its `meta.json` is cached per
 window on disk, so a note stored in there would be invisible until the next
@@ -649,6 +658,7 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/segment/{n}` | one segment's cards, frame range and windows as JSON |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
+| `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`) |
 | `/api/scene/{scene}/frame/{n}/heightmap.png` | that frame's BEV height map |

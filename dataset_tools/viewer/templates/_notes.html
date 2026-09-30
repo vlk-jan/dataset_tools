@@ -96,7 +96,10 @@
     {% if scope == "segment" %}
     <p class="cardnote">
       Only the notes whose frames touch this segment are listed;
-      <a href="/scene/{{ scene_id }}#notes">the scene page</a> has all of them.
+      <a href="/scene/{{ scene_id }}#notes">the scene page</a> has all of them,
+      and <a href="/notes">all notes in this root</a> are listed by topic.
     </p>
+    {% elif notes_status.enabled %}
+    <p class="cardnote"><a href="/notes">All notes in this root</a>, by topic.</p>
     {% endif %}
   </div>

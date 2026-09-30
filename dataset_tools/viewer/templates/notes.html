@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notes &mdash; dataset viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/viewer-static/style.css">
+</head>
+<body>
+<header>
+  <h1><a href="/">Dataset viewer</a> / notes</h1>
+  <span class="path">{{ status.dir }}</span>
+  <span class="muted">{{ n_notes }} note{{ "s" if n_notes != 1 }} across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
+</header>
+<main>
+
+  {% if not status.enabled %}
+  <p class="stale">Notes are off for this viewer (<code>--no-notes</code>): nothing is read, written or shown.</p>
+  {% elif not groups and not topic %}
+  <div class="card"><p class="muted" style="margin:0">
+    Nothing noted in this root yet. Notes are written from a scene page or the 3D view&rsquo;s panel,
+    pinned to a frame range, and this page lists every one of them by topic.
+  </p></div>
+  {% endif %}
+
+  {% if topics %}
+  {# The topic filter is plain links, so it works without JavaScript and a
+     filtered list can be linked to. #}
+  <nav class="tabs">
+    <a class="tab {{ 'active' if not topic }}" href="/notes">All topics</a>
+    {% for t in topics %}
+    <a class="tab {{ 'active' if t == topic }}" href="/notes?topic={{ t }}">{{ t }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  {% for group in groups %}
+  <h2>{{ group.topic }} <span class="muted">{{ group.notes | length }}</span></h2>
+  <div class="card notes">
+    <ul class="notelist">
+      {% for n in group.notes %}
+      <li>
+        <div class="notehead">
+          {% if n.orphan %}
+          <strong class="warn" title="no scene {{ n.scene }} in this root: the note file outlived the scene it was written on">{{ n.scene }}</strong>
+          {% else %}
+          <a href="/scene/{{ n.scene }}"><strong>{{ n.scene }}</strong></a>
+          <a class="chip" href="/scene/{{ n.scene }}/frame/{{ n.frame_start }}"
+             title="open the first frame of this range">{{ n.label }}</a>
+          {% endif %}
+          <span class="chip topic">{{ n.topic }}</span>
+          <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
+            {%- if n.updated %} &middot; edited{% endif %}</span>
+          {% if n.view_url %}
+          <a class="btn notetools" href="{{ n.view_url }}" title="the 3D view of the window holding this stretch, opened on its first frame">Open 3D</a>
+          {% endif %}
+        </div>
+        <p class="notetext">{{ n.text }}</p>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+
+</main>
+</body>
+</html>

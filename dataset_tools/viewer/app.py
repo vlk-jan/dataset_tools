@@ -310,9 +310,25 @@ def create_app(
                 "manifest": root.manifest(),
                 "simview_version": _simview_version(),
                 "simview_ok": simview_ok,
+                "notes_enabled": notes_store.enabled,
                 **page,
             },
         )
+
+    @app.get("/notes", response_class=HTMLResponse)
+    async def notes_index(request: Request, topic: str | None = Query(None, max_length=32)):
+        """Every note in the root on one page, grouped by topic.
+
+        Notes are written one scene at a time, from wherever a bad stretch was
+        noticed; this is where they are read back as a list of what is wrong
+        with the root. With notes off the page still answers, saying so.
+        """
+        page = await run_in_threadpool(_notes_index, state, notes_store, topic)
+        return templates.TemplateResponse(request=request, name="notes.html", context={"root": root, **page})
+
+    @app.get("/api/notes")
+    async def api_notes_index(topic: str | None = Query(None, max_length=32)):
+        return await run_in_threadpool(_notes_index, state, notes_store, topic)
 
     @app.get("/scene/{scene_id}", response_class=HTMLResponse)
     async def scene_page(
@@ -1294,11 +1310,7 @@ def _frame_details(
     else:
         details["segment"] = None
 
-    # The enumerated window this frame sits in: a ground-truth one if there is
-    # one, otherwise the whole-scene fallback. This is the "show me the motion
-    # around this frame" link, as opposed to the static single-frame view.
-    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
-    best = next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
+    best = _window_of_frame(access, index, max_frames, max_seconds)
     if best is not None:
         details["window"] = {
             "key": best.key,
@@ -1311,6 +1323,54 @@ def _frame_details(
     else:
         details["window"] = None
     return details
+
+
+def _window_of_frame(access: SceneAccess, index: int, max_frames: int, max_seconds: float) -> Window | None:
+    """The enumerated window a frame sits in: a ground-truth one if there is
+    one, otherwise the whole-scene fallback. This is the "show me the motion
+    around this frame" link, as opposed to the static single-frame view."""
+    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
+    return next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
+
+
+def _notes_index(state: ViewerState, notes_store: NoteStore, topic: str | None) -> dict[str, Any]:
+    """Every note in the root, grouped by topic, for the ``/notes`` page.
+
+    Each note carries the links the page draws: its scene, its first frame and
+    the window holding that frame opened on it. A notes file for a scene the
+    root does not have is listed and said to be orphaned rather than dropped --
+    the note is a person's work, and a scene renumbered out from under it is
+    exactly the case worth seeing.
+    """
+    by_scene = notes_store.list_all()
+    known = set(state.root.scene_ids(refresh=True))
+    rows: list[dict[str, Any]] = []
+    for scene_id, notes in by_scene.items():
+        access = state.access(scene_id) if scene_id in known else None
+        for note in notes:
+            window = _window_of_frame(access, note.frame_start, state.max_frames, state.max_seconds) if access else None
+            rows.append(
+                {
+                    **note.to_json(),
+                    "scene": scene_id,
+                    "orphan": access is None,
+                    "view_url": f"/view/{scene_id}/{window.key}?frame={note.frame_start}" if window else None,
+                }
+            )
+    # The UI's own topics in their own order, then anything hand-written after.
+    offered = notes_store.status()["topics"]
+    topics = sorted({r["topic"] for r in rows}, key=lambda t: (offered.index(t) if t in offered else len(offered), t))
+    if topic:
+        rows = [r for r in rows if r["topic"] == topic]
+    groups = [{"topic": t, "notes": [r for r in rows if r["topic"] == t]} for t in topics]
+    return {
+        "topic": topic,
+        "topics": topics,
+        "groups": [g for g in groups if g["notes"]],
+        "n_notes": len(rows),
+        "n_scenes": len({r["scene"] for r in rows}),
+        "status": notes_store.status(),
+    }
 
 
 def _frame_info(access: SceneAccess, index: int) -> dict[str, Any]:
