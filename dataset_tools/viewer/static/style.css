@@ -95,6 +95,7 @@ pre { background: var(--shade); padding: 10px 12px; border-radius: 6px; overflow
 .totals {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 8px;
+  border-radius: 8px; overflow: hidden;
 }
 .totals > div { background: var(--panel); padding: 10px 12px; }
 .totals dt {
@@ -148,6 +149,7 @@ section { margin-top: 34px; }
 .scene {
   display: grid; grid-template-columns: 224px 1fr;
   background: var(--panel); border: 1px solid var(--line); min-width: 0;
+  border-radius: 8px; overflow: hidden;
 }
 .strip { display: flex; flex-direction: column; background: var(--shade); }
 /* The three frames divide the card's height between them, so the strip ends
@@ -214,7 +216,7 @@ header > .split-tag { align-self: center; }
 
 .splitpanel {
   margin: 22px 0 0; padding: 14px 16px;
-  background: var(--panel); border: 1px solid var(--line);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
 }
 .splithead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .splithead h2 { font-size: 18px; font-weight: 600; margin: 0; }
