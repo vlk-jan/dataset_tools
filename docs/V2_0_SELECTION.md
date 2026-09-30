@@ -403,3 +403,19 @@ v2.0/v2.1): 101,876 for 130,912 mapped frames, 77.8 % (train 74.4 %, held out
 (different lidar height, slightly different map sets). The manifest carries a
 `derived.driven_similarity` placeholder for the viewer session's product.
 v2.0 and v2.1 are unchanged.
+
+## 11. HELHEST v1.2–v1.5 images as the OAK's own JPEG (2026-09-30)
+
+The same recovery as §9, applied to the v1 chain. v1.3, v1.4 and v1.5 link
+their `images/` directories into v1.2 (v1.5 → v1.4 → v1.3 → v1.2), so the
+real PNGs were in v1.2 only and one conversion serves all four roots. The
+OAK publishes `bgr8; jpeg compressed bgr8` at 0.23–0.29 MB a frame against
+1.7 MB of PNG. `slurm/images_from_bag.batch` (removed since, see git history) with `CSV=docs/scene_bags.csv
+BAG_COL=2 CAM=/luxonis/oak/rgb/image_raw/compressed` (RCI jobs 11725531 and
+11725541): 182,913 of 182,913 frames matched by pixel identity, 258 sampled
+frames re-checked pixel for pixel, 313.3 GB of PNG became 67.8 GB of JPEG
+(4.6×), the old PNGs dropped. The four manifests declare `jpg`;
+`keyframes.lst` (v1.3's, linked from v1.4 and v1.5) and v1.5's
+`scalr_keyframes.lst`, whose second column ScaLR does open, now name `.jpg`
+and every listed file exists. Not converted: `HELHEST_v1_3_aux` (86 scenes of
+real PNG) and `HELHEST_v1_rear_archive` (13), which are separate roots.
