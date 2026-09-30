@@ -9,7 +9,6 @@ ROS installation is required.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import logging
 import math
@@ -18,66 +17,42 @@ import shutil
 import struct
 import sys
 import traceback
+from collections import deque
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
-import networkx as nx
 import numpy as np
 from rosbags.highlevel import AnyReader
-from tqdm import tqdm
 
-try:
-    from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
-        cloudini,
-        disk_usage,
-        gnss_guard,
-        image_format,
-        rosbags_compat,
-        tf_pins,
-        time_align,
-    )
-    from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
-    from dataset_tools.transforms import (  # noqa: F401  (re-exported: the transform helpers used to live here)
-        euler_matrix,
-        pose_to_matrix,
-        quaternion_matrix,
-        roll_pitch_from_matrix,
-        roll_pitch_from_quat,
-    )
-except ImportError as exc:  # when the file is run directly from dataset_tools/
-    # Only the package itself being unimportable takes the fallback; an import
-    # failing *inside* one of these modules must surface as what it is rather
-    # than as "No module named 'cloudini'".
-    if exc.name != "dataset_tools":
-        raise
-    import cloudini
-    import disk_usage
-    import gnss_guard
-    import image_format
-    import rosbags_compat  # noqa: F401
-    import tf_pins
-    import time_align
-    from gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
-    from transforms import (  # noqa: F401
-        euler_matrix,
-        pose_to_matrix,
-        quaternion_matrix,
-        roll_pitch_from_matrix,
-        roll_pitch_from_quat,
-    )
+from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
+    cloudini,
+    disk_usage,
+    gnss_guard,
+    image_format,
+    rosbags_compat,
+    tf_pins,
+    time_align,
+    transforms,
+)
+from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, write_trajectory
+from dataset_tools.transforms import (
+    euler_matrix,
+    header_stamp,
+    pose_to_matrix,
+    quaternion_matrix,
+    roll_pitch_from_matrix,
+)
 
 LOG = logging.getLogger("helhest.extract")
 
-SCENE_DIR_RE = re.compile(r"^\d{4,}$")
 #: What ``--cam`` may point at: pass 2 decodes the payload with OpenCV.
 IMAGE_MSGTYPES = ("sensor_msgs/msg/CompressedImage",)
 #: Written as the very last step of a scene, so its presence marks completion.
 SENTINEL_FILE = "source_bag.txt"
 SCENES_CSV = "scenes.csv"
-SCENES_PARTS_DIR = ".scenes_parts"
 SCENES_CSV_HEADER = ["scene", "bag", "start_time", "frames"]
 
 STATUS_OK = "ok"
@@ -117,13 +92,6 @@ GROUND_TRUTH_FILES = ("odometry.txt", "odometry_segments.txt")
 # ---------------------------------------------------------------------------
 # Message helpers
 # ---------------------------------------------------------------------------
-def header_stamp(msg, fallback: float) -> float:
-    """``header.stamp`` of a deserialised message in seconds, or ``fallback``."""
-    if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
-        return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-    return fallback
-
-
 def header_stamp_from_cdr(raw: bytes) -> float | None:
     """``header.stamp`` read straight out of a CDR buffer, without deserialising.
 
@@ -278,16 +246,16 @@ def gps_row(t: float, msg) -> np.ndarray | None:
 # ---------------------------------------------------------------------------
 # TF helpers
 # ---------------------------------------------------------------------------
-def build_tf_graph(tf_msgs: Iterable) -> nx.DiGraph:
+def build_tf_graph(tf_msgs: Iterable) -> dict[str, dict[str, np.ndarray]]:
     """Build a bidirectional frame graph from TF messages.
 
     A TF message with ``header.frame_id = parent`` and ``child_frame_id = child``
     carries the pose of the child in the parent frame, i.e. the matrix ``M``
-    with ``p_parent = M @ p_child``. Every edge ``a -> b`` of the graph stores
-    the *point map* from ``a`` to ``b`` (``p_b = E @ p_a``), so the edge
-    ``parent -> child`` holds ``inv(M)`` and ``child -> parent`` holds ``M``.
+    with ``p_parent = M @ p_child``. Every edge ``G[a][b]`` of the graph is the
+    *point map* from ``a`` to ``b`` (``p_b = E @ p_a``), so ``G[parent][child]``
+    holds ``inv(M)`` and ``G[child][parent]`` holds ``M``.
     """
-    G = nx.DiGraph()
+    G: dict[str, dict[str, np.ndarray]] = {}
     for tf in tf_msgs:
         q = tf.transform.rotation
         M = quaternion_matrix([q.x, q.y, q.z, q.w])
@@ -296,28 +264,36 @@ def build_tf_graph(tf_msgs: Iterable) -> nx.DiGraph:
             tf.transform.translation.y,
             tf.transform.translation.z,
         ]
-        G.add_edge(tf.header.frame_id, tf.child_frame_id, transform=np.linalg.inv(M))
-        G.add_edge(tf.child_frame_id, tf.header.frame_id, transform=M)
+        G.setdefault(tf.header.frame_id, {})[tf.child_frame_id] = np.linalg.inv(M)
+        G.setdefault(tf.child_frame_id, {})[tf.header.frame_id] = M
     return G
 
 
-def get_transform(G: nx.DiGraph, src_frame, dst_frame) -> np.ndarray | None:
+def get_transform(G: dict[str, dict[str, np.ndarray]], src_frame, dst_frame) -> np.ndarray | None:
     """Transform T such that ``p_dst = T @ p_src``, or None if no TF path exists.
 
     Edges store point maps along their direction (see :func:`build_tf_graph`),
-    so the maps are chained right-to-left along the shortest path.
+    so the maps are chained right-to-left along the shortest path (BFS).
     """
     if src_frame == dst_frame:
         return np.eye(4)
     if src_frame not in G or dst_frame not in G:
         return None
-    try:
-        path = nx.shortest_path(G, source=src_frame, target=dst_frame)
-    except nx.NetworkXNoPath:
+    parent = {src_frame: None}
+    queue = deque([src_frame])
+    while queue and dst_frame not in parent:
+        a = queue.popleft()
+        for b in G[a]:
+            if b not in parent:
+                parent[b] = a
+                queue.append(b)
+    if dst_frame not in parent:
         return None
     T = np.eye(4)
-    for i in range(len(path) - 1):
-        T = G[path[i]][path[i + 1]]["transform"] @ T
+    b = dst_frame
+    while parent[b] is not None:
+        T = T @ G[parent[b]][b]
+        b = parent[b]
     return T
 
 
@@ -330,44 +306,6 @@ def nearest_idx(a: np.ndarray, b: np.ndarray) -> np.ndarray:
         return np.zeros(len(a), dtype=int)
     pos = np.clip(np.searchsorted(b, a), 1, len(b) - 1)
     return np.where(a - b[pos - 1] <= b[pos] - a, pos - 1, pos)
-
-
-def quaternion_from_matrix(R) -> np.ndarray:
-    """Unit quaternion ``(x, y, z, w)`` of a 3x3 rotation (Shepperd's method).
-
-    The inverse of :func:`quaternion_matrix`. Branching on the largest diagonal
-    term keeps the divisor away from zero for every rotation, including the
-    180-degree cases where the naive trace formula loses all precision.
-    """
-    m = np.asarray(R, dtype=float)[:3, :3]
-    tr = m[0, 0] + m[1, 1] + m[2, 2]
-    if tr > 0.0:
-        d = math.sqrt(tr + 1.0) * 2.0
-        return np.array([(m[2, 1] - m[1, 2]) / d, (m[0, 2] - m[2, 0]) / d, (m[1, 0] - m[0, 1]) / d, 0.25 * d])
-    if m[0, 0] > m[1, 1] and m[0, 0] > m[2, 2]:
-        d = math.sqrt(1.0 + m[0, 0] - m[1, 1] - m[2, 2]) * 2.0
-        return np.array([0.25 * d, (m[0, 1] + m[1, 0]) / d, (m[0, 2] + m[2, 0]) / d, (m[2, 1] - m[1, 2]) / d])
-    if m[1, 1] > m[2, 2]:
-        d = math.sqrt(1.0 + m[1, 1] - m[0, 0] - m[2, 2]) * 2.0
-        return np.array([(m[0, 1] + m[1, 0]) / d, 0.25 * d, (m[1, 2] + m[2, 1]) / d, (m[0, 2] - m[2, 0]) / d])
-    d = math.sqrt(1.0 + m[2, 2] - m[0, 0] - m[1, 1]) * 2.0
-    return np.array([(m[0, 2] + m[2, 0]) / d, (m[1, 2] + m[2, 1]) / d, 0.25 * d, (m[1, 0] - m[0, 1]) / d])
-
-
-def slerp(q0: np.ndarray, q1: np.ndarray, u: float) -> np.ndarray:
-    """Spherical linear interpolation between two ``(x, y, z, w)`` quaternions."""
-    q0 = np.asarray(q0, dtype=float)
-    q1 = np.asarray(q1, dtype=float)
-    dot = float(np.dot(q0, q1))
-    if dot < 0.0:  # same rotation, opposite hemisphere: take the short way round
-        q1, dot = -q1, -dot
-    if dot > 0.9995:  # nearly parallel; slerp is ill-conditioned, lerp is exact enough
-        q = q0 + u * (q1 - q0)
-        return q / np.linalg.norm(q)
-    theta = math.acos(max(-1.0, min(1.0, dot))) * u
-    q2 = q1 - q0 * dot
-    q2 /= np.linalg.norm(q2)
-    return q0 * math.cos(theta) + q2 * math.sin(theta)
 
 
 def interpolate_poses(
@@ -394,31 +332,19 @@ def interpolate_poses(
     query = np.asarray(query_ts, dtype=float)
     ts = np.asarray(sample_ts, dtype=float)
     poses = np.asarray(poses, dtype=float)
-    out = np.empty((len(query), 4, 4))
-    nearest = nearest_idx(query, ts)
+    nearest = poses[nearest_idx(query, ts)]
     if len(ts) < 2:
-        out[:] = poses[nearest]
-        return out, 0
+        return nearest, 0
 
-    hi = np.clip(np.searchsorted(ts, query), 1, len(ts) - 1)
-    n_interp = 0
-    for k, q in enumerate(query):
-        j = int(hi[k])
-        i = j - 1
-        dt = ts[j] - ts[i]
-        step = float(np.linalg.norm(poses[j][:3, 3] - poses[i][:3, 3]))
-        if not (ts[i] <= q <= ts[j]) or not (0.0 < dt <= max_gap) or step > max_speed * dt:
-            out[k] = poses[nearest[k]]
-            continue
-        u = (q - ts[i]) / dt
-        T = np.eye(4)
-        T[:3, 3] = poses[i][:3, 3] + u * (poses[j][:3, 3] - poses[i][:3, 3])
-        qi = quaternion_from_matrix(poses[i])
-        qj = quaternion_from_matrix(poses[j])
-        T[:3, :3] = quaternion_matrix(slerp(qi, qj, u))[:3, :3]
-        out[k] = T
-        n_interp += 1
-    return out, n_interp
+    pos, quat, _ = transforms.interpolate_poses(ts, poses, query)
+    out = transforms.poses_from_quat(pos, quat)
+    j = np.clip(np.searchsorted(ts, query), 1, len(ts) - 1)
+    i = j - 1
+    dt = ts[j] - ts[i]
+    step = np.linalg.norm(poses[j, :3, 3] - poses[i, :3, 3], axis=1)
+    ok = (ts[i] <= query) & (query <= ts[j]) & (dt > 0.0) & (dt <= max_gap) & (step <= max_speed * dt)
+    out[~ok] = nearest[~ok]
+    return out, int(ok.sum())
 
 
 def sync_timestamps(
@@ -607,48 +533,14 @@ def _scene_row(scene_dir: Path) -> list[str] | None:
     return [scene_dir.name, bag, start, str(frames)]
 
 
-def write_scene_part(parts_dir: Path, result: SceneResult) -> None:
-    """One CSV line per worker; the parent merges them (multiprocessing-safe)."""
-    parts_dir.mkdir(parents=True, exist_ok=True)
-    start = "" if math.isnan(result.start_time) else f"{result.start_time:.6f}"
-    row = [f"{result.index:04d}", result.bag, start, str(result.frames)]
-    with (parts_dir / f"{result.index:04d}.csv").open("w", newline="") as handle:
-        csv.writer(handle).writerow(row)
-
-
 def merge_scenes_csv(output_dir: Path) -> Path:
-    """Rewrite ``<output_dir>/scenes.csv`` from worker parts + finished scenes."""
-    parts_dir = output_dir / SCENES_PARTS_DIR
-    rows: dict[str, list[str]] = {}
-
-    if parts_dir.is_dir():
-        for part in sorted(parts_dir.glob("*.csv")):
-            with part.open(newline="") as handle:
-                for row in csv.reader(handle):
-                    if row:
-                        rows[row[0]] = row
-
-    for scene_dir in sorted(output_dir.iterdir()):
-        if not scene_dir.is_dir() or not SCENE_DIR_RE.match(scene_dir.name):
-            continue
-        if scene_dir.name in rows:
-            continue
-        row = _scene_row(scene_dir)
-        if row is not None:
-            rows[row[0]] = row
-
+    """Rewrite ``<output_dir>/scenes.csv`` from the finished scenes on disk."""
+    rows = [row for row in map(_scene_row, image_format.scenes(output_dir)) if row is not None]
     csv_path = output_dir / SCENES_CSV
     with csv_path.open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(SCENES_CSV_HEADER)
-        for key in sorted(rows):
-            writer.writerow(rows[key])
-
-    if parts_dir.is_dir():
-        for part in parts_dir.glob("*.csv"):
-            part.unlink()
-        with contextlib.suppress(OSError):  # someone else is still writing; harmless
-            parts_dir.rmdir()
+        writer.writerows(rows)
     return csv_path
 
 
@@ -694,10 +586,6 @@ def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
             status=STATUS_FAILED,
             message=f"{type(exc).__name__}: {exc}",
         )
-    # Only finished scenes go into scenes.csv; failures are reported in the
-    # end-of-run summary instead.
-    if result.status == STATUS_OK:
-        write_scene_part(output_dir / SCENES_PARTS_DIR, result)
     return result
 
 
@@ -708,7 +596,7 @@ def time_align_mode(value: str) -> str:
     any bag is opened rather than inside a worker process, where a ``SystemExit``
     would take the whole pool down.
     """
-    mode = str(value or "auto").strip().lower()
+    mode = value.strip().lower()
     if mode in ("auto", "off"):
         return mode
     try:
@@ -727,7 +615,7 @@ def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, ba
     ``off`` leaves the stamps alone. Returns the corrected clock and the profile
     to record, or ``(frame_ts, None)`` when nothing was applied.
     """
-    mode = time_align_mode(args.time_align)
+    mode = args.time_align
     if mode == "off":
         return frame_ts, None
 
@@ -765,8 +653,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     # camera's stamping against the LIDAR's, and nothing else: the offset both
     # of them share against the pose clock is a latency, not a stamp error, and
     # is measured after the clouds exist (see --time_align).
-    shift_cam = float(args.cam_time_offset or 0.0)
-    shift_lidar = 0.0
+    shift_cam = args.cam_time_offset
     result = SceneResult(index=-1, bag=bag_path.name, status=STATUS_OK)
 
     # Pre-cache connections
@@ -794,13 +681,13 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             "%s: from --odom %s: ground truth %s, GNSS guard %s",
             bag_path.name,
             args.odom,
-            "on" if gt_enabled(args) else "off (--gt on to force)",
-            "on" if guard_enabled(args) else "off (--gnss_guard on to force)",
+            "on" if _auto(args.gt, args.odom) else "off (--gt on to force)",
+            "on" if _auto(args.gnss_guard, args.odom) else "off (--gnss_guard on to force)",
         )
 
     # A scene is extracted from scratch every time, so whatever an earlier run
     # left behind must go first (see clear_scene_outputs).
-    clear_scene_outputs(scene_dir, ground_truth=gt_enabled(args))
+    clear_scene_outputs(scene_dir, ground_truth=_auto(args.gt, args.odom))
 
     # Pass 1: Collect timestamps for synchronization
     cam_timestamps = []
@@ -860,7 +747,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         if conn.topic == camera_topic:
             cam_timestamps.append(t + shift_cam)
         elif conn.topic == lidar_topic:
-            lidar_timestamps.append(t + shift_lidar)
+            lidar_timestamps.append(t)
         elif conn.topic in (args.odom, args.imu):
             # The same topic may serve as both odometry and orientation source
             if conn.topic == args.odom:
@@ -934,7 +821,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     # across: those would be exported carrying the nearest sample, which is a
     # fabricated pose with a different author. See dataset_tools.gnss_guard.
     guard_verdict = None
-    if guard_enabled(args) and odom_data:
+    if _auto(args.gnss_guard, args.odom) and odom_data:
         odom_data.sort(key=lambda x: x[0])
         # The stamps of the fixes that carried a position. The gaps in them are
         # when the receiver had no solution, whether it said so by publishing
@@ -984,7 +871,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         LOG.info("%s: no %s topic in the bag; gps.npy not written", bag_path.name, GPS_MSGTYPE)
 
     # Process TF Static
-    tf_graph = build_tf_graph(tf_msgs) if tf_msgs else nx.DiGraph()
+    tf_graph = build_tf_graph(tf_msgs)
     if args.tf_pins == "on":
         pinned = tf_pins.apply(tf_graph)
         for rec in pinned:
@@ -1049,7 +936,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     pcd_set = set(valid_pcd_ts)
 
     intrinsics_saved = False
-    image_how = getattr(args, "image_format", "camera")
+    image_how = args.image_format
     image_ext = None  # one format per scene, and per root: decided by the first frame
 
     for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
@@ -1057,7 +944,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         # -- including the fallback to the bag's own timestamp for a message
         # type without a header.
         is_cam = conn.topic == camera_topic
-        shift = shift_cam if is_cam else shift_lidar
+        shift = shift_cam if is_cam else 0.0
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
@@ -1136,7 +1023,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         gnss_guard.write_report(scene_dir / GNSS_GUARD_FILE, guard_verdict, float(frame_ts[0]))
 
     # Process Odom Transforms (relative to first frame)
-    if gt_enabled(args) and odom_data:
+    if _auto(args.gt, args.odom) and odom_data:
         if write_ground_truth(odom_data, scene_dir, spans=guard_verdict.spans if guard_verdict else None):
             LOG.info("%s: ground truth written (odometry.txt + segments)", bag_path.name)
         else:
@@ -1267,31 +1154,19 @@ def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> b
     return True
 
 
-def gt_enabled(args) -> bool:
-    """--gt auto: the odometry is its own ground truth only on rigs where the
-    source is absolute (Fixposition GNSS/INS); wheel-IMU /odom drifts and the
-    old rig's ground truth comes from the offline FAST-LIO regeneration."""
-    if args.gt == "on":
-        return True
-    if args.gt == "off":
-        return False
-    return "fixposition" in args.odom
+def _auto(mode: str, odom: str) -> bool:
+    """``on``/``off`` as given; ``auto`` is on only for an absolute GNSS/INS source.
 
-
-def guard_enabled(args) -> bool:
-    """--gnss_guard auto: screen the poses for a reset solution only where a
-    reset is a thing that happens. An absolute GNSS/INS source (Fixposition)
-    answers with a fabricated position when it loses its fix; wheel-IMU /odom
-    has nothing to lose and, being an integration, legitimately holds a
-    bit-identical pose for as long as the robot stands still -- which is the
-    guard's own signature for a fabricated stretch, so running it there would
-    delete exactly the frames where the robot was parked."""
-    mode = str(args.gnss_guard or "auto").lower()
-    if mode == "on":
-        return True
-    if mode == "off":
-        return False
-    return "fixposition" in args.odom
+    --gt: the odometry is its own ground truth only on rigs where the source is
+    absolute (Fixposition); wheel-IMU /odom drifts and the old rig's ground
+    truth comes from the offline FAST-LIO regeneration. --gnss_guard: a reset
+    solution only happens where there is a fix to lose; wheel-IMU /odom, being
+    an integration, legitimately holds a bit-identical pose for as long as the
+    robot stands still -- which is the guard's own signature for a fabricated
+    stretch, so running it there would delete exactly the frames where the
+    robot was parked.
+    """
+    return mode == "on" or (mode == "auto" and "fixposition" in odom)
 
 
 def write_ground_truth(
@@ -1431,9 +1306,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--gnss_guard",
-        type=str,
+        choices=("auto", "on", "off"),
         default="auto",
-        metavar="auto|on|off",
         help="Drop stretches where the GNSS/INS published a reset solution "
         "instead of a pose. A Fixposition that has lost its fix -- which is "
         "what rolling the robot over does -- keeps publishing odometry at full "
@@ -1562,11 +1436,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if todo and args.jobs > 1:
         with ProcessPoolExecutor(max_workers=args.jobs) as executor:
             futures = [executor.submit(_worker, bag, output_dir, idx, args) for idx, bag in todo]
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing bags"):
+            for n, future in enumerate(as_completed(futures), 1):
                 results.append(future.result())
+                LOG.info("%d/%d bags done (%s: %s)", n, len(todo), results[-1].bag, results[-1].status)
     else:
-        for idx, bag in tqdm(todo, desc="Processing bags"):
+        for n, (idx, bag) in enumerate(todo, 1):
             results.append(_worker(bag, output_dir, idx, args))
+            LOG.info("%d/%d bags done (%s: %s)", n, len(todo), results[-1].bag, results[-1].status)
 
     csv_path = merge_scenes_csv(output_dir)
     # The viewer's disk figures. Every scene this run touched is rescanned,

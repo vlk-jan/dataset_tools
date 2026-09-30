@@ -11,10 +11,12 @@ import numpy as np
 import pytest
 
 from dataset_tools import extract_data as ed
+from dataset_tools import transforms as tf
+from dataset_tools.transforms import euler_matrix
 
 
 def _pose(x=0.0, y=0.0, yaw=0.0):
-    T = ed.euler_matrix(0.0, 0.0, yaw)
+    T = euler_matrix(0.0, 0.0, yaw)
     T[:3, 3] = [x, y, 0.0]
     return T
 
@@ -23,29 +25,31 @@ def _pose(x=0.0, y=0.0, yaw=0.0):
     "roll,pitch,yaw",
     [(0.0, 0.0, 0.0), (0.3, -0.2, 1.1), (math.pi, 0.0, 0.0), (0.0, math.pi, 0.0), (-2.9, 0.4, 3.0)],
 )
-def test_quaternion_from_matrix_round_trips(roll, pitch, yaw):
+def test_mat_to_quat_round_trips(roll, pitch, yaw):
     """Including the 180-degree cases, where the naive trace formula collapses."""
-    R = ed.euler_matrix(roll, pitch, yaw)
-    q = ed.quaternion_from_matrix(R)
+    R = euler_matrix(roll, pitch, yaw)[:3, :3]
+    q = tf.mat_to_quat(R[None])
     assert np.allclose(np.linalg.norm(q), 1.0)
-    assert np.allclose(ed.quaternion_matrix(q)[:3, :3], R[:3, :3], atol=1e-12)
+    assert np.allclose(tf.poses_from_quat(np.zeros((1, 3)), q)[0, :3, :3], R, atol=1e-12)
+
+
+def _yaw_quats(*yaws):
+    return [tf.mat_to_quat(euler_matrix(0, 0, yaw)[None, :3, :3]) for yaw in yaws]
 
 
 def test_slerp_endpoints_and_midpoint():
-    q0 = ed.quaternion_from_matrix(ed.euler_matrix(0, 0, 0.0))
-    q1 = ed.quaternion_from_matrix(ed.euler_matrix(0, 0, 1.0))
-    assert np.allclose(ed.slerp(q0, q1, 0.0), q0)
-    assert np.allclose(ed.slerp(q0, q1, 1.0), q1)
-    mid = ed.quaternion_matrix(ed.slerp(q0, q1, 0.5))
-    assert np.allclose(mid[:3, :3], ed.euler_matrix(0, 0, 0.5)[:3, :3], atol=1e-12)
+    q0, q1 = _yaw_quats(0.0, 1.0)
+    assert np.allclose(tf.quat_slerp(q0, q1, np.array([0.0])), q0)
+    assert np.allclose(tf.quat_slerp(q0, q1, np.array([1.0])), q1)
+    mid = tf.poses_from_quat(np.zeros((1, 3)), tf.quat_slerp(q0, q1, np.array([0.5])))[0]
+    assert np.allclose(mid[:3, :3], euler_matrix(0, 0, 0.5)[:3, :3], atol=1e-12)
 
 
 def test_slerp_takes_the_short_way_round():
     """q and -q are the same rotation; the interpolation must not go the long way."""
-    q0 = ed.quaternion_from_matrix(ed.euler_matrix(0, 0, 0.1))
-    q1 = -ed.quaternion_from_matrix(ed.euler_matrix(0, 0, 0.2))
-    mid = ed.quaternion_matrix(ed.slerp(q0, q1, 0.5))
-    assert np.allclose(mid[:3, :3], ed.euler_matrix(0, 0, 0.15)[:3, :3], atol=1e-9)
+    q0, q1 = _yaw_quats(0.1, 0.2)
+    mid = tf.poses_from_quat(np.zeros((1, 3)), tf.quat_slerp(q0, -q1, np.array([0.5])))[0]
+    assert np.allclose(mid[:3, :3], euler_matrix(0, 0, 0.15)[:3, :3], atol=1e-9)
 
 
 def test_interpolation_beats_nearest_on_a_ramp():
@@ -58,7 +62,7 @@ def test_interpolation_beats_nearest_on_a_ramp():
     assert n == 3
     assert np.allclose(out[:, 0, 3], query, atol=1e-12)
     for T, q in zip(out, query, strict=True):  # the assert above already pins the lengths
-        assert np.allclose(T[:3, :3], ed.euler_matrix(0, 0, q)[:3, :3], atol=1e-9)
+        assert np.allclose(T[:3, :3], euler_matrix(0, 0, q)[:3, :3], atol=1e-9)
     # what nearest-neighbour would have produced, for the same queries
     nearest = poses[ed.nearest_idx(query, ts)]
     assert np.abs(nearest[:, 0, 3] - query).max() > 0.02

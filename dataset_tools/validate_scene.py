@@ -17,8 +17,8 @@ The older HELHEST layout is accepted too; its extra files (``trajectory.txt``,
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
-import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -26,16 +26,9 @@ from pathlib import Path
 
 import numpy as np
 
-try:
-    from dataset_tools import image_format
-    from dataset_tools.gnss_guard import MAX_SPEED
-    from dataset_tools.gt_io import read_segments, read_trajectory
-except ImportError:  # when the file is run directly from dataset_tools/
-    import image_format
-    from gnss_guard import MAX_SPEED
-    from gt_io import read_segments, read_trajectory
-
-SCENE_DIR_RE = re.compile(r"^\d{4,}$")
+from dataset_tools import image_format
+from dataset_tools.gnss_guard import MAX_SPEED
+from dataset_tools.gt_io import read_segments, read_trajectory
 
 #: Files every extracted scene must have.
 REQUIRED_FILES = (
@@ -78,12 +71,6 @@ class SceneReport:
     def name(self) -> str:
         return self.path.name
 
-    def error(self, message: str) -> None:
-        self.errors.append(message)
-
-    def warn(self, message: str) -> None:
-        self.warnings.append(message)
-
     def status(self, strict: bool = False) -> str:
         if self.errors:
             return "FAIL"
@@ -110,8 +97,7 @@ def find_scenes(paths: Sequence[Path]) -> list[Path]:
         if looks_like_scene(path):
             scenes.append(path)
             continue
-        children = sorted(child for child in path.iterdir() if child.is_dir() and SCENE_DIR_RE.match(child.name))
-        found = [child for child in children if looks_like_scene(child)]
+        found = [child for child in image_format.scenes(path) if looks_like_scene(child)]
         if not found:
             raise FileNotFoundError(f"no scenes found in {path}")
         scenes.extend(found)
@@ -132,7 +118,7 @@ def _check_index_continuity(report: SceneReport, files: Sequence[Path], label: s
     expected = [f"{i:05d}" for i in range(len(files))]
     if stems != expected:
         missing = sorted(set(expected) - set(stems))[:5]
-        report.error(
+        report.errors.append(
             f"{label}: filenames are not a contiguous 00000..{len(files) - 1:05d} run "
             f"(first gaps: {missing or 'unexpected names'})"
         )
@@ -140,17 +126,17 @@ def _check_index_continuity(report: SceneReport, files: Sequence[Path], label: s
 
 def _check_timestamps(report: SceneReport, ts: np.ndarray, label: str) -> None:
     if ts.ndim != 1:
-        report.error(f"{label}: expected one timestamp per line, got shape {ts.shape}")
+        report.errors.append(f"{label}: expected one timestamp per line, got shape {ts.shape}")
         return
     if not np.all(np.isfinite(ts)):
-        report.error(f"{label}: contains non-finite values")
+        report.errors.append(f"{label}: contains non-finite values")
         return
     diffs = np.diff(ts)
     if np.any(diffs < 0):
-        report.error(f"{label}: not monotonic ({int(np.sum(diffs < 0))} decreasing steps)")
+        report.errors.append(f"{label}: not monotonic ({int(np.sum(diffs < 0))} decreasing steps)")
     n_dup = int(np.sum(diffs == 0))
     if n_dup:
-        report.warn(f"{label}: {n_dup} duplicate timestamps")
+        report.warnings.append(f"{label}: {n_dup} duplicate timestamps")
 
 
 def _is_rotation(R: np.ndarray, tol: float = 1e-3) -> bool:
@@ -158,6 +144,30 @@ def _is_rotation(R: np.ndarray, tol: float = 1e-3) -> bool:
         return False
     identity = np.einsum("...ij,...kj->...ik", R, R)
     return bool(np.allclose(identity, np.eye(3), atol=tol) and np.all(np.abs(np.linalg.det(R) - 1.0) < tol))
+
+
+def _load_stack(
+    report: SceneReport, scene_dir: Path, name: str, shape: tuple[int, int], counts: dict[str, int]
+) -> np.ndarray | None:
+    """``name`` as an ``(N, *shape)`` stack, counted; None when absent, unreadable or misshapen.
+
+    Non-finite values are reported here but the stack is still returned.
+    """
+    path = scene_dir / name
+    if not path.is_file():
+        return None
+    try:
+        stack = np.load(path)
+    except Exception as exc:  # noqa: BLE001
+        report.errors.append(f"{name}: unreadable ({type(exc).__name__}: {exc})")
+        return None
+    if stack.ndim != 3 or stack.shape[1:] != shape:
+        report.errors.append(f"{name}: expected (N, {shape[0]}, {shape[1]}), got {stack.shape}")
+        return None
+    counts[name] = int(stack.shape[0])
+    if not np.all(np.isfinite(stack)):
+        report.errors.append(f"{name}: contains non-finite values")
+    return stack
 
 
 def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> None:
@@ -173,29 +183,29 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
         try:
             cloud = np.load(path)
         except Exception as exc:  # noqa: BLE001
-            report.error(f"clouds/{path.name}: unreadable ({type(exc).__name__}: {exc})")
+            report.errors.append(f"clouds/{path.name}: unreadable ({type(exc).__name__}: {exc})")
             continue
         dtypes.add(str(cloud.dtype))
         if cloud.ndim != 2 or cloud.shape[1] != 4:
-            report.error(f"clouds/{path.name}: expected (N, 4), got {cloud.shape}")
+            report.errors.append(f"clouds/{path.name}: expected (N, 4), got {cloud.shape}")
             continue
         if cloud.dtype.kind != "f":
-            report.error(f"clouds/{path.name}: expected a float dtype, got {cloud.dtype}")
+            report.errors.append(f"clouds/{path.name}: expected a float dtype, got {cloud.dtype}")
             continue
         n_points.append(int(cloud.shape[0]))
         if cloud.size:
             nan_counts += int(np.count_nonzero(~np.isfinite(cloud)))
             total_values += int(cloud.size)
         else:
-            report.warn(f"clouds/{path.name}: empty cloud")
+            report.warnings.append(f"clouds/{path.name}: empty cloud")
 
     if dtypes:
         report.stats["cloud_dtype"] = "/".join(sorted(dtypes))
         if len(dtypes) > 1:
-            report.warn(f"clouds: mixed dtypes {sorted(dtypes)}")
+            report.warnings.append(f"clouds: mixed dtypes {sorted(dtypes)}")
         elif not dtypes <= {"float32", "float64"}:
             # float32 is what the extractor writes; the old dataset is float64.
-            report.warn(f"clouds: unexpected dtype {sorted(dtypes)[0]}")
+            report.warnings.append(f"clouds: unexpected dtype {sorted(dtypes)[0]}")
     if n_points:
         report.stats["points_mean"] = int(np.mean(n_points))
         report.stats["points_min"] = int(np.min(n_points))
@@ -219,7 +229,9 @@ def check_odometry(
     report.stats["path_len_m"] = float(np.sum(steps))
     n_jumps = int(np.sum(steps > max_jump))
     if n_jumps:
-        report.warn(f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m " f"(max {np.max(steps):.2f} m)")
+        report.warnings.append(
+            f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m " f"(max {np.max(steps):.2f} m)"
+        )
 
     # Distance alone lets a short step past that no robot could have taken: at a
     # 16 Hz frame rate 0.9 m is 14 m/s. Divide by the interval the frames
@@ -234,7 +246,7 @@ def check_odometry(
     report.stats["max_speed_mps"] = float(np.max(speed))
     n_fast = int(np.sum((dt > 0) & (speed > max_speed)))
     if n_fast:
-        report.warn(
+        report.warnings.append(
             f"transforms.npy: {n_fast} frame-to-frame steps imply > {max_speed} m/s "
             f"(max {np.max(speed):.1f} m/s) -- a pose from another moment, not motion"
         )
@@ -247,7 +259,7 @@ def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) ->
     report.stats["tilt_max_deg"] = float(np.max(tilt))
     n_extreme = int(np.sum(tilt > max_tilt_deg))
     if n_extreme:
-        report.warn(
+        report.warnings.append(
             f"gravity_align.npy: {n_extreme} frames tilted > {max_tilt_deg} deg " f"(max {np.max(tilt):.1f} deg)"
         )
 
@@ -257,14 +269,14 @@ def check_extrinsic(report: SceneReport, path: Path) -> None:
     try:
         T = np.loadtxt(path)
     except Exception as exc:  # noqa: BLE001
-        report.error(f"{path.name}: unreadable ({type(exc).__name__}: {exc})")
+        report.errors.append(f"{path.name}: unreadable ({type(exc).__name__}: {exc})")
         return
     if T.shape != (4, 4):
-        report.error(f"{path.name}: expected 4x4, got {T.shape}")
+        report.errors.append(f"{path.name}: expected 4x4, got {T.shape}")
     elif not np.isfinite(T).all():
-        report.error(f"{path.name}: contains non-finite values")
+        report.errors.append(f"{path.name}: contains non-finite values")
     elif not _is_rotation(T[:3, :3]) or not np.allclose(T[3], [0.0, 0.0, 0.0, 1.0], atol=1e-6):
-        report.error(f"{path.name}: not a rigid transform")
+        report.errors.append(f"{path.name}: not a rigid transform")
 
 
 def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6) -> None:
@@ -280,50 +292,52 @@ def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6)
     segments = scene_dir / "odometry_segments.txt"
     if not odometry.is_file():
         if segments.is_file():
-            report.error("odometry_segments.txt is present but odometry.txt is not")
+            report.errors.append("odometry_segments.txt is present but odometry.txt is not")
         return
     try:
         ts, poses = read_trajectory(odometry)
     except (OSError, ValueError) as exc:
-        report.error(f"odometry.txt: unreadable ({type(exc).__name__}: {exc})")
+        report.errors.append(f"odometry.txt: unreadable ({type(exc).__name__}: {exc})")
         return
     if ts.size == 0:
-        report.warn("odometry.txt: no poses")
+        report.warnings.append("odometry.txt: no poses")
         return
     report.stats["gt_poses"] = int(ts.size)
     if not np.isfinite(poses).all():
-        report.error("odometry.txt: contains non-finite values")
+        report.errors.append("odometry.txt: contains non-finite values")
         return
     if not _is_rotation(poses[:, :3, :3]):
-        report.error("odometry.txt: rotation blocks are not orthonormal")
+        report.errors.append("odometry.txt: rotation blocks are not orthonormal")
     if not segments.is_file():
         return
 
     try:
         rows = read_segments(segments)
     except OSError as exc:
-        report.error(f"odometry_segments.txt: unreadable ({type(exc).__name__}: {exc})")
+        report.errors.append(f"odometry_segments.txt: unreadable ({type(exc).__name__}: {exc})")
         return
     if not rows:
-        report.warn("odometry_segments.txt: no segments")
+        report.warnings.append("odometry_segments.txt: no segments")
         return
     report.stats["gt_segments"] = len(rows)
     ordered = sorted(rows, key=lambda r: r.start_ts)
     for prev, cur in zip(ordered, ordered[1:], strict=False):
         if cur.start_ts < prev.end_ts - atol:
-            report.error(f"odometry_segments.txt: segments {prev.index} and {cur.index} overlap")
+            report.errors.append(f"odometry_segments.txt: segments {prev.index} and {cur.index} overlap")
     covered = np.zeros(ts.size, dtype=bool)
     for row in rows:
         inside = (ts >= row.start_ts - atol) & (ts <= row.end_ts + atol)
         covered |= inside
         n = int(inside.sum())
         if row.n_poses and n != row.n_poses:
-            report.error(f"segment {row.index}: n_poses is {row.n_poses} but odometry.txt has {n} poses in its span")
+            report.errors.append(
+                f"segment {row.index}: n_poses is {row.n_poses} but odometry.txt has {n} poses in its span"
+            )
         if n and not np.allclose(poses[inside][0], np.eye(4), atol=1e-4):
-            report.warn(f"segment {row.index}: first pose is not the identity (segments are re-anchored)")
+            report.warnings.append(f"segment {row.index}: first pose is not the identity (segments are re-anchored)")
     outside = int((~covered).sum())
     if outside:
-        report.warn(f"odometry.txt: {outside} poses lie outside every segment")
+        report.warnings.append(f"odometry.txt: {outside} poses lie outside every segment")
 
 
 def check_gps(report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None) -> None:
@@ -341,29 +355,29 @@ def check_gps(report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None) 
     try:
         gps = np.load(path)
     except Exception as exc:  # noqa: BLE001
-        report.warn(f"gps.npy: unreadable ({type(exc).__name__}: {exc})")
+        report.warnings.append(f"gps.npy: unreadable ({type(exc).__name__}: {exc})")
         return
     if gps.ndim != 2 or gps.shape[0] == 0 or gps.shape[1] < 4:
-        report.warn(f"gps.npy: expected (M, >=4) [t, lat, lon, alt, ...], got {gps.shape}")
+        report.warnings.append(f"gps.npy: expected (M, >=4) [t, lat, lon, alt, ...], got {gps.shape}")
         return
 
     report.stats["gps_fixes"] = int(gps.shape[0])
     ts, lat, lon = gps[:, 0], gps[:, 1], gps[:, 2]
     if not np.all(np.diff(ts) >= 0):
-        report.warn("gps.npy: timestamps are not sorted")
+        report.warnings.append("gps.npy: timestamps are not sorted")
     if not (np.isfinite(lat).all() and np.isfinite(lon).all()):
-        report.warn("gps.npy: contains non-finite coordinates")
+        report.warnings.append("gps.npy: contains non-finite coordinates")
     elif np.abs(lat).max() > 90.0 or np.abs(lon).max() > 180.0:
-        report.warn("gps.npy: coordinates outside [-90, 90] / [-180, 180] degrees")
+        report.warnings.append("gps.npy: coordinates outside [-90, 90] / [-180, 180] degrees")
     if gps.shape[1] >= 5:
         no_fix = float((gps[:, 4] < 0).mean())
         report.stats["gps_no_fix_frac"] = no_fix
         if no_fix > 0.5:
-            report.warn(f"gps.npy: {no_fix:.0%} of the fixes report no fix at all")
+            report.warnings.append(f"gps.npy: {no_fix:.0%} of the fixes report no fix at all")
     if data_ts is not None and data_ts.size and np.isfinite(ts).all():
         overlap = min(ts[-1], data_ts[-1]) - max(ts[0], data_ts[0])
         if overlap <= 0:
-            report.warn("gps.npy: its time span does not overlap data_ts.txt")
+            report.warnings.append("gps.npy: its time span does not overlap data_ts.txt")
 
 
 # ---------------------------------------------------------------------------
@@ -385,7 +399,7 @@ def validate_scene(
     try:
         image_ext = image_format.of_scene(scene_dir)
     except image_format.ImageFormatError as exc:
-        report.error(str(exc))
+        report.errors.append(str(exc))
         image_ext = max(image_format.held(scene_dir).items(), key=lambda kv: kv[1], default=(image_format.DEFAULT, 0))[
             0
         ]
@@ -397,17 +411,17 @@ def validate_scene(
         ("clouds", clouds, scene_dir / "clouds"),
     ):
         if not directory.is_dir():
-            report.error(f"{label}/ is missing")
+            report.errors.append(f"{label}/ is missing")
             continue
         if not files:
-            report.error(f"{label}/ is empty")
+            report.errors.append(f"{label}/ is empty")
             continue
         counts[label] = len(files)
         _check_index_continuity(report, files, label)
 
     for name in REQUIRED_FILES:
         if not (scene_dir / name).is_file():
-            report.error(f"{name} is missing")
+            report.errors.append(f"{name} is missing")
 
     for name in OPTIONAL_FILES:
         if (scene_dir / name).is_file():
@@ -427,7 +441,7 @@ def validate_scene(
         try:
             ts = np.atleast_1d(np.loadtxt(path))
         except Exception as exc:  # noqa: BLE001
-            report.error(f"{name}: unreadable ({type(exc).__name__}: {exc})")
+            report.errors.append(f"{name}: unreadable ({type(exc).__name__}: {exc})")
             continue
         timestamps[name] = ts
         counts[name] = int(ts.shape[0])
@@ -441,63 +455,34 @@ def validate_scene(
             offset = 2.0 * np.max(np.abs(data_ts - pcd_ts))
             report.stats["max_sync_offset_s"] = float(offset)
             if offset > max_sync_offset:
-                report.warn(
+                report.warnings.append(
                     f"camera/lidar sync offset up to {offset * 1e3:.0f} ms " f"(> {max_sync_offset * 1e3:.0f} ms)"
                 )
             report.stats["duration_s"] = float(data_ts[-1] - data_ts[0])
 
-    transforms = None
-    path = scene_dir / "transforms.npy"
-    if path.is_file():
-        try:
-            transforms = np.load(path)
-        except Exception as exc:  # noqa: BLE001
-            report.error(f"transforms.npy: unreadable ({type(exc).__name__}: {exc})")
-            transforms = None
+    transforms = _load_stack(report, scene_dir, "transforms.npy", (4, 4), counts)
     if transforms is not None:
-        if transforms.ndim != 3 or transforms.shape[1:] != (4, 4):
-            report.error(f"transforms.npy: expected (N, 4, 4), got {transforms.shape}")
-            transforms = None
-        else:
-            counts["transforms.npy"] = int(transforms.shape[0])
-            if not np.all(np.isfinite(transforms)):
-                report.error("transforms.npy: contains non-finite values")
-            elif not _is_rotation(transforms[:, :3, :3]):
-                report.error("transforms.npy: rotation blocks are not orthonormal")
-            bottom = transforms[:, 3, :]
-            if not np.allclose(bottom, [0.0, 0.0, 0.0, 1.0], atol=1e-6):
-                report.error("transforms.npy: bottom row is not [0 0 0 1]")
+        if np.all(np.isfinite(transforms)) and not _is_rotation(transforms[:, :3, :3]):
+            report.errors.append("transforms.npy: rotation blocks are not orthonormal")
+        if not np.allclose(transforms[:, 3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-6):
+            report.errors.append("transforms.npy: bottom row is not [0 0 0 1]")
 
-    gravity = None
-    path = scene_dir / "gravity_align.npy"
-    if path.is_file():
-        try:
-            gravity = np.load(path)
-        except Exception as exc:  # noqa: BLE001
-            report.error(f"gravity_align.npy: unreadable ({type(exc).__name__}: {exc})")
-            gravity = None
-    if gravity is not None:
-        if gravity.ndim != 3 or gravity.shape[1:] != (3, 3):
-            report.error(f"gravity_align.npy: expected (N, 3, 3), got {gravity.shape}")
-            gravity = None
-        else:
-            counts["gravity_align.npy"] = int(gravity.shape[0])
-            if not np.all(np.isfinite(gravity)):
-                report.error("gravity_align.npy: contains non-finite values")
-                gravity = None
-            elif not _is_rotation(gravity):
-                report.error("gravity_align.npy: not a stack of rotation matrices")
+    gravity = _load_stack(report, scene_dir, "gravity_align.npy", (3, 3), counts)
+    if gravity is not None and not np.all(np.isfinite(gravity)):
+        gravity = None
+    elif gravity is not None and not _is_rotation(gravity):
+        report.errors.append("gravity_align.npy: not a stack of rotation matrices")
 
     path = scene_dir / "camera_intrinsics.txt"
     if path.is_file():
         try:
             K = np.loadtxt(path)
             if K.shape != (3, 3):
-                report.error(f"camera_intrinsics.txt: expected 3x3, got {K.shape}")
+                report.errors.append(f"camera_intrinsics.txt: expected 3x3, got {K.shape}")
             elif not np.isfinite(K).all() or K[0, 0] <= 0 or K[1, 1] <= 0:
-                report.error("camera_intrinsics.txt: implausible focal lengths")
+                report.errors.append("camera_intrinsics.txt: implausible focal lengths")
         except Exception as exc:  # noqa: BLE001
-            report.error(f"camera_intrinsics.txt: unreadable ({type(exc).__name__}: {exc})")
+            report.errors.append(f"camera_intrinsics.txt: unreadable ({type(exc).__name__}: {exc})")
 
     for name in ("T_cam_to_base.txt", "T_cam_to_lidar.txt"):
         if (scene_dir / name).is_file():
@@ -509,7 +494,7 @@ def validate_scene(
     if counts:
         distinct = set(counts.values())
         if len(distinct) > 1:
-            report.error("frame counts disagree: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+            report.errors.append("frame counts disagree: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
         report.stats["frames"] = counts.get("images", min(counts.values()))
 
     check_clouds(report, clouds, n_sample)
@@ -520,7 +505,7 @@ def validate_scene(
 
     nan_frac = report.stats.get("nan_frac")
     if isinstance(nan_frac, float) and nan_frac > max_nan_frac:
-        report.warn(f"clouds: {nan_frac:.2%} non-finite values (> {max_nan_frac:.2%})")
+        report.warnings.append(f"clouds: {nan_frac:.2%} non-finite values (> {max_nan_frac:.2%})")
 
     return report
 
@@ -597,28 +582,15 @@ def print_report(report: SceneReport, strict: bool, verbose: bool) -> None:
 
 def write_table(reports: Sequence[SceneReport], path: str, strict: bool, markdown: bool) -> None:
     rows = [[_cell(r, c, strict) for c in CSV_COLUMNS] for r in reports]
-    if markdown:
-        lines = [
-            "| " + " | ".join(CSV_COLUMNS) + " |",
-            "| " + " | ".join("---" for _ in CSV_COLUMNS) + " |",
-        ]
-        lines += ["| " + " | ".join(row) + " |" for row in rows]
-        text = "\n".join(lines) + "\n"
-        if path == "-":
-            sys.stdout.write(text)
+    with contextlib.nullcontext(sys.stdout) if path == "-" else Path(path).open("w", newline="") as handle:
+        if markdown:
+            handle.write("| " + " | ".join(CSV_COLUMNS) + " |\n")
+            handle.write("| " + " | ".join("---" for _ in CSV_COLUMNS) + " |\n")
+            handle.writelines("| " + " | ".join(row) + " |\n" for row in rows)
         else:
-            Path(path).write_text(text)
-        return
-
-    if path == "-":
-        writer = csv.writer(sys.stdout)
-        writer.writerow(CSV_COLUMNS)
-        writer.writerows(rows)
-        return
-    with Path(path).open("w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(CSV_COLUMNS)
-        writer.writerows(rows)
+            writer = csv.writer(handle)
+            writer.writerow(CSV_COLUMNS)
+            writer.writerows(rows)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -11,10 +11,7 @@ from pathlib import Path
 from rosbags.highlevel import AnyReader
 from rosbags.rosbag2 import Writer
 
-try:
-    from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
-except ImportError:
-    import rosbags_compat  # noqa: F401
+from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
 
 
 def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> int:

@@ -72,8 +72,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[test]"
 ```
 
-Python >= 3.10 (not declared in `pyproject.toml`: colcon's setup.py introspection cannot evaluate `requires-python`). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`,
-`networkx`, `tqdm`.
+Python >= 3.10 (not declared in `pyproject.toml`: colcon's setup.py introspection cannot evaluate `requires-python`). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
 
 ### Container (CTU cluster)
 
@@ -208,9 +207,8 @@ Behaviour worth knowing:
   and they are **not** ground truth: `odometry.txt` is anchored per segment
   and says nothing about the Earth. A fix whose covariance the receiver called
   unknown carries `NaN` in the three covariance columns rather than zeros.
-- **`scenes.csv`** at the dataset root maps `scene,bag,start_time,frames`. Each
-  worker writes its own line into `.scenes_parts/`, and the parent merges them
-  when the run ends (safe under multiprocessing).
+- **`scenes.csv`** at the dataset root maps `scene,bag,start_time,frames`. The parent
+  rebuilds it from the finished scene directories when the run ends.
 
 ## Output format
 

@@ -11,12 +11,8 @@ import rclpy
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 
-try:
-    from dataset_tools.gt_io import GT_HEADER, format_pose_line
-    from dataset_tools.transforms import pose_to_matrix
-except ImportError:  # when the file is run directly from dataset_tools/
-    from gt_io import GT_HEADER, format_pose_line
-    from transforms import pose_to_matrix
+from dataset_tools.gt_io import GT_HEADER, format_pose_line
+from dataset_tools.transforms import pose_to_matrix
 
 
 class OdomRecorder(Node):

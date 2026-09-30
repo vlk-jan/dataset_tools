@@ -34,6 +34,7 @@ from dataset_tools.extract_data import (  # noqa: E402
     get_transform,
     header_stamp_from_cdr,
 )
+from dataset_tools.tf_pins import rpy_deg  # noqa: E402
 
 CAM = "/odin1/image/compressed"
 CLOUD = "/odin1/cloud_filtered/cloudini"
@@ -59,14 +60,6 @@ def quat_to_R(q):
             [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
         ]
     )
-
-
-def rpy_deg(R) -> list[float]:
-    """Roll, pitch, yaw in degrees of a rotation matrix (ZYX convention)."""
-    pitch = -np.arcsin(np.clip(R[2, 0], -1, 1))
-    roll = np.arctan2(R[2, 1], R[2, 2])
-    yaw = np.arctan2(R[1, 0], R[0, 0])
-    return [round(float(np.degrees(v)), 3) for v in (roll, pitch, yaw)]
 
 
 def main(argv=None) -> int:
@@ -163,14 +156,14 @@ def main(argv=None) -> int:
     out: dict = dict(bag=str(args.bag), counts=counts, n_topics=len(counts))
     # tf_static: does the Odin mount exist, and where are the wheels?
     G = build_tf_graph(tf_msgs)
-    edges = sorted({(a, b) for a, b in G.edges if G[a][b]["transform"] is not None})
+    edges = sorted((a, b) for a in G for b in G[a])
     X = get_transform(G, cloud_frame, BASE) if cloud_frame else None
     out["tf_static"] = dict(
         n_edges=len(edges) // 2,
-        frames=sorted(G.nodes),
+        frames=sorted(G),
         cloud_frame=cloud_frame,
         odin_mount=None if X is None else [round(float(v), 4) for v in X[:3, 3]],
-        odin_mount_rpy_deg=None if X is None else rpy_deg(X[:3, :3]),
+        odin_mount_rpy_deg=None if X is None else [round(v, 3) for v in rpy_deg(X)],
         cam_in_base=(
             None
             if caminfo is None or get_transform(G, caminfo["frame"], BASE) is None

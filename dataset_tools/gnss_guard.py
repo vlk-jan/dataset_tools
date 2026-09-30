@@ -212,10 +212,10 @@ def _runs(flags: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(edges[0::2], edges[1::2], strict=True))
 
 
-def teleport_edges(ts: np.ndarray, pos: np.ndarray, max_speed: float = MAX_SPEED, max_gap: float = MAX_GAP):
+def teleport_edges(ts: np.ndarray, pos: np.ndarray):
     """Indices ``i`` whose step to ``i + 1`` is faster than anything can move.
 
-    A step across a hole longer than ``max_gap`` is excluded: the stream said
+    A step across a hole longer than ``MAX_GAP`` is excluded: the stream said
     nothing for that long, and whatever distance the robot covered meanwhile is
     its own business.
     """
@@ -223,10 +223,10 @@ def teleport_edges(ts: np.ndarray, pos: np.ndarray, max_speed: float = MAX_SPEED
         return np.empty(0, dtype=int)
     dt = np.diff(ts)
     step = np.linalg.norm(np.diff(pos, axis=0), axis=1)
-    return np.flatnonzero((dt > 0) & (dt <= max_gap) & (step > max_speed * dt))
+    return np.flatnonzero((dt > 0) & (dt <= MAX_GAP) & (step > MAX_SPEED * dt))
 
 
-def frozen_spans(ts: np.ndarray, pos: np.ndarray, min_freeze: float = MIN_FREEZE) -> list[Span]:
+def frozen_spans(ts: np.ndarray, pos: np.ndarray) -> list[Span]:
     """Stretches where the translation does not move at all for long enough."""
     if len(ts) < 2:
         return []
@@ -235,22 +235,22 @@ def frozen_spans(ts: np.ndarray, pos: np.ndarray, min_freeze: float = MIN_FREEZE
     for a, b in _runs(still):
         # `still[k]` describes the step from sample k to k + 1, so the run of
         # samples holding that position is a..b inclusive.
-        if ts[b] - ts[a] >= min_freeze:
+        if ts[b] - ts[a] >= MIN_FREEZE:
             out.append(Span(float(ts[a]), float(ts[b]), "frozen"))
     return out
 
 
-def island_spans(ts: np.ndarray, edges: np.ndarray, min_island: float = MIN_ISLAND) -> list[Span]:
+def island_spans(ts: np.ndarray, edges: np.ndarray) -> list[Span]:
     """Short stretches fenced in by a teleport at both ends."""
     out = []
     for lo, hi in zip(edges[:-1], edges[1:], strict=False):
         a, b = int(lo) + 1, int(hi)  # samples strictly between the two jumps
-        if a <= b and ts[b] - ts[a] < min_island:
+        if a <= b and ts[b] - ts[a] < MIN_ISLAND:
             out.append(Span(float(ts[a]), float(ts[b]), "island"))
     return out
 
 
-def outage_spans(fix_ts, min_outage: float = MIN_OUTAGE) -> list[Span]:
+def outage_spans(fix_ts) -> list[Span]:
     """Stretches with no usable fix, read off the stamps of the usable ones.
 
     ``fix_ts`` are the stamps of the fixes that carried a position -- what
@@ -270,7 +270,7 @@ def outage_spans(fix_ts, min_outage: float = MIN_OUTAGE) -> list[Span]:
     t = np.sort(np.asarray(fix_ts, dtype=float))
     if len(t) < 2:
         return []
-    return [Span(float(t[i]), float(t[i + 1]), "no_fix") for i in np.flatnonzero(np.diff(t) > min_outage)]
+    return [Span(float(t[i]), float(t[i + 1]), "no_fix") for i in np.flatnonzero(np.diff(t) > MIN_OUTAGE)]
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ def _corroborated(span: Span, ts: np.ndarray, edges: np.ndarray, outages: list[S
     return bool((first - 1) in edges or last in edges)
 
 
-def find_spans(ts, poses, fix_ts=None, *, max_speed=MAX_SPEED, max_gap=MAX_GAP) -> list[Span]:
+def find_spans(ts, poses, fix_ts=None) -> list[Span]:
     """Every stretch of a pose stream that the receiver fabricated.
 
     ``ts`` and ``poses`` are the sorted odometry stream; ``fix_ts`` are the
@@ -364,7 +364,7 @@ def find_spans(ts, poses, fix_ts=None, *, max_speed=MAX_SPEED, max_gap=MAX_GAP) 
     if len(ts) < 2:
         return []
     pos = np.asarray(poses, dtype=float)[:, :3, 3]
-    edges = teleport_edges(ts, pos, max_speed, max_gap)
+    edges = teleport_edges(ts, pos)
     outages = [] if fix_ts is None else outage_spans(fix_ts)
     fixes = None if fix_ts is None else np.asarray(fix_ts, dtype=float)
 
@@ -390,24 +390,25 @@ def drop_poses(odom_data, spans: list[Span]):
     return [row for row in odom_data if not any(row[0] in s for s in spans)]
 
 
-def frame_mask(frame_ts: np.ndarray, spans: list[Span], pad: float = FRAME_PAD) -> np.ndarray:
+def frame_mask(frame_ts: np.ndarray, spans: list[Span]) -> np.ndarray:
     """True for the frames that keep a trustworthy pose."""
     keep = np.ones(len(frame_ts), dtype=bool)
     for s in spans:
-        keep &= ~((frame_ts >= s.start - pad) & (frame_ts <= s.end + pad))
+        keep &= ~((frame_ts >= s.start - FRAME_PAD) & (frame_ts <= s.end + FRAME_PAD))
     return keep
 
 
-def frame_support(frame_ts, odom_ts, *, gap: float = SUPPORT_GAP, pad: float = FRAME_PAD) -> np.ndarray:
+def frame_support(frame_ts, odom_ts) -> np.ndarray:
     """True for the frames that real pose samples bracket closely enough.
 
     False where :func:`~dataset_tools.extract_data.interpolate_poses` would
     have no choice but to copy the nearest sample: before the stream starts,
-    after it ends, or inside a hole wider than ``gap``. ``pad`` is the same
-    allowance :func:`frame_mask` makes for the frame clock not yet being
+    after it ends, or inside a hole wider than ``SUPPORT_GAP``. ``FRAME_PAD`` is
+    the same allowance :func:`frame_mask` makes for the frame clock not yet being
     corrected for capture-to-publish latency, and it is spent towards keeping
     the frame -- a frame is dropped only when no stamp it could correct to has
-    a pose either, so a hole has to exceed ``gap + 2 * pad`` to cost anything.
+    a pose either, so a hole has to exceed ``SUPPORT_GAP + 2 * FRAME_PAD`` to
+    cost anything.
 
     Only the stamps are read. The other way ``interpolate_poses`` falls back --
     a bracket implying an impossible speed -- is left alone here: after the
@@ -418,9 +419,9 @@ def frame_support(frame_ts, odom_ts, *, gap: float = SUPPORT_GAP, pad: float = F
     o = np.sort(np.asarray(odom_ts, dtype=float))
     if not len(o):
         return np.zeros(len(t), dtype=bool)
-    lo, hi = t - pad, t + pad
+    lo, hi = t - FRAME_PAD, t + FRAME_PAD
     keep = (hi >= o[0]) & (lo <= o[-1])
-    for i in np.flatnonzero(np.diff(o) > gap):
+    for i in np.flatnonzero(np.diff(o) > SUPPORT_GAP):
         keep &= ~((lo > o[i]) & (hi < o[i + 1]))
     return keep
 

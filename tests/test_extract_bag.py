@@ -610,7 +610,7 @@ def test_a_root_holds_one_image_format(tmp_path: Path):
 
 
 def _pin_matrix(parent, child):
-    return next(p for p in tf_pins.PINS if p.edge == (parent, child)).matrix()
+    return next(p for p in tf_pins.PINS if (p.parent, p.child) == (parent, child)).matrix()
 
 
 def test_odin_extrinsics_are_pinned(tmp_path: Path):

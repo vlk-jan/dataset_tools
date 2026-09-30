@@ -114,28 +114,6 @@ def test_missing_scene_dir_is_incomplete(tmp_path: Path):
 
 
 # ---------------------------------------------------------------- scenes.csv
-def test_merge_scenes_csv_from_worker_parts(tmp_path: Path):
-    parts = tmp_path / ed.SCENES_PARTS_DIR
-    for idx, bag, frames in ((1, "bag_b", 20), (0, "bag_a", 10)):
-        ed.write_scene_part(
-            parts,
-            ed.SceneResult(
-                index=idx,
-                bag=bag,
-                status=ed.STATUS_OK,
-                frames=frames,
-                start_time=1_700_000_000.0 + idx,
-            ),
-        )
-    csv_path = ed.merge_scenes_csv(tmp_path)
-
-    lines = csv_path.read_text().splitlines()
-    assert lines[0] == "scene,bag,start_time,frames"
-    assert lines[1] == "0000,bag_a,1700000000.000000,10"
-    assert lines[2] == "0001,bag_b,1700000001.000000,20"
-    assert not parts.exists()  # merged parts are cleaned up
-
-
 def test_merge_scenes_csv_recovers_rows_of_skipped_scenes(tmp_path: Path):
     write_scene(tmp_path / "0000", frames=4, start_time=1_700_000_000.0)
     write_scene(tmp_path / "0001", frames=2, start_time=1_700_000_500.0)
@@ -147,20 +125,12 @@ def test_merge_scenes_csv_recovers_rows_of_skipped_scenes(tmp_path: Path):
     assert rows[2] == "0001,synthetic_bag,1700000500.000000,2"
 
 
-def test_merge_scenes_csv_prefers_fresh_worker_rows(tmp_path: Path):
-    write_scene(tmp_path / "0000", frames=4)
-    ed.write_scene_part(
-        tmp_path / ed.SCENES_PARTS_DIR,
-        ed.SceneResult(index=0, bag="fresh_bag", status=ed.STATUS_OK, frames=99, start_time=1.0),
-    )
+def test_merge_scenes_csv_ignores_non_scene_entries(tmp_path: Path):
+    write_scene(tmp_path / "0000", frames=4, start_time=1_700_000_000.0)
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "0001.txt").write_text("")
     rows = ed.merge_scenes_csv(tmp_path).read_text().splitlines()
-    assert rows[1] == "0000,fresh_bag,1.000000,99"
-
-
-def test_write_scene_part_handles_unknown_start_time(tmp_path: Path):
-    parts = tmp_path / ed.SCENES_PARTS_DIR
-    ed.write_scene_part(parts, ed.SceneResult(index=7, bag="bag", status=ed.STATUS_EMPTY))
-    assert (parts / "0007.csv").read_text().strip() == "0007,bag,,0"
+    assert rows == ["scene,bag,start_time,frames", "0000,synthetic_bag,1700000000.000000,4"]
 
 
 # -------------------------------------------------------------------- CLI
@@ -236,5 +206,5 @@ def test_worker_turns_exceptions_into_failed_results(tmp_path: Path):
     result = ed._worker(tmp_path / "missing_bag", tmp_path / "out", 3, args)
     assert result.status == ed.STATUS_FAILED
     assert result.index == 3 and result.message
-    # Failed scenes must not end up in scenes.csv.
-    assert not (tmp_path / "out" / ed.SCENES_PARTS_DIR / "0003.csv").exists()
+    # A failed scene leaves no sentinel, so it cannot end up in scenes.csv.
+    assert not (tmp_path / "out" / "0003" / ed.SENTINEL_FILE).exists()

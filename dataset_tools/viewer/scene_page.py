@@ -619,7 +619,7 @@ def _tf_pins_stats(access: SceneAccess) -> list[dict[str, Any]]:
     for (parent, child), have in said.items():
         if "pin" not in have or "bag" not in have:
             continue
-        pin = tf_pins.Pin(parent, child, have["pin"][0], have["pin"][1], "")
+        pin = tf_pins.Pin(parent, child, have["pin"][0], have["pin"][1])
         record = tf_pins.Record(pin, have["bag"][0], have["bag"][1])
         stats.append(
             stat(

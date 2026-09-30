@@ -45,7 +45,7 @@ def _odin_graph(lidar_xyz=(0.02, 0.0, 0.03), lidar_rpy=(0.0, -1.5, 0.0)):
 
 
 def test_pin_matrix_is_the_tf_pose():
-    pin = tf_pins.Pin("a", "b", (1.0, 2.0, 3.0), (10.0, -20.0, 30.0), "test")
+    pin = tf_pins.Pin("a", "b", (1.0, 2.0, 3.0), (10.0, -20.0, 30.0))
     M = pin.matrix()
     assert np.allclose(M[:3, 3], (1.0, 2.0, 3.0))
     assert np.allclose(tf_pins.rpy_deg(M), (10.0, -20.0, 30.0))
@@ -54,13 +54,13 @@ def test_pin_matrix_is_the_tf_pose():
 def test_apply_replaces_both_directions_and_records_the_bag():
     G = _odin_graph()
     records = tf_pins.apply(G)
-    assert [r.pin.edge for r in records] == [p.edge for p in tf_pins.PINS]
+    assert [r.pin for r in records] == list(tf_pins.PINS)
     lidar = records[0]
     assert np.allclose(lidar.bag_xyz, (0.02, 0.0, 0.03))
     assert np.allclose(lidar.bag_rpy_deg, (0.0, -1.5, 0.0), atol=1e-9)
-    pin = next(p for p in tf_pins.PINS if p.edge == ("imu_link", "odin1_lidar"))
-    assert np.allclose(G["odin1_lidar"]["imu_link"]["transform"], pin.matrix())
-    assert np.allclose(G["imu_link"]["odin1_lidar"]["transform"], np.linalg.inv(pin.matrix()))
+    pin = next(p for p in tf_pins.PINS if (p.parent, p.child) == ("imu_link", "odin1_lidar"))
+    assert np.allclose(G["odin1_lidar"]["imu_link"], pin.matrix())
+    assert np.allclose(G["imu_link"]["odin1_lidar"], np.linalg.inv(pin.matrix()))
     # The chain to base_link is the URDF mount composed with the pin, whatever the bag said.
     mount = np.eye(4)
     mount[:3, 3] = (0.1, 0.0, 0.1)
@@ -68,7 +68,7 @@ def test_apply_replaces_both_directions_and_records_the_bag():
 
 
 def test_far_is_by_translation_or_rotation():
-    pin = tf_pins.Pin("a", "b", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), "test")
+    pin = tf_pins.Pin("a", "b", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
     near = tf_pins.Record(pin, (0.01, 0.01, 0.01), (0.2, 0.2, 0.0))
     assert not near.far
     assert tf_pins.Record(pin, (0.0, 0.0, 0.04), (0.0, 0.0, 0.0)).far
@@ -78,9 +78,9 @@ def test_far_is_by_translation_or_rotation():
 
 def test_apply_touches_nothing_without_the_edges():
     G = build_tf_graph([_TF("base_link", "lidar_frame", (0.17, 0.0, 0.145))])
-    before = {e: G[e[0]][e[1]]["transform"].copy() for e in G.edges}
+    before = {(a, b): E.copy() for a in G for b, E in G[a].items()}
     assert tf_pins.apply(G) == []
-    assert all(np.array_equal(before[e], G[e[0]][e[1]]["transform"]) for e in G.edges)
+    assert all(np.array_equal(E, G[a][b]) for (a, b), E in before.items())
 
 
 def test_report_round_trips(tmp_path):

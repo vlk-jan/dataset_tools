@@ -27,16 +27,13 @@ set -euo pipefail
 # directory rather than through $0, and --output above is relative to it too.
 
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
-[ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
+. "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 BAGS=${1:-/mnt/personal/$USER/helhest_new/bags_raw}
 OUT=${2:-/mnt/personal/$USER/helhest_new}
 
-singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
-    "$REPO/.venv/bin/python" "$REPO/dataset_tools/extract_data.py" \
-    "$BAGS" "$OUT" --jobs 8
+PYTHONPATH="$REPO" singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
+    "$PY" -m dataset_tools.extract_data "$BAGS" "$OUT" --jobs 8
 
 # Sanity-check what came out (non-zero exit on structural problems).
-singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
-    "$REPO/.venv/bin/python" "$REPO/dataset_tools/validate_scene.py" \
-    "$OUT" --csv "$OUT/validation.csv"
+PYTHONPATH="$REPO" singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
+    "$PY" -m dataset_tools.validate_scene "$OUT" --csv "$OUT/validation.csv"

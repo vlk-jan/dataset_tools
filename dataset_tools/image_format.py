@@ -34,7 +34,10 @@ manifest above it yet.
 import argparse
 import json
 import os
+import re
 from pathlib import Path
+
+from dataset_tools.gt_io import _replace_atomically
 
 NAME = "manifest.json"
 KEY = "images"
@@ -124,9 +127,13 @@ def of_scene(scene_dir, root=None) -> str:
     return want
 
 
+#: What a scene directory is called: its index, zero-padded to four digits.
+SCENE_DIR_RE = re.compile(r"\d{4,}")
+
+
 def scenes(root) -> list[Path]:
-    root = Path(root)
-    return sorted(d for d in root.iterdir() if d.name.isdigit() and d.is_dir())
+    """The scene directories of a root, in index order."""
+    return sorted(d for d in Path(root).iterdir() if SCENE_DIR_RE.fullmatch(d.name) and d.is_dir())
 
 
 def of_root(root) -> str | None:
@@ -180,9 +187,7 @@ def declare(root, ext=None) -> str | None:
         raise ImageFormatError(f"{path}: not a JSON object")
     old = doc.get(KEY) if isinstance(doc.get(KEY), dict) else {}
     doc[KEY] = {**old, **block(ext)}
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
-    os.replace(tmp, path)
+    _replace_atomically(path, lambda f: f.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n"))
     return ext
 
 

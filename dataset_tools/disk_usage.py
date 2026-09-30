@@ -50,6 +50,9 @@ import os
 import stat
 from datetime import datetime, timezone
 
+from dataset_tools.gt_io import _replace_atomically
+from dataset_tools.image_format import scenes as scene_dirs
+
 NAME = "disk_usage.json"
 SCHEMA = 3
 LOG = logging.getLogger(__name__)
@@ -176,7 +179,7 @@ def update(root, rescan=(), rescan_all=False):
         rescan_all = rescan_all or doc.get("schema") != SCHEMA
     except FileNotFoundError:
         old = {}
-    on_disk = sorted(d for d in os.listdir(root) if d.isdigit() and os.path.isdir(os.path.join(root, d)))
+    on_disk = [d.name for d in scene_dirs(root)]
     scenes = {}
     for s in on_disk:
         if rescan_all or s in rescan or s not in old:
@@ -194,11 +197,7 @@ def update(root, rescan=(), rescan_all=False):
         "totals": tot,
         "scenes": scenes,
     }
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(doc, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, path)
+    _replace_atomically(path, lambda f: f.write(json.dumps(doc, indent=2) + "\n"))
     return doc
 
 

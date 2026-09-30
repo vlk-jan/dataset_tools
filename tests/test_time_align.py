@@ -122,7 +122,7 @@ def test_an_aligned_scene_is_left_alone(tmp_path, world):
     _, profile = _estimate(scene)
 
     assert profile.is_identity and "already aligned" in profile.summary
-    assert profile.typical_gain < ta.ALIGNED_GAIN
+    assert np.median([w["gain"] for w in profile.windows]) < 10.0  # sharp as it stands
 
 
 def test_the_estimate_does_not_scale_with_speed(tmp_path, world):

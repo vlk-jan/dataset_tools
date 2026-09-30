@@ -48,11 +48,12 @@ window localises anything is left alone rather than guessed at.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+from dataset_tools.transforms import mat_to_quat, poses_from_quat, quat_slerp
 
 #: Voxel edge, metres. Fine enough that a 0.1 s error at walking pace separates
 #: two surfaces, coarse enough that the lidar's own noise does not.
@@ -93,9 +94,6 @@ MIN_DEPTH = 18.0
 #: rather than used as the criterion. Above this a window is called strong in
 #: the summary.
 STRONG_GAIN = 25.0
-#: A scene whose *typical* window has this little to gain is sharp as it
-#: stands, whatever its shallow minima prefer.
-ALIGNED_GAIN = 10.0
 #: No rig's pipeline is further behind than this; anything larger is a failed
 #: measurement, not a latency, and is dropped rather than applied.
 MAX_ABS_OFFSET = 2.0
@@ -116,39 +114,6 @@ LONG_WINDOW = 280
 # ---------------------------------------------------------------------------
 # The objective
 # ---------------------------------------------------------------------------
-def _quat_from_matrix(m: np.ndarray) -> np.ndarray:
-    """Unit quaternions ``(N, 4)`` as ``(x, y, z, w)`` from ``(N, 3, 3)``."""
-    out = np.empty((len(m), 4))
-    for k, r in enumerate(m):
-        tr = r[0, 0] + r[1, 1] + r[2, 2]
-        if tr > 0.0:
-            d = math.sqrt(tr + 1.0) * 2.0
-            out[k] = [(r[2, 1] - r[1, 2]) / d, (r[0, 2] - r[2, 0]) / d, (r[1, 0] - r[0, 1]) / d, 0.25 * d]
-        elif r[0, 0] > r[1, 1] and r[0, 0] > r[2, 2]:
-            d = math.sqrt(1.0 + r[0, 0] - r[1, 1] - r[2, 2]) * 2.0
-            out[k] = [0.25 * d, (r[0, 1] + r[1, 0]) / d, (r[0, 2] + r[2, 0]) / d, (r[2, 1] - r[1, 2]) / d]
-        elif r[1, 1] > r[2, 2]:
-            d = math.sqrt(1.0 + r[1, 1] - r[0, 0] - r[2, 2]) * 2.0
-            out[k] = [(r[0, 1] + r[1, 0]) / d, 0.25 * d, (r[1, 2] + r[2, 1]) / d, (r[0, 2] - r[2, 0]) / d]
-        else:
-            d = math.sqrt(1.0 + r[2, 2] - r[0, 0] - r[1, 1]) * 2.0
-            out[k] = [(r[0, 2] + r[2, 0]) / d, (r[1, 2] + r[2, 1]) / d, 0.25 * d, (r[1, 0] - r[0, 1]) / d]
-    return out
-
-
-def _matrix_from_quat(q: np.ndarray) -> np.ndarray:
-    """``(N, 3, 3)`` from unit quaternions ``(N, 4)`` as ``(x, y, z, w)``."""
-    x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
-    return np.stack(
-        [
-            np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], axis=1),
-            np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], axis=1),
-            np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], axis=1),
-        ],
-        axis=1,
-    )
-
-
 @dataclass
 class PoseTrack:
     """A pose track prepared once, so a sweep does not re-derive it per delta."""
@@ -161,7 +126,7 @@ class PoseTrack:
     def build(cls, ts: np.ndarray, poses: np.ndarray) -> PoseTrack:
         order = np.argsort(ts)
         ts, poses = np.asarray(ts, float)[order], np.asarray(poses, float)[order]
-        return cls(ts, poses[:, :3, 3].copy(), _quat_from_matrix(poses[:, :3, :3]))
+        return cls(ts, poses[:, :3, 3].copy(), mat_to_quat(poses[:, :3, :3]))
 
     def at(self, query: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Pose at each query time: lerp in translation, SLERP in rotation."""
@@ -170,19 +135,7 @@ class PoseTrack:
         span = self.ts[j] - self.ts[i]
         u = np.clip(np.where(span > 0, (query - self.ts[i]) / np.where(span > 0, span, 1.0), 0.0), 0.0, 1.0)
         pos = self.xyz[i] + u[:, None] * (self.xyz[j] - self.xyz[i])
-
-        qa, qb = self.quat[i], self.quat[j]
-        dot = np.sum(qa * qb, axis=1)
-        qb = np.where(dot[:, None] < 0, -qb, qb)  # same rotation, short way round
-        dot = np.abs(dot).clip(-1.0, 1.0)
-        theta = np.arccos(dot)
-        sin = np.sin(theta)
-        close = sin < 1e-6  # nearly parallel: SLERP is ill-conditioned, lerp is exact enough
-        wa = np.where(close, 1.0 - u, np.sin((1.0 - u) * theta) / np.where(close, 1.0, sin))
-        wb = np.where(close, u, np.sin(u * theta) / np.where(close, 1.0, sin))
-        q = wa[:, None] * qa + wb[:, None] * qb
-        q /= np.linalg.norm(q, axis=1, keepdims=True)
-        return pos, _matrix_from_quat(q)
+        return pos, poses_from_quat(pos, quat_slerp(self.quat[i], self.quat[j], u))[:, :3, :3]
 
 
 def load_clouds(scene_dir: Path, frames: np.ndarray, stride: int = 2) -> list[np.ndarray]:
@@ -318,10 +271,6 @@ class Profile:
     @property
     def is_identity(self) -> bool:
         return len(self.knot_ts) == 0
-
-    @property
-    def typical_gain(self) -> float:
-        return float(np.median([w["gain"] for w in self.windows])) if self.windows else 0.0
 
     @property
     def summary(self) -> str:

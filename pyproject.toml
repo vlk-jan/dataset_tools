@@ -22,8 +22,6 @@ dependencies = [
     "rosbags>=0.10",
     "numpy>=1.24",
     "opencv-python-headless>=4.5",
-    "networkx>=2.8",
-    "tqdm>=4.60",
 ]
 
 [project.optional-dependencies]
@@ -82,6 +80,7 @@ dataset_tools = ["libcloudini_shim.so"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 
 # The tree is formatted with this; 88 described nothing, nineteen files violated

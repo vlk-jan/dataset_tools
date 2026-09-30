@@ -116,7 +116,7 @@ def test_frames_are_dropped_with_a_margin_for_the_uncorrected_clock():
     frame stamp may sit a latency away from the pose clock."""
     spans = [gg.Span(1040.0, 1042.0, "frozen")]
     frame_ts = np.array([1038.5, 1039.5, 1041.0, 1042.5, 1043.5])
-    keep = gg.frame_mask(frame_ts, spans, pad=1.0)
+    keep = gg.frame_mask(frame_ts, spans)
     assert list(keep) == [True, False, False, False, True]
 
 
@@ -151,7 +151,7 @@ def test_the_margin_is_spent_towards_keeping_the_frame():
     a frame that *might* sit on a pose. Both err away from fabricating one."""
     odom_ts = np.r_[np.arange(1000.0, 1010.0, 0.1), np.arange(1015.0, 1025.0, 0.1)]
     frame_ts = np.array([1010.5, 1011.0, 1012.5, 1014.0, 1014.5])
-    keep = gg.frame_support(frame_ts, odom_ts, pad=1.0)
+    keep = gg.frame_support(frame_ts, odom_ts)
     assert list(keep) == [True, False, False, True, True]
 
 

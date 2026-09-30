@@ -8,14 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from dataset_tools.extract_data import (
-    build_tf_graph,
-    euler_matrix,
-    get_transform,
-    pose_to_matrix,
-    quaternion_matrix,
-    roll_pitch_from_quat,
-)
+from dataset_tools.extract_data import build_tf_graph, get_transform
+from dataset_tools.transforms import euler_matrix, pose_to_matrix, quaternion_matrix, roll_pitch_from_matrix
 
 
 def quat_from_euler(roll: float, pitch: float, yaw: float) -> list[float]:
@@ -59,7 +53,7 @@ def test_quaternion_matrix_matches_euler_matrix(rpy):
 @pytest.mark.parametrize("rpy", ANGLES)
 def test_roll_pitch_round_trip(rpy):
     roll, pitch, _ = rpy
-    got_roll, got_pitch = roll_pitch_from_quat(quat_from_euler(*rpy))
+    got_roll, got_pitch = roll_pitch_from_matrix(quaternion_matrix(quat_from_euler(*rpy)))
     assert got_roll == pytest.approx(roll, abs=1e-9)
     assert got_pitch == pytest.approx(pitch, abs=1e-9)
 
@@ -95,8 +89,8 @@ def test_tf_graph_edges_hold_point_maps_along_their_direction():
     M = euler_matrix(0.0, 0.0, math.pi / 2)
     M[:3, 3] = [0.1, 0.0, 0.5]
     # child -> parent edge maps lidar points into base_link, parent -> child the inverse
-    np.testing.assert_allclose(G["lidar"]["base_link"]["transform"], M, atol=1e-12)
-    np.testing.assert_allclose(G["base_link"]["lidar"]["transform"], np.linalg.inv(M), atol=1e-12)
+    np.testing.assert_allclose(G["lidar"]["base_link"], M, atol=1e-12)
+    np.testing.assert_allclose(G["base_link"]["lidar"], np.linalg.inv(M), atol=1e-12)
 
 
 def test_get_transform_maps_points_from_src_into_dst():
@@ -164,7 +158,7 @@ def test_tf_graph_takes_the_shortest_path_through_a_diamond():
 
 def test_tf_graph_missing_paths_and_identity():
     G = build_tf_graph([make_tf("a", "b", (1.0, 0.0, 0.0), (0.0, 0.0, 0.0))])
-    G.add_edge("c", "d", transform=np.eye(4))
+    G.update(build_tf_graph([make_tf("c", "d", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))]))
     np.testing.assert_allclose(get_transform(G, "a", "a"), np.eye(4))
     assert get_transform(G, "a", "missing") is None
     assert get_transform(G, "missing", "a") is None

@@ -32,15 +32,9 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-import networkx as nx
 import numpy as np
 
-try:
-    from dataset_tools.transforms import euler_matrix
-except ModuleNotFoundError as exc:  # run as a script beside the other modules
-    if exc.name != "dataset_tools":
-        raise
-    from transforms import euler_matrix
+from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix
 
 #: The record written beside a scene.
 FILE = "tf_pins.txt"
@@ -54,11 +48,6 @@ class Pin:
     child: str
     xyz: tuple[float, float, float]
     rpy_deg: tuple[float, float, float]
-    basis: str
-
-    @property
-    def edge(self) -> tuple[str, str]:
-        return self.parent, self.child
 
     def matrix(self) -> np.ndarray:
         """``M`` with ``p_parent = M @ p_child``, what a TF message with these values carries."""
@@ -76,14 +65,12 @@ PINS: tuple[Pin, ...] = (
         "odin1_lidar",
         xyz=(0.011, 0.024, 0.006),
         rpy_deg=(-0.29, -0.53, 0.12),
-        basis=BASIS,
     ),
     Pin(
         "odin1_lidar",
         "odin1_camera_link",
         xyz=(-0.010, 0.039, 0.014),
         rpy_deg=(0.40, 0.04, 0.06),
-        basis=BASIS,
     ),
 )
 
@@ -118,29 +105,27 @@ class Record:
 
 def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
     """Roll, pitch, yaw in degrees of a matrix from `euler_matrix` ('sxyz')."""
-    R = M[:3, :3]
-    pitch = -math.asin(max(-1.0, min(1.0, R[2, 0])))
-    roll = math.atan2(R[2, 1], R[2, 2])
-    yaw = math.atan2(R[1, 0], R[0, 0])
+    roll, pitch = roll_pitch_from_matrix(M)
+    yaw = math.atan2(M[1, 0], M[0, 0])
     return tuple(math.degrees(a) for a in (roll, pitch, yaw))
 
 
-def apply(G: nx.DiGraph, pins: tuple[Pin, ...] = PINS) -> list[Record]:
+def apply(G: dict[str, dict[str, np.ndarray]]) -> list[Record]:
     """Replace each pinned edge the graph has with its pin; return what the bag had.
 
-    ``G`` is from ``extract_data.build_tf_graph``: edge ``parent -> child``
-    holds ``inv(M)`` and ``child -> parent`` holds ``M``, the pose of the
-    child in the parent. Both directions are replaced.
+    ``G`` is from ``extract_data.build_tf_graph``: ``G[parent][child]`` holds
+    ``inv(M)`` and ``G[child][parent]`` holds ``M``, the pose of the child in
+    the parent. Both directions are replaced.
     """
     records = []
-    for pin in pins:
-        if not G.has_edge(pin.child, pin.parent):
+    for pin in PINS:
+        was = G.get(pin.child, {}).get(pin.parent)
+        if was is None:
             continue
-        was = G[pin.child][pin.parent]["transform"]
         records.append(Record(pin, tuple(float(v) for v in was[:3, 3]), rpy_deg(was)))
         M = pin.matrix()
-        G[pin.parent][pin.child]["transform"] = np.linalg.inv(M)
-        G[pin.child][pin.parent]["transform"] = M
+        G[pin.parent][pin.child] = np.linalg.inv(M)
+        G[pin.child][pin.parent] = M
     return records
 
 
@@ -163,6 +148,6 @@ def write_report(path: Path, records: list[Record]) -> None:
             )
         lines.append(
             f"# {r.pin.parent} -> {r.pin.child}: bag {r.translation_m * 1000:.0f} mm, "
-            f"{r.rotation_deg:.2f} deg from the pin{' (far)' if r.far else ''}; pin is the {r.pin.basis}"
+            f"{r.rotation_deg:.2f} deg from the pin{' (far)' if r.far else ''}; pin is the {BASIS}"
         )
     path.write_text("\n".join(lines) + "\n")

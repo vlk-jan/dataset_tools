@@ -90,7 +90,7 @@ def format_pose_line(t: float, T: np.ndarray) -> str:
     return " ".join(f"{v:.6f}" for v in (t, *np.asarray(T).ravel()))
 
 
-def _replace_atomically(dest, writer) -> None:
+def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> None:
     """Write through a temp file in the same directory and ``os.replace`` it in.
 
     A root that is being read by a training job at the time of an in-place edit
@@ -108,16 +108,8 @@ def _replace_atomically(dest, writer) -> None:
     os.replace(tmp, dest)
 
 
-def _write(dest: Path | str | TextIO, writer: Callable[[TextIO], None]) -> None:
-    """Run ``writer`` on an open handle as it is, or atomically into a path."""
-    if hasattr(dest, "write"):
-        writer(dest)  # type: ignore[arg-type]
-        return
-    _replace_atomically(dest, writer)
-
-
-def write_trajectory(dest: Path | str | TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
-    """Write header + one line per pose to a path or an open text handle.
+def write_trajectory(dest: Path | str, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
+    """Write header + one line per pose, atomically.
 
     ``ts`` and ``poses`` must be the same length: a mismatch is a caller's bug,
     and a file silently short of its poses would only be found downstream.
@@ -125,7 +117,7 @@ def write_trajectory(dest: Path | str | TextIO, ts: Iterable[float], poses: Iter
     ts, poses = list(ts), list(poses)
     if len(ts) != len(poses):
         raise ValueError(f"{len(ts)} timestamps for {len(poses)} poses")
-    _write(dest, lambda fh: _write_trajectory(fh, ts, poses))
+    _replace_atomically(dest, lambda fh: _write_trajectory(fh, ts, poses))
 
 
 def _write_trajectory(fh: TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
@@ -190,10 +182,10 @@ def format_segment_line(row: SegmentRow) -> str:
     return f"{row.index} {row.start_ts:.6f} {row.end_ts:.6f} {row.n_poses} {row.reason}".rstrip()
 
 
-def write_segments(dest: Path | str | TextIO, rows: Iterable[SegmentRow]) -> None:
-    """Write header + one line per segment to a path or an open text handle."""
+def write_segments(dest: Path | str, rows: Iterable[SegmentRow]) -> None:
+    """Write header + one line per segment, atomically."""
     rows = list(rows)
-    _write(dest, lambda fh: _write_segments(fh, rows))
+    _replace_atomically(dest, lambda fh: _write_segments(fh, rows))
 
 
 def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
