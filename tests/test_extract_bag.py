@@ -119,12 +119,12 @@ def _odom_msg(t: float, x: float, yaw: float = 0.0):
     )
 
 
-def _imu_msg(t: float, roll: float):
+def _imu_msg(t: float, roll: float, yaw_rate: float = 0.0):
     return _t("sensor_msgs/msg/Imu")(
         header=_header(t, "base_link"),
         orientation=_quat(x=math.sin(roll / 2), w=math.cos(roll / 2)),
         orientation_covariance=np.zeros(9),
-        angular_velocity=_vec(),
+        angular_velocity=_vec(z=yaw_rate),
         angular_velocity_covariance=np.zeros(9),
         linear_acceleration=_vec(),
         linear_acceleration_covariance=np.zeros(9),
@@ -276,7 +276,9 @@ def write_bag(
             if odom_until is None or k < odom_until:
                 # 1 m/s: under the GT teleport gate
                 put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k, yaw_rate * 0.1 * k))
-            put("/imu", t, _imu_msg(t, math.radians(10.0)))
+            # The IMU at 100 Hz when there is a sweep to deskew, so its gyro covers it.
+            for i in range(10 if sweep_s > 0 else 1):
+                put("/imu", t + 0.01 * i, _imu_msg(t + 0.01 * i, math.radians(10.0), yaw_rate))
             put("/joint_states", t, _joint_msg(0.1 * k if k < boot_joints else t, k))
             put("/cmd_vel", t, _t("geometry_msgs/msg/Twist")(linear=_vec(x=0.4), angular=_vec(z=0.1)))
             # A short eastward track; the last fix declares an unknown
@@ -840,6 +842,8 @@ def test_a_sweep_recorded_while_turning_is_deskewed_onto_the_frame_clock(tmp_pat
     # The last sweep runs past the last pose sample, so it is the one left raw.
     assert meta["frames"]["deskew"]["deskewed"] == len(frame_ts) - 1
     assert meta["frames"]["deskew"]["no_pose"] == 1
+    # No --deskew_imu in this bag: every sweep's rotation came from the slerp.
+    assert meta["frames"]["deskew"]["slerp"] == len(frame_ts) - 1 and "gyro" not in meta["frames"]["deskew"]
     assert meta["frames"]["deskew"]["sweep_span_s"] == pytest.approx(0.067, abs=1e-3)
 
     raw = tmp_path / "raw"
@@ -861,3 +865,35 @@ def test_a_cloud_without_per_point_time_is_written_as_recorded(bags: Path, tmp_p
         "sweep_span_s": 0.0,
         "no_time_field": n,
     }
+
+
+def test_the_gyro_refines_the_sweep_and_the_odometry_is_checked(tmp_path: Path):
+    """With --deskew_imu the rotation inside each sweep comes from the gyro,
+    and with --check_odom the scene carries pose_check.txt. The synthetic bag
+    turns at a constant rate, so gyro and slerp agree and the gyro is believed;
+    checked against its own stream, the odometry disagrees with nothing."""
+    rate = math.radians(60.0)
+    write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
+    out = tmp_path / "out"
+    flags = [*COMMON, "--gt", "on", "--time_align", "off", "--deskew_imu", "/imu", "--check_odom", "/odom"]
+    assert main([str(tmp_path / "bags"), str(out), *flags]) == 0
+    scene = out / "0000"
+    frame_ts = np.loadtxt(scene / "data_ts.txt")
+    k = 7
+    cloud = np.load(scene / "clouds" / f"{k:05d}.npy")
+    assert np.abs(cloud[:, :3] - _wall_in_base(frame_ts[k], rate)).max() < 0.02
+    meta = json.loads((scene / "extract_meta.json").read_text())
+    assert meta["frames"]["deskew"]["gyro"] >= len(frame_ts) - 3  # the gyro's last samples end with the bag
+    assert (
+        meta["frames"]["deskew"]["gyro"] + meta["frames"]["deskew"].get("slerp", 0)
+        == meta["frames"]["deskew"]["deskewed"]
+    )
+    # --check_odom equal to --odom is the same stream: nothing to compare, no report.
+    assert not (scene / "pose_check.txt").exists() and "pose_check" not in meta["frames"]
+
+    # The check against a different stream (here the same motion on a second topic) writes the report.
+    write_bag(tmp_path / "bags2" / "bag_b", frames=40, yaw_rate=rate, sweep_s=0.067)
+    out2 = tmp_path / "out2"
+    flags = [*COMMON, "--gt", "on", "--time_align", "off", "--check_odom", "/fixposition/odometry_llh"]
+    assert main([str(tmp_path / "bags2"), str(out2), *flags]) == 0  # a NavSatFix: no pose, check silently absent
+    assert not (out2 / "0000" / "pose_check.txt").exists()

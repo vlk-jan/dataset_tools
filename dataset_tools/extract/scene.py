@@ -23,7 +23,7 @@ from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
     tf_pins,
     time_align,
 )
-from dataset_tools.extract import deskew
+from dataset_tools.extract import deskew, pose_check
 from dataset_tools.extract.camera import IMAGE_MSGTYPES, get_first_frame, save_camera_extrinsic, save_intrinsics
 from dataset_tools.extract.gps import GPS_MSGTYPE, gps_row, pick_gps_topic
 from dataset_tools.extract.ground_truth import _auto, write_ground_truth
@@ -33,6 +33,7 @@ from dataset_tools.extract.scene_io import (
     GNSS_GUARD_FILE,
     JOINT_NAMES_FILE,
     META_FILE,
+    POSE_CHECK_FILE,
     SENTINEL_FILE,
     STATUS_EMPTY,
     STATUS_OK,
@@ -108,6 +109,13 @@ class _Pass1:
     odom_child_frame: str | None = None
     imu: list = field(default_factory=list)  # (ts, rotation matrix of imu frame in gravity-referenced frame)
     imu_frame: str | None = None
+    #: (ts, wx, wy, wz) of the gyro that refines the rotation inside a sweep (--deskew_imu), and its frame.
+    gyro: list = field(default_factory=list)
+    gyro_frame: str | None = None
+    gyro_rot: np.ndarray | None = None
+    #: (ts, pose) of the stream the odometry is checked against (--check_odom), and its child frame.
+    check_odom: list = field(default_factory=list)
+    check_child: str | None = None
     joint_states: list = field(default_factory=list)
     joint_setpoints: list = field(default_factory=list)
     cmd_vel: list = field(default_factory=list)
@@ -228,6 +236,8 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
         conns.get("/cmd_vel"),
         conns.get(p1.gps_topic),
         conns.get("/tf_static"),
+        conns.get(args.deskew_imu),
+        conns.get(args.check_odom),
     ]
     # Deduplicate (e.g. when --odom and --imu are the same topic)
     relevant_conns = list({id(c): c for c in relevant_conns if c is not None}.values())
@@ -266,6 +276,16 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
                     stamp_only.discard(id(conn))
         if conn.topic != "/tf_static":
             p1.stamps[conn.topic].append(t)
+
+        # The gyro and the check stream may double as --imu or --odom, so they
+        # are taken here, before the chain below claims the message.
+        if conn.topic == args.deskew_imu and hasattr(msg, "angular_velocity"):
+            w = msg.angular_velocity
+            p1.gyro.append((t, w.x, w.y, w.z))
+            p1.gyro_frame = msg.header.frame_id
+        if conn.topic == args.check_odom and conn.topic != args.odom and hasattr(msg, "pose"):
+            p1.check_odom.append((t, pose_to_matrix(msg.pose.pose)))
+            p1.check_child = msg.child_frame_id
 
         if conn.topic == args.cam:
             p1.cam_ts.append(t + shift_cam)
@@ -392,13 +412,19 @@ def _select_frames(p1: _Pass1, args, bag: str):
     guard_verdict = None
     if _auto(args.gnss_guard, args.odom) and p1.odom:
         p1.odom.sort(key=lambda x: x[0])
-        # The stamps of the fixes that carried a position. The gaps in them are
-        # when the receiver had no solution, whether it said so by publishing
-        # null island (gps_row drops those) or by publishing nothing at all.
-        # A rig with a fix topic but not one usable fix is an empty list, not
-        # None: the receiver never had a solution, which is evidence too.
-        fix_ts = [float(r[0]) for r in p1.gps_rows] if p1.gps_topic else None
-        p1.odom, keep, guard_verdict = gnss_guard.guard(p1.odom, frame_ts, fix_ts)
+        if args.gnss_guard == "on" or "fixposition" in args.odom:
+            # The full guard: asked for, or a Fixposition, whose reset solutions it knows.
+            # The stamps of the fixes that carried a position. The gaps in them are
+            # when the receiver had no solution, whether it said so by publishing
+            # null island (gps_row drops those) or by publishing nothing at all.
+            # A rig with a fix topic but not one usable fix is an empty list, not
+            # None: the receiver never had a solution, which is evidence too.
+            fix_ts = [float(r[0]) for r in p1.gps_rows] if p1.gps_topic else None
+            p1.odom, keep, guard_verdict = gnss_guard.guard(p1.odom, frame_ts, fix_ts)
+        else:
+            # The Odin1 odometry fabricates nothing; it relocalises in jumps,
+            # which the segment gate turns into breaks. Only coverage applies.
+            p1.odom, keep, guard_verdict = gnss_guard.coverage_guard(p1.odom, frame_ts)
         if not guard_verdict.clean:
             LOG.warning("%s: %s", bag, guard_verdict.summary(float(frame_ts[0])))
             valid_cam_ts, valid_pcd_ts, frame_ts = valid_cam_ts[keep], valid_pcd_ts[keep], frame_ts[keep]
@@ -508,6 +534,34 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             f"no TF path from orientation frame '{imu_frame}' to '{args.base_frame}': "
             "gravity_align.npy is the sensor's tilt, not the base's",
         )
+
+    # The gyro that refines the rotation inside a sweep needs its axes in the
+    # base frame; without a path it is not used, and the sweeps fall back to
+    # the pose track's slerp -- a loss of precision, not of correctness.
+    if p1.gyro:
+        T_gyro = get_transform(tf_graph, p1.gyro_frame, args.base_frame) if p1.gyro_frame else None
+        if T_gyro is None:
+            LOG.warning(
+                "%s: no TF path from gyro frame '%s' to '%s'; sweeps are deskewed from the pose track alone",
+                bag,
+                p1.gyro_frame,
+                args.base_frame,
+            )
+            p1.gyro = []
+        else:
+            p1.gyro_rot = T_gyro[:3, :3]
+
+    # The check stream is compared at the base frame too, or the lever arm
+    # between the two sensors would read as disagreement.
+    child = p1.check_child
+    T_check = get_transform(tf_graph, child, args.base_frame) if child else None
+    if T_check is not None and not np.allclose(T_check, np.eye(4)):
+        T_base_in_check = np.linalg.inv(T_check)
+        p1.check_odom = [(t, T @ T_base_in_check) for t, T in p1.check_odom]
+    elif child and T_check is None:
+        LOG.warning(
+            "%s: no TF path from '%s' to '%s'; the pose check compares at '%s'", bag, child, args.base_frame, child
+        )
     return tf_graph, T_lidar_to_base
 
 
@@ -544,6 +598,7 @@ def _write_frames(
     # The poses are at the base frame by now (_resolve_frames), which is the
     # frame the clouds are about to be written in -- the one deskewing needs.
     track = deskew.build_track(p1.odom) if args.deskew != "off" else None
+    gyro = deskew.GyroTrack.build(p1.gyro, p1.gyro_rot) if track is not None and p1.gyro else None
     sweeps = Counter()
     span = 0.0
     shift_cam = args.cam_time_offset
@@ -624,8 +679,10 @@ def _write_frames(
                 if offsets is None:
                     sweeps["no_time_field"] += 1
                 else:
-                    pcd, status = deskew.deskew(pcd, offsets[keep], t, float(frame_ts[pcd_idx]), track)
+                    pcd, status, method = deskew.deskew(pcd, offsets[keep], t, float(frame_ts[pcd_idx]), track, gyro)
                     sweeps[status] += 1
+                    if method:
+                        sweeps[method] += 1
                     if keep.any():
                         span = max(span, float(np.ptp(offsets[keep])))
             np.save(
@@ -652,12 +709,19 @@ def _report_deskew(p1: _Pass1, track, sweeps: Counter, span: float, clouds: int,
     p1.counts["deskew"] = entry
     if sweeps["deskewed"]:
         LOG.info(
-            "%s: %d/%d sweeps deskewed onto the frame clock (span up to %.3f s)%s",
+            "%s: %d/%d sweeps deskewed onto the frame clock (span up to %.3f s; rotation from the gyro in %d, "
+            "slerp in %d)%s",
             bag,
             sweeps["deskewed"],
             clouds,
             span,
-            "".join(f"; {v} {k.replace('_', ' ')}" for k, v in sorted(sweeps.items()) if k != "deskewed" and v),
+            sweeps["gyro"],
+            sweeps["slerp"],
+            "".join(
+                f"; {v} {k.replace('_', ' ')}"
+                for k, v in sorted(sweeps.items())
+                if k not in ("deskewed", "gyro", "slerp") and v
+            ),
         )
     elif sweeps["no_time_field"]:
         LOG.info("%s: the clouds carry no per-point time; written as recorded (nothing to deskew)", bag)
@@ -733,6 +797,32 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
             bag,
             args.odom,
         )
+
+    # The odometry this scene is built on, checked against the other stream the
+    # rig records (--check_odom): where the two disagree, and by how much.
+    if p1.odom and p1.check_odom:
+        p1.check_odom.sort(key=lambda x: x[0])
+        p1.odom.sort(key=lambda x: x[0])
+        result = pose_check.compare(
+            np.array([x[0] for x in p1.odom]),
+            np.array([x[1] for x in p1.odom]),
+            np.array([x[0] for x in p1.check_odom]),
+            np.array([x[1] for x in p1.check_odom]),
+            gnss_guard.MAX_SPEED,
+        )
+        pose_check.write_report(scene_dir / POSE_CHECK_FILE, result, args.odom, args.check_odom)
+        p1.counts["pose_check"] = {"reference": args.check_odom, **result}
+        five = (result.get("displacement") or {}).get("5s") or {}
+        LOG.info(
+            "%s: pose check against %s -- clock lag %s s, 5 s displacement median %s cm, %s jumps in the odometry",
+            bag,
+            args.check_odom,
+            result.get("clock_lag_s"),
+            five.get("median_cm"),
+            (result.get("primary_jumps") or {}).get("steps"),
+        )
+        for w in result.get("warnings", []):
+            LOG.warning("%s: pose check -- %s", bag, w)
 
     # Process gravity alignment
     if p1.imu:

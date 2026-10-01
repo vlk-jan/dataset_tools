@@ -32,6 +32,8 @@ SCENE_OUTPUT_DIRS = ("images", "clouds")
 TIME_ALIGN_FILE = "time_align.txt"
 #: The record of what the pose guard threw away, and why (gnss_guard).
 GNSS_GUARD_FILE = "gnss_guard.txt"
+#: The scene's odometry checked against the rig's other pose stream (extract.pose_check).
+POSE_CHECK_FILE = "pose_check.txt"
 #: What this run was, what the bag held, and what the run made of it.
 META_FILE = "extract_meta.json"
 #: The joint order of the joint_states.npy / joint_setpoints.npy columns.
@@ -50,6 +52,7 @@ SCENE_OUTPUT_FILES = (
     "gps.npy",
     TIME_ALIGN_FILE,
     GNSS_GUARD_FILE,
+    POSE_CHECK_FILE,
     tf_pins.FILE,
     META_FILE,
     JOINT_NAMES_FILE,

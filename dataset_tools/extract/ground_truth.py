@@ -13,16 +13,27 @@ from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, wri
 def _auto(mode: str, odom: str) -> bool:
     """``on``/``off`` as given; ``auto`` is on only for an absolute GNSS/INS source.
 
-    --gt: the odometry is its own ground truth only on rigs where the source is
-    absolute (Fixposition); wheel-IMU /odom drifts and the old rig's ground
-    truth comes from the offline FAST-LIO regeneration. --gnss_guard: a reset
-    solution only happens where there is a fix to lose; wheel-IMU /odom, being
-    an integration, legitimately holds a bit-identical pose for as long as the
-    robot stands still -- which is the guard's own signature for a fabricated
-    stretch, so running it there would delete exactly the frames where the
-    robot was parked.
+    --gt: the odometry is its own ground truth only on the new rig, whose
+    sources are the Odin1's lidar-inertial odometry and the Fixposition
+    GNSS/INS; wheel-IMU /odom drifts and the old rig's ground truth comes from
+    the offline FAST-LIO regeneration. --gnss_guard: the full guard (reset
+    solutions) is for the Fixposition; the Odin1 odometry gets its coverage
+    half only (:func:`dataset_tools.gnss_guard.coverage_guard`). Wheel-IMU
+    /odom, being an integration, legitimately holds a bit-identical pose for
+    as long as the robot stands still -- which is the guard's own signature
+    for a fabricated stretch, so running it there would delete exactly the
+    frames where the robot was parked.
     """
-    return mode == "on" or (mode == "auto" and "fixposition" in odom)
+    return mode == "on" or (mode == "auto" and is_ground_truth_source(odom))
+
+
+#: Odometry topics the dataset takes as ground truth as recorded: the Odin1's
+#: own odometry (v2.3 on) and the Fixposition GNSS/INS (v2 beta to v2.2).
+GROUND_TRUTH_SOURCES = ("odin1/odometry", "fixposition")
+
+
+def is_ground_truth_source(odom: str) -> bool:
+    return any(key in odom for key in GROUND_TRUTH_SOURCES)
 
 
 def write_ground_truth(

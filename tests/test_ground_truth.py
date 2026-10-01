@@ -67,3 +67,12 @@ def test_gap_reason_and_min_poses(tmp_path):
 
 def test_too_few_samples(tmp_path):
     assert not write_ground_truth(_traj([0, 0.1], [0, 0.1]), tmp_path)
+
+
+def test_the_auto_modes_follow_the_odometry_source():
+    from dataset_tools.extract.ground_truth import _auto, is_ground_truth_source
+
+    assert is_ground_truth_source("/odin1/odometry") and is_ground_truth_source("/fixposition/odometry_enu")
+    assert not is_ground_truth_source("/odom") and not is_ground_truth_source("/odom_2d")
+    assert _auto("auto", "/odin1/odometry") and not _auto("auto", "/odom")
+    assert _auto("on", "/odom") and not _auto("off", "/odin1/odometry")

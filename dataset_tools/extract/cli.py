@@ -107,19 +107,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--odom",
         type=str,
-        default="/fixposition/odometry_enu",
-        help="Odometry topic used for transforms.npy (old bags: /odom). Note: "
-        "the _smooth variant's child frame FP_POISH is not connected to "
-        "base_link via static TF, plain odometry_enu (FP_POI) is.",
+        default="/odin1/odometry",
+        help="Odometry topic used for odometry.txt and transforms.npy (default: the Odin1's own "
+        "lidar-inertial odometry, 14 Hz, 6-DoF, on the lidar's clock -- the ground truth from v2.3 on; "
+        "v2 beta to v2.2 used /fixposition/odometry_enu, old bags /odom). It is checked against "
+        "--check_odom. Note: the Fixposition _smooth variant's child frame FP_POISH is not connected "
+        "to base_link via static TF, plain odometry_enu (FP_POI) is.",
     )
     parser.add_argument(
         "--imu",
         type=str,
-        default="/fixposition/odometry_enu",
+        default="/odin1/odometry",
         help="Orientation source for gravity alignment; accepts sensor_msgs/Imu "
-        "or nav_msgs/Odometry topics (old bags: /ekf/imu/data). Note: the new "
-        "bags' /imu/data is mounted tilted (~5 deg roll, ~11 deg pitch) with "
-        "no TF to base_link, so the Fixposition orientation is used instead.",
+        "or nav_msgs/Odometry topics (default: the Odin1 odometry's attitude; v2 beta to v2.2 used "
+        "/fixposition/odometry_enu, old bags /ekf/imu/data). pose_check.txt reports the roll/pitch "
+        "difference against --check_odom.",
     )
     parser.add_argument(
         "--gps",
@@ -188,6 +190,26 @@ def build_parser() -> argparse.ArgumentParser:
         "every root before 2026-10-01 was. Recorded per scene in extract_meta.json (frames.deskew)",
     )
     parser.add_argument(
+        "--deskew_imu",
+        type=str,
+        default="/odin1/imu",
+        metavar="TOPIC",
+        help="sensor_msgs/Imu whose gyro gives the rotation inside each sweep when deskewing (default: the "
+        "Odin1's, 400 Hz); its frame needs a TF path to --base_frame. 'off', or a missing topic, falls back "
+        "to the pose track's slerp across the sweep. Per sweep the gyro is used only where it agrees with "
+        "that slerp to 1 deg; extract_meta.json counts gyro vs slerp",
+    )
+    parser.add_argument(
+        "--check_odom",
+        type=str,
+        default="/fixposition/odometry_enu",
+        metavar="TOPIC",
+        help="nav_msgs/Odometry the scene's odometry is checked against, at the base frame: jumps, "
+        "displacement over 1/2/5 s, clock lag, tilt. Written to pose_check.txt and extract_meta.json; "
+        "nothing in the scene is built from it. 'off' skips the check; the default is the Fixposition "
+        "GNSS/INS, which stays the georeference (gps.npy) and the check from v2.3 on",
+    )
+    parser.add_argument(
         "--image_format",
         choices=("camera", "png"),
         default="camera",
@@ -240,8 +262,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["auto", "on", "off"],
         default="auto",
         help="Write odometry.txt + odometry_segments.txt (v1.2 ground-truth "
-        "contract) from the odometry stream, segmented at gaps and GNSS "
-        "teleports. 'auto' enables it when --odom is a Fixposition topic.",
+        "contract) from the odometry stream, segmented at gaps and jumps "
+        "(relocalisations, GNSS teleports). 'auto' enables it when --odom is "
+        "the Odin1 odometry or a Fixposition topic.",
     )
     parser.add_argument(
         "--scenes",

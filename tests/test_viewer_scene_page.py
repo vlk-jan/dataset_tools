@@ -469,7 +469,7 @@ def test_the_extraction_card_sums_up_the_three_report_files(tmp_path):
     card = card_of(page, "Extraction")
     assert card is not None and card["warn"] is None
 
-    assert value_of(card, "frame clock") == "-0.710 s"
+    assert value_of(card, "frame clock") == "-0.700 s"  # the median of the two knots
     assert sub_of(card, "frame clock") == "2/3 windows (measured)"
     assert value_of(card, "measured offset") == "-690 ms"
     assert sub_of(card, "measured offset") == "median over 3 windows, largest -710 ms"

@@ -475,6 +475,27 @@ def guard(odom_data, frame_ts: np.ndarray, fix_ts=None) -> tuple[list, np.ndarra
     return kept, mask & support, verdict
 
 
+def coverage_guard(odom_data, frame_ts: np.ndarray) -> tuple[list, np.ndarray, Verdict]:
+    """The support half of :func:`guard` alone, for a pose source that has no
+    reset solution to detect (the Odin1's odometry relocalises in jumps, which
+    the segment gate turns into breaks; nothing in it is fabricated). Frames
+    before the stream, after it or inside a hole still go, for the same
+    reason as under the full guard."""
+    verdict = Verdict(n_poses=len(odom_data), n_frames=len(frame_ts))
+    frames = np.asarray(frame_ts, dtype=float)
+    if not odom_data:
+        return list(odom_data), np.ones(len(frames), dtype=bool), verdict
+    kept_ts = [row[0] for row in odom_data]
+    support = frame_support(frames, kept_ts)
+    verdict.n_frames_unsupported = int(np.count_nonzero(~support))
+    verdict.n_unsupported_before = int(np.count_nonzero(~support & (frames < kept_ts[0])))
+    verdict.n_unsupported_after = int(np.count_nonzero(~support & (frames > kept_ts[-1])))
+    verdict.n_unsupported_inside = (
+        verdict.n_frames_unsupported - verdict.n_unsupported_before - verdict.n_unsupported_after
+    )
+    return list(odom_data), support, verdict
+
+
 def write_report(path, verdict: Verdict, t0: float) -> None:
     """Record what the guard did, so a scene can be audited after the fact.
 
