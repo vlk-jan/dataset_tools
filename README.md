@@ -415,6 +415,16 @@ the viewer's own virtualenv:
 
 ## Known caveats
 
+- **One root, three keyframe lists, the hold-out in the manifest** (since
+  2026-10-01, HELHEST v2.3). `keyframes.lst` lists every frame with a map,
+  `keyframes_train.lst` the training scenes and `keyframes_heldout.lst` the
+  held-out session; `manifest.json` → `held_out.scenes` names that session,
+  and DRIFT's loader keeps those scenes out of every training and validation
+  fold whichever list it reads (`--keyframes`, `--allow_held_out`). v2.1 and
+  v2.2 did this with symlink roots (`*_train`, `*_heldout`,
+  `*_allframes_notrain`) because the loader read one fixed file name;
+  `helhest-validate` now checks the lists against the declaration
+  (`ROOT_KEYFRAMES`), and the viewer tags the scenes from it.
 - **A lidar frame is a sweep, not a snapshot.** The Odin1 scans its raster
   bottom to top over 67 ms and stamps the frame at the start; each point's
   own time is in the `offset_time` field. Until 2026-10-01 the extractor

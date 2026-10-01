@@ -800,6 +800,45 @@ def validate_root(root: Path, reports: Sequence[SceneReport], max_extrinsic_m: f
                         )
                     )
 
+    # The keyframe lists against the manifest's hold-out: a held-out scene in
+    # the training list is the one mistake the layout used to make impossible.
+    held_out: set[str] = set()
+    if manifest.is_file():
+        with contextlib.suppress(OSError, ValueError):
+            held = json.loads(manifest.read_text()).get("held_out")
+            scenes = held.get("scenes") if isinstance(held, dict) else held if isinstance(held, list) else []
+            held_out = {str(x).zfill(4) if str(x).isdigit() else str(x) for x in scenes or []}
+    on_disk_names = {r.name for r in reports}
+    for name in ("keyframes.lst", "keyframes_train.lst", "keyframes_heldout.lst"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            listed = {line.split("/", 1)[0] for line in path.read_text().splitlines() if line.strip()}
+        except OSError as exc:
+            out.append(Message(WARNING, "ROOT_KEYFRAMES", f"{name}: unreadable ({exc})"))
+            continue
+        unknown = sorted(listed - on_disk_names)
+        if unknown:
+            out.append(Message(WARNING, "ROOT_KEYFRAMES", f"{name} names scene(s) not on disk: {', '.join(unknown)}"))
+        if name == "keyframes_train.lst" and (leak := sorted(listed & held_out)):
+            out.append(
+                Message(
+                    ERROR,
+                    "ROOT_KEYFRAMES",
+                    f"{name} lists held-out scene(s) {', '.join(leak)} (manifest.json held_out.scenes); a "
+                    "training run on this list would see the held-out session",
+                )
+            )
+        if name == "keyframes_heldout.lst" and (extra := sorted(listed - held_out)):
+            out.append(
+                Message(
+                    WARNING,
+                    "ROOT_KEYFRAMES",
+                    f"{name} lists scene(s) the manifest does not hold out: {', '.join(extra)}",
+                )
+            )
+
     mounts = {}
     for r in reports:
         path = r.path / "T_cam_to_base.txt"

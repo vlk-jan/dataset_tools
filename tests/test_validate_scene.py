@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -403,3 +404,29 @@ def test_root_checks_and_the_allowlist_make_strict_a_gate(tmp_path: Path, capsys
     tilt = next(m for m in doc["scenes"]["0000"]["messages"] if m["code"] == "TILT")
     assert tilt["expected"] is True and tilt["severity"] == vs.WARNING
     assert [m["code"] for m in doc["root"]] == ["EXPECT_UNUSED"]
+
+
+def test_the_keyframe_lists_are_checked_against_the_manifest_s_hold_out(tmp_path: Path):
+    """A held-out scene in keyframes_train.lst is the one mistake the old
+    one-list-per-root layout made impossible; now the validator makes it loud."""
+    root = tmp_path / "root"
+    write_scene(root / "0000")
+    write_scene(root / "0001")
+    (root / "0001" / "source_bag.txt").write_text("other_bag\n")
+    (root / "manifest.json").write_text(json.dumps({"held_out": {"scenes": ["0001"]}}))
+    (root / "keyframes.lst").write_text(
+        "0000/clouds/00000.npy 0000/images/00000.png\n0001/clouds/00000.npy 0001/images/00000.png\n"
+    )
+    (root / "keyframes_train.lst").write_text("0000/clouds/00000.npy 0000/images/00000.png\n")
+    (root / "keyframes_heldout.lst").write_text("0001/clouds/00000.npy 0001/images/00000.png\n")
+    reports = [vs.validate_scene(root / "0000"), vs.validate_scene(root / "0001")]
+    assert [m for m in vs.validate_root(root, reports) if m.code == "ROOT_KEYFRAMES"] == []
+
+    (root / "keyframes_train.lst").write_text(
+        "0000/clouds/00000.npy x\n0001/clouds/00000.npy x\n0007/clouds/00000.npy x\n"
+    )
+    (root / "keyframes_heldout.lst").write_text("0000/clouds/00000.npy x\n")
+    msgs = [m for m in vs.validate_root(root, reports) if m.code == "ROOT_KEYFRAMES"]
+    assert any(m.severity == vs.ERROR and "held-out scene(s) 0001" in m.text for m in msgs)
+    assert any("not on disk: 0007" in m.text for m in msgs)
+    assert any("does not hold out: 0000" in m.text for m in msgs)

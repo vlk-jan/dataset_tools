@@ -26,7 +26,7 @@ import numpy as np
 
 from .. import image_format
 from .loaders import count_lines, read_segments, read_text
-from .splits import NO_SPLITS, SceneSplits, read_splits
+from .splits import DECLARED_FILES, NO_SPLITS, SceneSplits, read_splits
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
@@ -519,16 +519,33 @@ class DatasetRoot:
         return _read_json(self.path / "manifest.json")
 
     def splits(self) -> SceneSplits:
-        """``splits.json``: which scenes are held out from training, if any.
+        """``splits.json``, else the root's own declaration (manifest ``held_out``
+        and ``keyframes_train.lst``): which scenes are held out from training.
 
-        Re-read when it changes (``_root_file``): the file is a handful of scene
-        ids and only changes when someone re-decides the split. A root that does
-        not declare one gets `NO_SPLITS`, and every page renders as it always
+        Re-read when any of those files changes: they are a handful of scene
+        ids and only change when someone re-decides the split. A root that
+        declares nothing gets `NO_SPLITS`, and every page renders as it always
         did -- the viewer has no opinion of its own about which scenes are
         validation data, because that is a modelling decision and not something
         a directory listing can answer.
         """
-        return self._root_file("splits.json", lambda: read_splits(self.path) or NO_SPLITS)
+        return self._root_files_any(("splits.json", *DECLARED_FILES), lambda: read_splits(self.path) or NO_SPLITS)
+
+    def _root_files_any(self, relpaths: tuple[str, ...], load):
+        """`_root_file` over several files: re-run ``load()`` when any of them changed."""
+        keys = []
+        for relpath in relpaths:
+            try:
+                st = (self.path / relpath).stat()
+                keys.append((st.st_mtime_ns, st.st_size, st.st_ino))
+            except OSError:
+                keys.append(None)
+        name = "+".join(relpaths)
+        cached = self._root_files.get(name)
+        if cached is None or cached[0] != keys:
+            cached = (keys, load())
+            self._root_files[name] = cached
+        return cached[1]
 
     def _root_file(self, relpath: str, load):
         """``load()``, re-run only when ``relpath`` (under the root) changed.

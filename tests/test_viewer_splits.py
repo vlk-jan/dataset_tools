@@ -394,3 +394,76 @@ def test_an_unsplit_root_renders_exactly_as_it_did_before(tmp_path):
     assert "data-split" not in html
     assert 'class="splitpanel"' not in html
     assert "index.js" not in html
+
+
+# --------------------------------------------------------------------------
+# the root's own declaration, when there is no splits.json
+# --------------------------------------------------------------------------
+
+
+def _declare(root_path, held=("0002",), train_list=True):
+    manifest = json.loads((root_path / "manifest.json").read_text()) if (root_path / "manifest.json").exists() else {}
+    manifest.update(
+        {
+            "dataset_version": "2.3",
+            "held_out": {"scenes": list(held), "decision": "the last session is validation only"},
+        }
+    )
+    (root_path / "manifest.json").write_text(json.dumps(manifest))
+    if train_list:
+        lines = [f"{s}/clouds/00000.npy {s}/images/00000.png" for s in ("0000", "0001", "0002") if s not in held]
+        (root_path / "keyframes_train.lst").write_text("\n".join(lines) + "\n")
+        (root_path / "keyframes_heldout.lst").write_text(
+            "".join(f"{s}/clouds/00000.npy {s}/images/00000.png\n" for s in held)
+        )
+
+
+def test_a_manifest_hold_out_and_a_training_list_are_a_split_without_the_file(tmp_path):
+    """v2.3: no splits.json, but the manifest holds a session out and the root
+    carries keyframes_train.lst, which is what DRIFT's loader enforces too."""
+    root_path = make_root(tmp_path, scenes=("0000", "0001", "0002"))
+    _declare(root_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    s = root.splits()
+    assert s and s.name == "held_out" and s.dataset_version == "2.3"
+    assert s.of("0002") == "val" and s.of("0000") == "train" and s.of("0001") == "train"
+    assert s.of("0009") is None  # the training list is explicit: an unlisted scene is unassigned
+    assert "keyframes_train.lst" in s.source and "validation only" in s.note
+    assert index_page.split_mark(root, "0002")["which"] == "val"
+    assert splits.split_warning(s, root_path, ["0000", "0001", "0002"], {"dataset_version": "2.3"}) is None
+
+
+def test_a_hold_out_without_a_training_list_trains_on_the_rest(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000", "0001", "0002"))
+    _declare(root_path, train_list=False)
+    s = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache").splits()
+    assert s.of("0002") == "val" and s.of("0000") == "train" and s.of("0009") == "train"
+    assert s.source == "manifest.json held_out.scenes"
+
+
+def test_the_split_file_wins_over_the_declaration_and_both_refresh(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000", "0001", "0002"))
+    _declare(root_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    assert root.splits().of("0002") == "val"
+    write_splits(root_path, val=("0000",))
+    assert root.splits().of("0000") == "val" and root.splits().of("0002") == "train"
+    (root_path / "splits.json").unlink()
+    assert root.splits().of("0002") == "val"  # back to the declaration
+    # Re-deciding the hold-out in the manifest is picked up without a restart.
+    # (The cache keys on mtime and size; a rewrite within the same clock tick
+    # would not be seen, as for every root file, so the test moves the clock.)
+    _declare(root_path, held=("0001",))
+    import os  # noqa: E401
+    import time
+
+    later = time.time() + 5
+    for name in ("manifest.json", "keyframes_train.lst", "keyframes_heldout.lst"):
+        os.utime(root_path / name, (later, later))
+    assert root.splits().of("0001") == "val" and root.splits().of("0002") == "train"
+
+
+def test_a_root_declaring_no_hold_out_is_unmarked(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000",))
+    (root_path / "keyframes_train.lst").write_text("0000/clouds/00000.npy 0000/images/00000.png\n")
+    assert not probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache").splits()

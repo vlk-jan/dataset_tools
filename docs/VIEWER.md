@@ -401,6 +401,14 @@ looks exactly as before. Both files are re-read when they change.
 
 ## The train/val split: which scenes a model is scored on
 
+A root that declares its hold-out itself is tagged without any export: from
+HELHEST v2.1 the manifest names the held-out session (`held_out.scenes`), and
+from v2.3 the root carries `keyframes_train.lst` beside `keyframes.lst`. The
+viewer reads those as a `held_out` split (held out as validation, the training
+list's scenes as training, a scene in neither unassigned) whenever there is no
+`splits.json`; the file still wins when present, because it carries the window
+counts a declaration cannot, and either is re-read when it changes on disk.
+
 A root may carry a `splits.json` naming the scenes held out from training. When
 it does, every index card gets a labelled band down its left edge — solid violet
 `VAL` for held out, quiet slate `TRAIN` for trained on — and the scene page's

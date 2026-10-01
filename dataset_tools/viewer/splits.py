@@ -46,6 +46,17 @@ believed.
 
 Short key names (``val``, ``train``, ``excluded``, ``name``) are accepted too,
 for a split written by hand.
+
+**Without the file, the root's own declaration is read** (`declared_splits`).
+From HELHEST v2.1 the manifest names the scenes held out of training
+(``held_out.scenes``: a whole session, by decision), and from v2.3 the root
+carries ``keyframes_train.lst`` and ``keyframes_heldout.lst`` beside
+``keyframes.lst`` instead of one list per symlinked root. Those are the same
+facts DRIFT's loader enforces (``datasets.helhest.held_out_scenes``), so the
+viewer tags them the way it tags a ``scene_strat`` fold: held out as
+``val``, the training list's scenes as ``train``, a scene in neither as
+unassigned. ``splits.json`` still wins when present, because it carries the
+window counts a declaration cannot.
 """
 
 from __future__ import annotations
@@ -249,8 +260,63 @@ def parse_splits(data: Any) -> SceneSplits:
     )
 
 
+TRAIN_LIST = "keyframes_train.lst"
+HELDOUT_LIST = "keyframes_heldout.lst"
+#: The files a declared split is read from, for a cache keyed on their state.
+DECLARED_FILES: tuple[str, ...] = ("manifest.json", TRAIN_LIST, HELDOUT_LIST)
+
+
+def _list_scenes(path: Path) -> frozenset[str] | None:
+    """The scene ids a keyframe list names (its first path component), or None without the file."""
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    return frozenset(line.split("/", 1)[0] for line in text.splitlines() if line.strip())
+
+
+def declared_splits(root_path: Path, manifest: dict | None = None) -> SceneSplits:
+    """The split a root declares itself: ``manifest.held_out.scenes`` as the held-out
+    side, ``keyframes_train.lst`` as the training side when the root carries one.
+
+    `NO_SPLITS` when the manifest holds no ``held_out``: a root that declares
+    nothing is shown unmarked, as before.
+    """
+    root_path = Path(root_path)
+    if manifest is None:
+        try:
+            manifest = json.loads((root_path / "manifest.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return NO_SPLITS
+    if not isinstance(manifest, dict):
+        return NO_SPLITS
+    held = manifest.get("held_out")
+    scenes = held.get("scenes") if isinstance(held, dict) else held if isinstance(held, list) else None
+    val = _scene_set({"val": scenes}, "val") if scenes else None
+    if not val:
+        return NO_SPLITS
+    train = _list_scenes(root_path / TRAIN_LIST)
+    if train is not None:
+        train = train - val
+    parts = []
+    if isinstance(held, dict):
+        parts = [str(held[k]) for k in ("decision", "what_it_supports") if held.get(k)]
+    source = "manifest.json held_out.scenes" + (f" + {TRAIN_LIST}" if train is not None else "")
+    return SceneSplits(
+        name="held_out",
+        note=" ".join(parts) or None,
+        source=source,
+        root=str(root_path),
+        dataset_version=str(manifest.get("dataset_version")) if manifest.get("dataset_version") else None,
+        val=val,
+        train=train,
+        excluded=frozenset(),
+    )
+
+
 def read_splits(root_path: Path) -> SceneSplits:
-    """``<root>/splits.json``, or `NO_SPLITS` when it is absent or unreadable.
+    """``<root>/splits.json``, else what the root declares (`declared_splits`),
+    else `NO_SPLITS`.
 
     Unreadable is deliberately not fatal: a malformed split file must cost the
     index its two colours, not the whole page.
@@ -259,7 +325,7 @@ def read_splits(root_path: Path) -> SceneSplits:
     try:
         text = path.read_text()
     except OSError:
-        return NO_SPLITS
+        return declared_splits(root_path)
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:

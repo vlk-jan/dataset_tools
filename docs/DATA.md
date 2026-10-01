@@ -65,7 +65,9 @@ HELHEST/
 │   ├── driven_similarity/00000.npz … [derived, by DRIFT] `driven` (128,128) bool: cells a wheel-bottom contact of the GT path landed in over `label_horizon`; `max_sim` (128,128) float16: max cosine similarity of the cell's pre-head SeTProP feature to a driven cell's (1 on driven cells); `max_sim_geom`: the same from the 64-d height-map-statistics block alone (fails on tall obstacles, passes nearly everything else); `threshold` (0.9); plus `res`, `R_align`, `label_horizon`, `robot`, `setprop_ckpt` / `setprop_epoch` / `setprop_sha256`, `wi_ckpt`, `feature_dim`, `rig`, `dataset_version`, `odometry_frame`, `git_commit`. Written by DRIFT `scripts/data/generate_driven_similarity.py` from a checkpoint trained on HELHEST_v2_0 (recorded per file); a visualisation product for the viewer, NOT a label -- never read it as supervision; only keyframes with a driven cell have a file
 │   └── <scene>_full.npz          [derived, 31 scenes] scene-wide aggregated height map: `height_map`, `side_range`, `fwd_range`, `res`
 ├── maps_full/<scene>.pcd         [derived, 31 scenes] scene-wide aggregated point cloud
-├── keyframes.lst                 [derived] "scene/clouds/f.npy scene/images/f.png" pairs used for training
+├── keyframes.lst                 [derived] "scene/clouds/f.npy scene/images/f.png" pairs with a map; v2.3+: every scene,
+├── keyframes_train.lst           [derived] the training scenes, and
+├── keyframes_heldout.lst         [derived] the held-out session (manifest held_out.scenes) -- lists used for training
 ├── keyframes_filtered.lst        [derived] subset after quality filtering
 └── keyframes_adaptation.lst      [derived] small subset for online-adaptation experiments
 ```
@@ -458,6 +460,14 @@ the v2.2 bags the two agree to 2–5 cm over 1–5 s windows and 1 % in scale; t
 Odin1's failure mode is a discrete relocalisation jump, which breaks a
 segment and is counted in the check. v2 beta through v2.2 were built on the
 Fixposition instead (`odometry` in their manifests says so).
+**One root from v2.3.** The three keyframe lists sit beside the data
+(`keyframes.lst` every scene, `keyframes_train.lst`, `keyframes_heldout.lst`)
+and the manifest's `held_out.scenes` is what keeps the held-out session out of
+training: DRIFT's loader drops those scenes from every train/val fold unless
+asked otherwise, so the symlink roots of v2.1/v2.2 (`*_train`, `*_heldout`,
+`*_allframes_notrain`) are not needed. The viewer reads the same declaration
+for its train/validation tags.
+
 `gravity_align.npy` follows the same source: levelled by the Odin1 attitude
 the paved ground of scene 0000 comes out level to 0.03° of pitch, where the
 Fixposition attitude of v2.0–v2.2 left +1.77°. The two streams track each
