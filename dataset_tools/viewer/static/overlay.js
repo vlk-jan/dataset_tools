@@ -937,6 +937,9 @@ async function main() {
   if (build.height_maps && build.height_maps.used) parts.push(`${build.height_maps.used} height maps`);
   if (build.clouds && build.clouds.used) parts.push(`${build.clouds.used} clouds / ${build.clouds.points} pts`);
   if (build.seconds) parts.push(`built in ${build.seconds}s`);
+  // What the scene does not have, as the probe saw it: the first thing to
+  // check when a view looks sparser than expected.
+  if (build.missing_files && build.missing_files.length) parts.push(`absent: ${build.missing_files.join(", ")}`);
   els.buildInfo.textContent = parts.join(" · ");
 
   setupLegend();

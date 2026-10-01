@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} - dataset viewer{% endblock %}
+{% block header %}
+  <h1><a href="/">Dataset viewer</a> / {{ status }}</h1>
+{% endblock %}
+{% block main %}
+  <p>{{ detail }}</p>
+  <p><a href="/">Back to the index</a></p>
+{% endblock %}

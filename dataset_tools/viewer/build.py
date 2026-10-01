@@ -23,7 +23,7 @@ import numpy as np
 
 from .. import image_format
 from . import loaders as L
-from .probe import DatasetRoot, SceneProbe
+from .probe import OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
 from .render import unit_colors
 from .windows import (
     DEFAULT_MAX_FRAMES,
@@ -294,16 +294,38 @@ class SceneAccess:
     @property
     def frame_ts(self) -> np.ndarray | None:
         def load():
-            ts = L.read_timestamps(self.dir / "data_ts.txt")
-            if ts is None:
-                ts = L.read_timestamps(self.dir / "pcd_ts.txt")
-            if ts is None and self.probe.n_frames:
+            for name in ("data_ts.txt", "pcd_ts.txt"):
+                ts = L.read_timestamps(self.dir / name)
+                if ts is not None:
+                    self._cache["clock_source"] = name
+                    return ts
+            if self.probe.n_frames:
                 # No timestamp file at all: synthesise a uniform 10 Hz clock so
                 # the frames still have an ordering to play back.
-                ts = np.arange(self.probe.n_frames, dtype=np.float64) * 0.1
-            return ts
+                self._cache["clock_source"] = "synthetic"
+                return np.arange(self.probe.n_frames, dtype=np.float64) * 0.1
+            return None
 
         return self.cached("frame_ts", load)  # type: ignore[return-value]
+
+    @property
+    def clock_problem(self) -> str | None:
+        """Why the frame times on a page are not the scene's own, or None.
+
+        The fallbacks keep the pages working, which is also what hides them:
+        segment membership, windows and every signal are placed on this clock.
+        """
+        _ = self.frame_ts  # loading it records which file it came from
+        source = self._cache.get("clock_source")
+        if source in (None, "data_ts.txt"):
+            return None
+        why = "unreadable" if self.probe.has("data_ts") else "missing"
+        if source == "pcd_ts.txt":
+            return f"data_ts.txt is {why}: frame times on this page are the lidar's (pcd_ts.txt)."
+        return (
+            f"data_ts.txt is {why} and so is pcd_ts.txt: frame times on this page are made up at 10 Hz, "
+            "so which segment a frame is in, the windows and every signal are placed on a clock that is not real."
+        )
 
     @property
     def pcd_ts(self) -> np.ndarray | None:
@@ -1356,7 +1378,9 @@ def build_scene(
         "clouds": cloud_stats,
         "frames": [int(frames[0]), int(frames[-1])],
         "notes": notes,
-        "missing_files": access.probe.missing,
+        # What the scene lacks that would make this view fuller; optional
+        # extras (cmd_vel, the v1 camera file) are left out as noise.
+        "missing_files": [k for k in access.probe.missing if k not in OPTIONAL_ARTEFACTS],
     }
     if access.K is not None:
         metadata["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()

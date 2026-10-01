@@ -831,3 +831,51 @@ def test_the_frame_page_reads_the_motion_signals_and_notes_at_that_frame(gps_cli
     page = gps_client.get("/scene/0000/frame/3").text
     assert "covers three" in page and "elsewhere" not in page
     assert 'name="frame_start" min="0" max="11"' in page and 'value="3"' in page
+
+
+def test_validation_json_puts_the_findings_on_the_scene_and_filters_the_index(client, tmp_path):
+    from test_viewer_index import VALIDATION_CSV
+
+    root_path = tmp_path / "root"
+    (root_path / "validation.csv").write_text(VALIDATION_CSV)
+    finding = {
+        "scene": "0001",
+        "code": "FRAME_GAP",
+        "severity": "INFO",
+        "msg": "no frames for 0.3 s",
+        "t0": 0.2,
+        "t1": 0.5,
+    }
+    doc = {"scenes": {"0001": {"status": "WARN", "stats": {}, "messages": [finding]}}, "root": []}
+    (root_path / "validation.json").write_text(json.dumps(doc))
+    scene = client.get("/scene/0001").text
+    assert "FRAME_GAP" in scene and 'href="/scene/0001/frame/2"' in scene
+    assert "run helhest-validate 0001" not in scene
+
+    index = client.get("/?status=warn").text
+    assert 'id="s0001"' in index and 'id="s0000"' not in index
+    assert 'id="s0000"' in client.get("/?status=ok").text
+
+
+def test_bad_data_is_said_so_not_hidden(client, tmp_path):
+    root_path = tmp_path / "root"
+    # A corrupt clock: the pages fall back, and say that they did.
+    data_ts = root_path / "0000" / "data_ts.txt"
+    data_ts.write_text("not a number\n" + data_ts.read_text())
+    assert 'class="databanner"' in client.get("/scene/0000").text
+    assert "lidar" in client.get("/scene/0000/frame/1").text
+    assert 'class="databanner"' not in client.get("/scene/0001").text
+
+    # A frame image that is there but will not decode is not "no image".
+    (image,) = (root_path / "0001" / "images").glob("00001.*")
+    image.write_bytes(b"\xff\xd8 truncated")
+    assert client.get("/api/scene/0001/frame/1/image.jpg").status_code == 422
+    image.unlink()
+    assert client.get("/api/scene/0001/frame/1/image.jpg").status_code == 404
+
+
+def test_a_mistyped_address_gets_a_page_with_a_way_back(client):
+    page = client.get("/scene/9999", headers={"Accept": "text/html"})
+    assert page.status_code == 404 and 'href="/"' in page.text and "<html" in page.text
+    assert client.get("/scene/9999").headers["content-type"].startswith("application/json")
+    assert client.get("/api/scene/9999/gps.json", headers={"Accept": "text/html"}).json()

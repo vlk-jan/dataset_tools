@@ -687,6 +687,7 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
     mark = validation_mark(row)
     if mark is None:
         return None
+    messages = access.root.validation_messages(access.scene_id)
     stats = [
         stat("errors", row.get("errors") or "0", "structural: the scene contract"),
         stat("warnings", row.get("warnings") or "0", "data quality: NaNs, jumps, tilt"),
@@ -700,8 +701,13 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
     ):
         if row.get(key):
             stats.append(stat(label, row[key], unit))
-    note = f"For the messages, run helhest-validate {access.scene_id} on the root." if mark["cls"] != "yes" else None
-    return {
+    note = None
+    if messages is None and mark["cls"] != "yes":
+        note = (
+            f"For the messages, run helhest-validate {access.scene_id} on the root, or write them next to "
+            "validation.csv with --json validation.json."
+        )
+    card = {
         "kind": "validation",
         "title": "Validation",
         "badge": mark["status"],
@@ -710,6 +716,50 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
         "stats": stats,
         "note": note,
     }
+    if messages:
+        card.update(_validation_findings(access, messages))
+    return card
+
+
+#: Most severe first in the card's list.
+SEVERITY_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
+
+
+def _validation_findings(access: SceneAccess, messages: list[dict]) -> dict[str, Any]:
+    """The validator's messages as a list, and those with a place in time as
+    marks on a timeline that open the frame where they start."""
+    ts = access.frame_ts
+    duration = float(ts[-1] - ts[0]) if ts is not None and len(ts) > 1 else 0.0
+
+    def frame_at(t: float) -> int:
+        return int(min(np.searchsorted(ts, ts[0] + t), len(ts) - 1))
+
+    findings, marks = [], []
+    for m in sorted(messages, key=lambda m: (SEVERITY_ORDER.get(m.get("severity"), 3), m.get("t0") or 0)):
+        severity = "expected" if m.get("expected") else str(m.get("severity", ""))
+        href = None
+        if m.get("t0") is not None and duration > 0:
+            href = f"/scene/{access.scene_id}/frame/{frame_at(float(m['t0']))}"
+            t0, t1 = float(m["t0"]), float(m.get("t1", m["t0"]))
+            marks.append(
+                {
+                    "left": round(max(0.0, t0 / duration) * 100, 3),
+                    "width": round(max(0.4, (t1 - t0) / duration * 100), 3),
+                    "href": href,
+                    "title": f"{m.get('code')}: {m.get('msg')}",
+                    "fill": severity != "INFO",
+                }
+            )
+        findings.append({"severity": severity, "code": m.get("code"), "text": m.get("msg"), "href": href})
+    out: dict[str, Any] = {"findings": findings}
+    if marks:
+        out["timeline"] = {
+            "marks": marks,
+            "label": fmt_duration(duration),
+            "title": "where the validator's findings are in the scene",
+            "hint": "Each block is a finding with a place in time - click it to open its first frame.",
+        }
+    return out
 
 
 def _gps_src(scene_id: str, segment, frame: int | None) -> str:

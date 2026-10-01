@@ -359,10 +359,22 @@ def _derived_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return totals
 
 
-def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
-    """Everything the index template needs, curated half included when present."""
+#: ``/?status=`` values and the validation statuses each one shows.
+STATUS_FILTERS = {"ok": ("OK",), "warn": ("WARN",), "fail": ("FAIL", "FAIL (--strict)")}
+
+
+def build_index(root: DatasetRoot, probes: list[SceneProbe], status: str | None = None) -> dict[str, Any]:
+    """Everything the index template needs, curated half included when present.
+
+    ``status`` keeps only the scenes ``validation.csv`` gives that status
+    (``STATUS_FILTERS``); the totals then describe the scenes shown.
+    """
     atlas = root.atlas() or {}
     rows = [build_row(root, p) for p in probes]
+    counts = {k: sum(1 for r in rows if (r["validation"] or {}).get("status") in v) for k, v in STATUS_FILTERS.items()}
+    status_filter = {"current": status, "counts": counts} if any(r["validation"] for r in rows) else None
+    if status in STATUS_FILTERS:
+        rows = [r for r in rows if (r["validation"] or {}).get("status") in STATUS_FILTERS[status]]
     by_id = {r["probe"].scene_id: r for r in rows}
 
     groups: list[dict[str, Any]] = []
@@ -414,6 +426,9 @@ def build_index(root: DatasetRoot, probes: list[SceneProbe]) -> dict[str, Any]:
         # filter over them. Absent -- not empty -- on a root with no splits.json,
         # so the index of an unsplit root gains nothing at all.
         "split_panel": split_panel(root, rows),
+        # Links that show only the scenes validation.csv passed, warned on or
+        # failed; None on a root that was never validated.
+        "status_filter": status_filter,
         "split_warning": split_warning(root.splits(), root.path, [r["probe"].scene_id for r in rows], root.manifest()),
     }
 

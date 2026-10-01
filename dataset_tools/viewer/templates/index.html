@@ -39,6 +39,15 @@
       </div>
       {% endfor %}
     </dl>
+    {% if status_filter %}
+    {% set sf = status_filter %}
+    <p class="statusfilter">Validation:
+      <a href="/"{% if not sf.current %} aria-current="page"{% endif %}>all scenes</a>
+      {% for key, label in (("ok", "ok"), ("warn", "with warnings"), ("fail", "failed")) %}
+      · <a href="/?status={{ key }}"{% if sf.current == key %} aria-current="page"{% endif %}>{{ label }} <b>{{ sf.counts[key] }}</b></a>
+      {% endfor %}
+    </p>
+    {% endif %}
 
     {# Where the bytes go, from disk_usage.json. #}
     {% if disk_panel %}

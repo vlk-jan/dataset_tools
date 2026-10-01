@@ -17,6 +17,7 @@
 {% block header %}{% endblock %}
 </header>
 <main>
+{% if data_problem %}<p class="databanner" role="alert">{{ data_problem }}</p>{% endif %}
 {% block main %}{% endblock %}
 </main>
 {% block scripts %}{% endblock %}

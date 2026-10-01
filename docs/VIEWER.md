@@ -388,11 +388,16 @@ is there, every index card gets a chip -- `validated ok`, `N warnings` or `N
 errors`, with the row's numbers in its tooltip -- the masthead counts how the
 scenes fared, and the scene page gets a **Validation** card with the status,
 the counts and the numbers behind them (max step, max tilt, sync offset,
-non-finite fraction). The file carries *counts* of findings, not their text:
-the messages only go to the validator's own output, and the card says so
-rather than pretending. A scene the file does not mention gets no chip, and a
-root without the file looks exactly as before. Like the atlas, the file is
-read once per process.
+non-finite fraction). The file carries *counts* of findings, not their text.
+The text comes from `validation.json` next to it (`helhest-validate <root>
+--json <root>/validation.json`): the card then lists every finding, most
+severe first, with its code, and the ones with a place in time -- a hole in the
+frame clock, a gap in the joint states -- are blocks on a timeline and links
+to the frame where they start. Without `validation.json` the card says how to
+get the messages rather than pretending. Under the masthead, `Validation: all
+scenes · ok · with warnings · failed` filters the index (`/?status=warn`). A
+scene the file does not mention gets no chip, and a root without the file
+looks exactly as before. Both files are re-read when they change.
 
 ## The train/val split: which scenes a model is scored on
 
@@ -779,7 +784,13 @@ Dataset roots usually live on contended network storage, so:
 | `/healthz` | liveness, the root path and the scene count |
 
 A per-frame artefact the scene does not have returns `404` rather than a
-placeholder. `meta.json` records what the window was actually built from --
+placeholder; one the scene has but that cannot be read (a truncated JPEG, a
+corrupt `.npz`) returns `422` with a red "unreadable" tile, which the page
+shows as it is -- the two used to look the same. A scene whose `data_ts.txt`
+is missing or unreadable carries a red banner on its scene, segment and frame
+pages: the viewer then places everything on `pcd_ts.txt`, or on a made-up
+10 Hz clock, and says which. A mistyped scene or frame number gets a page with
+a way back to the index rather than a bare JSON error. `meta.json` records what the window was actually built from --
 `terrain_source`, how many clouds and height maps were read, and
 `missing_files` -- which is the quickest way to find out why a view looks
 sparser than expected.

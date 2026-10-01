@@ -44,7 +44,7 @@
          has flat spans that name no segment, and those stay plain marks. #}
       {% if card.timeline %}
       <div class="bar">
-        <div class="track" title="where ground truth exists inside the scene">
+        <div class="track" title="{{ card.timeline.title or 'where ground truth exists inside the scene' }}">
           {% if card.timeline.marks %}
             {% for m in card.timeline.marks %}
             <a class="seg{{ ' fill' if m.fill }}" href="{{ m.href }}"
@@ -57,7 +57,7 @@
         </div>
         <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>
         {% if card.timeline.marks %}
-        <p class="barhint">Each block is one ground-truth segment - click it to open that segment.</p>
+        <p class="barhint">{{ card.timeline.hint or "Each block is one ground-truth segment - click it to open that segment." }}</p>
         {% endif %}
       </div>
       {% endif %}
@@ -72,6 +72,14 @@
       </details>
       {% endfor %}
 
+      {% if card.findings %}
+      <ul class="findings">
+        {% for f in card.findings %}
+        <li class="{{ f.severity|lower }}"><b>{{ f.severity }}</b> <code>{{ f.code }}</code>
+          {% if f.href %}<a href="{{ f.href }}">{{ f.text }}</a>{% else %}{{ f.text }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
       {% if card.note %}<p class="cardnote">{{ card.note }}</p>{% endif %}
       {% if card.warn %}<p class="cardnote warn">{{ card.warn }}</p>{% endif %}
     </div>

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import functools
 import hashlib
 import json
 import logging
@@ -38,14 +39,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+import cv2
 import numpy as np
 import simview
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi import Path as PathParam
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import geo, render
@@ -220,6 +224,21 @@ def create_app(
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals["reason_text"] = describe_reason
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException):
+        """A page for a person, JSON for everything else: a mistyped scene or
+        frame number used to answer a browser with ``{"detail": ...}`` and no
+        way back to the index."""
+        if request.url.path.startswith("/api/") or "text/html" not in request.headers.get("accept", ""):
+            return await http_exception_handler(request, exc)
+        return templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={"root": root, "status": exc.status_code, "detail": exc.detail},
+            status_code=exc.status_code,
+        )
+
     app.mount(
         "/viewer-static",
         # Only SimView's entry point carries a cache-bust; with no
@@ -307,9 +326,9 @@ def create_app(
         return response
 
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
+    async def index(request: Request, status: str | None = Query(None, pattern="^(ok|warn|fail)$")):
         def work():
-            return build_index(root, root.probe_all())
+            return build_index(root, root.probe_all(), status)
 
         page = await run_in_threadpool(work)
         return templates.TemplateResponse(
@@ -361,6 +380,7 @@ def create_app(
             name="scene.html",
             context={
                 "root": root,
+                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "scene_ids": root.scene_ids(),
                 "probe": access.probe,
@@ -409,6 +429,7 @@ def create_app(
             name="segment.html",
             context={
                 "root": root,
+                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "seg": seg,
                 "probe": access.probe,
@@ -450,6 +471,7 @@ def create_app(
             name="frame.html",
             context={
                 "root": root,
+                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "index": index,
                 "probe": access.probe,
@@ -566,7 +588,7 @@ def create_app(
         path = access.frame_path("images", index)
         data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
         if data is None:
-            raise HTTPException(404, f"no image for frame {index}")
+            return _absent_or_unreadable(path, f"image for frame {index}")
         return Response(data, media_type="image/jpeg")
 
     @app.get("/api/scene/{scene_id}/frame/{index}/overlay.jpg")
@@ -584,9 +606,10 @@ def create_app(
 
         def work():
             image = access.frame_path("images", index)
-            cloud = load_cloud(access.frame_path("clouds", index))
+            cloud_path = access.frame_path("clouds", index)
+            cloud = load_cloud(cloud_path)
             if cloud is None or not image.is_file():
-                return None
+                return cloud_path if cloud is None else image
             info = access.camera_info or {}
             return _safe_render(
                 render.render_cloud_on_image,
@@ -600,8 +623,8 @@ def create_app(
             )
 
         data = await run_in_threadpool(work)
-        if data is None:
-            raise HTTPException(404, f"no image and cloud to overlay for frame {index}")
+        if data is None or isinstance(data, Path):
+            return _absent_or_unreadable(data, f"image and cloud to overlay for frame {index}")
         return Response(data, media_type="image/jpeg")
 
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
@@ -675,15 +698,17 @@ def create_app(
     ):
         access = _access_or_404(state, scene_id)
 
+        path = access.frame_path("clouds", index)
+
         def work():
-            cloud = load_cloud(access.frame_path("clouds", index))
+            cloud = load_cloud(path)
             if cloud is None:
                 return None
             return render.render_cloud_bev(cloud, size=size, color_by=color)
 
         data = await run_in_threadpool(work)
         if data is None:
-            raise HTTPException(404, f"no cloud for frame {index}")
+            return _absent_or_unreadable(path, f"cloud for frame {index}")
         return Response(data, media_type="image/png")
 
     # ------------------------------------------------------------------ notes
@@ -1091,28 +1116,32 @@ async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key
 
 
 async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer, size: int) -> Response:
+    path = access.frame_path(kind, index)
+
     def work():
-        arr = load_npz_key(access.frame_path(kind, index), key)
+        arr = load_npz_key(path, key)
         return None if arr is None else renderer(arr, size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
-        raise HTTPException(404, f"no {kind} for frame {index}")
+        return _absent_or_unreadable(path, f"{kind} for frame {index}")
     return Response(data, media_type="image/png")
 
 
 async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
     """The driven-similarity tile: three keys of one small npz, one image."""
 
+    path = access.frame_path("driven_similarity", index)
+
     def work():
-        sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
+        sidecar = read_driven_similarity(path)
         if sidecar is None:
             return None
         return render.render_driven_similarity(sidecar["driven"], sidecar["max_sim"], sidecar["threshold"], size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
-        raise HTTPException(404, f"no driven_similarity for frame {index}")
+        return _absent_or_unreadable(path, f"driven_similarity for frame {index}")
     return Response(data, media_type="image/png")
 
 
@@ -1180,6 +1209,25 @@ def _safe_render(fn, *args, **kwargs):
     except (OSError, ValueError) as exc:
         logger.debug("render failed: %s", exc)
         return None
+
+
+@functools.cache
+def _unreadable_tile() -> bytes:
+    """A red square that says so, drawn where a file exists but cannot be read."""
+    tile = np.full((96, 96, 3), (40, 40, 190), dtype=np.uint8)  # BGR
+    cv2.putText(tile, "unreadable", (6, 54), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+    return cv2.imencode(".png", tile)[1].tobytes()
+
+
+def _absent_or_unreadable(path: Path | None, what: str) -> Response:
+    """The answer when nothing could be drawn: 404 for a file the scene does
+    not have, 422 -- with a red tile, which the page shows as it is -- for one
+    it has but that will not load. The two looked the same, and the second is
+    exactly what reviewing a dataset is for."""
+    if path is not None and path.is_file():
+        logger.warning("%s: %s exists but cannot be read", what, path)
+        return Response(_unreadable_tile(), status_code=422, media_type="image/png")
+    raise HTTPException(404, f"no {what}")
 
 
 #: Fixes drawn for the *context* track -- the whole scene behind a highlighted

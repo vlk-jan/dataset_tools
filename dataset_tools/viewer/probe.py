@@ -597,6 +597,16 @@ class DatasetRoot:
     def validation_scene(self, scene_id: str) -> dict[str, str]:
         return (self.validation() or {}).get(scene_id, {})
 
+    def validation_messages(self, scene_id: str) -> list[dict] | None:
+        """This scene's findings from ``validation.json`` (``helhest-validate
+        --json``): code, severity, text and, where they have one, ``t0``/``t1``
+        in seconds from the first frame. ``None`` when the root has no such file."""
+        doc = self._root_file("validation.json", lambda: _read_json(self.path / "validation.json"))
+        if not isinstance(doc, dict):
+            return None
+        entry = (doc.get("scenes") or {}).get(scene_id) or {}
+        return [m for m in entry.get("messages") or [] if isinstance(m, dict)]
+
     def atlas_scene(self, scene_id: str) -> dict:
         atlas = self.atlas() or {}
         entry = (atlas.get("scenes") or {}).get(scene_id)
