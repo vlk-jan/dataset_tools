@@ -132,16 +132,28 @@ which is equivalent to spelling out the defaults:
 
 ```
 --cam /odin1/image/compressed --lidar /odin1/cloud_filtered/cloudini \
---odom /fixposition/odometry_enu --imu /fixposition/odometry_enu --gps auto
+--odom /odin1/odometry --imu /odin1/odometry --deskew_imu /odin1/imu \
+--check_odom /fixposition/odometry_enu --gps auto
 ```
 
-When `--odom` is a Fixposition topic, the extractor also writes the
-ground-truth files (`--gt auto`): `odometry.txt` (base_link pose at full
-rate, split into segments each re-anchored to the identity) and
+**Pose sources, from v2.3 on.** The ground truth is the Odin1's own
+lidar-inertial odometry (`/odin1/odometry`: 14 Hz, 6-DoF, stamped on the same
+clock as its clouds and images, locally within 2-5 cm of the Fixposition over
+1-5 s windows). The Fixposition GNSS/INS stays the georeference (`gps.npy`)
+and the check: every scene carries `pose_check.txt`, the odometry against it
+at the base frame -- jumps, displacement over 1/2/5 s, clock lag, tilt -- and
+a scene whose odometry relocalised in jumps is flagged there rather than
+trusted. v2 beta to v2.2 were built the other way round, on the Fixposition;
+`--odom /fixposition/odometry_enu --imu /fixposition/odometry_enu` reproduces
+that.
+
+When `--odom` is the Odin1 odometry or a Fixposition topic, the extractor also
+writes the ground-truth files (`--gt auto`): `odometry.txt` (base_link pose at
+full rate, split into segments each re-anchored to the identity) and
 `odometry_segments.txt` (never interpolate across segment boundaries).
-Segments break at >1 s gaps, at GNSS teleports, and at the holes
-`--gnss_guard` leaves where the receiver had no solution (`fix_lost`);
-one-sample spikes are discarded. This matches the HELHEST v1.2 contract, so
+Segments break at >1 s gaps, at jumps (the Odin1's relocalisations, GNSS
+teleports), and at the holes `--gnss_guard` leaves where a Fixposition had no
+solution (`fix_lost`); one-sample spikes are discarded. This matches the HELHEST v1.2 contract, so
 segment-aware consumers need no changes, with one difference: segments in a
 freshly written table are **numbered from 1**, so "segment 3 of 4" is the
 third one. Roots written before this (v1.2 through v1.5) are numbered from 0
@@ -172,7 +184,7 @@ lidar works.
 | --- | --- |
 | `--jobs N` | worker processes, one bag each (default 4; `1` runs in-process) |
 | `--overwrite` | re-extract scenes that are already complete (a scene's previous outputs are removed first) |
-| `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so only for Fixposition topics |
+| `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so for the Odin1 odometry and for Fixposition topics |
 | `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories |
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
@@ -180,6 +192,8 @@ lidar works.
 | `--gnss_guard auto\|on\|off` | drop stretches where the GNSS/INS published a reset solution instead of a pose, and every frame left without a real one -- both the frames those stretches strand and the frames the pose stream never covered. `auto` turns it on for an absolute source (Fixposition) and off for wheel odometry. Recorded per scene in `gnss_guard.txt` |
 | `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt` |
 | `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
+| `--deskew_imu TOPIC` | the gyro that gives the rotation inside each sweep when deskewing (default `/odin1/imu`, 400 Hz; needs a TF path to `--base_frame`). Used per sweep only where it agrees with the pose track's slerp to 1 deg, else the slerp; `off` or a missing topic means slerp throughout. Counted in `extract_meta.json` |
+| `--check_odom TOPIC` | the pose stream the odometry is checked against at the base frame (default `/fixposition/odometry_enu`; `off` skips). Nothing in the scene is built from it; the result is `pose_check.txt` and `extract_meta.json` -> `frames.pose_check` |
 | `--deskew auto\|off` | `auto` (default): where the cloud carries a per-point time (the Odin1's `offset_time`: its 256 x 192 raster is scanned bottom to top over 67 ms behind one stamp) and the pose stream covers the sweep, every return is moved to where the robot was at the frame's instant, so the cloud is a snapshot at `data_ts` like the image beside it. `off` writes the sweep as recorded, with its motion smear (4 deg across the raster at 60 deg/s), as every root before 2026-10-01. Counted per scene in `extract_meta.json` (`frames.deskew`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `--allow_frame_fallback` | extract a bag whose TF does not reach `--base_frame` from the lidar (and no `--lidar_extrinsic`), the odometry child frame or the orientation frame, leaving that stream in its own frame. Without it such a scene **fails**: clouds, poses or gravity in the wrong frame look plausible and are found late. What fell back is listed in `extract_meta.json` |
@@ -240,9 +254,10 @@ index-aligned.
 | `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`). With deskewed clouds this is the instant of the image and of every return alike; in roots made before 2026-10-01 the clouds' effective instant was the sweep's mean, and `time_align` had moved `data_ts` there, 27-52 ms after the image |
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
 | `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
+| `pose_check.txt` | — | text | s, m, deg | the scene's odometry (`--odom`) against `--check_odom`: spans and overlap, path length and jumps (steps over the segment gate, and the metres they carry) in each, z range, the clock lag of the odometry against the reference, the median roll/pitch difference, and the |displacement| disagreement over 1/2/5 s windows (median, p90, scale). Warnings at the end where a figure is out of bounds |
 | `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, how many further frames went for having no pose under them at all (since 2026-10-01 split into before the pose stream, after it and inside holes), and how many more once the clock was corrected; absent when the guard did not run |
 | `tf_pins.txt` | — | text | m, degrees | the static transforms pinned to a constant (`--tf_pins`): for each, the pin the scene was built with and what the bag's own `/tf_static` said, so a bag whose estimate sat far from the constant can be found; absent when nothing was pinned (a Livox bag, or `--tf_pins off`) |
-| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
+| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame from `--odom`, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
 | `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
 | `camera_intrinsics.txt` | 3 x 3 | text `float64` | pixels | `K` from the matching `camera_info` topic |
 | `camera_info.yaml` | — | YAML | — | the full `CameraInfo` (size, distortion model + coefficients, `K`, `R`, `P`); v1 scenes have only `camera_intrinsics.txt` |

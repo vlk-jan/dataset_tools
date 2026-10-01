@@ -446,6 +446,19 @@ number). From v2.3 the extractor deskews every sweep onto `data_ts`
 (`--deskew auto`), the clouds are snapshots at the image's instant, and the
 frame-clock correction reads as already aligned.
 
+**Ground truth from v2.3: the Odin1's own odometry.** `/odin1/odometry` is the
+unit's lidar-inertial odometry — 14 Hz, 6-DoF, stamped on the same clock as
+its clouds and images — and from v2.3 it is what `odometry.txt`,
+`transforms.npy` and `gravity_align.npy` are made from, with the sweeps
+deskewed by it (rotation inside a sweep from the Odin1 gyro at 400 Hz where it
+agrees with the odometry). The Fixposition GNSS/INS remains the georeference
+(`gps.npy`) and the check: each scene's `pose_check.txt` compares the two at
+`base_link` (jumps, displacement over 1/2/5 s, clock lag, tilt). Measured on
+the v2.2 bags the two agree to 2–5 cm over 1–5 s windows and 1 % in scale; the
+Odin1's failure mode is a discrete relocalisation jump, which breaks a
+segment and is counted in the check. v2 beta through v2.2 were built on the
+Fixposition instead (`odometry` in their manifests says so).
+
 **`gps.npy`** is new with this generation: `(M, 8)` `float64` rows of
 `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]` at the receiver's own rate
 (10 Hz on this rig), taken from `/fixposition/odometry_llh` — the same fusion
