@@ -200,3 +200,18 @@ def test_a_long_scene_is_measured_to_its_end(tmp_path):
     # The last window has to reach the last stretch of the scene, not stop at
     # the point where the cap ran out.
     assert frames[-1][-1] > n - 3 * ta.WINDOW
+
+
+def test_a_small_but_consistent_offset_is_a_measurement_not_noise():
+    """Scene 0011 of v2.2: four windows at +0.040..+0.048 s with modest gain
+    were once read as 'already aligned'. Knots scattered about zero are noise;
+    knots all on one side are an offset, however small."""
+    from dataset_tools.time_align import ZERO_TOL, already_aligned
+
+    weak = [{"gain": 9.0}, {"gain": 12.0}, {"gain": 10.0}, {"gain": 6.0}]
+    assert not already_aligned(weak, np.array([0.040, 0.039, 0.044, 0.048]))
+    assert already_aligned(weak, np.array([0.004, -0.003, 0.006, -0.002]))
+    assert not already_aligned(weak, np.array([0.002, 0.003, 0.080, 0.001]))  # one wild knot: not aligned
+    assert not already_aligned([{"gain": 30.0}], np.array([0.004]))  # a strong gain is an offset
+    assert not already_aligned(weak, np.zeros(0))
+    assert ZERO_TOL == 0.010

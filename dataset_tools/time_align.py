@@ -94,6 +94,9 @@ MIN_DEPTH = 18.0
 #: rather than used as the criterion. Above this a window is called strong in
 #: the summary.
 STRONG_GAIN = 25.0
+#: Knots whose median lies within this of zero are noise about an aligned clock,
+#: not an offset: half the fine sweep's 0.02 s step.
+ZERO_TOL = 0.010
 #: No rig's pipeline is further behind than this; anything larger is a failed
 #: measurement, not a latency, and is dropped rather than applied.
 MAX_ABS_OFFSET = 2.0
@@ -358,10 +361,25 @@ def estimate(
     if not len(ts):
         typical = float(np.median([w["gain"] for w in windows])) if windows else 0.0
         return Profile(windows, ts, d, f"no window localises a minimum, median window gain {typical:.1f}%")
-    strong = sum(1 for w in windows if w["gain"] >= STRONG_GAIN)
-    if not strong and np.all(np.abs(d) < 0.05):
-        return Profile(windows, np.zeros(0), np.zeros(0), "already aligned; every window's minimum sits at zero")
+    if already_aligned(windows, d):
+        return Profile(windows, np.zeros(0), np.zeros(0), "already aligned; the windows' minima sit at zero")
     return Profile(windows, ts, d, "measured")
+
+
+def already_aligned(windows: list[dict], knot_delta: np.ndarray) -> bool:
+    """Whether the believed windows say the clock is right as it stands.
+
+    Right means the knots scatter *around* zero -- their median within
+    ``ZERO_TOL`` -- not merely near it. Until 2026-10-01 this accepted any set
+    of knots all below 0.05 s, which swallowed scene 0011 of HELHEST v2.2:
+    four windows at +0.040..+0.048 s, each as deep as its neighbours' in other
+    scenes, left uncorrected while every other scene got its +0.04. A
+    consistent offset is a measurement, however small; only noise about zero
+    is nothing to correct.
+    """
+    if not len(knot_delta) or any(w["gain"] >= STRONG_GAIN for w in windows):
+        return False
+    return abs(float(np.median(knot_delta))) < ZERO_TOL and bool(np.all(np.abs(knot_delta) < 0.05))
 
 
 def apply_to_clock(frame_ts: np.ndarray, profile: Profile) -> tuple[np.ndarray, bool]:

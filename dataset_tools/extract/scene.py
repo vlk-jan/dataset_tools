@@ -23,10 +23,11 @@ from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
     tf_pins,
     time_align,
 )
+from dataset_tools.extract import deskew
 from dataset_tools.extract.camera import IMAGE_MSGTYPES, get_first_frame, save_camera_extrinsic, save_intrinsics
 from dataset_tools.extract.gps import GPS_MSGTYPE, gps_row, pick_gps_topic
 from dataset_tools.extract.ground_truth import _auto, write_ground_truth
-from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr
+from dataset_tools.extract.pointcloud import cloud_to_xyzit, header_stamp_from_cdr, valid_returns_mask
 from dataset_tools.extract.scene_io import (
     DERIVED_DIRS,
     GNSS_GUARD_FILE,
@@ -178,7 +179,21 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     (scene_dir / "clouds").mkdir(parents=True, exist_ok=True)
     _write_small_streams(p1, scene_dir, bag)
     tf_graph, T_lidar_to_base = _resolve_frames(reader, lidar_conn, p1, scene_dir, args, bag)
-    _write_frames(reader, conns, cam_conn, lidar_conn, p1, cam_ts, pcd_ts, tf_graph, T_lidar_to_base, scene_dir, args)
+    _write_frames(
+        reader,
+        conns,
+        cam_conn,
+        lidar_conn,
+        p1,
+        cam_ts,
+        pcd_ts,
+        frame_ts,
+        tf_graph,
+        T_lidar_to_base,
+        scene_dir,
+        args,
+        bag,
+    )
     frame_ts = _write_derived(scene_dir, frame_ts, pcd_ts, p1, guard_verdict, args, bag)
     _set_aside_stale(scene_dir, old_clock, bag)
     _write_meta(scene_dir, reader, bag_path, p1, guard_verdict, len(frame_ts), args)
@@ -512,13 +527,25 @@ def _write_frames(
     p1: _Pass1,
     valid_cam_ts,
     valid_pcd_ts,
+    frame_ts,
     tf_graph,
     T_lidar_to_base,
     scene_dir,
     args,
+    bag: str,
 ) -> None:
-    """Pass 2: the image and the cloud of every frame, under its chronological index."""
+    """Pass 2: the image and the cloud of every frame, under its chronological index.
+
+    Each cloud is written in the base frame and, where the sweep carries
+    per-point times and the pose stream covers it, moved onto the frame's own
+    instant ``frame_ts[k]`` (see :mod:`dataset_tools.extract.deskew`).
+    """
     camera_topic, lidar_topic = args.cam, args.lidar
+    # The poses are at the base frame by now (_resolve_frames), which is the
+    # frame the clouds are about to be written in -- the one deskewing needs.
+    track = deskew.build_track(p1.odom) if args.deskew != "off" else None
+    sweeps = Counter()
+    span = 0.0
     shift_cam = args.cam_time_offset
     verified = p1.verified
     cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
@@ -588,14 +615,54 @@ def _write_frames(
         elif conn.topic == lidar_topic and t in pcd_set:
             pcd_idx = pcd_ts_to_idx[t]  # Get correct chronological index
             # Before T_lidar_to_base, never after -- see drop_invalid_returns.
-            xyzi = drop_invalid_returns(cloud_to_xyzi(msg))
+            xyzi, offsets = cloud_to_xyzit(msg, t)
+            keep = valid_returns_mask(xyzi)
+            xyzi = xyzi[keep]
             pcd = np.hstack((xyzi[:, :3], np.ones((len(xyzi), 1), dtype=np.float32)))
             pcd = (pcd @ T_lidar_to_base.T.astype(np.float32))[:, :3]
+            if track is not None:
+                if offsets is None:
+                    sweeps["no_time_field"] += 1
+                else:
+                    pcd, status = deskew.deskew(pcd, offsets[keep], t, float(frame_ts[pcd_idx]), track)
+                    sweeps[status] += 1
+                    if keep.any():
+                        span = max(span, float(np.ptp(offsets[keep])))
             np.save(
                 scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
                 np.hstack((pcd, xyzi[:, 3:4])),
             )
             pcd_set.remove(t)
+
+    _report_deskew(p1, track, sweeps, span, len(valid_pcd_ts), args, bag)
+
+
+def _report_deskew(p1: _Pass1, track, sweeps: Counter, span: float, clouds: int, args, bag: str) -> None:
+    """One line in the log and one entry in extract_meta.json about what the
+    sweeps were moved by -- or why they were not."""
+    if args.deskew == "off":
+        p1.counts["deskew"] = {"mode": "off"}
+        return
+    if track is None:
+        p1.counts["deskew"] = {"mode": "auto", "clouds": clouds, "deskewed": 0, "reason": "no pose stream"}
+        LOG.info("%s: no pose stream to deskew the sweeps against; clouds written as recorded", bag)
+        return
+    entry = {"mode": "auto", "clouds": clouds, "deskewed": int(sweeps["deskewed"]), "sweep_span_s": round(span, 4)}
+    entry.update({k: int(v) for k, v in sorted(sweeps.items()) if k != "deskewed" and v})
+    p1.counts["deskew"] = entry
+    if sweeps["deskewed"]:
+        LOG.info(
+            "%s: %d/%d sweeps deskewed onto the frame clock (span up to %.3f s)%s",
+            bag,
+            sweeps["deskewed"],
+            clouds,
+            span,
+            "".join(f"; {v} {k.replace('_', ' ')}" for k, v in sorted(sweeps.items()) if k != "deskewed" and v),
+        )
+    elif sweeps["no_time_field"]:
+        LOG.info("%s: the clouds carry no per-point time; written as recorded (nothing to deskew)", bag)
+    else:
+        LOG.warning("%s: no sweep could be deskewed: %s", bag, dict(sweeps))
 
 
 def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_verdict, args, bag: str):

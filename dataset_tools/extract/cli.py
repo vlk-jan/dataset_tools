@@ -178,6 +178,16 @@ def build_parser() -> argparse.ArgumentParser:
         "sweeps, since it moves only one side of the match",
     )
     parser.add_argument(
+        "--deskew",
+        choices=("auto", "off"),
+        default="auto",
+        help="auto (default): where the cloud carries a per-point time (Odin1: offset_time, a 67 ms "
+        "bottom-to-top raster behind one stamp) and the pose stream covers the sweep, every return is "
+        "moved to where the robot was at the frame's instant, so the cloud is a snapshot taken at data_ts "
+        "like the image beside it. off: the sweep is written as recorded, with its motion smear, as "
+        "every root before 2026-10-01 was. Recorded per scene in extract_meta.json (frames.deskew)",
+    )
+    parser.add_argument(
         "--image_format",
         choices=("camera", "png"),
         default="camera",

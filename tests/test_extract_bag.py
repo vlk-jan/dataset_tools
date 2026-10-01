@@ -54,21 +54,24 @@ def _vec(x=0.0, y=0.0, z=0.0):
     return _t("geometry_msgs/msg/Vector3")(x=x, y=y, z=z)
 
 
-def _cloud_msg(t: float, points: np.ndarray, frame: str = "lidar_frame"):
-    """A PointCloud2 with x, y, z, intensity float32 fields."""
-    fields = [
-        _t("sensor_msgs/msg/PointField")(name=n, offset=4 * i, datatype=7, count=1)
-        for i, n in enumerate(("x", "y", "z", "intensity"))
-    ]
-    data = np.ascontiguousarray(points, dtype=np.float32).tobytes()
+def _cloud_msg(t: float, points: np.ndarray, frame: str = "lidar_frame", offsets: np.ndarray | None = None):
+    """A PointCloud2 with x, y, z, intensity float32 fields -- and, given
+    ``offsets``, the Odin1's per-point ``offset_time`` (seconds after the stamp)."""
+    names = ("x", "y", "z", "intensity") + (("offset_time",) if offsets is not None else ())
+    fields = [_t("sensor_msgs/msg/PointField")(name=n, offset=4 * i, datatype=7, count=1) for i, n in enumerate(names)]
+    cols = np.asarray(points, dtype=np.float32)
+    if offsets is not None:
+        cols = np.column_stack([cols, np.asarray(offsets, dtype=np.float32)])
+    data = np.ascontiguousarray(cols).tobytes()
+    step = 4 * len(names)
     return _t("sensor_msgs/msg/PointCloud2")(
         header=_header(t, frame),
         height=1,
         width=len(points),
         fields=fields,
         is_bigendian=False,
-        point_step=16,
-        row_step=16 * len(points),
+        point_step=step,
+        row_step=step * len(points),
         data=np.frombuffer(data, dtype=np.uint8),
         is_dense=False,
     )
@@ -102,8 +105,11 @@ def _camera_info_msg(t: float, frame: str = "cam_optical"):
     )
 
 
-def _odom_msg(t: float, x: float):
-    pose = _t("geometry_msgs/msg/Pose")(position=_t("geometry_msgs/msg/Point")(x=x, y=0.0, z=0.0), orientation=_quat())
+def _odom_msg(t: float, x: float, yaw: float = 0.0):
+    pose = _t("geometry_msgs/msg/Pose")(
+        position=_t("geometry_msgs/msg/Point")(x=x, y=0.0, z=0.0),
+        orientation=_quat(z=math.sin(yaw / 2), w=math.cos(yaw / 2)),
+    )
     twist = _t("geometry_msgs/msg/Twist")(linear=_vec(), angular=_vec())
     return _t("nav_msgs/msg/Odometry")(
         header=_header(t, "odom"),
@@ -177,6 +183,25 @@ def _tf_static_msg(odin: bool = False):
     return _t("tf2_msgs/msg/TFMessage")(transforms=transforms)
 
 
+#: A vertical wall 6 m ahead of the robot's start, in the odometry frame.
+WALL = np.column_stack([np.full(60, 6.0), np.linspace(-2.0, 2.0, 60), np.sort(np.tile(np.linspace(-0.4, 2.0, 12), 5))])
+
+
+def _wall_in_base(tau, yaw_rate: float) -> np.ndarray:
+    """:data:`WALL` as the robot at time(s) ``tau`` sees it: x = 1 m/s, yaw = yaw_rate * t."""
+    tau = np.broadcast_to(np.asarray(tau, dtype=float), (len(WALL),))
+    yaw = yaw_rate * (tau - T0)
+    d = WALL - np.column_stack([tau - T0, np.zeros_like(tau), np.zeros_like(tau)])
+    c, s = np.cos(yaw), np.sin(yaw)
+    return np.column_stack([c * d[:, 0] + s * d[:, 1], -s * d[:, 0] + c * d[:, 1], d[:, 2]])
+
+
+def _wall_in_lidar(tau, yaw_rate: float) -> np.ndarray:
+    """The same, in the front lidar's frame (mounted at LIDAR_XYZ, rolled 180 deg)."""
+    p = _wall_in_base(tau, yaw_rate) - np.asarray(LIDAR_XYZ)
+    return p * np.array([1.0, -1.0, -1.0])
+
+
 def write_bag(
     bag_dir: Path,
     frames: int = FRAMES,
@@ -187,6 +212,8 @@ def write_bag(
     odom_until: int | None = None,
     lidar_frame: str | None = None,
     boot_joints: int = 0,
+    yaw_rate: float = 0.0,
+    sweep_s: float = 0.0,
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
@@ -197,7 +224,10 @@ def write_bag(
     ``odom_until`` the odometry stops altogether, as when the robot side shuts
     down while the sensors record on. ``lidar_frame`` names a frame the TF tree
     does not hold; the first ``boot_joints`` joint states are stamped with a
-    clock that started at boot.
+    clock that started at boot. With ``yaw_rate`` (rad/s) the robot turns as it
+    drives, and with ``sweep_s`` each cloud is a raw sweep of :data:`WALL`
+    scanned bottom to top over that long, every point stamped with its own
+    ``offset_time`` -- the Odin1's raster, in miniature.
     """
     with Writer(bag_dir, version=8) as writer:
         conns = {
@@ -228,17 +258,24 @@ def write_bag(
         rng = np.random.default_rng(0)
         for k in range(frames):
             t = T0 + 0.1 * k
-            pts = rng.uniform(1.0, 5.0, size=(40, 4)).astype(np.float32)
-            pts[0] = [np.nan, 0, 0, 1]  # a NaN return
-            pts[1] = [0, 0, 0, 5]  # a dropped shot encoded as the origin
-            pts[2] = [1.0, 0.0, 0.0, 9.0]  # a known point, to check the mount transform
-            put("/lidar", t, _cloud_msg(t, pts, lidar_frame))
+            if sweep_s > 0:
+                offsets = np.linspace(0.0, sweep_s, len(WALL))
+                pts = np.column_stack([_wall_in_lidar(t + offsets, yaw_rate), np.full(len(WALL), 7.0)])
+                pts = np.vstack([[[np.nan, 0, 0, 1], [0, 0, 0, 5]], pts]).astype(np.float32)
+                put("/lidar", t, _cloud_msg(t, pts, lidar_frame, np.r_[0.0, 0.0, offsets]))
+            else:
+                pts = rng.uniform(1.0, 5.0, size=(40, 4)).astype(np.float32)
+                pts[0] = [np.nan, 0, 0, 1]  # a NaN return
+                pts[1] = [0, 0, 0, 5]  # a dropped shot encoded as the origin
+                pts[2] = [1.0, 0.0, 0.0, 9.0]  # a known point, to check the mount transform
+                put("/lidar", t, _cloud_msg(t, pts, lidar_frame))
             if k not in dropped_camera:
                 put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k, image_ext, cam_frame))
                 put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03, cam_frame))
             lost = reset_from is not None and k >= reset_from
             if odom_until is None or k < odom_until:
-                put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
+                # 1 m/s: under the GT teleport gate
+                put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k, yaw_rate * 0.1 * k))
             put("/imu", t, _imu_msg(t, math.radians(10.0)))
             put("/joint_states", t, _joint_msg(0.1 * k if k < boot_joints else t, k))
             put("/cmd_vel", t, _t("geometry_msgs/msg/Twist")(linear=_vec(x=0.4), angular=_vec(z=0.1)))
@@ -779,3 +816,48 @@ def test_joint_rows_follow_the_first_message_s_order():
     assert np.isnan(no_effort[5:]).all() and len(no_effort) == len(first)
     assert other is None and short is None
     assert p1.malformed == {"/joint_states": 2}
+
+
+def test_a_sweep_recorded_while_turning_is_deskewed_onto_the_frame_clock(tmp_path: Path):
+    """The Odin1 raster in miniature: a wall scanned over 67 ms while the robot
+    turns at 60 deg/s is sheared by 4 degrees as recorded. Extracted, it has to
+    stand straight where the robot saw it at the frame's instant -- and with
+    --deskew off it has to come out as recorded, shear and all."""
+    rate = math.radians(60.0)
+    write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
+    flags = [*COMMON, "--gt", "on", "--time_align", "off"]
+
+    out = tmp_path / "out"
+    assert main([str(tmp_path / "bags"), str(out), *flags]) == 0
+    scene = out / "0000"
+    k = 7
+    frame_ts = np.loadtxt(scene / "data_ts.txt")
+    cloud = np.load(scene / "clouds" / f"{k:05d}.npy")
+    assert cloud.shape == (len(WALL), 4) and np.allclose(cloud[:, 3], 7.0)
+    want = _wall_in_base(frame_ts[k], rate)  # the frame's instant: the cam/lidar midpoint
+    assert np.abs(cloud[:, :3] - want).max() < 0.02
+    meta = json.loads((scene / "extract_meta.json").read_text())
+    # The last sweep runs past the last pose sample, so it is the one left raw.
+    assert meta["frames"]["deskew"]["deskewed"] == len(frame_ts) - 1
+    assert meta["frames"]["deskew"]["no_pose"] == 1
+    assert meta["frames"]["deskew"]["sweep_span_s"] == pytest.approx(0.067, abs=1e-3)
+
+    raw = tmp_path / "raw"
+    assert main([str(tmp_path / "bags"), str(raw), *flags, "--deskew", "off"]) == 0
+    recorded = np.load(raw / "0000" / "clouds" / f"{k:05d}.npy")
+    assert np.linalg.norm(recorded[:, :3] - want, axis=1).max() > 0.25  # 3 deg over 52 ms at 6 m
+    assert json.loads((raw / "0000" / "extract_meta.json").read_text())["frames"]["deskew"] == {"mode": "off"}
+
+
+def test_a_cloud_without_per_point_time_is_written_as_recorded(bags: Path, tmp_path: Path):
+    out = tmp_path / "out"
+    assert main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
+    meta = json.loads((out / "0000" / "extract_meta.json").read_text())
+    n = FRAMES - 2
+    assert meta["frames"]["deskew"] == {
+        "mode": "auto",
+        "clouds": n,
+        "deskewed": 0,
+        "sweep_span_s": 0.0,
+        "no_time_field": n,
+    }

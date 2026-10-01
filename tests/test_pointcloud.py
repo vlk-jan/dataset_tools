@@ -178,3 +178,82 @@ def test_drop_invalid_returns_on_an_all_invalid_sweep():
     pts = np.array([[0.0, 0.0, 0.0, 0.0], [np.nan, np.nan, np.nan, 0.0]], dtype=np.float32)
     kept = drop_invalid_returns(pts)
     assert kept.shape == (0, 4)
+
+
+# --------------------------------------------------------------------------
+# per-point time
+# --------------------------------------------------------------------------
+
+UINT32 = 6
+FLOAT64 = 8
+
+
+def make_timed_msg(points: np.ndarray, times, name: str, datatype: int):
+    """A cloud with x, y, z, intensity and one time field of the given type."""
+    fmt = {FLOAT32: "<f4", UINT32: "<u4", FLOAT64: "<f8", UINT16: "<u2"}[datatype]
+    size = np.dtype(fmt).itemsize
+    fields = [field("x", 0), field("y", 4), field("z", 8), field("intensity", 12), field(name, 16, datatype)]
+    dtype = np.dtype(
+        {
+            "names": [f.name for f in fields],
+            "formats": ["<f4"] * 4 + [fmt],
+            "offsets": [f.offset for f in fields],
+            "itemsize": 16 + size,
+        }
+    )
+    buffer = np.zeros(len(points), dtype=dtype)
+    for i, n in enumerate(("x", "y", "z", "intensity")):
+        buffer[n] = points[:, i]
+    buffer[name] = times
+    return SimpleNamespace(
+        fields=fields, point_step=16 + size, is_bigendian=False, width=len(points), height=1, data=buffer.tobytes()
+    )
+
+
+def _pts():
+    return np.array([[1.0, 0.0, 0.0, 1.0], [2.0, 1.0, 0.0, 2.0], [np.nan, 0.0, 0.0, 3.0], [0.0, 0.0, 0.0, 4.0]])
+
+
+def test_the_odin1_offset_time_is_seconds_relative_to_the_stamp():
+    from dataset_tools.extract.pointcloud import cloud_to_xyzit, valid_returns_mask
+
+    msg = make_timed_msg(_pts(), [0.0, 0.034, 0.0, 0.067], "offset_time", FLOAT32)
+    xyzi, off = cloud_to_xyzit(msg, 1_700_000_000.5)
+    assert xyzi.shape == (4, 4) and off is not None
+    assert np.allclose(off, [0.0, 0.034, 0.0, 0.067], atol=1e-6)
+    # The invalid rows and their offsets go together.
+    keep = valid_returns_mask(xyzi)
+    assert keep.tolist() == [True, True, False, False]
+    assert np.allclose(off[keep], [0.0, 0.034], atol=1e-6)
+
+
+def test_an_integer_relative_field_is_nanoseconds():
+    from dataset_tools.extract.pointcloud import point_time_offsets
+
+    msg = make_timed_msg(_pts(), [0, 50_000_000, 0, 99_000_000], "t", UINT32)
+    pts = np.frombuffer(msg.data, dtype=fields_to_dtype(msg.fields, msg.point_step))
+    assert np.allclose(point_time_offsets(pts, 1.0), [0.0, 0.05, 0.0, 0.099])
+
+
+def test_an_absolute_timestamp_is_taken_against_the_stamp():
+    from dataset_tools.extract.pointcloud import point_time_offsets
+
+    stamp = 1_700_000_000.25
+    seconds = make_timed_msg(_pts(), stamp + np.array([0.0, 0.01, 0.02, 0.03]), "timestamp", FLOAT64)
+    pts = np.frombuffer(seconds.data, dtype=fields_to_dtype(seconds.fields, seconds.point_step))
+    assert np.allclose(point_time_offsets(pts, stamp), [0.0, 0.01, 0.02, 0.03], atol=1e-6)
+    # Livox: a double holding nanoseconds.
+    nanos = make_timed_msg(_pts(), (stamp + np.array([0.0, 0.01, 0.02, 0.03])) * 1e9, "timestamp", FLOAT64)
+    pts = np.frombuffer(nanos.data, dtype=fields_to_dtype(nanos.fields, nanos.point_step))
+    assert np.allclose(point_time_offsets(pts, stamp), [0.0, 0.01, 0.02, 0.03], atol=1e-5)
+
+
+def test_a_cloud_without_a_time_field_or_with_nonsense_in_it_has_none():
+    from dataset_tools.extract.pointcloud import cloud_to_xyzit, point_time_offsets
+
+    xyzi, off = cloud_to_xyzit(make_msg(_pts()), 1.0)
+    assert off is None and xyzi.shape == (4, 4)
+    # 'time' holding seconds since boot is not a sweep offset.
+    msg = make_timed_msg(_pts(), [5000.0, 5000.1, 5000.2, 5000.3], "time", FLOAT32)
+    pts = np.frombuffer(msg.data, dtype=fields_to_dtype(msg.fields, msg.point_step))
+    assert point_time_offsets(pts, 1.0) is None
