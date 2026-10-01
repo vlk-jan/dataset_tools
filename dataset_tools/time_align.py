@@ -280,7 +280,8 @@ class Profile:
         if self.is_identity:
             return f"no correction ({self.note})"
         lo, hi = self.knot_delta.min(), self.knot_delta.max()
-        shape = f"{lo:+.3f} s" if hi - lo < 0.05 else f"{lo:+.3f} .. {hi:+.3f} s, varying"
+        mid = float(np.median(self.knot_delta))
+        shape = f"{mid:+.3f} s" if hi - lo < 0.05 else f"{lo:+.3f} .. {hi:+.3f} s, varying"
         return f"{shape} from {len(self.knot_ts)}/{len(self.windows)} windows ({self.note})"
 
     def at(self, ts: np.ndarray) -> np.ndarray:
