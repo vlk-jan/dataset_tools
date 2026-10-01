@@ -239,7 +239,7 @@ def windows_for_scene(
                 suffix = f".{ci}" if len(chunks) > 1 else ""
                 label = f"Segment {seg.index}"
                 if len(chunks) > 1:
-                    label += f" (part {ci + 1}/{len(chunks)})"
+                    label += f" ({ci + 1}/{len(chunks)})"
                 windows.append(
                     Window(
                         key=f"seg{seg.index:03d}{suffix}",
@@ -278,7 +278,7 @@ def windows_for_scene(
             suffix = f".{ci}" if len(chunks) > 1 else ""
             label = "Whole scene, wheel odometry" if source == "transforms" else "Whole scene, no pose"
             if len(chunks) > 1:
-                label += f" (part {ci + 1}/{len(chunks)})"
+                label += f" ({ci + 1}/{len(chunks)})"
             windows.append(
                 Window(
                     key=f"raw{suffix}",

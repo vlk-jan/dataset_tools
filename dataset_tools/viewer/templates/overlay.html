@@ -21,7 +21,7 @@
       <div class="dt-title">Scene {{ scene_id }} &middot;
         {%- if window.kind == "segment" %} Segment {{ window.segment_index }}
           {%- if n_segments %}/{{ n_segments }}{% endif %}
-          {%- if window.n_chunks > 1 %} (part {{ window.chunk + 1 }}/{{ window.n_chunks }}){% endif %}
+          {%- if window.n_chunks > 1 %} ({{ window.chunk + 1 }}/{{ window.n_chunks }}){% endif %}
         {%- else %} {{ window.label }}{% endif %}</div>
       {# Widest to narrowest, so the links read as the path down to this view. #}
       <div class="dt-sub">

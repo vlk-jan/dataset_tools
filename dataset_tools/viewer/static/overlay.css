@@ -115,9 +115,18 @@
    something to keep on screen over the per-frame tiles. The summary line
    still names the mode currently being drawn, which is the part you want at
    a glance. */
+/* The panel is a fixed-height column and only the tiles scroll, so an open
+   section taller than what is left (six modes' prose, a long note list) ran
+   off the bottom of the window with no way to reach it. An open section may
+   shrink to the room there is and scroll inside itself, its summary pinned. */
+.dt-legend[open] { min-height: 0; overflow-y: auto; padding-top: 0; }
 .dt-legend summary {
   cursor: pointer; list-style: none;
   display: flex; align-items: baseline; gap: 6px;
+}
+.dt-legend[open] summary {
+  position: sticky; top: 0; z-index: 1; padding-top: var(--sp-2);
+  background: color-mix(in srgb, var(--bg) 94%, var(--panel));
 }
 .dt-legend summary::-webkit-details-marker { display: none; }
 .dt-legend summary::before {

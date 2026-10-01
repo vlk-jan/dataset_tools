@@ -117,7 +117,9 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #: 10: the ``driven`` and ``drivable`` terrain layers from ``driven_similarity/``,
 #:    and ``meta.available`` lists that modality; a bundle built before knows
 #:    neither.
-META_VERSION = 10
+#: 11: the episode label is the window's own ("Segment 1 (3/4)"), without the
+#:    pose source after it.
+META_VERSION = 11
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -1451,7 +1453,7 @@ def build_scene(
         trajectories=trajectories,
         scalar_values={k: v.astype(np.float32) for k, v in scalars.items()} or None,
     )
-    scene.mark_episode(label=f"{window.label} ({gt.source})", start_index=0)
+    scene.mark_episode(label=window.label, start_index=0)
 
     meta = {
         "meta_version": META_VERSION,
