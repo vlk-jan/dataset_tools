@@ -79,9 +79,16 @@ export function centerOnRobot(app) {
 
 /** Apply every patch and return the handles the overlay drives them with. */
 export function installSimviewPatches(app) {
-    styleGhost(app);
-    defaultPointCloudsOff(app);
-    defaultPanelState(app);
+    // Each on its own: SimView changes under these patches (an editable
+    // install moves with its repo), and one that throws must not take the
+    // others with it -- a renamed method once left every default unapplied.
+    for (const patch of [styleGhost, defaultPointCloudsOff, collapseBodyStates, applyFolderDefaults, fitAnalysisBar]) {
+        try {
+            patch(app);
+        } catch (error) {
+            console.warn(`SimView patch ${patch.name} not applied:`, error);
+        }
+    }
 
     // ---------------------------------------------------------------- ghost
     //
@@ -120,8 +127,9 @@ function defaultPointCloudsOff(app) {
     if (ctrl && ctrl.getValue() !== false) ctrl.setValue(false);
 }
 
-/**
- * Open the control panel on what this viewer is actually for.
+/*
+ * The two panel defaults below open the controls on what this viewer is
+ * actually for.
  *
  * SimView opens Body and Terrain Options and closes Camera Options, which fits
  * a physics scene where the terrain's properties are the subject. Here the
@@ -131,28 +139,27 @@ function defaultPointCloudsOff(app) {
  * States window is likewise a readout to open on demand, not a panel that
  * should cover the scene on every window open.
  *
- * All three are set through SimView's public objects, so a viewer can undo any
- * of them with one click and nothing is removed from the UI.
+ * Both are set through SimView's public objects, so a viewer can undo any of
+ * them with one click and nothing is removed from the UI.
  */
-function defaultPanelState(app) {
-    collapseBodyStates(app);
-    applyFolderDefaults(app);
-}
 
 /** Start the Body States window collapsed; its header still expands it. */
 function collapseBodyStates(app) {
     const bsw = app.bodyStateWindow;
     if (!bsw || !bsw.window) return;
-    // `toggleCollapse` rather than the class directly: it also flips the
-    // header's caret, which a bare classList write would leave pointing down.
-    if (!bsw.window.classList.contains("collapsed")) bsw.toggleCollapse();
+    // A <details> since simview's collapsible-panel refactor: closing it is
+    // all there is. Before that, `toggleCollapse` (which also flips the caret).
+    if ("open" in bsw.window) bsw.window.open = false;
+    else if (!bsw.window.classList.contains("collapsed")) bsw.toggleCollapse();
 }
 
-/** Which of SimView's lil-gui folders start open, by their title. Folders not
- *  named here (Body Options, Scene Info) keep SimView's own default. */
+/** Which of SimView's lil-gui folders start open, by their title -- all four
+ *  named, so a change in SimView's own defaults does not change this view. */
 const FOLDER_DEFAULTS = {
+    "Body Options": true,
     "Terrain Options": false,
     "Camera Options": true,
+    "Scene Info": false,
 };
 
 function applyFolderDefaults(app) {
@@ -174,6 +181,37 @@ function applyFolderDefaults(app) {
             console.info(`no lil-gui folder titled "${title}"; leaving it as SimView left it.`);
         }
     }
+}
+
+/**
+ * Pin SimView's Analysis bar between the Body states window and the controls,
+ * the same gap from each.
+ *
+ * Measured, not written as constants in overlay.css: both panels' sizes have
+ * changed between simview versions (the Body states window lost 33 px in the
+ * collapsible-panel refactor), and fixed numbers left the gaps lopsided twice.
+ * Re-fitted when either panel resizes, the window resizes, or the data panel
+ * opens or closes (the controls move with it, via a class on <body>).
+ */
+const ANALYSIS_GAP = 10;
+
+function fitAnalysisBar(app) {
+    const bar = document.querySelector(".analysis-container");
+    const left = app.bodyStateWindow && app.bodyStateWindow.window;
+    const right = document.querySelector(".lil-gui.root");
+    if (!bar || !left || !right) return;
+    const fit = () => {
+        const l = left.getBoundingClientRect();
+        const r = right.getBoundingClientRect();
+        bar.style.setProperty("left", `${l.right + ANALYSIS_GAP}px`, "important");
+        bar.style.setProperty("right", `${window.innerWidth - r.left + ANALYSIS_GAP}px`, "important");
+    };
+    const resized = new ResizeObserver(fit);
+    resized.observe(left);
+    resized.observe(right);
+    new MutationObserver(fit).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    window.addEventListener("resize", fit);
+    fit();
 }
 
 /**

@@ -312,12 +312,18 @@
 .dt-build.failed .dt-build-msg { color: var(--bad); }
 
 /* SimView's own lil-gui control panel is fixed to the top-right, exactly where
-   our data panel sits. Nudge it clear by the panel's width while the panel is
-   open (a CSS-only adjustment; SimView is untouched). The selector has to beat
+   our data panel sits. Nudge it clear of the panel and of the 24 px edge tab
+   that sticks out of the panel's left side, with a 16 px gap: 340 + 24 + 16
+   (a CSS-only adjustment; SimView is untouched). The selector has to beat
    lil-gui's own runtime-injected rule, hence the specificity and !important. */
 body:not(.dt-collapsed) .lil-gui.root.autoPlace,
 body:not(.dt-collapsed) .lil-gui.autoPlace {
-  right: 356px !important;
+  right: 380px !important;
+}
+/* Collapsed, the panel is gone but its tab still sits on the window edge. */
+body.dt-collapsed .lil-gui.root.autoPlace,
+body.dt-collapsed .lil-gui.autoPlace {
+  right: calc(24px + 16px) !important;
 }
 
 /* SimView's Analysis panel is 40% of the viewport centred on it, which
@@ -326,21 +332,15 @@ body:not(.dt-collapsed) .lil-gui.autoPlace {
    ("wheel_odom_drift" among them) end up unclickable: lil-gui is on top and
    swallows the pointer.
 
-   Pinned between the two panels instead of centred, so both edges are
-   accounted for: the "Body states" window on the left, the controls (at
-   whichever of its two positions) on the right. */
-/* The same 10 px gap on both sides. Left: the Body states window ends at
-   16 + 354 px. Right: the control panel's right offset (356 px beside our
-   panel, SimView's 16 px without it) plus its width (lil-gui's --width,
-   260 px in simview 5.1). */
+   Pinned between the two panels instead of centred, the same 10 px from the
+   "Body states" window on the left and the controls on the right. Their
+   sizes change between simview versions, so simview_patch.js measures them
+   and sets left/right itself (fitAnalysisBar); this only lets it stretch. */
 .analysis-container {
-  left: calc(16px + 354px + 10px) !important;
-  right: calc(356px + 260px + 10px) !important;
   width: auto !important;
   min-width: 300px;
   transform: none !important;
 }
-body.dt-collapsed .analysis-container { right: calc(16px + 260px + 10px) !important; }
 
 /* SimView centres its playback bar on the window; beside the open panel that
    is off-centre in the part of the scene still showing. Centred on what is
