@@ -119,7 +119,9 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
 #:    neither.
 #: 11: the episode label is the window's own ("Segment 1 (3/4)"), without the
 #:    pose source after it.
-META_VERSION = 11
+#: 12: no episode at all. A window is one stretch of one segment, and the
+#:    panel's title already names it; the timeline label only repeated it.
+META_VERSION = 12
 
 #: What each terrain colour mode means, in the viewer's own terms.
 #:
@@ -1453,7 +1455,6 @@ def build_scene(
         trajectories=trajectories,
         scalar_values={k: v.astype(np.float32) for k, v in scalars.items()} or None,
     )
-    scene.mark_episode(label=window.label, start_index=0)
 
     meta = {
         "meta_version": META_VERSION,
