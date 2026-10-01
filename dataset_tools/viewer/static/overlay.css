@@ -74,7 +74,9 @@
   transition: color 0.15s ease, background 0.15s ease;
 }
 .dt-edge:hover { color: var(--fg); background: var(--panel-2); }
-.dt-edge span { display: block; transition: transform 0.18s ease; }
+/* The chevron is drawn, not a "›" glyph: a glyph stays hairline at any size
+   and is whatever the font makes of it. */
+.dt-edge span { display: block; line-height: 0; transition: transform 0.18s ease; }
 .dt-panel.collapsed .dt-edge span { transform: rotate(180deg); }
 
 .dt-readout {
