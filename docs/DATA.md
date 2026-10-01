@@ -460,10 +460,12 @@ segment and is counted in the check. v2 beta through v2.2 were built on the
 Fixposition instead (`odometry` in their manifests says so).
 `gravity_align.npy` follows the same source: levelled by the Odin1 attitude
 the paved ground of scene 0000 comes out level to 0.03° of pitch, where the
-Fixposition attitude of v2.0–v2.2 left +1.77° (the receiver's mounting against
-`base_link`, about +0.9°, on top of the robot's own +0.9° nose-up pitch). Height
-maps and compression labels of v2.0–v2.2 are therefore tilted by about 1.6 cm
-per metre ahead; v2.3's are not (see `NEW_RIG_READINESS.md`).
+Fixposition attitude of v2.0–v2.2 left +1.77°. The two streams track each
+other frame by frame (correlation +0.995), so the Fixposition's error is a
+rigid offset per scene, +1.2 to +1.7° of pitch: the height maps and
+compression labels of v2.0–v2.2 are tilted by a constant 2.0–2.9 cm per metre
+ahead within each scene; v2.3's are not (per-scene numbers in its manifest,
+method in `NEW_RIG_READINESS.md`).
 
 **`gps.npy`** is new with this generation: `(M, 8)` `float64` rows of
 `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]` at the receiver's own rate
