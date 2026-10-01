@@ -131,10 +131,17 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
   margin: 2px 0 0; font: 600 var(--fs-lg)/1.2 var(--display); font-variant-numeric: tabular-nums;
 }
 .totals dd small { display: block; margin-top: 2px; font: 400 var(--fs-xs)/1.3 var(--sans); color: var(--muted); }
-/* Disk usage by modality. Categorical slots validated against --panel for
-   colour-blind separation; the legend names every slot, so hue is never the
-   only thing that says which modality a segment is. */
-:root { --dk-1: #3987e5; --dk-2: #d95926; --dk-3: #199e70; --dk-4: #c98500; --dk-5: #d55181; --dk-6: #8a5cd6; }
+/* Disk usage by modality, in Catppuccin: Latte here, Mocha in the dark theme.
+   Images blue, clouds peach, height maps green, height masks red, driven
+   similarity pink; "other" is a catch-all, so it is the theme's neutral grey,
+   not a sixth hue. The bar is sorted by size, so any two can touch: chosen to
+   maximise the worst all-pairs dE (dataviz validate_palette.js) among
+   Catppuccin hues -- 12 normal / 3.8 CVD in Mocha, 16 / 5.9 in Latte. That is
+   below a categorical palette's targets, and no five Catppuccin hues do
+   better, so the bar never leans on colour alone: 2 px gaps between
+   segments, a legend that names and sizes every one, a title on each. */
+:root { --dk-1: #1e66f5; --dk-2: #fe640b; --dk-3: #40a02b; --dk-4: #d20f39; --dk-5: var(--faint); --dk-6: #ea76cb; }
+:root[data-theme="dark"] { --dk-1: #89b4fa; --dk-2: #fab387; --dk-3: #a6e3a1; --dk-4: #f38ba8; --dk-6: #f5c2e7; }
 .diskpanel { margin: 0 0 var(--sp-3); }
 .card .diskpanel { margin: var(--sp-4) 0 0; }
 .diskbar { display: flex; gap: 2px; height: 10px; background: var(--track); border-radius: 2px; overflow: hidden; }
