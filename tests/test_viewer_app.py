@@ -916,3 +916,20 @@ def test_a_verdict_travels_from_the_note_to_the_index_the_segments_table_and_the
     edited = client.patch(f"/api/scene/0001/notes/{made.json()['id']}", json={"verdict": ""})
     assert edited.json()["verdict"] == ""
     assert 'id="s0001"' not in client.get("/?verdict=drop").text
+
+
+def test_simviews_cache_stamp_follows_its_files_not_only_its_version(tmp_path):
+    """An editable SimView changes its modules without changing its version; a
+    version-only URL kept browsers on year-cached modules from before."""
+    import os
+
+    from dataset_tools.viewer.app import _static_fingerprint
+
+    (tmp_path / "js").mkdir()
+    module = tmp_path / "js" / "main.js"
+    module.write_text("import chroma from 'chroma';")
+    before = _static_fingerprint(tmp_path)
+    assert before == _static_fingerprint(tmp_path)  # stable while nothing changes
+    module.write_text("export {};")
+    os.utime(module, ns=(1, 1))
+    assert _static_fingerprint(tmp_path) != before

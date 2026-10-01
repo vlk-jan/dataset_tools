@@ -254,13 +254,17 @@ def create_app(
 
     simview_static = str(files("simview") / "static")
     simview_ver = simview.__version__
-    # The entry point and every ES module it imports resolve under a
-    # version-stamped path, so a package upgrade changes every module's URL at
-    # once and the browser cannot run a stale mix of old and new modules: the
-    # file at a URL never changes, so it is cached forever. This is what
-    # render_viewer_page points at.
+    # The entry point and every ES module it imports resolve under a stamped
+    # path, so a change to SimView changes every module's URL at once and the
+    # browser cannot run a stale mix of old and new modules: the file at a URL
+    # never changes, so it is cached forever. This is what render_viewer_page
+    # points at. The stamp is the version *and* a fingerprint of the files: an
+    # editable install changes them without changing the version, and a
+    # version-only stamp left browsers on a year-cached module that imported
+    # what the new page no longer mapped ("chroma", simview dfc3294).
+    simview_stamp = f"{simview_ver}-{_static_fingerprint(Path(simview_static))}"
     app.mount(
-        f"/simview-static/{simview_ver}",
+        f"/simview-static/{simview_stamp}",
         _CachedStatic(directory=simview_static, cache_control="public, max-age=31536000, immutable"),
         name="simview_static_versioned",
     )
@@ -607,7 +611,7 @@ def create_app(
         body = overlay + '<script type="module" src="/viewer-static/overlay.js"></script>'
         page = await run_in_threadpool(
             render_viewer_page,
-            f"/simview-static/{simview_ver}",
+            f"/simview-static/{simview_stamp}",
             f"/api/data/{bundle_key}/{stamp}",
             body,
             head,
@@ -1313,6 +1317,20 @@ def _overlay_possible(access: SceneAccess) -> bool:
     if not (p.has("images") and p.has("clouds") and p.has("camera_intrinsics") and p.has("T_cam_to_base")):
         return False
     return access.K is not None and access.T_cam is not None
+
+
+def _static_fingerprint(root: Path) -> str:
+    """A short hash of every file's path, size and mtime under ``root``.
+
+    Read once at startup: it changes whenever a file does, which is all a
+    cache-busting URL needs, without hashing the contents.
+    """
+    h = hashlib.sha1()
+    for path in sorted(root.rglob("*")):
+        if path.is_file():
+            st = path.stat()
+            h.update(f"{path.relative_to(root)}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+    return h.hexdigest()[:10]
 
 
 def _safe_render(fn, *args, **kwargs):
