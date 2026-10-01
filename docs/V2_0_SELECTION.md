@@ -125,8 +125,11 @@ robots and the crowd in frame).
 **09-22 Lipník** (0026–0027): the Robotour site — ploughed field, rutted mud,
 grass mounds and banks, gravel and railway ballast, a felled log. Tilt 95th
 pct 11.5°, sd 3.5–3.7°, the roughest upright driving in the collection; 0.46
-m/s; RTK. 0027 has 525 s without any Fixposition pose (294 s of it one hole
-inside the scene), so 7,557 of its frames are not exported.
+m/s; RTK. 0027 has 525 s of frames without a Fixposition pose -- about 24 s
+before the pose stream starts and 499 s after the robot side stopped at
+1,242 s while the Odin1 recorded on -- so 7,557 of its frames are not
+exported. Its 294 s hole inside the scene is the Odin1 failing (no camera, no
+lidar), not the Fixposition: 2,939 poses lie inside it.
 
 ## 4. Selection
 
@@ -146,7 +149,7 @@ Rule 2, from the purpose: made surfaces are kept as a *sample*, not in bulk.
 | 0001 | 09-14 `17_23_46` (beta 0025) | cobbles and gravel on a route nothing else drives; 627 m; no RTK (fine, §2) |
 | 0002 | 09-19 `robotour_finals_1` | the longest clean autonomous drive: 1.5 km, cobbles/asphalt/gravel, 18 % stationary |
 | 0003 | 09-22 `14_16_30` (beta 0026) | Lipník field, ruts, mounds, ballast |
-| 0004 | 09-22 `15_27_08` (beta 0027) | Lipník banks, log, ballast; one 294 s pose hole |
+| 0004 | 09-22 `15_27_08` (beta 0027) | Lipník banks, log, ballast; one 294 s Odin1 outage |
 
 **Optional, new firmware, moving, if volume on made surfaces is wanted**
 (append rows in this order to keep scenes chronological): 09-14 `13_45_23`
@@ -278,7 +281,7 @@ rebuild.
 
 The root is 12 scenes, 109,681 frames, 4,917 m of ground truth, 2 h 12 min,
 108,244 height maps; `validate_scene` 0 failed, 4 with warnings (steps across
-pose holes in 0001, 0004 and 0008, frames past 45° in 0008 and 0009).
+frame-clock holes in 0001, 0004 and 0008, frames past 45° in 0008 and 0009).
 Finalized 2026-09-29.
 
 **DRIFT-side files, written the same day on the finalized root.**
