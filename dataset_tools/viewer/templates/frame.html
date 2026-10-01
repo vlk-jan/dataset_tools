@@ -37,8 +37,17 @@
     <div class="framemain">
       {% if details.present.images %}
       <figure class="bigoverlay">
+        <div class="photobox">
         <img class="bigframe zoomable" id="bigframe" src="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
+             data-plain="/api/scene/{{ scene_id }}/frame/{{ index }}/image.jpg?w=1280"
              alt="scene {{ scene_id }} frame {{ index }}" tabindex="0" title="Click for a bigger copy">
+        {% if details.overlay %}
+        <div class="depthlegend" hidden aria-hidden="true">
+          <span>lidar depth from camera</span><i></i>
+          <span class="depthrange"><b data-near></b><b data-far></b></span>
+        </div>
+        {% endif %}
+        </div>
         {# The calibration check: this frame's cloud on this frame's picture,
            swapped in over the same image by the button. Only where the scene
            has T_cam_to_base.txt and K and the frame has both files --
@@ -227,9 +236,14 @@
   <div class="zoomstage">
     <img alt="">
     <div class="zoomcell" hidden></div>
+    <div class="depthlegend" hidden aria-hidden="true">
+      <span>lidar depth from camera</span><i></i>
+      <span class="depthrange"><b data-near></b><b data-far></b></span>
+    </div>
   </div>
   <output class="zoomread" hidden></output>
 </dialog>
+<script src="/viewer-static/depthlegend.js"></script>
 <script src="/viewer-static/zoom.js" defer></script>
 <script type="module" src="/viewer-static/notes.js"></script>
 {% if signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
@@ -245,13 +259,23 @@
   const img = document.getElementById("bigframe");
   const btn = document.getElementById("cloudtoggle");
   const cap = document.getElementById("cloudcap");
-  const plain = img.src;
-  const set = (on) => {
-    img.src = on ? btn.dataset.cloud : plain;
+  const legend = img.parentElement.querySelector(".depthlegend");
+  const set = async (on) => {
     img.alt = on ? img.alt.replace(/(, lidar cloud.*)?$/, ", lidar cloud projected into the camera image")
                  : img.alt.replace(/, lidar cloud.*$/, "");
     btn.setAttribute("aria-pressed", on);
     cap.hidden = !on;
+    if (on) {
+      try {
+        const overlay = await dtDepth.load(btn.dataset.cloud);
+        if (btn.getAttribute("aria-pressed") !== "true") return URL.revokeObjectURL(overlay.src);
+        dtDepth.setSrc(img, overlay.src);
+        dtDepth.show(legend, overlay.range);
+        return;
+      } catch { btn.setAttribute("aria-pressed", false); cap.hidden = true; }
+    }
+    dtDepth.setSrc(img, img.dataset.plain);
+    dtDepth.show(legend, null);
   };
   btn.addEventListener("click", () => set(btn.getAttribute("aria-pressed") !== "true"));
 })();

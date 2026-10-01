@@ -346,8 +346,6 @@ def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> byte
 #: Returns closer to the camera than this (metres, along its optical axis) are
 #: not drawn: they are the robot's own body, or behind the lens.
 OVERLAY_MIN_DEPTH = 0.1
-#: Narrowest overlay that gets the depth legend drawn in (pixels).
-LEGEND_MIN_WIDTH = 480
 
 
 def _project_points(
@@ -396,7 +394,7 @@ def render_cloud_on_image(
     quality: int = 78,
     distortion_model: str | None = None,
     distortion_coeffs: Sequence[float] | np.ndarray | None = None,
-) -> bytes:
+) -> tuple[bytes, tuple[float, float] | None]:
     """The frame's lidar returns projected into its camera image, as a JPEG.
 
     A calibration check, not a product: a road that lands beside the road, or
@@ -413,6 +411,11 @@ def render_cloud_on_image(
     equidistant fisheye for Odin1, plumb_bob / rational_polynomial for pinhole
     lenses). If absent or unknown, uncorrected pinhole projection is used as a
     fallback. ``K`` is scaled with the image when it is downscaled to ``width``.
+
+    Returns the JPEG and the depth span the colours run over -- this frame's
+    own 2nd-98th percentile, in metres -- or ``None`` when no return landed.
+    The legend that says it is the page's, drawn over the picture rather than
+    into it, so it stays in its corner when the picture is zoomed.
     """
     from PIL import Image
 
@@ -425,6 +428,7 @@ def render_cloud_on_image(
     rgb = np.asarray(img).copy()
     h, w = rgb.shape[:2]
 
+    span = None
     pts = np.asarray(cloud, dtype=np.float64)
     if pts.ndim == 2 and pts.shape[1] >= 3 and len(pts):
         T = np.linalg.inv(np.asarray(T_cam_to_base, dtype=np.float64))
@@ -448,42 +452,8 @@ def render_cloud_on_image(
                     vv, uu = v + dy, u + dx
                     ok = (uu >= 0) & (uu < w) & (vv >= 0) & (vv < h)
                     rgb[vv[ok], uu[ok]] = colors[ok]
-
-            if w >= LEGEND_MIN_WIDTH:  # smaller, the legend would cover the picture
-                _draw_depth_legend(rgb, near, far)
+            span = (near, far)
 
     buf = io.BytesIO()
     Image.fromarray(rgb, mode="RGB").save(buf, format="JPEG", quality=quality, optimize=False)
-    return buf.getvalue()
-
-
-def _draw_depth_legend(rgb: np.ndarray, near: float, far: float) -> None:
-    """Paint the depth colour bar into the image's bottom-left corner, in place.
-
-    Drawn into the picture rather than beside it because the span is this
-    frame's own (2nd-98th percentile of its depths) and the picture is all the
-    page swaps in; it also comes along into the zoomed copy.
-    """
-    from PIL import Image, ImageDraw, ImageFont
-
-    h, w = rgb.shape[:2]
-    s = max(1.0, w / 1280)  # legend scale: the same share of the frame at any width
-    bar_w, bar_h, pad = round(220 * s), round(12 * s), round(8 * s)
-    font = ImageFont.load_default(size=round(14 * s))
-    line = round(18 * s)
-    # The far end is the 98th percentile, not the farthest return: everything
-    # beyond it is the same dark red, and "+" says so.
-    left, right = f"{near:.1f} m", f"{far:.1f} m+"
-    img = Image.fromarray(rgb)
-    draw = ImageDraw.Draw(img, "RGBA")
-    x0, y0 = pad, h - 3 * pad - 2 * line - bar_h
-    draw.rectangle([x0, y0 - pad, x0 + bar_w + 2 * pad, h - pad], fill=(0, 0, 0, 160))
-    draw.text((x0 + pad, y0), "lidar depth from camera", fill=(255, 255, 255, 255), font=font)
-    ramp = np.repeat(LUTS["turbo"][np.linspace(0, 255, bar_w).astype(int)][None], bar_h, axis=0)
-    img.paste(Image.fromarray(ramp), (x0 + pad, y0 + line + pad // 2))
-    y_num = y0 + line + pad + bar_h
-    draw.text((x0 + pad, y_num), left, fill=(255, 255, 255, 255), font=font)
-    draw.text(
-        (x0 + pad + bar_w - draw.textlength(right, font=font), y_num), right, fill=(255, 255, 255, 255), font=font
-    )
-    rgb[:] = np.asarray(img)
+    return buf.getvalue(), span

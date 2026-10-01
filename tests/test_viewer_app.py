@@ -112,6 +112,11 @@ def test_per_frame_endpoints_serve_images_and_404_past_the_end(client):
 def test_the_cloud_is_projected_into_the_image_only_where_the_calibration_allows(client, tmp_path):
     r = client.get("/api/scene/0000/frame/0/overlay.jpg")
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+    # The depth span rides in a header for the page's legend, not painted into the
+    # picture; absent when no return landed in view (as in this synthetic frame).
+    if "x-depth-range" in r.headers:
+        near, far = map(float, r.headers["x-depth-range"].split())
+        assert 0 < near < far
     assert client.get("/api/scene/0000/frame/9999/overlay.jpg").status_code == 404
     page = client.get("/scene/0000/frame/0").text
     assert "overlay.jpg" in page and "Cloud on image" in page

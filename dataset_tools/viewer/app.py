@@ -690,7 +690,10 @@ def create_app(
         data = await run_in_threadpool(work)
         if data is None or isinstance(data, Path):
             return _absent_or_unreadable(data, f"image and cloud to overlay for frame {index}")
-        return Response(data, media_type="image/jpeg")
+        jpeg, span = data
+        # The depth the colours run over, for the legend the page draws on top.
+        headers = {"X-Depth-Range": f"{span[0]:.2f} {span[1]:.2f}"} if span else {}
+        return Response(jpeg, media_type="image/jpeg", headers=headers)
 
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):

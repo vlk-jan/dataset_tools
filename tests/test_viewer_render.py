@@ -80,12 +80,14 @@ def test_a_known_point_lands_on_its_pixel_when_projected_into_the_image(tmp_path
     # A return 5 m ahead, 1 m to the left, at the camera's height: x_cam = -1,
     # y_cam = 0, z_cam = 5 -> u = 100 - 100 / 5 = 80, v = 50.
     cloud = np.array([[5.0, 1.0, 0.2, 10.0]], dtype=np.float32)
-    jpeg = render.render_cloud_on_image(path, cloud, K, T, width=1280)
+    jpeg, span = render.render_cloud_on_image(path, cloud, K, T, width=1280)
+    assert span is not None and span[0] < span[1]  # the depth span the page's legend states
     px = np.asarray(Image.open(io.BytesIO(jpeg)).convert("RGB"))
     assert px[50, 80].sum() > 100  # the dot
     assert px[50, 150].sum() < 30  # nowhere else
     # A return behind the camera is not drawn at all.
-    behind = render.render_cloud_on_image(path, np.array([[-5.0, 1.0, 0.2, 10.0]]), K, T)
+    behind, no_span = render.render_cloud_on_image(path, np.array([[-5.0, 1.0, 0.2, 10.0]]), K, T)
+    assert no_span is None
     assert np.asarray(Image.open(io.BytesIO(behind)).convert("RGB")).sum() < 3000
 
 
@@ -107,13 +109,13 @@ def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path
     cloud = np.array([[5.0, -5.0, 0.2, 10.0]], dtype=np.float32)
 
     # 1. Pinhole: lands around u=200
-    jpeg_pin = render.render_cloud_on_image(path, cloud, K, T, width=1280)
+    jpeg_pin, _ = render.render_cloud_on_image(path, cloud, K, T, width=1280)
     px_pin = np.asarray(Image.open(io.BytesIO(jpeg_pin)).convert("RGB"))
     assert px_pin[50, 200].sum() > 100
     assert px_pin[50, 179].sum() < 30
 
     # 2. Equidistant fisheye: lands around u=179
-    jpeg_fish = render.render_cloud_on_image(
+    jpeg_fish, _ = render.render_cloud_on_image(
         path, cloud, K, T, width=1280, distortion_model="equidistant", distortion_coeffs=[0.0, 0.0, 0.0, 0.0]
     )
     px_fish = np.asarray(Image.open(io.BytesIO(jpeg_fish)).convert("RGB"))

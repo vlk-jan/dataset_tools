@@ -39,3 +39,20 @@
    lines, so wrapping does not move it vertically either. */
 .zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
 .zoomread[hidden] { display: none; }
+/* The cloud overlay's depth legend (depthlegend.js), over the bottom-left
+   corner of the picture's box -- the frame page's photo and the zoom stage --
+   and not inside the picture, so zooming and panning leave it where it is.
+   The ramp is turbo, sampled from render.LUTS as the dots are painted. */
+.photobox { position: relative; }
+.depthlegend {
+  position: absolute; left: 8px; bottom: 8px; z-index: 1; pointer-events: none;
+  padding: 6px 8px; border-radius: 4px; background: rgb(0 0 0 / 0.63);
+  color: #fff; font: var(--fs-xs)/1.3 var(--sans);
+}
+.depthlegend[hidden] { display: none; }
+.depthlegend i {
+  display: block; width: 180px; height: 10px; margin: 4px 0 2px;
+  background: linear-gradient(90deg, #30123b, #4157be, #3296ef, #31c6d6, #59e790, #a4f84d, #dadd34, #f3ab29, #ef671c, #c9270a, #7a0403);
+}
+.depthrange { display: flex; justify-content: space-between; font-family: var(--mono); }
+.depthrange b { font-weight: 400; }

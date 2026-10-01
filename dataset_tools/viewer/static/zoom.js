@@ -164,16 +164,37 @@
   let ownCloud = false;
   const cloudOn = () => (pageCloud ? pageCloud.getAttribute("aria-pressed") === "true" : ownCloud);
   let current = null;
+  // The photo, plain or with the cloud on it and its depth legend over the
+  // stage's corner (depthlegend.js) -- outside the picture, so it stays put
+  // while the picture magnifies and pans. A newer request wins over a slower one.
+  const legend = dlg.querySelector(".depthlegend");
+  const plainOf = (src) => fullSize(src.dataset.plain ?? src.src);
+  const cloudOf = (src) => (pageCloud ? fullSize(pageCloud.dataset.cloud) : src.dataset.cloud);
+  let photoTurn = 0;
+  const showPhoto = async (src) => {
+    const turn = ++photoTurn;
+    if (cloudOn() && cloudOf(src)) {
+      try {
+        const overlay = await dtDepth.load(cloudOf(src));
+        if (turn !== photoTurn) return URL.revokeObjectURL(overlay.src);
+        dtDepth.setSrc(img, overlay.src);
+        dtDepth.show(legend, overlay.range);
+        return;
+      } catch {}
+    }
+    if (turn !== photoTurn) return;
+    dtDepth.setSrc(img, plainOf(src));
+    dtDepth.show(legend, null);
+  };
   zoomCloud?.addEventListener("click", () => {
     if (pageCloud) {
       pageCloud.click();
-      img.src = fullSize(bigframe.src);
       img.alt = bigframe.alt;
     } else {
       ownCloud = !ownCloud;
-      img.src = ownCloud ? current.dataset.cloud : fullSize(current.src);
     }
     zoomCloud.setAttribute("aria-pressed", String(cloudOn()));
+    showPhoto(current);
   });
 
   // Keys pressed in the dialog are its own: over the 3D view, SimView's
@@ -199,8 +220,12 @@
     title.textContent = src.alt.replace(/, lidar cloud.*$/, "");
     img.alt = src.alt;
     current = src;
-    const projected = !pageCloud && photo && cloudOn() && src.dataset.cloud;
-    img.src = src.dataset.zoom ?? (projected || fullSize(src.src));
+    if (photo) showPhoto(src);
+    else {
+      photoTurn += 1; // a photo still loading must not land on this picture
+      dtDepth.setSrc(img, src.dataset.zoom);
+      dtDepth.show(legend, null);
+    }
     if (zoomCloud) {
       zoomCloud.hidden = !photo || (!pageCloud && !src.dataset.cloud);
       zoomCloud.setAttribute("aria-pressed", String(cloudOn()));
