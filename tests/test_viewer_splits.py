@@ -316,15 +316,17 @@ def test_the_scene_page_badge_agrees_with_the_index_rim(tmp_path):
     assert marks == {"0000": "train", "0001": "val"}
 
 
-def test_the_declaration_is_read_once_per_root(tmp_path):
-    """Like the atlas: a handful of scene ids, not something to re-read per view."""
+def test_the_declaration_is_read_again_only_when_it_changes(tmp_path):
+    """Like the atlas: not re-parsed per view, but a re-decided split shows
+    without a restart."""
     root_path = make_root(tmp_path)
     write_splits(root_path, val=("0000",))
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
 
     first = root.splits()
-    (root_path / "splits.json").write_text(json.dumps({"val_scenes": ["9999"]}))
     assert root.splits() is first
+    (root_path / "splits.json").write_text(json.dumps({"val_scenes": ["9999"]}))
+    assert root.splits().val == frozenset({"9999"})
 
 
 # --------------------------------------------------------------------------

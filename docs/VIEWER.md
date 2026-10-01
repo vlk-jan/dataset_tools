@@ -35,6 +35,7 @@ python3.12 -m venv .venv-viewer
 | `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
 | `--cache-dir DIR` | where built scenes are cached (default: a per-root directory under `$XDG_CACHE_HOME/dataset_tools_viewer/`) |
 | `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
+| `--cache-max-gb GB` | keep at most this much of built 3D windows on disk, oldest build removed first (default `5`) |
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
@@ -376,8 +377,8 @@ recording), a bar of where the bytes go by modality, and an **on disk** cell on
 each scene card. The index sum covers only scenes in both the root and the
 file; any scene the file has not scanned yet is named under the bar. A scene
 page gets a **Disk usage** card (total, per frame, the same bar) and each entry
-in its file inventory shows its size. Like the atlas, the file is read once per
-process, so restart the viewer after a rescan.
+in its file inventory shows its size. Like the atlas, the file is re-read when
+it changes, so a rescan shows without a restart.
 
 ## Validation: what `helhest-validate` made of each scene
 
@@ -719,7 +720,9 @@ except through SimView's public GUI controllers for the view toggle.
 Dataset roots usually live on contended network storage, so:
 
 - The index uses directory listings and `.npy` headers only — never a cloud or
-  an image — and caches the result per scene, keyed by the directory's mtime.
+  an image — and caches the result per scene, keyed by the scene's fingerprint:
+  the directory and every entry directly in it (about thirty `stat` calls), so
+  a file added to `height_maps/` or `odometry.txt` rewritten in place is seen.
 - Scenes are built per window, on demand, and cached on disk under
   `$XDG_CACHE_HOME/dataset_tools_viewer/`.
 - One window aggregates a bounded number of clouds and height maps -- chosen
@@ -808,7 +811,10 @@ the episode is an odometry failure rather than a viewer artefact.
 what was *asked for*, which does not change when the builder does, so
 `meta.json` carries `build.META_VERSION` and anything older is rebuilt rather
 than served. Without that, a window anyone had already opened would go on
-serving the old metadata forever.
+serving the old metadata forever. The same goes for the data: `meta.json`
+records the scene's fingerprint it was built from (`build.data`), and a window
+whose scene has changed since -- re-extracted, a regenerated `odometry.txt`,
+new height maps -- is rebuilt on its next request.
 
 **The terrain looks flat, or blockier than 0.1 m.** Check the panel's build
 line. Without `height_maps/` the terrain is accumulated from the clouds, and
@@ -834,11 +840,17 @@ somewhere else (they then no longer travel with the dataset) or `--no-notes` to
 switch the feature off. `/healthz` reports the same state under `notes`.
 
 **A scene changed on disk and the index still shows the old numbers.** The
-probe cache is keyed by each scene directory's mtime and refreshes itself, and
-the scene list is re-read on every index render, so a scene an array job
-finishes while the viewer runs appears without a restart. Only `manifest.json`,
-`atlas/`, `splits.json` and `disk_usage.json` are read once per process. To
-force a full rebuild, start once with `--clear-cache`. That removes only what
+probe cache is keyed by each scene's fingerprint and refreshes itself, and the
+scene list is re-read on every index render, so a scene an array job finishes
+while the viewer runs appears without a restart. `atlas/`, `splits.json`,
+`disk_usage.json`, `validation.csv` and `scenes.csv` are re-read when their
+mtime changes. Frame images, overlays, BEV tiles and thumbnails go to the
+browser with `Cache-Control: no-cache` and an ETag built from the scene's
+fingerprint, the atlas and the viewer's code: an unchanged picture costs a
+304, a re-extracted or renumbered scene shows its new pictures on a plain
+reload. (Until 2026-10-01 they were cached for a day, thumbnails for a year,
+under URLs that name only a scene number and a frame index.) To force a full
+rebuild, start once with `--clear-cache`. That removes only what
 the viewer wrote -- `probe_cache.json` and `bundles/` -- so it is safe even
 when `--cache-dir` points at a directory holding something else. To clear every
 root at once, delete the whole default cache instead:

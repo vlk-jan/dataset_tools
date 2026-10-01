@@ -147,3 +147,21 @@ def test_a_scene_added_after_startup_is_found_without_a_restart(tmp_path):
     again = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache2")
     make_root(tmp_path, scenes=("0002",))
     assert again.scene_dir("0002") == root_path / "0002"
+
+
+def test_files_added_inside_a_scene_reach_the_probe_even_across_a_restart(tmp_path):
+    """The scene directory's own mtime does not move when a file appears in
+    height_maps/ or a file is rewritten in place; the persisted probe used to
+    keep the old counts for good."""
+    from helpers_viewer import make_root
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=6)
+    cache = tmp_path / "cache"
+    before = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
+    maps = root_path / "0000" / "height_maps"
+    victim = sorted(maps.iterdir())[0]
+    victim.unlink()
+
+    after = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")  # reads the persisted cache
+    assert after.counts["height_maps"] == before.counts["height_maps"] - 1
+    assert after.fingerprint != before.fingerprint

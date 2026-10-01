@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import threading
 import time
 from collections import OrderedDict
@@ -59,7 +60,7 @@ from .loaders import (
     roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
-from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape
+from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
 from .scene_page import build_scene_page, map_card
 from .segment_page import attitude_per_window, build_segment_page
 from .segment_page import find as find_segment
@@ -93,18 +94,21 @@ logger = logging.getLogger("dataset_tools.viewer.app")
 HERE = Path(__file__).parent
 #: Pixel size of a frame-page BEV tile; the page's zoom asks for up to 1536.
 TILE_SIZE = 384
-#: Per-frame renders of files that never change once extracted.
-DAY_CACHE = {"Cache-Control": "public, max-age=86400"}
+#: Per-frame renders and thumbnails: kept by the browser, but asked about every
+#: time (``no-cache``), and answered with a 304 while the scene's fingerprint,
+#: the atlas and the viewer's code are what the ETag says. Their URLs name only
+#: a scene number and a frame index, which a re-extraction or a renumbering
+#: points at other pictures -- a lifetime of any length shows the old ones.
+SCENE_ASSET_RE = re.compile(r"^/api/scene/(\d+)/(frame/\d+/[a-z]+\.(jpg|png|json)|thumb/[a-z]+\.jpg)$")
 #: The shapes a window key (``windows.py``) and a build-options key
 #: (``BuildOptions.cache_key``) can take. Both are URL segments that end up in
 #: a cache *path*, so anything else is refused before a path is formed.
 WINDOW_KEY_RE = re.compile(r"^(seg\d+(\.\d+)?|raw(\.\d+)?|frame\d+)$")
 OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-#: Stored atlas thumbnails are curated files that only change when someone
-#: regenerates them by hand, and the index asks for 129 of them at once.
-CURATED = {"Cache-Control": "public, max-age=31536000, immutable"}
 #: Scene handles kept at once, least recently used dropped first.
 CACHE_SCENES = 4
+#: Default ceiling on the built 3D windows kept on disk.
+DEFAULT_CACHE_MAX_GB = 5.0
 
 
 def _warm_build_imports() -> None:
@@ -132,14 +136,20 @@ class ViewerState:
         root: DatasetRoot,
         max_frames: int,
         max_seconds: float = DEFAULT_MAX_SECONDS,
+        cache_max_bytes: float = DEFAULT_CACHE_MAX_GB * 1e9,
     ) -> None:
         self.root = root
         self.max_frames = max_frames
         self.max_seconds = max_seconds
+        self.cache_max_bytes = cache_max_bytes
         self._access: OrderedDict[str, SceneAccess] = OrderedDict()
         self._locks: dict[str, asyncio.Lock] = {}
         self.bundle_dir = root.cache_dir / BUNDLE_DIR_NAME
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
+        #: What each bundle's meta.json said, keyed by its path and mtime: every
+        #: blob of a window asks whether the bundle is current, and parsing a
+        #: 0.7 MB meta.json each time blocked the event loop for ~0.3 s a window.
+        self.meta_memo: dict[Path, tuple[int, tuple]] = {}
 
     def access(self, scene_id: str) -> SceneAccess:
         """A cached per-scene handle. Bounded so a long session browsing many
@@ -174,6 +184,7 @@ def create_app(
     clear_cache: bool = False,
     allowed_hosts: Sequence[str] | None = None,
     prefetch: bool = True,
+    cache_max_gb: float = DEFAULT_CACHE_MAX_GB,
 ) -> FastAPI:
     """The viewer as an ASGI app.
 
@@ -189,7 +200,7 @@ def create_app(
     one being looked at.
     """
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
-    state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds)
+    state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds, cache_max_bytes=cache_max_gb * 1e9)
     # Resolved once: the pages report where notes go and why they cannot be
     # written when they cannot, and probing that per request would put a write
     # on the hot path of an otherwise read-only server.
@@ -264,6 +275,36 @@ def create_app(
         except OSError:  # pragma: no cover - a zipped/partial install
             _h.update(_f.encode())
     stamp = _h.hexdigest()[:8]
+
+    @app.middleware("http")
+    async def revalidate_scene_assets(request: Request, call_next):
+        """ETag + ``no-cache`` on every per-frame render and thumbnail (``SCENE_ASSET_RE``).
+
+        The tag is computed before anything is rendered, from what the picture
+        depends on: the scene's fingerprint, the atlas (curated thumbnails), the
+        viewer's code and the URL with its query. A browser that has the bytes
+        gets a 304 and no render at all.
+        """
+        match = SCENE_ASSET_RE.match(request.url.path)
+        if not match:
+            return await call_next(request)
+        try:
+            fingerprint = scene_fingerprint(root.path / match.group(1))
+        except OSError:
+            return await call_next(request)  # unknown scene: the route says so
+        try:
+            atlas = (root.atlas_dir / "atlas.json").stat().st_mtime_ns
+        except OSError:
+            atlas = 0
+        key = f"{fingerprint}|{atlas}|{stamp}|{request.url.path}?{request.url.query}"
+        etag = f'"{hashlib.sha1(key.encode()).hexdigest()[:20]}"'
+        headers = {"ETag": etag, "Cache-Control": "no-cache"}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        response = await call_next(request)
+        if response.status_code == 200:
+            response.headers.update(headers)
+        return response
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
@@ -526,7 +567,7 @@ def create_app(
         data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
         if data is None:
             raise HTTPException(404, f"no image for frame {index}")
-        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
+        return Response(data, media_type="image/jpeg")
 
     @app.get("/api/scene/{scene_id}/frame/{index}/overlay.jpg")
     async def api_frame_overlay(scene_id: str, index: int, w: int = Query(1280, ge=64, le=1920)):
@@ -561,7 +602,7 @@ def create_app(
         data = await run_in_threadpool(work)
         if data is None:
             raise HTTPException(404, f"no image and cloud to overlay for frame {index}")
-        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
+        return Response(data, media_type="image/jpeg")
 
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
@@ -578,7 +619,7 @@ def create_app(
             raise HTTPException(404, f"no thumbnail slot {slot!r}")
         stored = root.atlas_thumb(scene_id, slot)
         if stored is not None:
-            return FileResponse(stored, media_type="image/jpeg", headers=CURATED)
+            return FileResponse(stored, media_type="image/jpeg")
 
         n_frames = access.probe.n_frames
         if not n_frames or not access.probe.has("images"):
@@ -600,7 +641,7 @@ def create_app(
         data = await run_in_threadpool(work)
         if data is None:
             raise HTTPException(404, f"no image to thumbnail for scene {scene_id}")
-        return Response(data, media_type="image/jpeg", headers=DAY_CACHE)
+        return Response(data, media_type="image/jpeg")
 
     # ``size`` is the tile's pixel size: the frame page's tiles ask for the
     # default, its click-to-zoom asks for a bigger copy of the same picture.
@@ -626,7 +667,7 @@ def create_app(
         grid = await run_in_threadpool(_frame_grid, access, index)
         if grid is None:
             raise HTTPException(404, f"no BEV grid for frame {index}")
-        return Response(json.dumps(grid, separators=(",", ":")), media_type="application/json", headers=DAY_CACHE)
+        return Response(json.dumps(grid, separators=(",", ":")), media_type="application/json")
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(
@@ -643,7 +684,7 @@ def create_app(
         data = await run_in_threadpool(work)
         if data is None:
             raise HTTPException(404, f"no cloud for frame {index}")
-        return Response(data, media_type="image/png", headers=DAY_CACHE)
+        return Response(data, media_type="image/png")
 
     # ------------------------------------------------------------------ notes
 
@@ -914,7 +955,9 @@ def _options_from_key(opts_key: str) -> BuildOptions:
         return BuildOptions()
 
 
-def _bundle_is_current(dest: Path, window: Window | None) -> bool:
+def _bundle_is_current(
+    dest: Path, window: Window | None, data: str = "", memo: dict[Path, tuple[int, tuple]] | None = None
+) -> bool:
     """Is this cached bundle complete, built by today's code, and still this
     window?
 
@@ -933,19 +976,38 @@ def _bundle_is_current(dest: Path, window: Window | None) -> bool:
     and ``window=None`` -- a key this scene no longer offers, such as a part of
     a segment that is no longer split that far -- is never current: there is
     nothing left for that bundle to be a build of.
+
+    The third way is the data itself: a re-extraction, a regenerated
+    odometry.txt or new height maps leave the key and the frame range alone.
+    ``data`` is the scene's fingerprint (``probe.scene_fingerprint``) now; the
+    bundle records the one it was built from.
     """
     if window is None:
         return False
-    if not ((dest / "model.json").is_file() and (dest / "meta.json").is_file()):
+    if not (dest / "model.json").is_file():
         return False
     try:
-        meta = json.loads((dest / "meta.json").read_text())
-    except (OSError, ValueError):
+        mtime = (dest / "meta.json").stat().st_mtime_ns
+    except OSError:
         return False
-    if meta.get("meta_version") != META_VERSION:
-        return False
-    cached = meta.get("window") or {}
-    return (cached.get("frame_start"), cached.get("frame_end")) == (window.frame_start, window.frame_end)
+    hit = memo.get(dest) if memo is not None else None
+    if hit is not None and hit[0] == mtime:
+        summary = hit[1]
+    else:
+        try:
+            meta = json.loads((dest / "meta.json").read_text())
+        except (OSError, ValueError):
+            return False
+        cached = meta.get("window") or {}
+        summary = (
+            meta.get("meta_version"),
+            cached.get("frame_start"),
+            cached.get("frame_end"),
+            (meta.get("build") or {}).get("data", ""),
+        )
+        if memo is not None:
+            memo[dest] = (mtime, summary)
+    return summary == (META_VERSION, window.frame_start, window.frame_end, data)
 
 
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
@@ -958,11 +1020,12 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
     dest = _bundle_path(state, scene_id, window_key, opts_key)
     access = _access_or_404(state, scene_id)
     window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
-    if _bundle_is_current(dest, window):
+    data = access.probe.fingerprint
+    if _bundle_is_current(dest, window, data, state.meta_memo):
         return dest
 
     async with state.lock(f"{scene_id}/{window_key}/{opts_key}"):
-        if _bundle_is_current(dest, window):
+        if _bundle_is_current(dest, window, data, state.meta_memo):
             return dest
         opts = _options_from_key(opts_key)
 
@@ -975,7 +1038,9 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
             meta["build"]["bundle"] = info
+            meta["build"]["data"] = data
             (dest / "meta.json").write_text(json.dumps(meta))
+            _evict_bundles(state.bundle_dir, dest, state.cache_max_bytes)
             logger.info(
                 "built %s/%s in %.1fs (%d blobs, %.1f MB)",
                 scene_id,
@@ -997,6 +1062,26 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             raise HTTPException(500, f"build failed ({type(exc).__name__}); see the viewer's log") from exc
 
 
+def _evict_bundles(bundle_dir: Path, keep: Path, max_bytes: float) -> None:
+    """Delete the oldest built windows until the cache is under ``max_bytes``.
+
+    Every distinct set of build options is its own bundle (up to ~75 MB), so
+    without a ceiling the cache only grows. Oldest by build time; ``keep``, the
+    one just built, never goes.
+    """
+    bundles = [d for d in bundle_dir.glob("*/*/*") if d.is_dir()]
+    sizes = {d: sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) for d in bundles}
+    total = sum(sizes.values())
+    for d in sorted(bundles, key=lambda d: d.stat().st_mtime):
+        if total <= max_bytes:
+            break
+        if d == keep:
+            continue
+        shutil.rmtree(d, ignore_errors=True)
+        total -= sizes[d]
+        logger.info("cache over %.1f GB: removed %s", max_bytes / 1e9, d.relative_to(bundle_dir))
+
+
 async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> None:
     """Build a window nobody has asked for yet, quietly."""
     try:
@@ -1013,7 +1098,7 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, rendere
     data = await run_in_threadpool(work)
     if data is None:
         raise HTTPException(404, f"no {kind} for frame {index}")
-    return Response(data, media_type="image/png", headers=DAY_CACHE)
+    return Response(data, media_type="image/png")
 
 
 async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
@@ -1028,7 +1113,7 @@ async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
     data = await run_in_threadpool(work)
     if data is None:
         raise HTTPException(404, f"no driven_similarity for frame {index}")
-    return Response(data, media_type="image/png", headers=DAY_CACHE)
+    return Response(data, media_type="image/png")
 
 
 def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:

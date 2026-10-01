@@ -189,7 +189,10 @@ def test_the_index_shows_curated_descriptions_and_serves_stored_thumbnails(atlas
     assert 'loading="lazy"' in r.text
     thumb = atlas_client.get("/api/scene/0000/thumb/a.jpg")
     assert thumb.status_code == 200
-    assert "immutable" in thumb.headers["cache-control"]
+    # Revalidated, not kept blind: a regenerated atlas has to show.
+    assert thumb.headers["cache-control"] == "no-cache"
+    again = atlas_client.get("/api/scene/0000/thumb/a.jpg", headers={"If-None-Match": thumb.headers["etag"]})
+    assert again.status_code == 304
 
 
 def test_the_index_renders_without_any_curated_metadata(client):
@@ -615,14 +618,36 @@ def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(cli
     (meta,) = tmp_path.rglob(f"0000/seg000/{opts}/meta.json")
     stored = json.loads(meta.read_text())["window"]
     window = windows.Window("seg000", "segment", "", stored["frame_start"], stored["frame_end"], "odometry")
-    assert _bundle_is_current(meta.parent, window)
-    assert not _bundle_is_current(meta.parent, None)
-    assert not _bundle_is_current(tmp_path / "nowhere", window)
+    data = json.loads(meta.read_text())["build"]["data"]
+    assert data
+    assert _bundle_is_current(meta.parent, window, data)
+    assert not _bundle_is_current(meta.parent, window, "another scene state")
+    assert not _bundle_is_current(meta.parent, None, data)
+    assert not _bundle_is_current(tmp_path / "nowhere", window, data)
 
     stale = json.loads(meta.read_text())
     stale["meta_version"] = 0
     meta.write_text(json.dumps(stale))
-    assert not _bundle_is_current(meta.parent, window)
+    assert not _bundle_is_current(meta.parent, window, data)
+
+
+def test_changed_data_reaches_every_page_without_a_restart(client, tmp_path):
+    """A re-extraction in place: new frame images, a rewritten odometry file.
+    The browser's copies are revalidated against the scene's fingerprint, and
+    the built 3D window is rebuilt rather than served."""
+    image = client.get("/api/scene/0000/frame/0/image.jpg")
+    assert image.status_code == 200 and image.headers["cache-control"] == "no-cache"
+    tag = image.headers["etag"]
+    assert client.get("/api/scene/0000/frame/0/image.jpg", headers={"If-None-Match": tag}).status_code == 304
+
+    opts = "40-160000-80-500000-0.1-height"
+    first = json.loads(client.get(f"/api/data/0000/seg000/{opts}/x/meta.json").text)["build"]["data"]
+
+    (odometry,) = tmp_path.rglob("0000/odometry.txt")
+    odometry.write_text(odometry.read_text() + "\n")  # same name, new content
+    assert client.get("/api/scene/0000/frame/0/image.jpg", headers={"If-None-Match": tag}).status_code == 200
+    second = json.loads(client.get(f"/api/data/0000/seg000/{opts}/x/meta.json").text)["build"]["data"]
+    assert second != first
 
 
 def test_a_bundle_key_that_is_not_canonical_is_refused(client):

@@ -6,19 +6,20 @@ one of ``images/`` or ``clouds/`` to be worth listing. The probe is deliberately
 cheap -- directory listings, line counts and ``.npy`` headers only, never a
 cloud or an image -- because dataset roots live on contended network storage.
 
-Results are cached on disk (keyed by the scene directory's mtime) so the index
+Results are cached on disk, keyed by the scene's fingerprint (the directory
+and every entry directly in it: see :func:`scene_fingerprint`), so the index
 page costs one listing per scene per session at most.
 """
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
 import os
 import time
 from dataclasses import asdict, dataclass, field
-from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +32,29 @@ logger = logging.getLogger("dataset_tools.viewer.probe")
 
 #: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
 #: by an older viewer is discarded rather than read back with holes in it.
-PROBE_CACHE_FORMAT = 4
+PROBE_CACHE_FORMAT = 5
+
+
+def scene_fingerprint(scene_dir: Path) -> str:
+    """A digest that moves whenever anything a page shows from this scene does.
+
+    The directory itself (its inode: a scene swapped for another under the same
+    number) and every entry directly in it -- a per-frame directory's mtime
+    moves when a file is added, removed or renamed in it, a file's mtime and
+    size when it is rewritten in place. About thirty ``stat`` calls. What it
+    cannot see is a per-frame file rewritten in place under the same name,
+    which no tool here does. Raises ``OSError`` when the scene is gone.
+    """
+    st = scene_dir.stat()
+    h = hashlib.sha1(f"{st.st_ino}:{st.st_mtime_ns}".encode())
+    with os.scandir(scene_dir) as entries:
+        for entry in sorted(entries, key=lambda e: e.name):
+            try:
+                es = entry.stat()
+            except OSError:
+                continue  # removed while listing; the directory's mtime says so
+            h.update(f"/{entry.name}:{es.st_ino}:{es.st_mtime_ns}:{es.st_size}".encode())
+    return h.hexdigest()[:16]
 
 
 @dataclass(frozen=True)
@@ -249,7 +272,8 @@ class SceneProbe:
     fill_spans: list[list[float]] = field(default_factory=list)
     bag: str | None = None
     warnings: list[str] = field(default_factory=list)
-    mtime: float = 0.0
+    #: :func:`scene_fingerprint` when probed; empty for a scene that was unreadable.
+    fingerprint: str = ""
 
     @property
     def missing(self) -> list[str]:
@@ -294,9 +318,9 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
     scene_id = scene_id or scene_dir.name
     probe = SceneProbe(scene_id=scene_id)
     try:
-        probe.mtime = scene_dir.stat().st_mtime
+        probe.fingerprint = scene_fingerprint(scene_dir)
     except OSError:
-        probe.mtime = 0.0
+        probe.fingerprint = ""
 
     try:
         entries = set(os.listdir(scene_dir))
@@ -459,6 +483,8 @@ class DatasetRoot:
             files, freed = clear_cache_dir(self.cache_dir)
             logger.info("cleared %s: %d file(s), %.1f MB", self.cache_dir, files, freed / 1e6)
         self._probe_cache: dict[str, SceneProbe] = {}
+        #: Root-level files, each with the (mtime_ns, size, inode) it was read at.
+        self._root_files: dict[str, tuple[tuple[int, int, int] | None, object]] = {}
         self._scene_ids: list[str] | None = None
         #: Set by every fresh probe, cleared by every save: what makes
         #: ``probe_all`` able to write the cache once instead of once a scene.
@@ -495,18 +521,32 @@ class DatasetRoot:
     def splits(self) -> SceneSplits:
         """``splits.json``: which scenes are held out from training, if any.
 
-        Read once per process, like the atlas: the file is a handful of scene
+        Re-read when it changes (``_root_file``): the file is a handful of scene
         ids and only changes when someone re-decides the split. A root that does
         not declare one gets `NO_SPLITS`, and every page renders as it always
         did -- the viewer has no opinion of its own about which scenes are
         validation data, because that is a modelling decision and not something
         a directory listing can answer.
         """
-        return self._splits
+        return self._root_file("splits.json", lambda: read_splits(self.path) or NO_SPLITS)
 
-    @cached_property
-    def _splits(self) -> SceneSplits:
-        return read_splits(self.path) or NO_SPLITS
+    def _root_file(self, relpath: str, load):
+        """``load()``, re-run only when ``relpath`` (under the root) changed.
+
+        These files are small and change by hand or by a tool run beside the
+        viewer -- ``helhest-validate`` rewriting validation.csv, an atlas being
+        regenerated -- so a stat per use replaces reading them once per process.
+        """
+        try:
+            st = (self.path / relpath).stat()
+            key = (st.st_mtime_ns, st.st_size, st.st_ino)
+        except OSError:
+            key = None
+        cached = self._root_files.get(relpath)
+        if cached is None or cached[0] != key:
+            cached = (key, load())
+            self._root_files[relpath] = cached
+        return cached[1]
 
     @property
     def atlas_dir(self) -> Path:
@@ -519,26 +559,18 @@ class DatasetRoot:
         that took a full pass over the bags to produce -- so it is *stored* next
         to the data rather than derived. It is entirely optional: a root without
         an ``atlas/`` directory (a fresh extraction from a different rig, say)
-        still renders, just without the curated half. Read once per process; the
-        file is small and only changes when someone regenerates it by hand.
+        still renders, just without the curated half. Re-read when it changes;
+        the file is small and only changes when someone regenerates it.
         """
-        return self._atlas
-
-    @cached_property
-    def _atlas(self) -> dict | None:
-        return _read_json(self.atlas_dir / "atlas.json")
+        return self._root_file("atlas/atlas.json", lambda: _read_json(self.atlas_dir / "atlas.json"))
 
     def disk_usage(self) -> dict | None:
         """``disk_usage.json``: bytes per scene and modality, or ``None``.
 
         Written by ``helhest-disk-usage``, because measuring it walks every
-        file in the root. Read once per process, like the atlas.
+        file in the root. Re-read when it changes, like the atlas.
         """
-        return self._disk_usage
-
-    @cached_property
-    def _disk_usage(self) -> dict | None:
-        return _read_json(self.path / "disk_usage.json")
+        return self._root_file("disk_usage.json", lambda: _read_json(self.path / "disk_usage.json"))
 
     def disk_usage_scene(self, scene_id: str) -> dict:
         entry = ((self.disk_usage() or {}).get("scenes") or {}).get(scene_id)
@@ -549,13 +581,12 @@ class DatasetRoot:
 
         ``slurm/finalize_v2.sh`` leaves it at the root. It carries a status
         and the numbers per scene and *counts* of errors and warnings, not
-        their text -- the messages only go to the validator's own output. Read
-        once per process, like the atlas; ``None`` when absent or unreadable.
+        their text -- the messages are in validation.json. Re-read when it
+        changes, like the atlas; ``None`` when absent or unreadable.
         """
-        return self._validation
+        return self._root_file("validation.csv", self._read_validation)
 
-    @cached_property
-    def _validation(self) -> dict[str, dict[str, str]] | None:
+    def _read_validation(self) -> dict[str, dict[str, str]] | None:
         rows = _scene_csv(self.path / "validation.csv")
         if rows is None:
             return None
@@ -602,28 +633,24 @@ class DatasetRoot:
 
     def csv_rows(self) -> dict[str, dict]:
         """``scenes.csv`` indexed by scene id ({} when the file is absent)."""
-        return self._csv_rows
-
-    @cached_property
-    def _csv_rows(self) -> dict[str, dict]:
-        return _scene_csv(self.path / "scenes.csv") or {}
+        return self._root_file("scenes.csv", lambda: _scene_csv(self.path / "scenes.csv") or {})
 
     # -- probing -----------------------------------------------------------
 
     def probe(self, scene_id: str, refresh: bool = False, persist: bool = True) -> SceneProbe:
-        """Probe one scene, reusing the on-disk cache while its mtime holds.
+        """Probe one scene, reusing the on-disk cache while its fingerprint holds.
 
         ``persist=False`` records the result without writing the cache file;
         the caller is then responsible for calling :meth:`save_probe_cache`.
         """
         scene_dir = self.scene_dir(scene_id)
         cached = self._probe_cache.get(scene_id)
-        if cached is not None and not refresh:
+        if cached is not None and not refresh and cached.fingerprint:
             try:
-                if abs(scene_dir.stat().st_mtime - cached.mtime) < 1e-6:
+                if scene_fingerprint(scene_dir) == cached.fingerprint:
                     return cached
             except OSError:
-                return cached
+                pass  # the scene is gone: probe it again, and say so
         probe = probe_scene(scene_dir, scene_id)
         row = self.csv_rows().get(scene_id)
         if row:
@@ -645,7 +672,7 @@ class DatasetRoot:
         The scene list is always re-read: one listing of the root, so a scene
         an array job finished after the viewer started shows up on the next
         index render rather than after a restart. Each scene's probe still
-        stands while its directory's mtime does.
+        stands while its fingerprint does.
         """
         probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=True)]
         self.save_probe_cache()
