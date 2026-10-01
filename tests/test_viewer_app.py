@@ -898,6 +898,8 @@ def test_a_verdict_travels_from_the_note_to_the_index_the_segments_table_and_the
     assert "/scene/0001/segment/" in table and "verdict-drop" in table
     assert client.get("/segments?sort=att").status_code == 200
 
+    assert 'href="/api/notes.csv"' in client.get("/notes").text
+    assert "/api/notes.csv" not in client.get("/").text
     rows = client.get("/api/notes.csv").text.splitlines()
     assert rows[0].startswith("scene,frame_start,frame_end,t_start,t_end,topic,verdict")
     assert rows[1].startswith("0001,2,4,") and ",odometry,drop," in rows[1]

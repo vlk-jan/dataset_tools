@@ -3,6 +3,7 @@
 {% block header %}
   <h1><a href="/">Dataset viewer</a> / notes</h1>
   <span class="muted">{{ n_notes }} note{{ "s" if n_notes != 1 }} across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
+  <a href="/api/notes.csv" title="every note as a table, with its frame range and frame times" download>download csv</a>
 {% endblock %}
 {% block main %}
 
