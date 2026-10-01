@@ -283,8 +283,13 @@ question of a root already on disk. See `dataset_tools/time_align.py` for what
 the objective is and why a window is judged on the depth of its minimum rather
 than on how far that minimum beats zero.
 
-**To do:** find out what the Odin1 buffers and why 0006–0008 came back with no
-latency at all; if it can be made to stamp at capture, all of this goes away.
+**Resolved 2026-10-01 — it stamps at capture; the frame is a sweep.** On the
+2026-09 bags the publish latency is gone (recv − header steady at +0.12 s,
+IMU and odometry on GNSS time within 5 ms). What remained, +27..+52 ms per
+scene, is the cloud itself: a 67 ms bottom-to-top raster behind one stamp,
+each point carrying its `offset_time`. The extractor now deskews it
+(`--deskew`, see the README); on a deskewed root this correction reads as
+already aligned, and the camera, exposed at the stamp, needs no offset.
 
 **Robot model — blocks `proprio_labels/`.** No `/robot_description` was recorded
 and `tf_static` has only nine edges, none of them the chassis. v1.3 sourced

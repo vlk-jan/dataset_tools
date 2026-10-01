@@ -50,7 +50,7 @@ recordings (camera-limited), **~10 Hz** in October 2025 and February 2026.
 HELHEST/
 ├── 0000/ … 0042/                 one directory per scene
 │   ├── images/00000.png …        RGB frames, 1280×800, 8-bit BGR PNG
-│   ├── clouds/00000.npy …        LiDAR scans, float64 (N, 4): x y z [m] intensity, base frame
+│   ├── clouds/00000.npy …        LiDAR scans, float64 (N, 4): x y z [m] intensity, base frame (v2.3+: deskewed onto data_ts)
 │   ├── pcd_ts.txt                LiDAR timestamp per frame (unix s, UTC)
 │   ├── data_ts.txt               (camera + LiDAR stamp)/2 per frame
 │   ├── camera_intrinsics.txt     3×3 K
@@ -432,6 +432,19 @@ camera at ~29 Hz; onboard SLAM odometry) and a **Fixposition** GNSS/INS
 The extraction tool in this repository handles both generations and writes the
 same scene layout (plus `joint_setpoints.npy`, `cmd_vel.npy` and `gps.npy` when
 available).
+
+**The Odin1 frame is a 67 ms sweep.** The unit scans its 256 × 192 raster
+bottom to top over 67 ms, stamps the frame at the start of the sweep and gives
+every point its own `offset_time`; the image is exposed at that same stamp
+(camera and cloud stamps differ by 1.7 ms, constant). Roots extracted before
+2026-10-01 (v2.0–v2.2) hold the raw sweep: in a turn its top is a few degrees
+further round than its bottom (4° at 60°/s), the clouds' effective instant is
+the sweep's mean, 27–52 ms after the stamp, and `data_ts` was moved there by
+the frame-clock correction — so a consumer placing image content at `data_ts`
+is 27–52 ms late (the scene's `time_align.txt`, line 2, holds the exact
+number). From v2.3 the extractor deskews every sweep onto `data_ts`
+(`--deskew auto`), the clouds are snapshots at the image's instant, and the
+frame-clock correction reads as already aligned.
 
 **`gps.npy`** is new with this generation: `(M, 8)` `float64` rows of
 `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]` at the receiver's own rate

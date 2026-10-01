@@ -180,6 +180,7 @@ lidar works.
 | `--gnss_guard auto\|on\|off` | drop stretches where the GNSS/INS published a reset solution instead of a pose, and every frame left without a real one -- both the frames those stretches strand and the frames the pose stream never covered. `auto` turns it on for an absolute source (Fixposition) and off for wheel odometry. Recorded per scene in `gnss_guard.txt` |
 | `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt` |
 | `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
+| `--deskew auto\|off` | `auto` (default): where the cloud carries a per-point time (the Odin1's `offset_time`: its 256 x 192 raster is scanned bottom to top over 67 ms behind one stamp) and the pose stream covers the sweep, every return is moved to where the robot was at the frame's instant, so the cloud is a snapshot at `data_ts` like the image beside it. `off` writes the sweep as recorded, with its motion smear (4 deg across the raster at 60 deg/s), as every root before 2026-10-01. Counted per scene in `extract_meta.json` (`frames.deskew`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `--allow_frame_fallback` | extract a bag whose TF does not reach `--base_frame` from the lidar (and no `--lidar_extrinsic`), the odometry child frame or the orientation frame, leaving that stream in its own frame. Without it such a scene **fails**: clouds, poses or gravity in the wrong frame look plausible and are found late. What fell back is listed in `extract_meta.json` |
 | `--max_sync_dt S` | largest camera/lidar stamp difference a frame may pair (default `0.1`); further-apart mutual nearest neighbours, an image across a camera stall, are dropped and counted in `extract_meta.json` |
@@ -235,8 +236,8 @@ index-aligned.
 | Path | Shape | dtype | Units / frame | Notes |
 | --- | --- | --- | --- | --- |
 | `images/NNNNN.jpg` | H x W x 3 | `uint8` | the camera's own JPEG, `msg.data` unmodified | the compressed image topic, byte for byte. `.png` in a root made before 2026-09-29 or with `--image_format png`; `manifest.json` -> `images.extension` says which (no key: png). HELHEST v1.2-v1.5 (real files in v1.2, the others linked) and v2.1 were given their JPEGs back by `scripts/images_from_bag.py` (removed since, see git history) on 2026-09-29/30 and declare `jpg`; v2.0, v1.3_aux and v1_rear_archive still hold PNG |
-| `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows and all-zero points dropped, so `N` varies |
-| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`) |
+| `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows and all-zero points dropped, so `N` varies. Since 2026-10-01 each sweep is deskewed onto `data_ts` (`--deskew`): every return stands where the robot saw it at the frame's instant. Roots made before that hold the raw 67 ms sweep |
+| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`). With deskewed clouds this is the instant of the image and of every return alike; in roots made before 2026-10-01 the clouds' effective instant was the sweep's mean, and `time_align` had moved `data_ts` there, 27-52 ms after the image |
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
 | `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
 | `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, how many further frames went for having no pose under them at all (since 2026-10-01 split into before the pose stream, after it and inside holes), and how many more once the clock was corrected; absent when the guard did not run |
@@ -399,6 +400,19 @@ the viewer's own virtualenv:
 
 ## Known caveats
 
+- **A lidar frame is a sweep, not a snapshot.** The Odin1 scans its raster
+  bottom to top over 67 ms and stamps the frame at the start; each point's
+  own time is in the `offset_time` field. Until 2026-10-01 the extractor
+  dropped that field and wrote the sweep as if simultaneous, `--time_align`
+  then measured the clouds' effective instant 27-52 ms after the stamp (the
+  mean of the offsets) and moved `data_ts` there -- so against `data_ts` the
+  image, exposed at the stamp, read 30-50 ms early, and the cloud projected
+  onto the image slid sideways in every fast turn. `--deskew auto` undoes the
+  motion within the sweep; on such a root `time_align.txt` should read as
+  already aligned. For a root made before, the image's instant is
+  `data_ts - delta` with `delta` the correction on line 2 of the scene's
+  `time_align.txt` (0 where none was applied), and the smear within the sweep
+  cannot be undone without the bag.
 - **Cloudini clouds.** The Odin1 lidar publishes
   `point_cloud_interfaces/CompressedPointCloud2`; decoding needs
   `dataset_tools/libcloudini_shim.so` (see above).
