@@ -10,8 +10,8 @@ import math
 import numpy as np
 import pytest
 
-from dataset_tools import extract_data as ed
 from dataset_tools import transforms as tf
+from dataset_tools.extract.sync import interpolate_poses, nearest_idx
 from dataset_tools.transforms import euler_matrix
 
 
@@ -57,21 +57,21 @@ def test_interpolation_beats_nearest_on_a_ramp():
     poses = np.array([_pose(x=t, yaw=t) for t in ts])  # 1 m/s, 1 rad/s
     query = np.array([0.05, 0.17, 0.94])  # nothing lands on a sample
 
-    out, n = ed.interpolate_poses(query, ts, poses)
+    out, n = interpolate_poses(query, ts, poses)
 
     assert n == 3
     assert np.allclose(out[:, 0, 3], query, atol=1e-12)
     for T, q in zip(out, query, strict=True):  # the assert above already pins the lengths
         assert np.allclose(T[:3, :3], euler_matrix(0, 0, q)[:3, :3], atol=1e-9)
     # what nearest-neighbour would have produced, for the same queries
-    nearest = poses[ed.nearest_idx(query, ts)]
+    nearest = poses[nearest_idx(query, ts)]
     assert np.abs(nearest[:, 0, 3] - query).max() > 0.02
 
 
 def test_samples_are_reproduced_exactly():
     ts = np.arange(0.0, 0.51, 0.1)
     poses = np.array([_pose(x=t, yaw=0.5 * t) for t in ts])
-    out, _ = ed.interpolate_poses(ts, ts, poses)
+    out, _ = interpolate_poses(ts, ts, poses)
     assert np.allclose(out, poses, atol=1e-12)
 
 
@@ -79,7 +79,7 @@ def test_nearest_is_used_across_a_gap():
     """A 2 s hole is not motion to interpolate through."""
     ts = np.array([0.0, 0.1, 2.1, 2.2])
     poses = np.array([_pose(x=0.0), _pose(x=0.1), _pose(x=2.1), _pose(x=2.2)])
-    out, n = ed.interpolate_poses(np.array([1.0]), ts, poses, max_gap=0.5)
+    out, n = interpolate_poses(np.array([1.0]), ts, poses, max_gap=0.5)
     assert n == 0
     assert out[0][0, 3] == pytest.approx(0.1)  # the nearer edge of the hole
 
@@ -88,7 +88,7 @@ def test_nearest_is_used_across_a_teleport():
     """A GNSS jump: blending the two sides would fabricate a pose never held."""
     ts = np.array([0.0, 0.1, 0.2])
     poses = np.array([_pose(x=0.0), _pose(x=0.1), _pose(x=900.0)])
-    out, n = ed.interpolate_poses(np.array([0.15]), ts, poses, max_speed=4.0)
+    out, n = interpolate_poses(np.array([0.15]), ts, poses, max_speed=4.0)
     assert n == 0
     assert out[0][0, 3] in (pytest.approx(0.1), pytest.approx(900.0))
     assert out[0][0, 3] == pytest.approx(0.1)
@@ -97,7 +97,7 @@ def test_nearest_is_used_across_a_teleport():
 def test_queries_outside_the_sample_range_clamp():
     ts = np.array([1.0, 1.1, 1.2])
     poses = np.array([_pose(x=1.0), _pose(x=1.1), _pose(x=1.2)])
-    out, n = ed.interpolate_poses(np.array([0.5, 5.0]), ts, poses)
+    out, n = interpolate_poses(np.array([0.5, 5.0]), ts, poses)
     assert n == 0
     assert out[0][0, 3] == pytest.approx(1.0)
     assert out[1][0, 3] == pytest.approx(1.2)
@@ -106,6 +106,6 @@ def test_queries_outside_the_sample_range_clamp():
 def test_a_single_sample_is_used_everywhere():
     ts = np.array([3.0])
     poses = np.array([_pose(x=7.0)])
-    out, n = ed.interpolate_poses(np.array([0.0, 3.0, 9.0]), ts, poses)
+    out, n = interpolate_poses(np.array([0.0, 3.0, 9.0]), ts, poses)
     assert n == 0
     assert np.allclose(out[:, 0, 3], 7.0)

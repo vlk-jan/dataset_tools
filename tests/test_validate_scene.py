@@ -163,7 +163,7 @@ def test_non_orthonormal_transform_is_an_error(scene: Path):
 
 
 def test_tilt_statistics_and_warning(scene: Path):
-    from dataset_tools.extract_data import euler_matrix
+    from dataset_tools.transforms import euler_matrix
 
     gravity = np.load(scene / "gravity_align.npy")
     gravity[1] = euler_matrix(np.radians(50.0), 0.0, 0.0)[:3, :3]

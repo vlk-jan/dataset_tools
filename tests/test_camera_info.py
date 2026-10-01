@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from dataset_tools.extract_data import write_camera_info_yaml
+from dataset_tools.extract.camera import write_camera_info_yaml
 
 
 def _msg():

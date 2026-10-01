@@ -27,13 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from rosbags.highlevel import AnyReader  # noqa: E402
 
 from dataset_tools import rosbags_compat  # noqa: F401,E402  (patches rosbags)
-from dataset_tools.extract_data import (  # noqa: E402
-    build_tf_graph,
-    cloud_to_xyzi,
-    drop_invalid_returns,
-    get_transform,
-    header_stamp_from_cdr,
-)
+from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr  # noqa: E402
+from dataset_tools.extract.tf_graph import build_tf_graph, get_transform  # noqa: E402
 from dataset_tools.tf_pins import rpy_deg  # noqa: E402
 
 CAM = "/odin1/image/compressed"

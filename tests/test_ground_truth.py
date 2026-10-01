@@ -1,6 +1,6 @@
 import numpy as np
 
-from dataset_tools.extract_data import write_ground_truth
+from dataset_tools.extract.ground_truth import write_ground_truth
 
 
 def _traj(ts, xs):

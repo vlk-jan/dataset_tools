@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dataset_tools.extract_data import nearest_idx, sync_timestamps
+from dataset_tools.extract.sync import nearest_idx, sync_timestamps
 
 
 def brute_force_sync(cam, pcd):

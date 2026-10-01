@@ -1,6 +1,7 @@
 import numpy as np
 
-from dataset_tools.extract_data import get_transform, save_camera_extrinsic
+from dataset_tools.extract.camera import save_camera_extrinsic
+from dataset_tools.extract.tf_graph import get_transform
 
 
 class _TF:
@@ -19,7 +20,7 @@ class _TF:
 
 
 def _graph():
-    from dataset_tools.extract_data import build_tf_graph
+    from dataset_tools.extract.tf_graph import build_tf_graph
 
     # base -> cam: pure translation
     return build_tf_graph([_TF("base_link", "cam_optical", (0.155, 0.0, 0.23), (0, 0, 0, 1))])

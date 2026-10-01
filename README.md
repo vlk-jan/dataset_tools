@@ -10,7 +10,7 @@ optional `odom_recorder` node needs `rclpy`.
 
 | Tool | Entry point | What it does |
 | --- | --- | --- |
-| `dataset_tools/extract_data.py` | `helhest-extract` | bags -> scene directories |
+| `dataset_tools/extract/` | `helhest-extract` | bags -> scene directories (`cli`, `scene` per bag, `scene_io`, `sync`, `pointcloud`, `gps`, `tf_graph`, `camera`, `ground_truth`) |
 | `dataset_tools/validate_scene.py` | `helhest-validate` | check extracted scenes |
 | `dataset_tools/sort_bag.py` | `helhest-sort-bag` | rewrite a bag sorted by header stamp |
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |

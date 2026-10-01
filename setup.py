@@ -30,7 +30,7 @@ setup(
     entry_points={
         "console_scripts": [
             "odom_recorder = dataset_tools.odom_node:main",
-            "helhest-extract = dataset_tools.extract_data:main",
+            "helhest-extract = dataset_tools.extract.cli:main",
             "helhest-validate = dataset_tools.validate_scene:main",
             "helhest-sort-bag = dataset_tools.sort_bag:main",
             "helhest-viewer = dataset_tools.viewer.__main__:main",

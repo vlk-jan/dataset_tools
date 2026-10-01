@@ -6,12 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from dataset_tools.extract_data import (
-    PC2_DTYPES,
-    cloud_to_xyzi,
-    drop_invalid_returns,
-    fields_to_dtype,
-)
+from dataset_tools.extract.pointcloud import PC2_DTYPES, cloud_to_xyzi, drop_invalid_returns, fields_to_dtype
 
 FLOAT32 = 7
 UINT16 = 4

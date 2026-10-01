@@ -18,8 +18,12 @@ import pytest
 from rosbags.rosbag2 import Writer
 from rosbags.typesys import Stores, get_typestore
 
-from dataset_tools import extract_data as ed
 from dataset_tools import image_format, tf_pins
+from dataset_tools.extract.cli import main
+from dataset_tools.extract.gps import gps_row, pick_gps_topic
+from dataset_tools.extract.pointcloud import header_stamp_from_cdr
+from dataset_tools.extract.scene_io import TIME_ALIGN_FILE, scene_frame_counts, scene_is_complete
+from dataset_tools.transforms import euler_matrix, header_stamp
 from dataset_tools.validate_scene import validate_scene
 
 TS = get_typestore(Stores.ROS2_JAZZY)
@@ -255,11 +259,11 @@ def bags(tmp_path: Path) -> Path:
 
 def test_a_synthetic_bag_extracts_to_a_complete_scene(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
+    assert main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
     scene = out / "0000"
     n = FRAMES - 2  # two sweeps had no camera frame
-    assert ed.scene_is_complete(scene)
-    assert ed.scene_frame_counts(scene) == {"images": n, "clouds": n, "data_ts.txt": n, "pcd_ts.txt": n}
+    assert scene_is_complete(scene)
+    assert scene_frame_counts(scene) == {"images": n, "clouds": n, "data_ts.txt": n, "pcd_ts.txt": n}
 
     # Sync: the dropped sweeps are gone, the rest pair with the 30 ms later image.
     data_ts = np.loadtxt(scene / "data_ts.txt")
@@ -286,7 +290,7 @@ def test_a_synthetic_bag_extracts_to_a_complete_scene(bags: Path, tmp_path: Path
     # Gravity alignment reproduces the 10 deg roll the IMU reported.
     gravity = np.load(scene / "gravity_align.npy")
     assert gravity.shape == (n, 3, 3)
-    assert np.allclose(gravity[0], ed.euler_matrix(math.radians(10.0), 0.0, 0.0)[:3, :3])
+    assert np.allclose(gravity[0], euler_matrix(math.radians(10.0), 0.0, 0.0)[:3, :3])
 
     K = np.loadtxt(scene / "camera_intrinsics.txt")
     assert K[0, 0] == 500.0 and "plumb_bob" in (scene / "camera_info.yaml").read_text()
@@ -315,7 +319,7 @@ def test_gps_is_extracted_from_the_fused_navsatfix_topic(bags: Path, tmp_path: P
     frame-aligned array.
     """
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     gps = np.load(out / "0000" / "gps.npy")
 
     assert gps.shape == (FRAMES, 8)
@@ -339,8 +343,8 @@ def test_cam_time_offset_shifts_the_frame_clock(bags: Path, tmp_path: Path):
     the offset because data_ts.txt is the camera/lidar midpoint.
     """
     plain, shifted = tmp_path / "plain", tmp_path / "shifted"
-    assert ed.main([str(bags), str(plain), *COMMON]) == 0
-    assert ed.main([str(bags), str(shifted), *COMMON, "--cam_time_offset", "0.01"]) == 0
+    assert main([str(bags), str(plain), *COMMON]) == 0
+    assert main([str(bags), str(shifted), *COMMON, "--cam_time_offset", "0.01"]) == 0
 
     a = np.loadtxt(plain / "0000" / "data_ts.txt")
     b = np.loadtxt(shifted / "0000" / "data_ts.txt")
@@ -350,15 +354,15 @@ def test_cam_time_offset_shifts_the_frame_clock(bags: Path, tmp_path: Path):
     assert np.allclose(b - a, 0.005, atol=1e-6)
 
     # every frame still has its image and its cloud: the pass-2 lookups hit
-    assert ed.scene_frame_counts(shifted / "0000") == ed.scene_frame_counts(plain / "0000")
+    assert scene_frame_counts(shifted / "0000") == scene_frame_counts(plain / "0000")
     assert np.allclose(np.loadtxt(shifted / "0000" / "pcd_ts.txt"), np.loadtxt(plain / "0000" / "pcd_ts.txt"))
 
 
 def test_the_default_run_is_unchanged_by_the_offset_flag(bags: Path, tmp_path: Path):
     """0.0 must be the identity on the float, not merely close to it."""
     plain, zero = tmp_path / "plain", tmp_path / "zero"
-    assert ed.main([str(bags), str(plain), *COMMON]) == 0
-    assert ed.main([str(bags), str(zero), *COMMON, "--cam_time_offset", "0"]) == 0
+    assert main([str(bags), str(plain), *COMMON]) == 0
+    assert main([str(bags), str(zero), *COMMON, "--cam_time_offset", "0"]) == 0
     for name in ("data_ts.txt", "pcd_ts.txt"):
         assert (zero / "0000" / name).read_bytes() == (plain / "0000" / name).read_bytes()
 
@@ -382,14 +386,14 @@ def test_a_null_island_fix_is_dropped():
         def __init__(self, lat, lon, alt=0.0):
             self.latitude, self.longitude, self.altitude = lat, lon, alt
 
-    assert ed.gps_row(1.0, _Fix(0.0, 0.0)) is None
-    row = ed.gps_row(1.0, _Fix(50.109, 14.417, 227.0))
+    assert gps_row(1.0, _Fix(0.0, 0.0)) is None
+    row = gps_row(1.0, _Fix(50.109, 14.417, 227.0))
     assert row is not None and row[1] == 50.109
 
 
 def test_gps_off_writes_no_file(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON, "--gps", "off"]) == 0
+    assert main([str(bags), str(out), *COMMON, "--gps", "off"]) == 0
     assert not (out / "0000" / "gps.npy").exists()
     assert (out / "0000" / "source_bag.txt").is_file()  # the scene is otherwise complete
 
@@ -408,21 +412,21 @@ def test_gps_topic_selection_prefers_a_fused_fix_that_carries_messages():
         Conn("/fixposition/gnss2", fix, 400),
         Conn("/fixposition/odometry_llh", fix, 800),
     ]
-    assert ed.pick_gps_topic(conns, "auto") == "/fixposition/odometry_llh"
+    assert pick_gps_topic(conns, "auto") == "/fixposition/odometry_llh"
     # An old-rig bag, whose receiver names the topic differently.
     septentrio = [Conn("/septentrio/navsatfix", fix, 500), Conn("/odom", "nav_msgs/msg/Odometry", 100)]
-    assert ed.pick_gps_topic(septentrio, "auto") == "/septentrio/navsatfix"
-    assert ed.pick_gps_topic(conns, "off") is None
-    assert ed.pick_gps_topic(conns, "/some/topic") == "/some/topic"
-    assert ed.pick_gps_topic([Conn("/odom", "nav_msgs/msg/Odometry", 100)], "auto") is None
+    assert pick_gps_topic(septentrio, "auto") == "/septentrio/navsatfix"
+    assert pick_gps_topic(conns, "off") is None
+    assert pick_gps_topic(conns, "/some/topic") == "/some/topic"
+    assert pick_gps_topic([Conn("/odom", "nav_msgs/msg/Odometry", 100)], "auto") is None
 
 
 def test_a_second_run_skips_the_complete_scene(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     marker = scene = out / "0000"
     mtime = (marker / "source_bag.txt").stat().st_mtime_ns
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     assert (scene / "source_bag.txt").stat().st_mtime_ns == mtime
 
 
@@ -433,17 +437,17 @@ def test_overwrite_removes_what_an_earlier_run_left_behind(bags: Path, tmp_path:
     and the validator reports a mismatch on every run.
     """
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     scene = out / "0000"
     (scene / "images" / "00099.png").write_bytes(b"stale")
     (scene / "clouds" / "00099.npy").write_bytes(b"stale")
     (scene / "regen").mkdir()
     (scene / "regen" / "keep.txt").write_text("provenance, not ours to delete\n")
     (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration, which runs before the extraction\n")
-    assert not ed.scene_is_complete(scene)
+    assert not scene_is_complete(scene)
 
-    assert ed.main([str(bags), str(out), *COMMON, "--overwrite"]) == 0
-    assert ed.scene_is_complete(scene)
+    assert main([str(bags), str(out), *COMMON, "--overwrite"]) == 0
+    assert scene_is_complete(scene)
     assert not (scene / "images" / "00099.png").exists() and not (scene / "clouds" / "00099.npy").exists()
     assert (scene / "regen" / "keep.txt").is_file()
     # --gt is off for /odom, so the regenerated ground truth is not this run's to remove.
@@ -453,17 +457,15 @@ def test_overwrite_removes_what_an_earlier_run_left_behind(bags: Path, tmp_path:
 def test_header_stamp_read_from_cdr_matches_the_deserialised_one():
     msg = _image_msg(T0 + 0.123456789, 1)
     raw = TS.serialize_cdr(msg, "sensor_msgs/msg/CompressedImage")
-    assert ed.header_stamp_from_cdr(raw) == ed.header_stamp(
-        TS.deserialize_cdr(raw, "sensor_msgs/msg/CompressedImage"), 0.0
-    )
-    assert ed.header_stamp_from_cdr(b"\x00\x01\x00") is None
+    assert header_stamp_from_cdr(raw) == header_stamp(TS.deserialize_cdr(raw, "sensor_msgs/msg/CompressedImage"), 0.0)
+    assert header_stamp_from_cdr(b"\x00\x01\x00") is None
 
 
 def test_time_align_off_leaves_the_stamps_as_recorded(bags: Path, tmp_path: Path):
     """The escape hatch has to be exactly the identity, not merely close."""
     auto, off = tmp_path / "auto", tmp_path / "off"
-    assert ed.main([str(bags), str(auto), *COMMON]) == 0
-    assert ed.main([str(bags), str(off), *COMMON, "--time_align", "off"]) == 0
+    assert main([str(bags), str(auto), *COMMON]) == 0
+    assert main([str(bags), str(off), *COMMON, "--time_align", "off"]) == 0
     # This bag is 30 frames, too few for a window, so auto measures nothing and
     # the two runs must agree byte for byte.
     for name in ("data_ts.txt", "pcd_ts.txt", "transforms.npy", "gravity_align.npy"):
@@ -479,8 +481,8 @@ def test_a_given_offset_moves_both_sensor_clocks(bags: Path, tmp_path: Path):
     point, since what is being corrected is the sensors' latency against them.
     """
     plain, shifted = tmp_path / "plain", tmp_path / "shifted"
-    assert ed.main([str(bags), str(plain), *COMMON, "--gt", "on"]) == 0
-    assert ed.main([str(bags), str(shifted), *COMMON, "--gt", "on", "--time_align", "-0.05"]) == 0
+    assert main([str(bags), str(plain), *COMMON, "--gt", "on"]) == 0
+    assert main([str(bags), str(shifted), *COMMON, "--gt", "on", "--time_align", "-0.05"]) == 0
     a, b = plain / "0000", shifted / "0000"
 
     for name in ("data_ts.txt", "pcd_ts.txt"):
@@ -489,7 +491,7 @@ def test_a_given_offset_moves_both_sensor_clocks(bags: Path, tmp_path: Path):
         # atol: one ulp of float64 at a 1.7e9 epoch is ~4e-7.
         assert np.allclose(after - before, -0.05, atol=1e-6), name
 
-    assert ed.scene_frame_counts(b) == ed.scene_frame_counts(a)
+    assert scene_frame_counts(b) == scene_frame_counts(a)
     assert (b / "images" / "00003.png").read_bytes() == (a / "images" / "00003.png").read_bytes()
     assert (b / "odometry.txt").read_bytes() == (a / "odometry.txt").read_bytes()
     assert np.array_equal(np.load(b / "joint_states.npy"), np.load(a / "joint_states.npy"))
@@ -498,8 +500,8 @@ def test_a_given_offset_moves_both_sensor_clocks(bags: Path, tmp_path: Path):
 def test_the_camera_offset_still_re_pairs(bags: Path, tmp_path: Path):
     """The two knobs are different things and compose as different things."""
     plain, both = tmp_path / "plain", tmp_path / "both"
-    assert ed.main([str(bags), str(plain), *COMMON]) == 0
-    assert ed.main([str(bags), str(both), *COMMON, "--time_align", "-0.05", "--cam_time_offset", "0.01"]) == 0
+    assert main([str(bags), str(plain), *COMMON]) == 0
+    assert main([str(bags), str(both), *COMMON, "--time_align", "-0.05", "--cam_time_offset", "0.01"]) == 0
     a, b = plain / "0000", both / "0000"
 
     assert np.allclose(np.loadtxt(b / "pcd_ts.txt") - np.loadtxt(a / "pcd_ts.txt"), -0.05, atol=1e-6)
@@ -511,7 +513,7 @@ def test_the_camera_offset_still_re_pairs(bags: Path, tmp_path: Path):
 def test_a_scene_too_short_to_measure_is_left_alone(bags: Path, tmp_path: Path):
     """Auto never invents a correction it could not measure."""
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     scene = out / "0000"
 
     # 30 frames is under one window, so there is nothing to measure with.
@@ -521,7 +523,7 @@ def test_a_scene_too_short_to_measure_is_left_alone(bags: Path, tmp_path: Path):
 
     # It still says so, rather than saying nothing: a scene that was left alone
     # and a scene nobody looked at are not the same thing.
-    report = (scene / ed.TIME_ALIGN_FILE).read_text()
+    report = (scene / TIME_ALIGN_FILE).read_text()
     assert "no correction" in report and "too little to measure against" in report
 
 
@@ -532,10 +534,10 @@ def test_a_reset_gnss_solution_never_reaches_the_scene(tmp_path: Path):
     root = tmp_path / "bags"
     write_bag(root / "bag_a", frames=60, reset_from=40)
     out = tmp_path / "out"
-    assert ed.main([str(root), str(out), *COMMON, "--gt", "on", "--gnss_guard", "on"]) == 0
+    assert main([str(root), str(out), *COMMON, "--gt", "on", "--gnss_guard", "on"]) == 0
 
     scene = out / "0000"
-    counts = ed.scene_frame_counts(scene)
+    counts = scene_frame_counts(scene)
     assert counts["images"] == counts["clouds"] == counts["data_ts.txt"]
     assert counts["images"] < 60  # the reset cost frames
 
@@ -552,7 +554,7 @@ def test_the_guard_stays_off_for_wheel_odometry(bags: Path, tmp_path: Path):
     """A wheel-IMU pose legitimately holds still while the robot is parked,
     which is the guard's own signature for a fabricated stretch."""
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
+    assert main([str(bags), str(out), *COMMON, "--gt", "on"]) == 0
     assert not (out / "0000" / "gnss_guard.txt").exists()
 
 
@@ -566,11 +568,11 @@ def test_a_scene_stores_the_camera_s_own_bytes(tmp_path: Path):
     and the root says so where a consumer looks for it."""
     write_bag(tmp_path / "bags" / "bag_a", image_ext=".jpg")
     out = tmp_path / "out"
-    assert ed.main([str(tmp_path / "bags"), str(out), *COMMON]) == 0
+    assert main([str(tmp_path / "bags"), str(out), *COMMON]) == 0
     scene = out / "0000"
-    assert ed.scene_is_complete(scene)
+    assert scene_is_complete(scene)
     assert {p.suffix for p in (scene / "images").iterdir()} == {".jpg"}
-    assert ed.scene_frame_counts(scene)["images"] == FRAMES
+    assert scene_frame_counts(scene)["images"] == FRAMES
     assert (scene / "images" / "00003.jpg").read_bytes() == _image_payload(3, ".jpg").tobytes()
     assert image_format.declared(out) == ".jpg"
     assert json.loads((out / "manifest.json").read_text())["images"] == {
@@ -583,7 +585,7 @@ def test_a_scene_stores_the_camera_s_own_bytes(tmp_path: Path):
 def test_image_format_png_stores_the_pixels_instead(tmp_path: Path):
     write_bag(tmp_path / "bags" / "bag_a", image_ext=".jpg")
     out = tmp_path / "out"
-    assert ed.main([str(tmp_path / "bags"), str(out), *COMMON, "--image_format", "png"]) == 0
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--image_format", "png"]) == 0
     scene = out / "0000"
     assert {p.suffix for p in (scene / "images").iterdir()} == {".png"}
     want = cv2.imdecode(_image_payload(3, ".jpg"), cv2.IMREAD_COLOR)
@@ -598,14 +600,14 @@ def test_a_root_holds_one_image_format(tmp_path: Path):
     bags = tmp_path / "bags"
     write_bag(bags / "bag_a", image_ext=".png")
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     write_bag(bags / "bag_b", image_ext=".jpg")
-    assert ed.main([str(bags), str(out), *COMMON]) == 1
-    assert ed.scene_is_complete(out / "0000")
+    assert main([str(bags), str(out), *COMMON]) == 1
+    assert scene_is_complete(out / "0000")
     assert not list((out / "0001").glob("images/*.jpg"))
     # ... and with the pixels stored as PNG it extends the root.
-    assert ed.main([str(bags), str(out), *COMMON, "--image_format", "png"]) == 0
-    assert ed.scene_is_complete(out / "0001")
+    assert main([str(bags), str(out), *COMMON, "--image_format", "png"]) == 0
+    assert scene_is_complete(out / "0001")
     assert image_format.of_root(out) == ".png"
 
 
@@ -620,7 +622,7 @@ def test_odin_extrinsics_are_pinned(tmp_path: Path):
     bags = tmp_path / "bags"
     write_bag(bags / "bag_a", odin=True)
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     scene = out / "0000"
 
     mount = np.eye(4)
@@ -652,7 +654,7 @@ def test_tf_pins_off_keeps_the_bag(tmp_path: Path):
     bags = tmp_path / "bags"
     write_bag(bags / "bag_a", odin=True)
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON, "--tf_pins", "off"]) == 0
+    assert main([str(bags), str(out), *COMMON, "--tf_pins", "off"]) == 0
     scene = out / "0000"
     known = np.load(scene / "clouds" / "00000.npy")[0, :3]
     assert np.allclose(known, (1.1, 0.0, 0.15), atol=1e-5)
@@ -661,5 +663,5 @@ def test_tf_pins_off_keeps_the_bag(tmp_path: Path):
 
 def test_livox_bag_has_nothing_to_pin(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
-    assert ed.main([str(bags), str(out), *COMMON]) == 0
+    assert main([str(bags), str(out), *COMMON]) == 0
     assert not (out / "0000" / tf_pins.FILE).exists()

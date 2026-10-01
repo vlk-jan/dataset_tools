@@ -50,7 +50,7 @@ innocent explanation the others do not share.
     The receiver's own admission, read as a hole in the stream of fixes that
     carried a position. A Fixposition with no solution may publish
     ``NavSatFix`` at null island, which
-    :func:`~dataset_tools.extract_data.gps_row` drops, or it may simply stop
+    :func:`~dataset_tools.extract.gps.gps_row` drops, or it may simply stop
     publishing; 0014 does both, 3 s of null island around one of its jumps and
     a 12.7 s silence around the other. Reading the hole rather than the flavour
     of the hole catches them with one rule.
@@ -109,8 +109,8 @@ from pathlib import Path
 import numpy as np
 
 #: Speed, m/s, above which a step between two samples is not motion. The one
-#: definition: :func:`~dataset_tools.extract_data.write_ground_truth`,
-#: :func:`~dataset_tools.extract_data.interpolate_poses` and
+#: definition: :func:`~dataset_tools.extract.ground_truth.write_ground_truth`,
+#: :func:`~dataset_tools.extract.sync.interpolate_poses` and
 #: :mod:`dataset_tools.validate_scene` take it from here, so they all agree
 #: about which steps are real.
 #:
@@ -144,7 +144,7 @@ MIN_ISLAND = 5.0
 #: a dropped message.
 MIN_OUTAGE = 2.0
 
-#: Seconds. The widest bracket :func:`~dataset_tools.extract_data.interpolate_poses`
+#: Seconds. The widest bracket :func:`~dataset_tools.extract.sync.interpolate_poses`
 #: will blend across; wider than that it copies the nearest sample instead, and
 #: what it copies is not a measurement of the frame it lands on. This has to
 #: track that function's ``max_gap`` default, which is why it is not MAX_GAP --
@@ -256,7 +256,7 @@ def outage_spans(fix_ts) -> list[Span]:
     ``fix_ts`` are the stamps of the fixes that carried a position -- what
     reaches ``gps.npy``. Everything the receiver does when it has no solution
     shows up here as the same thing, a hole: it may publish ``NavSatFix`` at
-    null island, which :func:`~dataset_tools.extract_data.gps_row` drops, or it
+    null island, which :func:`~dataset_tools.extract.gps.gps_row` drops, or it
     may simply stop publishing. Scene 0014 of HELHEST v2 beta does both -- 3 s
     of null island around one of its jumps and a 12.7 s silence around the
     other -- so reading the hole rather than the flavour of the hole is what
@@ -401,7 +401,7 @@ def frame_mask(frame_ts: np.ndarray, spans: list[Span]) -> np.ndarray:
 def frame_support(frame_ts, odom_ts) -> np.ndarray:
     """True for the frames that real pose samples bracket closely enough.
 
-    False where :func:`~dataset_tools.extract_data.interpolate_poses` would
+    False where :func:`~dataset_tools.extract.sync.interpolate_poses` would
     have no choice but to copy the nearest sample: before the stream starts,
     after it ends, or inside a hole wider than ``SUPPORT_GAP``. ``FRAME_PAD`` is
     the same allowance :func:`frame_mask` makes for the frame clock not yet being

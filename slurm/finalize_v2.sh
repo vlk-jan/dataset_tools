@@ -20,7 +20,7 @@ BINDS="--bind /mnt/personal --bind /mnt/data"
 
 singularity exec $BINDS "$SIF" "$PY" -c "
 from pathlib import Path
-from dataset_tools.extract_data import merge_scenes_csv
+from dataset_tools.extract.scene_io import merge_scenes_csv
 print(merge_scenes_csv(Path('$OUT')))
 "
 column -s, -t "$OUT/scenes.csv"

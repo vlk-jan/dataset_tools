@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from dataset_tools.extract_data import build_tf_graph, get_transform
+from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
 from dataset_tools.transforms import euler_matrix, pose_to_matrix, quaternion_matrix, roll_pitch_from_matrix
 
 

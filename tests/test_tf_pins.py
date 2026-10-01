@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from dataset_tools import tf_pins
-from dataset_tools.extract_data import build_tf_graph, get_transform
+from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
 from dataset_tools.transforms import euler_matrix
 
 

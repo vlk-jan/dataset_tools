@@ -113,7 +113,7 @@ def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
 def apply(G: dict[str, dict[str, np.ndarray]]) -> list[Record]:
     """Replace each pinned edge the graph has with its pin; return what the bag had.
 
-    ``G`` is from ``extract_data.build_tf_graph``: ``G[parent][child]`` holds
+    ``G`` is from ``extract.tf_graph.build_tf_graph``: ``G[parent][child]`` holds
     ``inv(M)`` and ``G[child][parent]`` holds ``M``, the pose of the child in
     the parent. Both directions are replaced.
     """
