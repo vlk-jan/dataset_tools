@@ -471,7 +471,10 @@ def test_the_viewer_page_installs_the_simview_patches(client):
     # simview 5 fixed every upstream bug the old stopgaps papered over.
     assert "STOPGAP" not in body and "versionAtMost" not in body
     # The patches name the bodies they are about.
-    assert "lidar_cloud" in body and "wheel_odom_ghost" in body
+    assert "wheel_odom_ghost" in body
+    # simview 5.1 keeps pose-less bodies (the aggregated cloud) out of Track
+    # Body and prints the time to two decimals itself; the patches went.
+    assert "lidar_cloud" not in body and "updateElements" not in body
 
 
 def test_the_initial_frame_is_opened_through_simviews_own_seek(client):
@@ -515,8 +518,9 @@ def test_the_view_opens_with_the_robot_in_shot(client):
 
 def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
     """It is already in the world frame, so a per-frame identity transform is
-    a blob that says nothing -- and is what would keep it in the Body states
-    list once SimView starts filtering that list by trajectory."""
+    a blob that says nothing -- and is what would keep it in SimView's Body
+    states, Track Body and terrain-profile lists, which since simview 5.1 take
+    only bodies with a pose (`Body.hasPose`)."""
     opts = "40-160000-80-500000-0.1-height"
     client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
     model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()

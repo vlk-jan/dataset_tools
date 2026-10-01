@@ -59,7 +59,11 @@
    panel and stays exactly one tab-width on-screen when collapsed, always at
    the vertical middle of the window edge, where nothing else is. */
 .dt-edge {
-  position: absolute; left: -24px; top: 50%; transform: translateY(-50%);
+  /* Centred by `top`, not by a transform: SimView (>= 5.1) styles every
+     button on the page and its `button:active` sets `transform`, which
+     dropped the tab 33 px under the pointer mid-click, so the release landed
+     on the canvas and the panel never toggled. */
+  position: absolute; left: -24px; top: calc(50% - 33px);
   width: 24px; height: 66px; padding: 0;
   display: flex; align-items: center; justify-content: center;
   background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--muted);
@@ -315,22 +319,7 @@ body:not(.dt-collapsed) .lil-gui.autoPlace {
   right: 356px !important;
 }
 
-/* SimView's Analysis panel: one scalar tab per name, `flex: 1` across a fixed
-   40%-wide bar. With a dozen scalars every label truncates to three characters
-   ("wh...", "wh...", "wh..."), which is no label at all. The bar already wraps,
-   so letting the tabs take their content's width makes them readable at the
-   cost of a second row. Beats lil-gui-era specificity by matching the same
-   class with `!important`; SimView injects its own <style> at runtime, after
-   this file, so source order alone would lose. */
-.analysis-container .scalar-tab {
-  flex: 0 1 auto !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
-  font-size: 0.85em !important;
-  padding: 4px 7px !important;
-}
-
-/* ...and the panel it sits in is 40% of the viewport centred on it, which
+/* SimView's Analysis panel is 40% of the viewport centred on it, which
    runs straight under SimView's own control panel -- more so here, because
    this overlay pushes that panel left by its own width. The right-hand tabs
    ("wheel_odom_drift" among them) end up unclickable: lil-gui is on top and
@@ -339,11 +328,15 @@ body:not(.dt-collapsed) .lil-gui.autoPlace {
    Pinned between the two panels instead of centred, so both edges are
    accounted for: the "Body states" window on the left, the controls (at
    whichever of its two positions) on the right. */
+/* The same 10 px gap on both sides. Left: the Body states window ends at
+   16 + 354 px. Right: the control panel's right offset (356 px beside our
+   panel, SimView's 16 px without it) plus its width (lil-gui's --width,
+   260 px in simview 5.1). */
 .analysis-container {
-  left: 380px !important;
-  right: 620px !important;
+  left: calc(16px + 354px + 10px) !important;
+  right: calc(356px + 260px + 10px) !important;
   width: auto !important;
   min-width: 300px;
   transform: none !important;
 }
-body.dt-collapsed .analysis-container { right: 264px !important; }
+body.dt-collapsed .analysis-container { right: calc(16px + 260px + 10px) !important; }

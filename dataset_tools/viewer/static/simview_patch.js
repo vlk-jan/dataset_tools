@@ -10,12 +10,6 @@
  * simview 5 fixed them upstream.
  */
 
-/** Bodies that exist for bookkeeping, not as things with a pose worth reading.
- *  `lidar_cloud` is the window's clouds already accumulated in the world frame:
- *  it is a body only because that is how SimView carries point clouds, and it
- *  is deliberately stateless (see build.py). */
-export const HOUSEKEEPING_BODIES = ["lidar_cloud"];
-
 /** The wheel-odometry pose marker (see build.py's `_ghost_track`). */
 export const GHOST_BODY = "wheel_odom_ghost";
 
@@ -85,11 +79,9 @@ export function centerOnRobot(app) {
 
 /** Apply every patch and return the handles the overlay drives them with. */
 export function installSimviewPatches(app) {
-    hideHousekeepingBodies(app);
     styleGhost(app);
     defaultPointCloudsOff(app);
     defaultPanelState(app);
-    shortTimeReadout(app);
 
     // ---------------------------------------------------------------- ghost
     //
@@ -181,49 +173,6 @@ function applyFolderDefaults(app) {
             // leaving the panel in SimView's default state.
             console.info(`no lil-gui folder titled "${title}"; leaving it as SimView left it.`);
         }
-    }
-}
-
-/**
- * Print the playback time to two decimals, on one line.
- *
- * SimView writes "time: 0.000 / 489.060" every redraw, and the span may wrap
- * where the control row runs short. A millisecond is finer than any frame here
- * (~70 ms apart), so the third decimal only cost width. Its `updateElements`
- * is replaced on the instance: it still runs, and the readout is rewritten
- * after it. The controls are built in SimView's onStoreReady, which can land
- * after the store this patch set waited for, so it waits for them in turn.
- */
-function shortTimeReadout(app, framesLeft = 600) {
-    const pc = app.animationController && app.animationController.playbackControls;
-    if (!pc || !pc.frameCounter) {
-        if (framesLeft > 0) requestAnimationFrame(() => shortTimeReadout(app, framesLeft - 1));
-        return;
-    }
-    pc.frameCounter.style.whiteSpace = "nowrap";
-    const update = pc.updateElements.bind(pc);
-    pc.updateElements = () => {
-        update();
-        const ac = pc.animationController;
-        pc.frameCounter.textContent =
-            `time: ${ac.getCurrentTime().toFixed(2)} / ${ac.getTotalTime().toFixed(2)}`;
-    };
-    pc.updateElements();
-}
-
-/**
- * Keep bookkeeping bodies out of the "Track Body" camera picker.
- *
- * The cloud has no per-frame pose (it is already accumulated in the window's
- * frame), so there is nothing to track. SimView's Body states list already
- * skips stateless point clouds; its Track Body list offers every body.
- */
-function hideHousekeepingBodies(app) {
-    const track = app.uiControls.findController("trackBody");
-    const select = track && track.domElement.querySelector("select");
-    if (!select) return;
-    for (const option of [...select.options]) {
-        if (HOUSEKEEPING_BODIES.includes(option.value)) option.remove();
     }
 }
 
