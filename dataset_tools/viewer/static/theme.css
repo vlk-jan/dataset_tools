@@ -3,8 +3,9 @@
    family. Light is the default; theme.js sets data-theme="dark" on <html>
    from the saved choice or the OS preference before the page paints.
 
-   The 3D view's panel (#dt-panel, .dt-build) is always dark: it floats over
-   SimView's renderer, which is dark whatever the page around it says.
+   The 3D view's panel (#dt-panel, .dt-build) and its zoom (.dt-zoom) are
+   always dark: they float over SimView's renderer, which is dark whatever the
+   page around it says.
 
    Tokens only -- every page's stylesheet imports this one. */
 :root {
@@ -34,7 +35,7 @@
   --track: #ccd0da;     /* surface0 */
   --shade: #dce0e8;     /* crust */
 }
-:root[data-theme="dark"], #dt-panel, .dt-build {
+:root[data-theme="dark"], #dt-panel, .dt-build, .dt-zoom {
   color-scheme: dark;
   --bg: #181825;        /* mantle */
   --panel: #1e1e2e;     /* base */
@@ -58,7 +59,7 @@
 /* Washes and rules derived from the hues above, so each theme gets its own
    without a second list. Declared on every element that redefines the hues,
    or they would be computed once from the light ones and inherited. */
-:root, #dt-panel, .dt-build {
+:root, #dt-panel, .dt-build, .dt-zoom {
   --ok-soft: color-mix(in srgb, var(--ok) 18%, var(--panel));
   --train-soft: color-mix(in srgb, var(--train) 18%, var(--panel));
   --accent-soft: color-mix(in srgb, var(--accent) 22%, var(--panel));

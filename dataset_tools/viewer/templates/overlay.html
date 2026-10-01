@@ -123,30 +123,30 @@
   </details>
 
   <div class="dt-tiles" id="dt-tiles">
-    <section class="dt-tile" data-kind="images" data-endpoint="image.jpg">
+    <section class="dt-tile" data-kind="images" data-endpoint="image.jpg"{% if cloud_on_image %} data-cloud{% endif %}>
       <h3>Camera <span class="dt-note"></span></h3>
-      <div class="dt-imgwrap"><img alt="camera frame"><div class="dt-absent">no image for this frame</div></div>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="camera frame"><div class="dt-absent">no image for this frame</div></div>
     </section>
-    <section class="dt-tile" data-kind="height_maps" data-endpoint="heightmap.png">
+    <section class="dt-tile" data-kind="height_maps" data-endpoint="heightmap.png" data-zoom-size="1024" data-probe>
       <h3>Height map <span class="dt-note">BEV, forward up</span></h3>
-      <div class="dt-imgwrap"><img alt="height map"><div class="dt-absent">no height map for this frame</div></div>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="height map"><div class="dt-absent">no height map for this frame</div></div>
     </section>
-    <section class="dt-tile" data-kind="height_masks" data-endpoint="validity.png">
+    <section class="dt-tile" data-kind="height_masks" data-endpoint="validity.png" data-zoom-size="1024" data-probe>
       <h3>Validity <span class="dt-note">
         <i class="dt-sw dt-sw-m"></i>measured
         <i class="dt-sw dt-sw-i"></i>interpolated
         <i class="dt-sw dt-sw-e"></i>extrapolated</span></h3>
-      <div class="dt-imgwrap"><img alt="height map validity"><div class="dt-absent">no validity mask for this frame</div></div>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="height map validity"><div class="dt-absent">no validity mask for this frame</div></div>
     </section>
-    <section class="dt-tile" data-kind="driven_similarity" data-endpoint="driven.png" data-optional>
+    <section class="dt-tile" data-kind="driven_similarity" data-endpoint="driven.png" data-zoom-size="1024" data-probe data-optional>
       <h3>Driven &amp; drivable <span class="dt-note">
         <i class="dt-sw dt-sw-d"></i>driven
         <i class="dt-sw dt-sw-s"></i>similar (DRIFT trust)</span></h3>
-      <div class="dt-imgwrap"><img alt="driven cells and feature similarity"><div class="dt-absent">no driven-similarity map for this frame</div></div>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="driven cells and feature similarity"><div class="dt-absent">no driven-similarity map for this frame</div></div>
     </section>
-    <section class="dt-tile" data-kind="clouds" data-endpoint="cloud.png">
+    <section class="dt-tile" data-kind="clouds" data-endpoint="cloud.png" data-zoom-size="768">
       <h3>Raw cloud <span class="dt-note">top-down, 5 m rings</span></h3>
-      <div class="dt-imgwrap"><img alt="lidar cloud top-down"><div class="dt-absent">no cloud for this frame</div></div>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="lidar cloud top-down"><div class="dt-absent">no cloud for this frame</div></div>
     </section>
   </div>
 
@@ -154,3 +154,24 @@
     <div id="dt-buildinfo" class="dt-sub"></div>
   </div>
 </div>
+
+{# Click a tile for a bigger copy: the frame page's zoom dialog and zoom.js,
+   unchanged. overlay.js keeps each tile's data-zoom / data-grid on the frame
+   it is showing; the height-map grids open with the cell probe. #}
+<dialog id="zoom" class="zoom dt-zoom" aria-label="Zoomed view">
+  <div class="zoomhead">
+    <strong class="zoomtitle"></strong>
+    <span class="muted zoomhint" hidden>hover to read a cell &middot; click to pin it &middot; arrow keys move the pin</span>
+    {% if cloud_on_image %}
+    <button type="button" class="btn zoomcloud" id="zoomcloud" aria-pressed="false" hidden
+            title="Project this frame's lidar cloud onto the image">Cloud on image</button>
+    {% endif %}
+    <form method="dialog"><button class="btn" aria-label="Close">&times;</button></form>
+  </div>
+  <div class="zoomstage">
+    <img alt="">
+    <div class="zoomcell" hidden></div>
+  </div>
+  <output class="zoomread" hidden></output>
+</dialog>
+<script src="/viewer-static/zoom.js" defer></script>

@@ -5,6 +5,7 @@
    document would fight its resize handling. */
 
 @import url("theme.css");
+@import url("zoom.css");
 
 #dt-panel, .dt-build {
   font: var(--fs-sm)/1.45 var(--sans);
@@ -353,3 +354,15 @@ body:not(.dt-collapsed) .sv-playback {
   left: max(calc((100% - 340px) / 2), calc(20px + 172px + 10px + 325px));
   max-width: calc(100vw - 340px - 32px);
 }
+
+/* The zoom dialog over the 3D view. style.css is not loaded here, so its two
+   classes the dialog uses are given here; the palette is the panel's (dark),
+   via .dt-zoom in theme.css. */
+.dt-zoom { font: var(--fs-sm)/1.45 var(--sans); }
+.dt-zoom .muted { color: var(--muted); }
+.dt-zoom .btn {
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--fg);
+}
+.dt-zoom .btn:hover { border-color: var(--accent); }
+.dt-zoom .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }

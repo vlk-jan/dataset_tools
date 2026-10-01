@@ -148,19 +148,39 @@
     e.preventDefault();
   });
 
-  // The cloud toggle, mirrored in the dialog: it presses the page's own button
-  // (so the choice is shared and remembered) and swaps the zoomed picture to
-  // match, leaving the magnification where it was.
+  // The cloud toggle, mirrored in the dialog. On the frame page it presses the
+  // page's own button (so the choice is shared and remembered) and swaps the
+  // zoomed picture to match, leaving the magnification where it was. Where
+  // there is no page button -- the 3D view's camera tile -- the dialog keeps
+  // the choice itself, under the frame page's key, and the picture names its
+  // projected twin in data-cloud.
   const zoomCloud = document.getElementById("zoomcloud");
   const pageCloud = document.getElementById("cloudtoggle");
   const bigframe = document.getElementById("bigframe");
-  const fullSize = (url) => url.replace(/([?&]w=)\d+/, "$11920");
+  // The photo at full width: the frame page's carries a w= to raise, the 3D
+  // view's tile asks for the endpoint's 640 px default and gets one added.
+  const fullSize = (url) =>
+    /[?&]w=\d+/.test(url) ? url.replace(/([?&]w=)\d+/, "$11920") : `${url}${url.includes("?") ? "&" : "?"}w=1920`;
+  let ownCloud = false;
+  try { ownCloud = !!localStorage.getItem("cloudOnImage"); } catch {}
+  const cloudOn = () => (pageCloud ? pageCloud.getAttribute("aria-pressed") === "true" : ownCloud);
+  let current = null;
   zoomCloud?.addEventListener("click", () => {
-    pageCloud.click();
-    zoomCloud.setAttribute("aria-pressed", pageCloud.getAttribute("aria-pressed"));
-    img.src = fullSize(bigframe.src);
-    img.alt = bigframe.alt;
+    if (pageCloud) {
+      pageCloud.click();
+      img.src = fullSize(bigframe.src);
+      img.alt = bigframe.alt;
+    } else {
+      ownCloud = !ownCloud;
+      try { localStorage.setItem("cloudOnImage", ownCloud ? "1" : ""); } catch {}
+      img.src = ownCloud ? current.dataset.cloud : fullSize(current.src);
+    }
+    zoomCloud.setAttribute("aria-pressed", String(cloudOn()));
   });
+
+  // Keys pressed in the dialog are its own: over the 3D view, SimView's
+  // shortcuts (arrows, A, C, space...) listen on the window behind it.
+  dlg.addEventListener("keydown", (e) => { if (e.key !== "Escape") e.stopPropagation(); });
 
   // A click on the backdrop (the dialog box itself, outside its content) closes it.
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
@@ -180,10 +200,12 @@
     // The heading names the frame only; whether the cloud is on is the button's to say.
     title.textContent = src.alt.replace(/, lidar cloud.*$/, "");
     img.alt = src.alt;
-    img.src = src.dataset.zoom ?? fullSize(src.src);
+    current = src;
+    const projected = !pageCloud && photo && cloudOn() && src.dataset.cloud;
+    img.src = src.dataset.zoom ?? (projected || fullSize(src.src));
     if (zoomCloud) {
-      zoomCloud.hidden = !photo;
-      zoomCloud.setAttribute("aria-pressed", pageCloud.getAttribute("aria-pressed"));
+      zoomCloud.hidden = !photo || (!pageCloud && !src.dataset.cloud);
+      zoomCloud.setAttribute("aria-pressed", String(cloudOn()));
     }
     img.classList.toggle("bev", !!src.dataset.zoom);
     dlg.showModal();

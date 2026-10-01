@@ -576,6 +576,8 @@ def create_app(
             # with; ?frame= is not -- it names a frame of *this* window.
             view_query=_view_query(request.query_params),
             probe=access.probe,
+            # Whether the camera tile's zoom can project the cloud onto it.
+            cloud_on_image=_overlay_possible(access),
             # How many segments the scene has, so the panel can title the view
             # "Segment 3/17" rather than leaving "3 of how many?" to a trip
             # back to the scene page.

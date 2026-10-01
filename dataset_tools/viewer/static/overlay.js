@@ -155,7 +155,21 @@ function applyTiles(frame) {
     }
     img.classList.remove("hidden");
     wrap.classList.remove("absent");
-    pending.push({ img, url: `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}` });
+    const url = `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}`;
+    // What the zoom dialog (zoom.js) opens for this tile, on this frame: a
+    // larger render for the top-down tiles, the cell probe's grid for the
+    // height-map ones; the camera image (neither) magnifies in place.
+    const name = tile.querySelector("h3").firstChild.textContent.trim();
+    img.alt = `${name} for frame ${frame}`;
+    if (tile.dataset.zoomSize) img.dataset.zoom = `${url}?size=${tile.dataset.zoomSize}`;
+    if (tile.dataset.probe !== undefined) img.dataset.grid = `${cfg.frameBase}/${frame}/grid.json`;
+    // The camera image with this frame's cloud projected onto it, for the
+    // dialog's "Cloud on image" -- only where the frame has a cloud.
+    if (tile.dataset.cloud !== undefined) {
+      if (available.clouds && available.clouds.has(frame)) img.dataset.cloud = `${cfg.frameBase}/${frame}/overlay.jpg?w=1920`;
+      else delete img.dataset.cloud;
+    }
+    pending.push({ img, url });
   }
   if (pending.length === 0) {
     tileShownFrame = frame;

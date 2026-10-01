@@ -1,0 +1,41 @@
+/* The click-to-zoom dialog (zoom.js), on the frame page and over the 3D view:
+   one picture as big as the window allows, and on the height-map grids a
+   probe -- the outlined cell and its values below. Tokens come from theme.css,
+   which both pages' stylesheets import. */
+.zoomable { cursor: zoom-in; }
+.zoom {
+  max-width: 96vw; max-height: 96vh; padding: var(--sp-3); border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel); color: var(--fg);
+}
+.zoom::backdrop { background: rgb(0 0 0 / 0.6); }
+.zoomhead { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); }
+.zoomhead form { margin-left: auto; }
+.zoomhead .btn { font: inherit; cursor: pointer; }
+.zoomhead .zoomcloud { margin-left: auto; }
+.zoomhead .zoomcloud[hidden] { display: none; }
+.zoomhead .zoomcloud:not([hidden]) + form { margin-left: 0; }
+.zoomhint { font-size: var(--fs-sm); }
+.zoomstage { position: relative; width: fit-content; margin: 0 auto; }
+.zoomstage img { display: block; max-width: 92vw; max-height: calc(96vh - 170px); border-radius: 4px; }
+/* The BEV tiles are square: fill the window rather than stop at the render's size. */
+.zoomstage img.bev { width: min(calc(96vh - 170px), 92vw); height: auto; image-rendering: pixelated; cursor: crosshair; }
+/* The camera image magnifies inside its own box (zoom.js): the frame stays put
+   and the picture moves under it. */
+.zoomstage.photo { overflow: hidden; }
+/* No readout under a photo, so it may take the room the probe's lines need. */
+.zoomstage.photo img { max-height: calc(96vh - 80px); }
+.zoomstage.photo img { transform-origin: 0 0; touch-action: none; }
+.zoomstage.photo.zoomed { cursor: grab; }
+.zoomstage.photo.dragging { cursor: grabbing; }
+.zoomstage.photo.dragging img { user-select: none; }
+.zoomcell {
+  position: absolute; pointer-events: none; box-sizing: border-box;
+  outline: 2px solid #fff; box-shadow: 0 0 0 3px rgb(0 0 0 / 0.7);
+}
+.zoomcell.pinned { outline-color: var(--accent); }
+/* width 0 + min-width 100%: the readout takes the width the picture gives the
+   dialog and wraps inside it, rather than widening the dialog as its lines
+   grow and shrink under the pointer -- which shook the picture. Room for four
+   lines, so wrapping does not move it vertically either. */
+.zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
+.zoomread[hidden] { display: none; }
