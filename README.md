@@ -268,6 +268,7 @@ helhest-validate /path/to/dataset               # a whole dataset root
 helhest-validate /path/to/dataset/0000 0001     # or individual scenes
 helhest-validate /path/to/dataset --csv report.csv
 helhest-validate /path/to/dataset --csv - --markdown -q
+helhest-validate /path/to/dataset --json /path/to/dataset/validation.json --strict
 ```
 
 Checks file presence, equal frame counts across images / clouds / timestamps /
@@ -283,13 +284,49 @@ count, a sorted clock, coordinates on the globe, and a time span that overlaps
 `data_ts.txt`. Every finding there is a warning — nothing in the scene contract
 is computed from it.
 
+Also checked:
+
+- **Proprioception** (`joint_states.npy`, `joint_setpoints.npy`, `cmd_vel.npy`):
+  rows stamped before 2001 (never-set or boot-clock stamps), unsorted stamps, a
+  stream that starts or ends more than 2 s inside the frames, and gaps over 1 s
+  with frames under them. `cmd_vel` is published only while the autonomy
+  drives, so its coverage and gaps are INFO.
+- **Holes in the frame clock**: every gap over 1 s in `data_ts.txt`, with where
+  it is (INFO; `max_frame_gap_s` and `hole_time_s` in the stats).
+- **Every cloud's point count**, from its `.npy` header: empty clouds warn,
+  ones under 100 points are INFO. The full loads stay a sample.
+- **Per-frame products** (`height_maps/`, `height_masks/`, `proprio_labels/`,
+  `driven_similarity/`): every file names a frame of the scene, one loads, and
+  directories a re-extraction set aside (`*.stale-*`) are listed.
+- **The root**, when a root is given: two scenes from one bag (error), a
+  `manifest.json` whose scenes, frame counts or bags no longer match the disk,
+  and a `T_cam_to_base.txt` that differs between scenes by more than 5 mm.
+
 Structural problems are **errors** (exit code `1`); data-quality observations
-(NaNs, jumps, extreme tilt) are **warnings** — `--strict` makes them fail too.
+(NaNs, implausible speed, extreme tilt, proprioception not covering the frames)
+are **warnings** — `--strict` makes them fail too. What is worth knowing but no
+defect is **INFO** (`-v` prints it): a hole in the frame clock, a long odometry
+step across one. Every message carries a stable code, printed in brackets.
+
+`--strict` is a usable gate once a root lists what it is known to contain in
+`<root>/validation_expect.json` (or `--expect FILE`):
+
+```json
+{"expected": [["0008", "TILT"], ["0009", "TILT"], ["*", "CLOUD_EMPTY"]]}
+```
+
+Those findings are still reported, marked expected, and no longer count; an
+entry that matches nothing is reported as `EXPECT_UNUSED`, so the list cannot
+silently outlive its reason. `--json PATH` writes every message (`scene`,
+`code`, `severity`, `msg`, and `t0`/`t1` in seconds from the first frame where
+the finding has a place) and every scene's stats.
 Written to `<root>/validation.csv`, the report is shown by the viewer: a chip
 per scene on the index and a card on the scene page.
 Thresholds: `--max-jump` (m), `--max-tilt` (deg), `--max-nan`, `--max-sync` (s);
-`--sample-clouds N` sets how many clouds are opened per scene (default 8, keeps
-the check fast on network storage).
+`--sample-clouds N` sets how many clouds are opened per scene (default 8; `0`
+also skips the header scan of every cloud, which is most of a run's time on slow
+storage -- 16 s warm, a minute cold, for HELHEST v2.1's 133k frames on a USB
+drive).
 
 The older dataset layout is supported: `odometry.txt`, `trajectory.txt`,
 `T_cam_to_lidar.txt`, `height_maps/`, `height_masks/` and `<scene>_full.npz`

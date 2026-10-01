@@ -130,13 +130,16 @@ def test_nan_fraction_is_reported_and_warned(scene: Path):
     assert any("non-finite" in w for w in report.warnings)
 
 
-def test_odometry_jump_is_a_warning(scene: Path):
+def test_odometry_jump_is_info_and_its_speed_a_warning(scene: Path):
+    """A long step is no defect on its own -- across a hole in the frame clock
+    it is what driving looks like; the speed it implies is what can be wrong."""
     transforms = np.load(scene / "transforms.npy")
     transforms[2, 0, 3] += 5.0
     np.save(scene / "transforms.npy", transforms)
     report = vs.validate_scene(scene, max_jump=1.0)
     assert report.errors == []
-    assert any("jumps > 1.0 m" in w for w in report.warnings)
+    assert any("jumps > 1.0 m" in w for w in report.infos)
+    assert any("m/s" in w for w in report.warnings)
     assert report.stats["max_step_m"] == pytest.approx(5.2, abs=1e-6)
 
 
@@ -326,3 +329,77 @@ def test_two_image_formats_in_one_scene_are_an_error(scene: Path):
     (scene / "images" / "00003.png").rename(scene / "images" / "00003.jpg")
     report = vs.validate_scene(scene)
     assert any("more than one format" in e for e in report.errors)
+
+
+# --------------------------------------------------------------------------
+# coded messages, proprioception, holes, clouds, derived products, the root
+# --------------------------------------------------------------------------
+def _codes(report: vs.SceneReport, severity: str | None = None) -> set[str]:
+    return {m.code for m in report.messages if severity is None or m.severity == severity}
+
+
+def test_proprio_stamped_on_the_boot_clock_or_leaving_the_frames_uncovered_warns(tmp_path: Path):
+    scene = write_scene(tmp_path / "0000", frames=100)  # 10 s of frames
+    t0 = 1_700_000_000.0
+    t = np.r_[0.12, 0.13, t0 + np.arange(0, 4, 0.01), t0 + np.arange(6, 7, 0.01)]  # boot rows, a 2 s hole, short end
+    np.save(scene / "joint_states.npy", np.c_[t, np.zeros((len(t), 9))])
+    np.save(scene / "cmd_vel.npy", np.c_[t0 + np.arange(0, 3, 0.1), np.zeros((30, 6))])
+    report = vs.validate_scene(scene)
+    assert {"PROPRIO_T0", "PROPRIO_GAP", "PROPRIO_COVERAGE"} <= _codes(report, vs.WARNING)
+    # cmd_vel runs only while the autonomy drives: its coverage is not a defect.
+    cmd = [m for m in report.messages if m.text.startswith("cmd_vel.npy")]
+    assert cmd and all(m.severity == vs.INFO for m in cmd)
+
+
+def test_a_hole_in_the_frame_clock_is_info_with_its_place(tmp_path: Path):
+    scene = write_scene(tmp_path / "0000", frames=6)
+    ts = np.loadtxt(scene / "data_ts.txt")
+    ts[3:] += 5.0
+    np.savetxt(scene / "data_ts.txt", ts)
+    np.savetxt(scene / "pcd_ts.txt", ts - 0.005)
+    report = vs.validate_scene(scene, max_jump=10.0)
+    gap = next(m for m in report.messages if m.code == "FRAME_GAP")
+    assert gap.severity == vs.INFO and gap.t0 == pytest.approx(0.2) and gap.t1 == pytest.approx(5.3)
+    assert report.stats["max_frame_gap_s"] == pytest.approx(5.1)
+    assert report.status() == "OK"
+
+
+def test_every_cloud_header_is_read_for_empty_frames(tmp_path: Path):
+    scene = write_scene(tmp_path / "0000", frames=40)
+    np.save(scene / "clouds" / "00013.npy", np.empty((0, 4), dtype=np.float32))  # not among the 8 sampled
+    report = vs.validate_scene(scene)
+    assert "CLOUD_EMPTY" in _codes(report, vs.WARNING)
+    assert report.stats["clouds_empty"] == 1
+
+
+def test_derived_files_must_name_frames_of_the_scene(tmp_path: Path):
+    scene = write_scene(tmp_path / "0000", frames=4)
+    (scene / "height_maps").mkdir()
+    for i in (0, 3, 7):
+        np.savez(scene / "height_maps" / f"{i:05d}.npz", height_map=np.zeros((2, 2)))
+    (scene / "height_masks.stale-20261001-120000").mkdir()
+    report = vs.validate_scene(scene)
+    assert "DERIVED_INDEX" in _codes(report, vs.ERROR)
+    assert "DERIVED_STALE" in _codes(report, vs.INFO)
+
+
+def test_root_checks_and_the_allowlist_make_strict_a_gate(tmp_path: Path, capsys):
+    root = tmp_path / "root"
+    write_scene(root / "0000")
+    write_scene(root / "0001")  # also says synthetic_bag: two scenes from one bag
+    a = vs.validate_scene(root / "0000")
+    roots = vs.validate_root(root, [a, vs.validate_scene(root / "0001")])
+    assert [m.code for m in roots] == ["ROOT_DUP_BAG"]
+    (root / "0001" / "source_bag.txt").write_text("other_bag\n")
+
+    gravity = np.load(root / "0000" / "gravity_align.npy")
+    gravity[1] = np.diag([1.0, -1.0, -1.0])  # upside down: a roll-over
+    np.save(root / "0000" / "gravity_align.npy", gravity)
+    assert vs.main([str(root), "--strict", "-q"]) == 1
+    (root / vs.EXPECT_FILE).write_text('{"expected": [["0000", "TILT"], ["*", "GPS"]]}')
+    out = tmp_path / "v.json"
+    assert vs.main([str(root), "--strict", "-q", "--json", str(out)]) == 0
+    doc = __import__("json").loads(out.read_text())
+    tilt = next(m for m in doc["scenes"]["0000"]["messages"] if m["code"] == "TILT")
+    assert tilt["expected"] is True and tilt["severity"] == vs.WARNING
+    assert [m["code"] for m in doc["root"]] == ["EXPECT_UNUSED"]
