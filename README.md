@@ -181,6 +181,8 @@ lidar works.
 | `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt` |
 | `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
+| `--allow_frame_fallback` | extract a bag whose TF does not reach `--base_frame` from the lidar (and no `--lidar_extrinsic`), the odometry child frame or the orientation frame, leaving that stream in its own frame. Without it such a scene **fails**: clouds, poses or gravity in the wrong frame look plausible and are found late. What fell back is listed in `extract_meta.json` |
+| `--max_sync_dt S` | largest camera/lidar stamp difference a frame may pair (default `0.1`); further-apart mutual nearest neighbours, an image across a camera stall, are dropped and counted in `extract_meta.json` |
 | `--tf_pins on\|off` | `on` (default): the two static transforms the Odin1 estimates online, `imu_link -> odin1_lidar` and `odin1_lidar -> odin1_camera_link`, are replaced by one constant for every bag (`dataset_tools.tf_pins.PINS`, the median of what 42 bags published), because the estimate wanders by 3 cm and half a degree between boots and even within a bag. What the bag said is recorded per scene in `tf_pins.txt`. `off` uses the bag's values, as every root before 2026-09-30 |
 | `-v` | debug logging |
 
@@ -193,6 +195,19 @@ Behaviour worth knowing:
   scene counts as complete only if it finished and its frame counts agree.
   Complete scenes are skipped unless `--overwrite` is given. Scenes extracted
   before this bookkeeping existed have no `source_bag.txt` and will be redone.
+  A finished scene whose `source_bag.txt` names a different bag than the one
+  the run would put there stops the run before anything is extracted, with or
+  without `--overwrite`: the bag list moved, and skipping would leave the new
+  bag out while overwriting would renumber the root.
+- **Per-frame products follow the clock.** `height_maps/`, `height_masks/`,
+  `proprio_labels/` and `driven_similarity/` are built after the extraction, one
+  file per frame index. A re-extraction keeps them when it writes the same
+  `data_ts.txt`, and renames them `<dir>.stale-<date>-<time>` when it does not,
+  since they would describe frames that are now other moments.
+- **Stamps that were never set.** A header stamp before 2001 (zero, or time
+  since boot from a driver that publishes before its clock syncs: the first
+  51 `/joint_states` of HELHEST v2.1 scene 0000 say 0.12 s) is replaced by the
+  message's receive time, and counted per topic in `extract_meta.json`.
 - **Numbering** follows the sorted bag order, so `--scenes` and `--start_index`
   keep indices stable rather than renumbering the selection.
 - **Failures are collected**, not fatal: a bag that raises is logged with its
@@ -224,7 +239,7 @@ index-aligned.
 | `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`) |
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
 | `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
-| `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, and how many further frames went for having no pose under them at all; absent when the guard did not run |
+| `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, how many further frames went for having no pose under them at all (since 2026-10-01 split into before the pose stream, after it and inside holes), and how many more once the clock was corrected; absent when the guard did not run |
 | `tf_pins.txt` | — | text | m, degrees | the static transforms pinned to a constant (`--tf_pins`): for each, the pin the scene was built with and what the bag's own `/tf_static` said, so a bag whose estimate sat far from the constant can be found; absent when nothing was pinned (a Livox bag, or `--tf_pins off`) |
 | `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
 | `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
@@ -235,6 +250,8 @@ index-aligned.
 | `joint_setpoints.npy` | (M, 1 + 3J) | `float64` | same layout | only if `/joint_setpoints` exists |
 | `cmd_vel.npy` | (M, 7) | `float64` | `[t, vx, vy, vz, wx, wy, wz]`, m/s and rad/s, base frame | only if `/cmd_vel` exists |
 | `gps.npy` | (M, 8) | `float64` | `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]`, degrees, m and m² | full rate, sorted by `t`, not frame-aligned; only if the bag carries a `NavSatFix` |
+| `joint_names.txt` | J lines | text | — | the joint order of the `joint_states.npy` / `joint_setpoints.npy` columns: the first message's. Later messages are reordered to it; one naming other joints is skipped (counted in `extract_meta.json`); an empty column (no effort) is NaN |
+| `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping: messages, pairs, pairs over `--max_sync_dt`, what the guard removed and where, frames trimmed after the clock correction, frames written. Since 2026-10-01 |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
 | `../scenes.csv` | — | text | — | dataset-level index: `scene,bag,start_time,frames` |
 
@@ -502,6 +519,13 @@ the viewer's own virtualenv:
   two thirds of them 0016's last 57 s, where the receiver stops publishing while
   the camera runs on. With it, no scene in the root exports a step above
   3.2 m/s, and every one of those is driving.
+
+  That margin is there because the guard runs before the clock correction. Once
+  the clock is final, a frame that still has no pose on either side of it is
+  dropped too and the indices close up behind it (`gnss_guard.txt`: "after the
+  clock correction"); before 2026-10-01 those were exported with the nearest
+  pose copied in -- 184 frames across ten scenes of HELHEST v2.2, all at a
+  scene's ends.
 - **Out-of-order bags.** Timestamps are sorted before synchronisation. If a bag
   is badly out of order for other reasons, `sort_bag.py` rewrites it sorted by
   header stamp.

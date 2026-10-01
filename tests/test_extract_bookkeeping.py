@@ -187,7 +187,7 @@ def test_main_reports_no_bags(tmp_path: Path):
 
 
 def test_main_skips_complete_scenes_and_writes_index(tmp_path: Path):
-    make_bag(tmp_path / "bags", "bag_a")
+    make_bag(tmp_path / "bags", "synthetic_bag")
     out = tmp_path / "out"
     write_scene(out / "0000", frames=3)  # pretend it was extracted already
 
@@ -217,3 +217,17 @@ def test_worker_turns_exceptions_into_failed_results(tmp_path: Path):
     assert result.index == 3 and result.message
     # A failed scene leaves no sentinel, so it cannot end up in scenes.csv.
     assert not (tmp_path / "out" / "0003" / SENTINEL_FILE).exists()
+
+
+def test_main_refuses_a_scene_that_holds_another_bag(tmp_path: Path):
+    """A bag added in the middle of the list moves every later bag up one index;
+    resuming must not skip the new bag because its index holds a finished scene
+    of the bag that used to sort there."""
+    make_bag(tmp_path / "bags", "bag_a")
+    out = tmp_path / "out"
+    write_scene(out / "0000", frames=3)  # extracted from "synthetic_bag"
+    before = sorted(p.name for p in (out / "0000").iterdir())
+
+    assert main([str(tmp_path / "bags"), str(out), "--jobs", "1"]) == 2
+    assert main([str(tmp_path / "bags"), str(out), "--jobs", "1", "--overwrite"]) == 2
+    assert sorted(p.name for p in (out / "0000").iterdir()) == before

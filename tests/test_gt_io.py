@@ -96,3 +96,15 @@ def test_anchor_to_first_puts_the_identity_first():
     assert np.allclose(anchored[0], np.eye(4))
     assert np.allclose(anchored[:, 0, 3], [0.0, 0.5, 1.0, 1.5])
     assert np.allclose(anchored[:, 1, 3], 0.0)
+
+
+def test_a_pass_notices_when_someone_else_rewrote_its_output(tmp_path):
+    scene = tmp_path / "0000"
+    (scene / "regen").mkdir(parents=True)
+    gt_io.write_trajectory(scene / "odometry.txt", [1.0, 2.0], [np.eye(4), np.eye(4)])
+    gt_io.write_segments(scene / "odometry_segments.txt", [gt_io.SegmentRow(1, 1.0, 2.0, 2, "end_of_run")])
+    assert not gt_io.changed_since_written(scene, "backup.txt")  # no record yet: as before
+    gt_io.record_written(scene, "backup.txt")
+    assert not gt_io.changed_since_written(scene, "backup.txt")
+    gt_io.write_segments(scene / "odometry_segments.txt", [gt_io.SegmentRow(1, 1.0, 2.0, 2, "gap")])
+    assert gt_io.changed_since_written(scene, "backup.txt")

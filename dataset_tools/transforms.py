@@ -62,10 +62,21 @@ def pose_to_matrix(pose) -> np.ndarray:
     return T
 
 
+#: Seconds. A header stamp before this (2001-09-09) was never set from a wall
+#: clock: zero, or time since boot from a driver that publishes before its clock
+#: is synced. The robot's /joint_states open with 51 such rows in HELHEST v2.1
+#: scene 0000, stamped 0.12 s; sorted by time, they sit 55 years before the rest.
+MIN_VALID_STAMP = 1e9
+
+
 def header_stamp(msg, fallback: float) -> float:
-    """``header.stamp`` of a deserialised message in seconds, or ``fallback``."""
+    """``header.stamp`` of a deserialised message in seconds, or ``fallback``
+    when the message has no header or its stamp was never set (see
+    :data:`MIN_VALID_STAMP`)."""
     if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
-        return msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        if t >= MIN_VALID_STAMP:
+            return t
     return fallback
 
 

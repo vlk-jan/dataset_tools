@@ -184,6 +184,16 @@ class Verdict:
     #: span cost. Kept apart from ``n_frames_dropped`` because the two have
     #: different causes and a scene can have either without the other.
     n_frames_unsupported: int = 0
+    #: ``n_frames_unsupported`` by where the frames lay: before the first
+    #: surviving pose, after the last, or inside a hole. A sensor that kept
+    #: recording after the robot side stopped shows up as ``after``; a hole in
+    #: the frames themselves never shows up here at all (there are no frames).
+    n_unsupported_before: int = 0
+    n_unsupported_after: int = 0
+    n_unsupported_inside: int = 0
+    #: Frames dropped after the clock correction, when the corrected stamp
+    #: turned out to have no pose bracketing it (see :func:`frame_support`).
+    n_frames_trimmed: int = 0
 
     @property
     def clean(self) -> bool:
@@ -398,7 +408,7 @@ def frame_mask(frame_ts: np.ndarray, spans: list[Span]) -> np.ndarray:
     return keep
 
 
-def frame_support(frame_ts, odom_ts) -> np.ndarray:
+def frame_support(frame_ts, odom_ts, pad: float = FRAME_PAD) -> np.ndarray:
     """True for the frames that real pose samples bracket closely enough.
 
     False where :func:`~dataset_tools.extract.sync.interpolate_poses` would
@@ -414,12 +424,15 @@ def frame_support(frame_ts, odom_ts) -> np.ndarray:
     a bracket implying an impossible speed -- is left alone here: after the
     spans are gone what remains of it is rare, and the pose on either side is a
     real one.
+
+    With ``pad=0`` the stamps are taken as final: run on the corrected clock,
+    it finds the frames that would still be handed a copied pose.
     """
     t = np.asarray(frame_ts, dtype=float)
     o = np.sort(np.asarray(odom_ts, dtype=float))
     if not len(o):
         return np.zeros(len(t), dtype=bool)
-    lo, hi = t - FRAME_PAD, t + FRAME_PAD
+    lo, hi = t - pad, t + pad
     keep = (hi >= o[0]) & (lo <= o[-1])
     for i in np.flatnonzero(np.diff(o) > SUPPORT_GAP):
         keep &= ~((lo > o[i]) & (hi < o[i + 1]))
@@ -447,8 +460,18 @@ def guard(odom_data, frame_ts: np.ndarray, fix_ts=None) -> tuple[list, np.ndarra
 
     # Support is measured against what survives, so the holes the spans just
     # opened are covered by the same rule as the ones the receiver left.
-    support = frame_support(frames, [row[0] for row in kept])
-    verdict.n_frames_unsupported = int(np.count_nonzero(mask & ~support))
+    kept_ts = [row[0] for row in kept]
+    support = frame_support(frames, kept_ts)
+    lost = mask & ~support
+    verdict.n_frames_unsupported = int(np.count_nonzero(lost))
+    if kept_ts:
+        verdict.n_unsupported_before = int(np.count_nonzero(lost & (frames < kept_ts[0])))
+        verdict.n_unsupported_after = int(np.count_nonzero(lost & (frames > kept_ts[-1])))
+    else:
+        verdict.n_unsupported_before = verdict.n_frames_unsupported
+    verdict.n_unsupported_inside = (
+        verdict.n_frames_unsupported - verdict.n_unsupported_before - verdict.n_unsupported_after
+    )
     return kept, mask & support, verdict
 
 
@@ -463,7 +486,11 @@ def write_report(path, verdict: Verdict, t0: float) -> None:
         "# start_s end_s reason   (seconds into the scene)",
         f"# {verdict.n_poses_dropped}/{verdict.n_poses} poses, "
         f"{verdict.n_frames_dropped}/{verdict.n_frames} frames removed",
-        f"# {verdict.n_frames_unsupported}/{verdict.n_frames} further frames had no pose under them",
+        f"# {verdict.n_frames_unsupported}/{verdict.n_frames} further frames had no pose under them "
+        f"({verdict.n_unsupported_before} before the pose stream, {verdict.n_unsupported_after} after it, "
+        f"{verdict.n_unsupported_inside} inside holes)",
+        f"# after the clock correction, {verdict.n_frames_trimmed}/{verdict.n_frames} more frames "
+        "had no pose bracketing them, dropped as well",
     ]
     lines += [f"{s.start - t0:.3f} {s.end - t0:.3f} {s.reason}" for s in verdict.spans]
     Path(path).write_text("\n".join(lines) + "\n")

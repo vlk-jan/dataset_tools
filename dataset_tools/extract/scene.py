@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import logging
+import subprocess
+import sys
+import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import cv2
@@ -20,7 +28,10 @@ from dataset_tools.extract.gps import GPS_MSGTYPE, gps_row, pick_gps_topic
 from dataset_tools.extract.ground_truth import _auto, write_ground_truth
 from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr
 from dataset_tools.extract.scene_io import (
+    DERIVED_DIRS,
     GNSS_GUARD_FILE,
+    JOINT_NAMES_FILE,
+    META_FILE,
     SENTINEL_FILE,
     STATUS_EMPTY,
     STATUS_OK,
@@ -103,6 +114,18 @@ class _Pass1:
     tf_msgs: list = field(default_factory=list)
     #: Connections whose stamps are read straight out of the raw bytes.
     verified: set[int] = field(default_factory=set)
+    #: The joint order of every joint_states / joint_setpoints row: the first message's.
+    joint_names: list | None = None
+    #: Every stamp, by topic: what extract_meta.json reports coverage and gaps from.
+    stamps: dict = field(default_factory=lambda: defaultdict(list))
+    #: Messages whose header stamp was never set, by topic; their receive time stands in.
+    unset_stamps: Counter = field(default_factory=Counter)
+    #: Joint messages that could not be lined up with ``joint_names``, by topic; skipped.
+    malformed: Counter = field(default_factory=Counter)
+    #: Missing TF paths the run went on without (--allow_frame_fallback).
+    frame_fallbacks: list = field(default_factory=list)
+    #: Frame bookkeeping for extract_meta.json.
+    counts: dict = field(default_factory=dict)
 
 
 def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
@@ -138,7 +161,9 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         )
 
     # A scene is extracted from scratch every time, so whatever an earlier run
-    # left behind must go first (see clear_scene_outputs).
+    # left behind must go first (see clear_scene_outputs). Its frame clock is
+    # remembered, to tell whether the per-frame products built on it still hold.
+    old_clock = _digest(scene_dir / "data_ts.txt")
     clear_scene_outputs(scene_dir, ground_truth=_auto(args.gt, args.odom))
 
     p1 = _collect(reader, conns, cam_conn, lidar_conn, args)
@@ -155,11 +180,13 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     tf_graph, T_lidar_to_base = _resolve_frames(reader, lidar_conn, p1, scene_dir, args, bag)
     _write_frames(reader, conns, cam_conn, lidar_conn, p1, cam_ts, pcd_ts, tf_graph, T_lidar_to_base, scene_dir, args)
     frame_ts = _write_derived(scene_dir, frame_ts, pcd_ts, p1, guard_verdict, args, bag)
+    _set_aside_stale(scene_dir, old_clock, bag)
+    _write_meta(scene_dir, reader, bag_path, p1, guard_verdict, len(frame_ts), args)
 
     # Provenance; written last, so it doubles as the "scene finished" marker.
     (scene_dir / SENTINEL_FILE).write_text(f"{bag}\n")
 
-    result.frames = int(len(cam_ts))
+    result.frames = int(len(frame_ts))
     result.start_time = float(frame_ts[0])
     return result
 
@@ -197,19 +224,33 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
     stamp_only = {id(cam_conn), id(lidar_conn)}
     verified = p1.verified
 
+    def stamp(msg, recv: float, topic: str) -> float:
+        # The header stamp, or the bag's receive time for a message without one
+        # -- in seconds, as pass 2 computes it -- counting the headers whose
+        # stamp was never set (transforms.MIN_VALID_STAMP).
+        t = header_stamp(msg, None)
+        if t is None:
+            if hasattr(msg, "header"):
+                p1.unset_stamps[topic] += 1
+            t = recv
+        return t
+
     for conn, timestamp, raw in reader.messages(relevant_conns):
+        recv = timestamp * 1e-9
         if id(conn) in stamp_only and id(conn) in verified:
             t = header_stamp_from_cdr(raw)
             if t is None:
-                t = header_stamp(reader.deserialize(raw, conn.msgtype), timestamp)
+                t = stamp(reader.deserialize(raw, conn.msgtype), recv, conn.topic)
         else:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, timestamp)
+            t = stamp(msg, recv, conn.topic)
             if id(conn) in stamp_only:
                 if header_stamp_from_cdr(raw) == t:
                     verified.add(id(conn))
                 else:
                     stamp_only.discard(id(conn))
+        if conn.topic != "/tf_static":
+            p1.stamps[conn.topic].append(t)
 
         if conn.topic == args.cam:
             p1.cam_ts.append(t + shift_cam)
@@ -229,10 +270,10 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
                     q = msg.pose.pose.orientation
                     p1.imu_frame = msg.child_frame_id
                 p1.imu.append((t, quaternion_matrix([q.x, q.y, q.z, q.w])))
-        elif conn.topic == "/joint_states":
-            p1.joint_states.append(np.r_[t, msg.position, msg.velocity, msg.effort])
-        elif conn.topic == "/joint_setpoints":
-            p1.joint_setpoints.append(np.r_[t, msg.position, msg.velocity, msg.effort])
+        elif conn.topic in ("/joint_states", "/joint_setpoints"):
+            row = _joint_row(p1, conn.topic, t, msg)
+            if row is not None:
+                (p1.joint_states if conn.topic == "/joint_states" else p1.joint_setpoints).append(row)
         elif conn.topic == "/cmd_vel":
             tw = msg.twist if hasattr(msg, "twist") else msg
             p1.cmd_vel.append(
@@ -255,11 +296,54 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
     return p1
 
 
+def _joint_row(p1: _Pass1, topic: str, t: float, msg):
+    """One joint_states / joint_setpoints row, its columns in ``p1.joint_names`` order.
+
+    The order is the first message's, and is written to joint_names.txt. A later
+    message naming its joints in another order is reordered; one naming other
+    joints, or carrying a column of the wrong length, is skipped and counted. A
+    column a message leaves empty (some drivers never fill effort) becomes NaN
+    rather than a short row that would make the whole array fail to stack.
+    """
+    names = list(msg.name) or [f"joint{i}" for i in range(len(msg.position))]
+    if p1.joint_names is None:
+        p1.joint_names = names
+    want = p1.joint_names
+    if sorted(names) != sorted(want):
+        p1.malformed[topic] += 1
+        return None
+    order = [names.index(j) for j in want]
+    cols = []
+    for values in (msg.position, msg.velocity, msg.effort):
+        values = np.asarray(values, dtype=float)
+        if len(values) == 0:
+            cols.append(np.full(len(want), np.nan))
+        elif len(values) == len(names):
+            cols.append(values[order])
+        else:
+            p1.malformed[topic] += 1
+            return None
+    return np.r_[t, *cols]
+
+
 def _select_frames(p1: _Pass1, args, bag: str):
     """Which camera/lidar pairs become frames: ``(cam_ts, pcd_ts, frame_ts,
     guard_verdict)``, or why the scene is empty, as a string."""
     # Sync timestamps (mutual nearest neighbour)
     valid_cam_ts, valid_pcd_ts = sync_timestamps(p1.cam_ts, p1.lidar_ts)
+    p1.counts.update(camera_messages=len(p1.cam_ts), lidar_messages=len(p1.lidar_ts), pairs=len(valid_cam_ts))
+    # Mutual nearest neighbours can still be far apart: across a camera stall,
+    # the image either side pairs with whichever sweep is left.
+    close = np.abs(valid_cam_ts - valid_pcd_ts) <= args.max_sync_dt
+    p1.counts["pairs_over_max_sync_dt"] = int(np.count_nonzero(~close))
+    if not close.all():
+        LOG.warning(
+            "%s: %d camera/lidar pairs more than %.3f s apart; dropped (--max_sync_dt)",
+            bag,
+            np.count_nonzero(~close),
+            args.max_sync_dt,
+        )
+        valid_cam_ts, valid_pcd_ts = valid_cam_ts[close], valid_pcd_ts[close]
 
     if len(valid_cam_ts) == 0:
         LOG.warning(
@@ -323,6 +407,12 @@ def _write_small_streams(p1: _Pass1, scene_dir: Path, bag: str) -> None:
             np.save(scene_dir / f"{name}.npy", arr[np.argsort(arr[:, 0])])
         else:
             LOG.info("%s: no messages on /%s; %s.npy not written", bag, name, name)
+    if p1.joint_names is not None:
+        (scene_dir / JOINT_NAMES_FILE).write_text("".join(f"{n}\n" for n in p1.joint_names))
+    for topic, n in sorted(p1.malformed.items()):
+        LOG.warning("%s: %d messages on %s did not match the joints %s; skipped", bag, n, topic, p1.joint_names)
+    for topic, n in sorted(p1.unset_stamps.items()):
+        LOG.warning("%s: %d messages on %s carry no wall-clock stamp; their receive time is used", bag, n, topic)
 
     # GPS is an optional extra, not part of the scene contract: a bag without a
     # fix is a scene without gps.npy, exactly as one without /cmd_vel is.
@@ -364,11 +454,12 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             T_lidar_to_base = euler_matrix(roll, pitch, yaw)
             T_lidar_to_base[:3, 3] = [x, y, z]
         else:
-            LOG.warning(
-                "%s: no TF path from '%s' to '%s' and no --lidar_extrinsic given; using identity",
+            _frame_fallback(
+                p1,
+                args,
                 bag,
-                lidar_frame,
-                args.base_frame,
+                f"no TF path from '{lidar_frame}' to '{args.base_frame}' and no --lidar_extrinsic given: "
+                "clouds stay in the lidar frame",
             )
             T_lidar_to_base = np.eye(4)
 
@@ -380,11 +471,11 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
         T_base_in_child = np.linalg.inv(T_child_to_base)
         p1.odom = [(t, T @ T_base_in_child) for t, T in p1.odom]
     elif child and T_child_to_base is None:
-        LOG.warning(
-            "%s: no TF path from odom child '%s' to '%s'; storing raw odometry poses",
+        _frame_fallback(
+            p1,
+            args,
             bag,
-            child,
-            args.base_frame,
+            f"no TF path from odom child '{child}' to '{args.base_frame}': poses stay those of '{child}'",
         )
 
     # Re-express the orientation source at the base frame too, so gravity
@@ -395,13 +486,22 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
         T_base_in_imu = np.linalg.inv(T_imu_to_base)
         p1.imu = [(t, R @ T_base_in_imu) for t, R in p1.imu]
     elif imu_frame and T_imu_to_base is None:
-        LOG.warning(
-            "%s: no TF path from orientation frame '%s' to '%s'; using raw orientations for gravity alignment",
+        _frame_fallback(
+            p1,
+            args,
             bag,
-            imu_frame,
-            args.base_frame,
+            f"no TF path from orientation frame '{imu_frame}' to '{args.base_frame}': "
+            "gravity_align.npy is the sensor's tilt, not the base's",
         )
     return tf_graph, T_lidar_to_base
+
+
+def _frame_fallback(p1: _Pass1, args, bag: str, what: str) -> None:
+    """A frame the run cannot put where it belongs: an error, unless asked to go on."""
+    if not args.allow_frame_fallback:
+        raise ValueError(f"{what} (--allow_frame_fallback to extract it like that anyway)")
+    LOG.warning("%s: %s", bag, what)
+    p1.frame_fallbacks.append(what)
 
 
 def _write_frames(
@@ -439,7 +539,7 @@ def _write_frames(
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, timestamp) + shift
+            t = header_stamp(msg, timestamp * 1e-9) + shift
         else:
             t += shift
             if t not in (cam_set if is_cam else pcd_set):
@@ -510,8 +610,27 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     corrected, align = align_frame_clock(scene_dir, frame_ts, p1.odom, args, bag)
     applied = corrected - frame_ts
     frame_ts = corrected
+    pcd_ts = valid_pcd_ts + applied
+
+    # The guard kept frames within FRAME_PAD of a pose, because the clock was
+    # not corrected yet. Now it is: a frame that still has no pose bracketing it
+    # would be handed a copy of the nearest one (interpolate_poses), so it goes.
+    if guard_verdict is not None and p1.odom:
+        keep = gnss_guard.frame_support(frame_ts, [t for t, _ in p1.odom], pad=0.0)
+        if not keep.all():
+            guard_verdict.n_frames_trimmed = int(np.count_nonzero(~keep))
+            LOG.warning(
+                "%s: %d frames have no pose bracketing them on the corrected clock; dropped",
+                bag,
+                guard_verdict.n_frames_trimmed,
+            )
+            if not keep.any():
+                raise ValueError("no frame keeps a pose once the frame clock is corrected")
+            _drop_frames(scene_dir, keep)
+            frame_ts, pcd_ts = frame_ts[keep], pcd_ts[keep]
+
     np.savetxt(scene_dir / "data_ts.txt", frame_ts)
-    np.savetxt(scene_dir / "pcd_ts.txt", valid_pcd_ts + applied)
+    np.savetxt(scene_dir / "pcd_ts.txt", pcd_ts)
     if align is not None:
         time_align.write_report(scene_dir / TIME_ALIGN_FILE, align, float(frame_ts[0]))
 
@@ -567,3 +686,124 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
             args.imu,
         )
     return frame_ts
+
+
+def _drop_frames(scene_dir: Path, keep: np.ndarray) -> None:
+    """Delete the frames ``keep`` rejects from images/ and clouds/ and renumber
+    the rest, so frame k is again the k-th file of each.
+
+    Ascending order makes the renames safe: a frame only ever moves down, onto
+    an index whose own file has already moved or gone.
+    """
+    for sub in ("images", "clouds"):
+        files = {int(p.stem): p for p in (scene_dir / sub).iterdir()}
+        new = 0
+        for old, kept in enumerate(keep):
+            path = files.get(old)
+            if not kept:
+                if path is not None:
+                    path.unlink()
+                continue
+            if path is not None and new != old:
+                path.rename(path.with_name(f"{new:05d}{path.suffix}"))
+            new += 1
+
+
+def _digest(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def _set_aside_stale(scene_dir: Path, old_clock: str | None, bag: str) -> None:
+    """Move the per-frame products of an earlier run aside when the frame clock changed.
+
+    They are indexed by frame, so once the frames are different moments they
+    describe the wrong ones -- silently. Unchanged clock, same frames: they stay.
+    """
+    present = [d for d in DERIVED_DIRS if (scene_dir / d).is_dir()]
+    if not present or old_clock == _digest(scene_dir / "data_ts.txt"):
+        return
+    suffix = time.strftime("stale-%Y%m%d-%H%M%S")
+    for d in present:
+        (scene_dir / d).rename(scene_dir / f"{d}.{suffix}")
+    LOG.warning("%s: the frame clock changed; %s moved aside as *.%s -- rebuild them", bag, ", ".join(present), suffix)
+
+
+@functools.cache
+def _tool() -> dict:
+    """Which code this is: the checkout's commit, and the versions that decode the bag."""
+    here = Path(__file__).resolve().parent
+
+    def git(*argv):
+        try:
+            run = subprocess.run(["git", "-C", str(here), *argv], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return run.stdout.strip() if run.returncode == 0 else None
+
+    status = git("status", "--porcelain")
+    try:
+        rosbags = version("rosbags")
+    except PackageNotFoundError:
+        rosbags = None
+    return {
+        "git_commit": git("rev-parse", "HEAD"),
+        "git_dirty": None if status is None else bool(status),
+        "python": sys.version.split()[0],
+        "rosbags": rosbags,
+        "numpy": np.__version__,
+        "opencv": cv2.__version__,
+    }
+
+
+def _coverage(ts, t0: float, max_gap: float = 1.0, max_listed: int = 100) -> dict:
+    """Count, extent and holes of one topic's stamps, in seconds since the bag began."""
+    t = np.sort(np.asarray(ts, dtype=float))
+    gaps = np.flatnonzero(np.diff(t) > max_gap)
+    return {
+        "messages": len(t),
+        "first_s": round(float(t[0] - t0), 3),
+        "last_s": round(float(t[-1] - t0), 3),
+        "gaps_over_1s": len(gaps),
+        "gaps": [[round(float(t[i] - t0), 3), round(float(t[i + 1] - t0), 3)] for i in gaps[:max_listed]],
+    }
+
+
+def _write_meta(scene_dir: Path, reader, bag_path: Path, p1: _Pass1, guard_verdict, frames: int, args) -> None:
+    """extract_meta.json: the run, the bag, and what the run made of it.
+
+    ``streams`` gives each topic the run read its coverage and its holes over a
+    second, in seconds since the bag began -- the first place to look when a
+    scene has a hole, to see which sensor went quiet.
+    """
+    t0 = reader.start_time * 1e-9
+    topics: dict = {}
+    for c in reader.connections:
+        entry = topics.setdefault(c.topic, {"msgtype": c.msgtype, "messages": 0})
+        entry["messages"] += int(getattr(c, "msgcount", 0) or 0)
+    guard = None
+    if guard_verdict is not None:
+        guard = {k: v for k, v in vars(guard_verdict).items() if k != "spans"}
+        guard["spans"] = [[round(s.start - t0, 3), round(s.end - t0, 3), s.reason] for s in guard_verdict.spans]
+    meta = {
+        "tool": _tool(),
+        "argv": sys.argv,
+        "args": vars(args),
+        "bag": {
+            "name": bag_path.name,
+            "path": str(bag_path.resolve()),
+            "start": t0,
+            "duration_s": round(reader.duration * 1e-9, 3),
+            "topics": topics,
+        },
+        "decisions": {
+            "gps_topic": p1.gps_topic,
+            "ground_truth": _auto(args.gt, args.odom),
+            "gnss_guard": _auto(args.gnss_guard, args.odom),
+        },
+        "streams": {topic: _coverage(ts, t0) for topic, ts in sorted(p1.stamps.items()) if ts},
+        "frames": {**p1.counts, "guard": guard, "written": frames},
+        "unset_stamps": dict(p1.unset_stamps),
+        "malformed_joint_messages": dict(p1.malformed),
+        "frame_fallbacks": p1.frame_fallbacks,
+    }
+    (scene_dir / META_FILE).write_text(json.dumps(meta, indent=1) + "\n")

@@ -29,6 +29,7 @@ from dataset_tools.extract.scene_io import (
     merge_scenes_csv,
     parse_scene_selection,
     scene_is_complete,
+    source_bag,
 )
 
 LOG = logging.getLogger("helhest.extract")
@@ -202,6 +203,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manual lidar->base transform, used when TF does not connect the "
         "lidar frame to the base frame (the case for the 2026-08 Odin1 bags)",
     )
+    parser.add_argument(
+        "--max_sync_dt",
+        type=float,
+        default=0.1,
+        metavar="SECONDS",
+        help="Largest camera/lidar stamp difference a frame may pair; mutual nearest neighbours further apart "
+        "(an image across a camera stall) are dropped and counted in extract_meta.json. The Odin1 pairs to "
+        "within 2 ms; a 10 Hz lidar never leaves an image more than 0.05 s from its nearest sweep",
+    )
+    parser.add_argument(
+        "--allow_frame_fallback",
+        action="store_true",
+        help="Extract a bag whose TF does not reach the base frame from the lidar, the odometry child or the "
+        "orientation source, leaving that stream in its own frame. Without it such a scene fails: clouds, poses "
+        "or gravity in the wrong frame look plausible and are found late. Recorded in extract_meta.json",
+    )
     parser.add_argument("--jobs", type=int, default=4, help="Worker processes")
     parser.add_argument(
         "--overwrite",
@@ -258,6 +275,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
 
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # A finished scene names its bag. Under another bag's index it means the
+    # bag list moved (a bag added in the middle, one removed): skipping it would
+    # leave the new bag unextracted, overwriting it would renumber the root.
+    moved = []
+    for idx, bag in jobs:
+        held = source_bag(output_dir / f"{idx:04d}")
+        if held is not None and held != bag.name:
+            moved.append(f"{idx:04d} holds {held}, where this run would put {bag.name}")
+    if moved:
+        for line in moved:
+            LOG.error("scene %s", line)
+        LOG.error(
+            "the bags no longer line up with the scenes in %s: extract into a new root, or pick the bags with "
+            "--scenes / --start_index so each lands on its own scene",
+            output_dir,
+        )
+        return 2
 
     todo = []
     results: list[SceneResult] = []

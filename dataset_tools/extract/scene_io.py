@@ -32,6 +32,10 @@ SCENE_OUTPUT_DIRS = ("images", "clouds")
 TIME_ALIGN_FILE = "time_align.txt"
 #: The record of what the pose guard threw away, and why (gnss_guard).
 GNSS_GUARD_FILE = "gnss_guard.txt"
+#: What this run was, what the bag held, and what the run made of it.
+META_FILE = "extract_meta.json"
+#: The joint order of the joint_states.npy / joint_setpoints.npy columns.
+JOINT_NAMES_FILE = "joint_names.txt"
 SCENE_OUTPUT_FILES = (
     "data_ts.txt",
     "pcd_ts.txt",
@@ -47,10 +51,18 @@ SCENE_OUTPUT_FILES = (
     TIME_ALIGN_FILE,
     GNSS_GUARD_FILE,
     tf_pins.FILE,
+    META_FILE,
+    JOINT_NAMES_FILE,
     SENTINEL_FILE,
 )
 #: Written only when the odometry source is its own ground truth (``--gt``).
 GROUND_TRUTH_FILES = ("odometry.txt", "odometry_segments.txt")
+#: Built after the extraction, one file per frame index (DRIFT and friends).
+#: The extractor never writes them, so a re-extraction that changes the frame
+#: clock leaves them describing frames that no longer exist; it moves them
+#: aside instead (see ``scene._set_aside_stale``). ``regen/`` is not here: it is
+#: keyed by time, not by frame index.
+DERIVED_DIRS = ("height_maps", "height_masks", "proprio_labels", "driven_similarity")
 
 
 @dataclass
@@ -194,6 +206,12 @@ def scene_is_complete(scene_dir: Path) -> bool:
         return False
     values = set(counts.values())
     return len(values) == 1 and values != {0}
+
+
+def source_bag(scene_dir: Path) -> str | None:
+    """The bag a finished scene was extracted from, or None for an unfinished one."""
+    sentinel = scene_dir / SENTINEL_FILE
+    return sentinel.read_text().strip() if sentinel.is_file() else None
 
 
 def _scene_row(scene_dir: Path) -> list[str] | None:

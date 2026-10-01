@@ -33,8 +33,10 @@ from dataset_tools.gt_gaps import split_runs  # noqa: E402
 from dataset_tools.gt_io import (  # noqa: E402
     SegmentRow,
     anchor_to_first,
+    changed_since_written,
     read_segments,
     read_trajectory,
+    record_written,
     write_segments,
     write_trajectory,
 )
@@ -148,6 +150,8 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check) -> dict:
             np.concatenate(kept_T) if kept_T else T[:0],
         )
         write_segments(scene / "odometry_segments.txt", rows)
+        if not regen.is_symlink():
+            record_written(scene, BACKUP_TRAJ)
     return st
 
 
@@ -170,10 +174,22 @@ def main() -> int:
         help="score/cut the published files even if regen/ holds a pre-cut backup "
         "(a root whose regen/ is a symlink to another root's must use this)",
     )
+    ap.add_argument(
+        "--force", action="store_true", help="rebuild from the regen/ backup even if odometry.txt changed since"
+    )
     a = ap.parse_args()
     global USE_BACKUPS
     USE_BACKUPS = not a.live
     scenes = a.scenes or sorted(p.name for p in a.root.iterdir() if p.is_dir() and p.name.isdigit())
+    if USE_BACKUPS and not a.check and not a.force:
+        changed = [sc for sc in scenes if changed_since_written(a.root / sc, BACKUP_TRAJ)]
+        if changed:
+            print(
+                f"odometry.txt changed since this pass last wrote it in {', '.join(changed)}; rebuilding from "
+                f"regen/{BACKUP_TRAJ} would undo that. Move the backups aside, or --force",
+                file=sys.stderr,
+            )
+            return 1
     with Pool(a.jobs) as pool:
         scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off, USE_BACKUPS) for sc in scenes])
     report, tot = {}, {}

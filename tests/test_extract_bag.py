@@ -23,6 +23,7 @@ from dataset_tools.extract.cli import main
 from dataset_tools.extract.gps import gps_row, pick_gps_topic
 from dataset_tools.extract.pointcloud import header_stamp_from_cdr
 from dataset_tools.extract.scene_io import TIME_ALIGN_FILE, scene_frame_counts, scene_is_complete
+from dataset_tools.gt_io import read_trajectory
 from dataset_tools.transforms import euler_matrix, header_stamp
 from dataset_tools.validate_scene import validate_scene
 
@@ -183,13 +184,20 @@ def write_bag(
     reset_from: int | None = None,
     image_ext: str = ".png",
     odin: bool = False,
+    odom_until: int | None = None,
+    lidar_frame: str | None = None,
+    boot_joints: int = 0,
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
     Camera frames come 30 ms after their sweep; ``dropped_camera`` sweeps have
     no image at all and must therefore not become frames. From ``reset_from``
     the odometry publishes what a GNSS/INS with no solution publishes -- one
-    position far away, held still -- and the fix goes to null island.
+    position far away, held still -- and the fix goes to null island. From
+    ``odom_until`` the odometry stops altogether, as when the robot side shuts
+    down while the sensors record on. ``lidar_frame`` names a frame the TF tree
+    does not hold; the first ``boot_joints`` joint states are stamped with a
+    clock that started at boot.
     """
     with Writer(bag_dir, version=8) as writer:
         conns = {
@@ -215,7 +223,8 @@ def write_bag(
             writer.write(conns[topic], int(t * 1e9), TS.serialize_cdr(msg, conns[topic].msgtype))
 
         put("/tf_static", T0, _tf_static_msg(odin))
-        lidar_frame, cam_frame = ("odin1_lidar", "odin1_camera_link") if odin else ("lidar_frame", "cam_optical")
+        default_lidar, cam_frame = ("odin1_lidar", "odin1_camera_link") if odin else ("lidar_frame", "cam_optical")
+        lidar_frame = lidar_frame or default_lidar
         rng = np.random.default_rng(0)
         for k in range(frames):
             t = T0 + 0.1 * k
@@ -228,9 +237,10 @@ def write_bag(
                 put("/cam/image/compressed", t + 0.03, _image_msg(t + 0.03, k, image_ext, cam_frame))
                 put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03, cam_frame))
             lost = reset_from is not None and k >= reset_from
-            put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
+            if odom_until is None or k < odom_until:
+                put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k))  # 1 m/s: under the GT teleport gate
             put("/imu", t, _imu_msg(t, math.radians(10.0)))
-            put("/joint_states", t, _joint_msg(t, k))
+            put("/joint_states", t, _joint_msg(0.1 * k if k < boot_joints else t, k))
             put("/cmd_vel", t, _t("geometry_msgs/msg/Twist")(linear=_vec(x=0.4), angular=_vec(z=0.1)))
             # A short eastward track; the last fix declares an unknown
             # covariance, which must reach gps.npy as NaN rather than as 0.
@@ -665,3 +675,107 @@ def test_livox_bag_has_nothing_to_pin(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
     assert main([str(bags), str(out), *COMMON]) == 0
     assert not (out / "0000" / tf_pins.FILE).exists()
+
+
+# --------------------------------------------------------------------------
+# what a scene says about itself, and what it refuses to fabricate
+# --------------------------------------------------------------------------
+
+
+def test_frames_past_the_pose_stream_are_dropped_once_the_clock_is_final(tmp_path: Path):
+    """The guard keeps frames up to a second past the last pose, because it runs
+    before the clock correction. On the final clock a frame with no pose
+    bracketing it would carry a copy of the last one; it goes, and the indices
+    close up behind it."""
+    write_bag(tmp_path / "bags" / "bag_a", frames=60, odom_until=50)
+    out = tmp_path / "out"
+    flags = [*COMMON, "--gt", "on", "--gnss_guard", "on", "--time_align", "off"]
+    assert main([str(tmp_path / "bags"), str(out), *flags]) == 0
+
+    scene = out / "0000"
+    frame_ts = np.loadtxt(scene / "data_ts.txt")
+    odom_ts, _ = read_trajectory(scene / "odometry.txt")
+    assert frame_ts[-1] <= odom_ts[-1]
+    counts = scene_frame_counts(scene)
+    assert counts["images"] == counts["clouds"] == len(frame_ts) == len(np.load(scene / "transforms.npy"))
+    assert sorted(int(p.stem) for p in (scene / "clouds").iterdir()) == list(range(len(frame_ts)))
+    report = (scene / "gnss_guard.txt").read_text()
+    assert "after the clock correction, 0/60" not in report
+    meta = json.loads((scene / "extract_meta.json").read_text())
+    assert meta["frames"]["guard"]["n_frames_trimmed"] > 0
+    assert meta["frames"]["written"] == len(frame_ts)
+
+
+def test_boot_clock_stamps_fall_back_to_the_receive_time(tmp_path: Path):
+    write_bag(tmp_path / "bags" / "bag_a", boot_joints=5)
+    out = tmp_path / "out"
+    assert main([str(tmp_path / "bags"), str(out), *COMMON]) == 0
+    scene = out / "0000"
+    t = np.load(scene / "joint_states.npy")[:, 0]
+    assert t.min() > 1e9 and np.all(np.diff(t) > 0)
+    meta = json.loads((scene / "extract_meta.json").read_text())
+    assert meta["unset_stamps"] == {"/joint_states": 5}
+    assert (scene / "joint_names.txt").read_text().split() == ["l", "r", "b"]
+
+
+def test_a_lidar_outside_the_tf_tree_fails_the_scene_unless_allowed(tmp_path: Path):
+    write_bag(tmp_path / "bags" / "bag_a", lidar_frame="nowhere")
+    assert main([str(tmp_path / "bags"), str(tmp_path / "strict"), *COMMON]) == 1
+    assert not (tmp_path / "strict" / "0000" / "source_bag.txt").exists()
+
+    out = tmp_path / "allowed"
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--allow_frame_fallback"]) == 0
+    meta = json.loads((out / "0000" / "extract_meta.json").read_text())
+    assert len(meta["frame_fallbacks"]) == 1 and "nowhere" in meta["frame_fallbacks"][0]
+
+
+def test_pairs_further_apart_than_max_sync_dt_are_not_frames(bags: Path, tmp_path: Path):
+    """The synthetic camera fires 30 ms after its sweep."""
+    out = tmp_path / "out"
+    assert main([str(bags), str(out), *COMMON, "--max_sync_dt", "0.01"]) == 0
+    assert not (out / "0000" / "source_bag.txt").exists()
+
+
+def test_the_meta_file_reports_each_stream_and_its_holes(bags: Path, tmp_path: Path):
+    out = tmp_path / "out"
+    assert main([str(bags), str(out), *COMMON]) == 0
+    meta = json.loads((out / "0000" / "extract_meta.json").read_text())
+    assert meta["bag"]["name"] == "bag_a"
+    assert meta["streams"]["/lidar"]["messages"] == FRAMES
+    assert meta["streams"]["/cam/image/compressed"]["messages"] == FRAMES - 2
+    assert meta["frames"]["pairs"] == FRAMES - 2 == meta["frames"]["written"]
+    assert meta["args"]["max_sync_dt"] == 0.1
+
+
+def test_a_changed_frame_clock_sets_the_per_frame_products_aside(bags: Path, tmp_path: Path):
+    out = tmp_path / "out"
+    assert main([str(bags), str(out), *COMMON]) == 0
+    scene = out / "0000"
+    (scene / "height_maps").mkdir()
+    # Same bag, same clock: the maps still describe these frames.
+    assert main([str(bags), str(out), *COMMON, "--overwrite"]) == 0
+    assert (scene / "height_maps").is_dir()
+    # A shifted clock: they do not.
+    assert main([str(bags), str(out), *COMMON, "--overwrite", "--time_align", "0.2"]) == 0
+    assert not (scene / "height_maps").exists()
+    assert len(list(scene.glob("height_maps.stale-*"))) == 1
+
+
+def test_joint_rows_follow_the_first_message_s_order():
+    from types import SimpleNamespace
+
+    from dataset_tools.extract.scene import _joint_row, _Pass1
+
+    def msg(names, pos, vel, eff):
+        return SimpleNamespace(name=names, position=pos, velocity=vel, effort=eff)
+
+    p1 = _Pass1(gps_topic=None)
+    first = _joint_row(p1, "/joint_states", 1.0, msg(["l", "r"], [1, 2], [3, 4], [5, 6]))
+    swapped = _joint_row(p1, "/joint_states", 2.0, msg(["r", "l"], [2, 1], [4, 3], [6, 5]))
+    no_effort = _joint_row(p1, "/joint_states", 3.0, msg(["l", "r"], [1, 2], [3, 4], []))
+    other = _joint_row(p1, "/joint_states", 4.0, msg(["l", "x"], [1, 2], [3, 4], [5, 6]))
+    short = _joint_row(p1, "/joint_states", 5.0, msg(["l", "r"], [1], [3, 4], [5, 6]))
+    np.testing.assert_array_equal(first[1:], swapped[1:])
+    assert np.isnan(no_effort[5:]).all() and len(no_effort) == len(first)
+    assert other is None and short is None
+    assert p1.malformed == {"/joint_states": 2}

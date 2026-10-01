@@ -578,7 +578,7 @@ def _time_align_stats(access: SceneAccess) -> list[dict[str, Any]]:
 def _gnss_guard_stats(access: SceneAccess) -> tuple[list[dict[str, Any]], str | None]:
     """What ``gnss_guard.txt`` says was removed: two counted comment lines and one row per stretch."""
     comments, rows = _report_lines(access, "gnss_guard.txt")
-    counts = re.findall(r"(\d+)/(\d+) (poses|frames|further frames)", " ".join(comments))
+    counts = re.findall(r"(\d+)/(\d+) (poses|frames|further frames|more frames)", " ".join(comments))
     by = {what: (int(a), int(b)) for a, b, what in counts}
     poses, frames, unsupported = by.get("poses"), by.get("frames"), by.get("further frames")
     if poses is None or frames is None or unsupported is None:
@@ -588,6 +588,11 @@ def _gnss_guard_stats(access: SceneAccess) -> tuple[list[dict[str, Any]], str | 
         stat("cost", f"{poses[0]:,} poses · {frames[0]:,} frames", f"of {poses[1]:,} · {frames[1]:,}"),
         stat("no pose under them", f"{unsupported[0]:,} frames", f"of {unsupported[1]:,}, dropped as well"),
     ]
+    if "more frames" in by:  # written since 2026-10-01
+        trimmed = by["more frames"]
+        stats.append(
+            stat("no pose after the clock correction", f"{trimmed[0]:,} frames", f"of {trimmed[1]:,}, dropped")
+        )
     reasons = sorted({r.split()[2] for r in rows if len(r.split()) > 2})
     note = f"Stretches caught as {', '.join(reasons)}." if reasons else None
     return stats, note

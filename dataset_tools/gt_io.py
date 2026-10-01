@@ -18,6 +18,7 @@ go through these functions, so the format is spelled out exactly once.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import warnings
@@ -196,3 +197,41 @@ def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
     fh.write(SEGMENTS_HEADER + "\n")
     for k, row in enumerate(rows):
         fh.write(format_segment_line(replace(row, index=FIRST_SEGMENT + k)) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# What a post-processing pass last wrote
+# ---------------------------------------------------------------------------
+# split_segments_at_gaps.py and cut_segments_at_map_mismatch.py each keep their
+# input under regen/ and rebuild from it on a re-run. That is only right while
+# the published files are still the ones the pass itself wrote: once the other
+# pass, a re-extraction or a regeneration has changed them, rebuilding from the
+# backup silently throws that work away. Each pass therefore records a digest of
+# what it wrote next to its backup, and checks it before trusting the backup.
+def published_digest(scene: Path) -> str:
+    """sha256 over the scene's ``odometry.txt`` and ``odometry_segments.txt``."""
+    h = hashlib.sha256()
+    for name in ("odometry.txt", "odometry_segments.txt"):
+        h.update((Path(scene) / name).read_bytes())
+    return h.hexdigest()
+
+
+def _written_record(scene: Path, backup: str) -> Path:
+    return Path(scene) / "regen" / f"{backup}.written.sha256"
+
+
+def record_written(scene: Path, backup: str) -> None:
+    """Note what the pass that keeps ``regen/<backup>`` just published."""
+    _written_record(scene, backup).write_text(published_digest(scene) + "\n")
+
+
+def changed_since_written(scene: Path, backup: str) -> bool:
+    """True when the published files are no longer what that pass last wrote.
+
+    False when they still are, or when there is no record (a backup made before
+    records were kept): those runs proceed as they always did.
+    """
+    record = _written_record(scene, backup)
+    if not record.is_file():
+        return False
+    return record.read_text().strip() != published_digest(scene)

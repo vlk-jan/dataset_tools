@@ -36,8 +36,10 @@ from dataset_tools.gt_gaps import ReferencePath, gap_seams, split_runs  # noqa: 
 from dataset_tools.gt_io import (  # noqa: E402
     SegmentRow,
     anchor_to_first,
+    changed_since_written,
     read_segments,
     read_trajectory,
+    record_written,
     write_segments,
     write_trajectory,
 )
@@ -46,8 +48,13 @@ BACKUP_TRAJ = "odometry_pregapsplit.txt"
 BACKUP_SEGS = "odometry_segments_pregapsplit.txt"
 
 
-def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, check: bool) -> dict:
+def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, check: bool, force: bool = False) -> dict:
     regen = scene / "regen"
+    if (regen / BACKUP_TRAJ).exists() and not check and not force and changed_since_written(scene, BACKUP_TRAJ):
+        raise SystemExit(
+            f"{scene}: odometry.txt changed since this pass last wrote it; rebuilding from "
+            f"regen/{BACKUP_TRAJ} would undo that. Move the backup aside, or --force"
+        )
     src_traj = regen / BACKUP_TRAJ if (regen / BACKUP_TRAJ).exists() else scene / "odometry.txt"
     src_segs = regen / BACKUP_SEGS if (regen / BACKUP_SEGS).exists() else scene / "odometry_segments.txt"
     t, T = read_trajectory(src_traj)
@@ -112,6 +119,7 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
             np.concatenate(kept_T) if kept_T else T[:0],
         )
         write_segments(scene / "odometry_segments.txt", rows)
+        record_written(scene, BACKUP_TRAJ)
     return stats
 
 
@@ -123,6 +131,9 @@ def main() -> int:
     ap.add_argument("--max-err", type=float, default=1.0)
     ap.add_argument("--min-poses", type=int, default=20)
     ap.add_argument("--check", action="store_true", help="report only, write nothing")
+    ap.add_argument(
+        "--force", action="store_true", help="rebuild from the regen/ backup even if odometry.txt changed since"
+    )
     a = ap.parse_args()
 
     scenes = a.scenes or sorted(p.name for p in a.root.iterdir() if p.is_dir() and p.name.isdigit())
@@ -131,7 +142,7 @@ def main() -> int:
         f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s}"
     )
     for sc in scenes:
-        s = split_scene(a.root / sc, a.max_gap, a.max_err, a.min_poses, a.check)
+        s = split_scene(a.root / sc, a.max_gap, a.max_err, a.min_poses, a.check, a.force)
         for k, v in s.items():
             tot[k] = tot.get(k, 0) + v
         print(

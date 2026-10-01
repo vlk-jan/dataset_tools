@@ -7,6 +7,7 @@ import struct
 import numpy as np
 
 from dataset_tools import cloudini
+from dataset_tools.transforms import MIN_VALID_STAMP
 
 
 def header_stamp_from_cdr(raw: bytes) -> float | None:
@@ -17,13 +18,16 @@ def header_stamp_from_cdr(raw: bytes) -> float | None:
     the header starts with ``stamp.sec`` (int32) and ``stamp.nanosec``
     (uint32). Images and clouds are megabytes each and the first pass needs
     nothing but this number, so skipping the full decode is what makes that
-    pass cheap. Returns None for a buffer too short to hold a stamp.
+    pass cheap. Returns None for a buffer too short to hold a stamp, and for a
+    stamp that was never set (:data:`~dataset_tools.transforms.MIN_VALID_STAMP`),
+    so the caller falls back exactly as :func:`~dataset_tools.transforms.header_stamp` does.
     """
     if len(raw) < 12:
         return None
     fmt = "<iI" if raw[1] == 1 else ">iI"
     sec, nanosec = struct.unpack_from(fmt, raw, 4)
-    return sec + nanosec * 1e-9
+    t = sec + nanosec * 1e-9
+    return t if t >= MIN_VALID_STAMP else None
 
 
 # sensor_msgs/PointField datatype enum -> numpy type

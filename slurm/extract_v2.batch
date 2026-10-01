@@ -78,7 +78,13 @@ read_row
 scene=$(echo "$row" | cut -d, -f1)
 FORCE=${FORCE:-0}
 if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
-    echo "$scene already complete"; exit 0
+    # Complete, but from which bag? A changed bag list puts another bag here.
+    held=$(cat "$OUT/$scene/source_bag.txt")
+    if [ "$held" = "$(basename "$bagdir")" ]; then
+        echo "$scene already complete"; exit 0
+    fi
+    echo "$scene holds $held but $CSV puts $(basename "$bagdir") here -- refusing; FORCE=1 replaces it"
+    exit 13
 fi
 EXTRA=""
 [ "$FORCE" = "1" ] && EXTRA="--overwrite"
@@ -98,9 +104,18 @@ echo "[$(date '+%F %T')] $scene extract rc=$rc"
 [ -e "$local_out/$scene/source_bag.txt" ] || { echo "$scene: no scene produced"; exit 11; }
 
 mkdir -p "$OUT/.validation"
+# A scene that fails validation is not published over the root's copy;
+# FORCE_PUBLISH=1 publishes it anyway (and says so).
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
-    "$local_out/$scene" --csv "$SCRATCH/validation.csv" \
-    || echo "$scene: validation reported problems"
+    "$local_out/$scene" --csv "$SCRATCH/validation.csv"
+vrc=$?
+if [ $vrc -ne 0 ]; then
+    if [ "${FORCE_PUBLISH:-0}" != "1" ]; then
+        echo "$scene: VALIDATION FAILED (rc=$vrc) -- not published; FORCE_PUBLISH=1 publishes anyway"
+        exit 14
+    fi
+    echo "$scene: validation failed (rc=$vrc), published anyway (FORCE_PUBLISH=1)"
+fi
 
 # Height maps + validity masks, in this task, against the clouds and the
 # gravity_align.npy this task just wrote. They used to be a separate submission
