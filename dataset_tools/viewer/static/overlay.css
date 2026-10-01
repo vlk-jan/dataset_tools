@@ -340,3 +340,16 @@ body:not(.dt-collapsed) .lil-gui.autoPlace {
   transform: none !important;
 }
 body.dt-collapsed .analysis-container { right: calc(16px + 260px + 10px) !important; }
+
+/* SimView centres its playback bar on the window; beside the open panel that
+   is off-centre in the part of the scene still showing. Centred on what is
+   left of the window instead, sliding with the panel -- but never closer
+   than 10 px to the height legend in the corner (20 + 172 px wide), which a
+   narrow window would otherwise slide it over. CSS cannot read the bar's
+   own width, so the floor assumes half of it is 325 px (it is ~642 px in
+   simview 5.1); only windows under ~1400 px reach that floor. */
+.sv-playback { transition: left 0.18s ease; }
+body:not(.dt-collapsed) .sv-playback {
+  left: max(calc((100% - 340px) / 2), calc(20px + 172px + 10px + 325px));
+  max-width: calc(100vw - 340px - 32px);
+}
