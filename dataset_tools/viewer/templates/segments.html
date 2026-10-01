@@ -32,7 +32,7 @@
              title="{{ r.notes | map(attribute='text') | join(' / ') | truncate(160) }}">{{ r.notes | length }}</a>{% endif %}
           {%- for v in r.verdicts %} <span class="chip verdict-{{ v }}">{{ v }}</span>{% endfor %}
         </td>
-        <td class="muted">{{ reason_text(w.reason) if w.reason else "" }}</td>
+        <td class="muted prose">{{ reason_text(w.reason) if w.reason else "" }}</td>
         <td><a class="btn primary" href="/view/{{ r.scene }}/{{ w.key }}">Open 3D</a></td>
       </tr>
     {% endfor %}

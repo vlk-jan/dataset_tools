@@ -48,6 +48,12 @@ th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--lin
 th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 0); background: var(--panel); }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Short cells (ids, ranges, counts, the Open button) keep to one line; the one
+   free-text column (td.prose) takes the spare width and wraps. Below 1000px
+   there is no spare width, so everything wraps again. */
+th, td { white-space: nowrap; }
+td.prose { white-space: normal; width: 100%; }
+@media (max-width: 1000px) { th, td { white-space: normal; } }
 /* The rate under a count in a numeric cell: same column, quieter, on its own line. */
 td.num small { display: block; font-size: 12px; font-family: var(--mono); }
 .chip {
@@ -483,9 +489,10 @@ button.chip[aria-expanded="true"] {
 }
 .bigoverlay figcaption code { font-size: 12px; }
 .framemain .tiles {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
   gap: 14px; margin: 14px 0;
 }
+@media (max-width: 700px) { .framemain .tiles { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .framemain .tile {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 8px; min-width: 0;

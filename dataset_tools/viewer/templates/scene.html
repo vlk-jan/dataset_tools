@@ -223,7 +223,7 @@
           </span>
         </td>
         {{ ui.gt_cells(w, attitude_per_window.get(w.key)) }}
-        <td class="muted">{{ w.note }}</td>
+        <td class="muted prose">{{ w.note }}</td>
         <td><a class="btn {{ 'primary' if w.pose_source == 'odometry' else '' }}"
                href="/view/{{ scene_id }}/{{ w.key }}">Open 3D</a></td>
       </tr>
