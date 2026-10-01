@@ -921,6 +921,7 @@ def test_a_verdict_travels_from_the_note_to_the_index_the_segments_table_and_the
 def test_simviews_cache_stamp_follows_its_files_not_only_its_version(tmp_path):
     """An editable SimView changes its modules without changing its version; a
     version-only URL kept browsers on year-cached modules from before."""
+    pytest.importorskip("simview")
     import os
 
     from dataset_tools.viewer.app import _static_fingerprint
