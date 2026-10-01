@@ -165,13 +165,11 @@ def test_the_route_404s_on_a_root_without_the_modality(client):
     assert client.get("/api/scene/0000/frame/0/driven.png").status_code == 404
 
 
-def test_the_frame_page_shows_the_tile_and_its_counts_only_where_the_modality_exists(driven_client, client):
+def test_the_frame_page_shows_the_tile_only_where_the_modality_exists(driven_client, client):
     r = driven_client.get("/scene/0000/frame/3")
     assert r.status_code == 200
     assert "Driven &amp; drivable" in r.text
     assert "driven.png" in r.text
-    assert "13 cells driven" in r.text  # 2x2 under the robot + 3x3 ahead
-    assert "similarity &gt; 0.90" in r.text
     plain = client.get("/scene/0000/frame/3")
     assert plain.status_code == 200
     assert "Driven &amp; drivable" not in plain.text

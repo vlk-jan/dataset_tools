@@ -19,8 +19,12 @@
   let grid = null;
   let pinned = null;
 
-  const side = (v, pos, neg) => `${Math.abs(v).toFixed(2)} m ${v >= 0 ? pos : neg}`;
-  const num = (v, d = 3) => (v == null ? "no value" : v.toFixed(d));
+  // Two decimals, padded to a fixed width (the readout is monospace and keeps
+  // its spaces): a line that changes length as the pointer moves reflows the
+  // dialog, and the picture shakes.
+  const fixed = (v, width) => v.toFixed(2).padStart(width);
+  const side = (v, pos, neg) => `${fixed(Math.abs(v), 5)} m ${v >= 0 ? pos : neg}`;
+  const num = (v) => (v == null ? "no value" : fixed(v, 5));
 
   // Display cell (r, c) -> file cell (i, j): the tiles are drawn flipped in
   // both axes so forward is up and left is left (render._bev_to_display).
@@ -37,7 +41,8 @@
     });
     cell.hidden = false;
     const lines = [
-      `cell [${i}, ${j}] · ${side(x, "ahead", "behind")}, ${side(y, "left", "right")} · ${Math.hypot(x, y).toFixed(2)} m away`,
+      `cell [${String(i).padStart(3)}, ${String(j).padStart(3)}] · ${side(x, "ahead", "behind")}, ` +
+        `${side(y, "left", "right")} · ${fixed(Math.hypot(x, y), 5)} m away`,
     ];
     const what = [];
     if (layers.height) what.push(`height ${num(layers.height[k])} m`);
@@ -48,7 +53,7 @@
     if (layers.max_sim) {
       const sim = layers.max_sim[k];
       const parts = [layers.driven[k] ? "driven" : "not driven", `similarity ${num(sim)}`];
-      if (sim != null && sim > grid.threshold) parts.push(`trusted (> ${grid.threshold})`);
+      if (sim != null && sim > grid.threshold) parts.push(`trusted (> ${grid.threshold.toFixed(2)})`);
       if (layers.max_sim_geom) parts.push(`geometry-only ${num(layers.max_sim_geom[k])}`);
       lines.push(parts.join(" · "));
     }
@@ -65,7 +70,7 @@
   const idle = () => {
     cell.hidden = true;
     read.textContent = grid.height_range
-      ? `colours span ${grid.height_range[0]} … ${grid.height_range[1]} m (2nd-98th percentile of this map)`
+      ? `colours span ${grid.height_range[0].toFixed(2)} … ${grid.height_range[1].toFixed(2)} m (2nd-98th percentile of this map)`
       : "hover over the map to read a cell";
   };
 

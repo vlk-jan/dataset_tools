@@ -522,7 +522,11 @@ button.chip[aria-expanded="true"] {
   outline: 2px solid #fff; box-shadow: 0 0 0 3px rgb(0 0 0 / 0.7);
 }
 .zoomcell.pinned { outline-color: var(--accent); }
-.zoomread { display: block; white-space: pre-line; font: 14px/1.5 var(--mono); margin-top: 8px; min-height: 4.5em; }
+/* width 0 + min-width 100%: the readout takes the width the picture gives the
+   dialog and wraps inside it, rather than widening the dialog as its lines
+   grow and shrink under the pointer -- which shook the picture. Room for four
+   lines, so wrapping does not move it vertically either. */
+.zoomread { display: block; white-space: pre-wrap; font: 14px/1.5 var(--mono); margin-top: 8px; min-height: 6em; width: 0; min-width: 100%; }
 .zoomread[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ notes

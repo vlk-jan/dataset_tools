@@ -58,19 +58,15 @@
 
       <div class="tiles">
         {% for kind, endpoint, label in (
+             ("clouds", "cloud.png", "Cloud, top-down"),
              ("height_maps", "heightmap.png", "Height map"),
              ("height_masks", "validity.png", "Validity mask"),
-             ("clouds", "cloud.png", "Cloud, top-down"),
              ("driven_similarity", "driven.png", "Driven & drivable")) %}
         {# The driven tile is a DRIFT product most roots lack: a scene without the
            directory shows no tile at all, so such a root looks exactly as before. #}
         {% if kind != "driven_similarity" or probe.present.get(kind) %}
         <figure class="tile">
           <figcaption>{{ label }}
-            {% if kind == "driven_similarity" and details.driven %}
-            <small class="muted">{{ details.driven.n_driven }} cells driven,
-              {{ details.driven.n_trusted }} trusted at similarity &gt; {{ "%.2f"|format(details.driven.threshold) }}</small>
-            {% endif %}
           </figcaption>
           {% if details.present.get(kind) %}
           {# Click for a bigger copy; the three height-map grids zoom into a
