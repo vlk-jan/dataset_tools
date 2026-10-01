@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer needs Python 3.12+ and pulls in
-[SimView](https://pypi.org/project/simview/) (`>=5.1.0`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=5.1.1`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. The 3.12 floor is
 SimView's, not ours — the extraction tools still run on 3.10, so keep the viewer
 in its own virtualenv when the extraction venv is older:
