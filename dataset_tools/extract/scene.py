@@ -323,7 +323,7 @@ def _joint_row(p1: _Pass1, topic: str, t: float, msg):
         else:
             p1.malformed[topic] += 1
             return None
-    return np.r_[t, *cols]
+    return np.r_[(t, *cols)]
 
 
 def _select_frames(p1: _Pass1, args, bag: str):
