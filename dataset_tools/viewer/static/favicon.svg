@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-235.45 0 1360.7 1360.7">
+  <!-- The HELHEST symbol, squared for a tab icon; light on a dark tab bar. -->
+  <style>
+    path, rect { fill: #1b1b1b; }
+    @media (prefers-color-scheme: dark) { path, rect { fill: #e6e9ef; } }
+  </style>
+  <rect x="346.3" y="692" width="197.3" height="668.7"/>
+  <rect x="346.3" width="197.3" height="197.2"/>
+  <path d="M0,889.8V0h197.7v346h494.3V0h197.7v889.8h-197.7v-346H197.7v346H0Z"/>
+</svg>

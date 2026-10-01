@@ -598,6 +598,7 @@ def create_app(
         # notes status carries an OS error string) would end the block early.
         config = config.replace("<", "\\u003c")
         head = (
+            '<link rel="icon" href="/viewer-static/favicon.svg" type="image/svg+xml">'
             '<link rel="stylesheet" href="/viewer-static/overlay.css">'
             f"<script>window.__dtViewer = {config};</script>"
         )
