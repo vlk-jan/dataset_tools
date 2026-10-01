@@ -145,8 +145,8 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
             continue
         have = sum(1 for i in access.available_frames(kind) if lo <= i < hi)
         missing.append(f"{kind} {have}/{hi - lo}")
-    if missing:
-        stats.append(stat("per-frame files", " · ".join(missing), "inside this segment"))
+        # One cell per directory, like every other number in the grid.
+        stats.append(stat(kind.replace("_", " "), f"{have}/{hi - lo}", "frames with the file"))
     if any(m.startswith("height_map") for m in missing) and p.counts.get("clouds", 0) == p.n_frames:
         notes.append(
             "A frame whose sweep has too few returns left after the ground-plane clip gets no height map; "

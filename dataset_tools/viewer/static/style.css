@@ -738,13 +738,19 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 }
 .sig .plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
 .sig .plot i.gt { position: absolute; top: 0; bottom: 0; background: var(--ok); opacity: .12; }
+/* Green over the light theme's blue-grey reads as murk; half the wash still
+   marks the gaps. */
+:root:not([data-theme="dark"]) .sig .plot i.gt { opacity: .06; }
 .sig path { fill: none; stroke: var(--c); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .sig path.dash { stroke-dasharray: 4 3; stroke-opacity: .75; }
 .sig line.zero { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .sig line.cursor { stroke: var(--fg); stroke-width: 1; vector-effect: non-scaling-stroke; }
+/* On a backing of the plot's own colour, so a line running through the corner
+   does not strike the number out. */
 .sig .ylab {
   position: absolute; left: 4px; font: 400 var(--fs-2xs) var(--mono); color: var(--muted);
-  pointer-events: none;
+  pointer-events: none; padding: 0 3px; border-radius: 2px;
+  background: color-mix(in srgb, var(--shade) 85%, transparent);
 }
 .sig .ylab.hi { top: 2px; }
 .sig .ylab.lo { bottom: 2px; }
