@@ -1,23 +1,6 @@
 /* Shared styling for the index and scene pages. The 3D viewer itself is
    SimView's; only the pages around it are ours. */
 @import url("theme.css");
-:root {
-  /* Type stacks. System fonts only: the viewer runs where there is no route
-     to the internet. Inter, the web page's heading face, is used for display
-     type where it is installed locally. */
-  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SF Mono", monospace;
-  /* Type scale. Every size on these pages is one of these; the two smallest
-     are for mono labels and captions, which read larger than sans at a size. */
-  --fs-2xs: 10.5px;
-  --fs-xs: 11.5px;
-  --fs-sm: 13px;
-  --fs-base: 14.5px;
-  --fs-md: 16px;
-  --fs-lg: 18px;
-  --fs-xl: 22px;
-}
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -28,34 +11,34 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 /* Anchors (#notes, a scene card) land below the sticky header, not under it. */
-html { scroll-padding-top: calc(var(--headh, 0px) + 12px); }
+html { scroll-padding-top: calc(var(--headh, 0px) + var(--sp-3)); }
 /* One focus ring for everything a keyboard can land on that has none of its own. */
 :is(a, .btn, .linkbtn, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
 .skip {
   position: absolute; left: 8px; top: -100px; z-index: 1300;
-  padding: 6px 12px; background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 6px var(--sp-3); background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
 }
 .skip:focus { top: 8px; }
 header {
-  padding: 18px 24px;
+  padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   display: flex;
   align-items: baseline;
-  gap: 16px;
+  gap: var(--sp-4);
   flex-wrap: wrap;
 }
 /* The site header stays on screen; theme.js writes its height to --headh so
    sticky table headings park below it rather than under it. */
 body > header { position: sticky; top: 0; z-index: 1100; }
 header h1 { font-size: var(--fs-xl); margin: 0; font-weight: 600; }
-header nav { margin-left: auto; display: flex; gap: 16px; }
+header nav { margin-left: auto; display: flex; gap: var(--sp-4); }
 header nav ~ .theme-toggle { margin-left: 0; }
 header .path { color: var(--muted); font-family: var(--mono); font-size: var(--fs-base); }
-main { padding: 20px 24px 60px; width: 100%; }
-h2 { font-size: var(--fs-lg); margin: 26px 0 10px; font-weight: 600; }
+main { padding: var(--sp-5) var(--sp-5) var(--sp-8); width: 100%; }
+h2 { font-size: var(--fs-lg); margin: var(--sp-5) 0 var(--sp-3); font-weight: 600; }
 table { border-collapse: collapse; width: 100%; font-size: var(--fs-base); }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+th, td { text-align: left; padding: 6px var(--sp-3); border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 0); background: var(--panel); }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -80,10 +63,10 @@ td.num small { display: block; font-size: var(--fs-sm); font-family: var(--mono)
 .chip.bad { color: var(--bad); border-color: var(--bad-line); }
 .card {
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
+  border-radius: 8px; padding: var(--sp-4) var(--sp-4); margin-bottom: var(--sp-4);
 }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; margin: 12px 0 0; font-size: var(--fs-base); align-items: baseline; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-4); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px var(--sp-4); margin: var(--sp-3) 0 0; font-size: var(--fs-base); align-items: baseline; }
 /* Labelled like dl.stats, so a list of values reads as the same furniture. */
 .kv dt {
   font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em;
@@ -92,13 +75,13 @@ td.num small { display: block; font-size: var(--fs-sm); font-family: var(--mono)
 .kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .kv dd .muted, .kv dd.muted { font-weight: 400; }
 .kv dd .muted { font-size: var(--fs-sm); }
-.card .cardact { margin: 12px 0 0; }
+.card .cardact { margin: var(--sp-3) 0 0; }
 code, pre { font-family: var(--mono); font-size: var(--fs-base); }
-pre { background: var(--shade); padding: 10px 12px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--line); }
+pre { background: var(--shade); padding: var(--sp-3) var(--sp-3); border-radius: 6px; overflow-x: auto; border: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
 .btn {
-  display: inline-block; padding: 5px 12px; border-radius: 6px;
+  display: inline-block; padding: 5px var(--sp-3); border-radius: 6px;
   border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
 }
 .btn, .tab, .frametile, .hero figure, .sf, button.chip, .linkbtn {
@@ -119,26 +102,26 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 
 /* Said above the masthead, because the masthead itself is the stale part. */
 .stale {
-  margin: 0 0 14px; padding: 8px 12px; border: 1px solid var(--warn);
+  margin: 0 0 var(--sp-4); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--warn);
   border-left-width: 4px; border-radius: 6px; background: var(--panel);
   font-size: var(--fs-sm); color: var(--warn);
 }
-.masthead { padding: 4px 0 12px; border-bottom: 2px solid var(--fg); margin-bottom: 8px; }
+.masthead { padding: 4px 0 var(--sp-3); border-bottom: 2px solid var(--fg); margin-bottom: var(--sp-2); }
 .kicker {
   font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em;
   text-transform: uppercase; color: var(--accent);
 }
 .masthead-title {
   font-size: clamp(26px, 3.4vw, 38px); font-weight: 700;
-  letter-spacing: -.01em; margin: 8px 0 10px;
+  letter-spacing: -.01em; margin: var(--sp-2) 0 var(--sp-3);
 }
-.lede { max-width: 78ch; color: var(--muted); margin: 0 0 18px; }
+.lede { max-width: 78ch; color: var(--muted); margin: 0 0 var(--sp-4); }
 .totals {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 8px;
+  gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 var(--sp-2);
   border-radius: 8px; overflow: hidden;
 }
-.totals > div { background: var(--panel); padding: 10px 12px; }
+.totals > div { background: var(--panel); padding: var(--sp-3) var(--sp-3); }
 .totals dt {
   font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted);
@@ -151,8 +134,8 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
    colour-blind separation; the legend names every slot, so hue is never the
    only thing that says which modality a segment is. */
 :root { --dk-1: #3987e5; --dk-2: #d95926; --dk-3: #199e70; --dk-4: #c98500; --dk-5: #d55181; --dk-6: #8a5cd6; }
-.diskpanel { margin: 0 0 10px; }
-.card .diskpanel { margin: 14px 0 0; }
+.diskpanel { margin: 0 0 var(--sp-3); }
+.card .diskpanel { margin: var(--sp-4) 0 0; }
 .diskbar { display: flex; gap: 2px; height: 10px; background: var(--track); border-radius: 2px; overflow: hidden; }
 .diskbar i { min-width: 0; }
 .dk-images { background: var(--dk-1); }
@@ -162,8 +145,8 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 .dk-driven_similarity { background: var(--dk-6); }
 .dk-other { background: var(--dk-5); }
 .disklegend {
-  list-style: none; padding: 0; margin: 8px 0 0;
-  display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--fs-sm); color: var(--muted);
+  list-style: none; padding: 0; margin: var(--sp-2) 0 0;
+  display: flex; flex-wrap: wrap; gap: 4px var(--sp-4); font-size: var(--fs-sm); color: var(--muted);
 }
 .disklegend li { display: flex; align-items: center; gap: 6px; }
 .disklegend i { width: 10px; height: 10px; border-radius: 2px; }
@@ -174,18 +157,18 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 .note { font-size: var(--fs-base); color: var(--muted); max-width: 100ch; margin: 0; }
 .note code { font: var(--fs-sm) var(--mono); }
 
-section { margin-top: 34px; }
+section { margin-top: var(--sp-6); }
 .shead {
-  display: flex; align-items: baseline; gap: 14px;
+  display: flex; align-items: baseline; gap: var(--sp-4);
   border-bottom: 1px solid var(--line); padding-bottom: 6px;
 }
 .shead h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0; }
 .scount { font: 500 var(--fs-xs) var(--mono); color: var(--muted); }
-.sblurb { color: var(--muted); font-size: var(--fs-base); max-width: 78ch; margin: 8px 0 18px; }
+.sblurb { color: var(--muted); font-size: var(--fs-base); max-width: 78ch; margin: var(--sp-2) 0 var(--sp-4); }
 
 /* One card per scene, two or more cards per row when the window allows it. */
 .scenes {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: 16px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: var(--sp-4);
 }
 .scene {
   display: grid; grid-template-columns: 224px 1fr;
@@ -200,21 +183,21 @@ section { margin-top: 34px; }
 .strip.empty {
   align-items: center; justify-content: center; font-size: var(--fs-sm); min-height: 120px;
 }
-.scene > .body { padding: 12px 16px 14px; min-width: 0; }
+.scene > .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
 .scene .body > header, .card > header {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap;
   padding: 0; border: 0; background: none;
 }
 .scene h3 { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
 .scene h3 a { color: var(--fg); }
 .date { font: 400 var(--fs-sm) var(--mono); color: var(--muted); }
 .cov {
-  margin-left: auto; font: 500 var(--fs-xs) var(--mono); padding: 2px 8px; border-radius: 2px;
+  margin-left: auto; font: 500 var(--fs-xs) var(--mono); padding: 2px var(--sp-2); border-radius: 2px;
 }
 .cov.hi { background: var(--ok-soft); color: var(--ok); }
 .cov.mid { background: var(--track); color: var(--muted); }
 .cov.lo { background: var(--track); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
-.env { font-size: var(--fs-base); margin: 6px 0 12px; max-width: 74ch; }
+.env { font-size: var(--fs-base); margin: 6px 0 var(--sp-3); max-width: 74ch; }
 
 /* ------------------------------------------------------- train / val split
    Which side of the scene-level split a scene is on: a labelled band down the
@@ -243,7 +226,7 @@ section { margin-top: 34px; }
    `.scene.split` outranks the plain `.scene` rule that does the stacking. */
 @media (max-width: 700px) {
   .scene.split { grid-template-columns: 1fr; }
-  .splitband { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: 6px 12px; }
+  .splitband { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: 6px var(--sp-3); }
 }
 /* The filter hides by attribute; both carry a display of their own. */
 .scene[hidden], main > section[hidden] { display: none; }
@@ -251,20 +234,20 @@ section { margin-top: 34px; }
 /* The scene page's tag, in the site header, whose items are baseline aligned
    against a 22px h1. */
 .split-tag {
-  font: 600 var(--fs-xs) var(--mono); padding: 3px 9px; border-radius: 2px;
+  font: 600 var(--fs-xs) var(--mono); padding: 3px var(--sp-2); border-radius: 2px;
   text-transform: uppercase; letter-spacing: .08em;
 }
 header > .split-tag { align-self: center; }
 
 .splitpanel {
-  margin: 22px 0 0; padding: 14px 16px;
+  margin: var(--sp-5) 0 0; padding: var(--sp-4) var(--sp-4);
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
 }
-.splithead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.splithead { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
 .splithead h2 { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
-.splitfilter { display: flex; flex-wrap: wrap; gap: 8px; }
+.splitfilter { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .sf {
-  display: inline-flex; align-items: baseline; gap: 7px; padding: 7px 12px;
+  display: inline-flex; align-items: baseline; gap: 7px; padding: 7px var(--sp-3);
   font: var(--fs-base) var(--sans); color: var(--muted); cursor: pointer;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
 }
@@ -276,14 +259,14 @@ header > .split-tag { align-self: center; }
 .sf small { font: var(--fs-xs) var(--mono); color: var(--muted); }
 .sf i { align-self: center; width: 11px; height: 11px; border-radius: 2px; background: var(--c); }
 /* The same shares as the buttons, drawn: how lopsided the fold is. */
-.splitbar { display: flex; gap: 2px; height: 8px; margin: 12px 0 0; background: var(--track); }
+.splitbar { display: flex; gap: 2px; height: 8px; margin: var(--sp-3) 0 0; background: var(--track); }
 .splitbar i { background: var(--c); }
-.splitabout { margin-top: 12px; font-size: var(--fs-base); color: var(--muted); }
+.splitabout { margin-top: var(--sp-3); font-size: var(--fs-base); color: var(--muted); }
 .splitabout summary {
   cursor: pointer; width: fit-content;
   font: 500 var(--fs-xs) var(--mono); letter-spacing: .06em; text-transform: uppercase;
 }
-.splitabout p { max-width: 90ch; margin: 8px 0 0; }
+.splitabout p { max-width: 90ch; margin: var(--sp-2) 0 0; }
 .splitabout code { font: var(--fs-sm) var(--mono); }
 /* "4 of 12 shown" beside a section title while a filter is on. */
 .sshown { font: 500 var(--fs-xs) var(--mono); color: var(--muted); margin-left: auto; }
@@ -317,7 +300,7 @@ header > .split-tag { align-self: center; }
 
 dl.stats {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
-  gap: 8px 16px; margin: 14px 0 0;
+  gap: var(--sp-2) var(--sp-4); margin: var(--sp-4) 0 0;
 }
 dl.stats > div { border-top: 1px solid var(--line); padding-top: 4px; min-width: 0; }
 dl.stats dt {
@@ -331,14 +314,14 @@ dl.stats dd small {
   display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--muted);
 }
 
-.chips { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px; }
+.chips { margin-top: var(--sp-3); display: flex; flex-wrap: wrap; gap: 4px; }
 .bagline {
-  margin: 8px 0 0; font: 400 var(--fs-xs) var(--mono); color: var(--muted);
+  margin: var(--sp-2) 0 0; font: 400 var(--fs-xs) var(--mono); color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .small { font-size: var(--fs-sm); }
 .atlas-footer {
-  margin-top: 40px; border-top: 1px solid var(--line); padding-top: 12px;
+  margin-top: var(--sp-7); border-top: 1px solid var(--line); padding-top: var(--sp-3);
   font-size: var(--fs-sm); color: var(--muted); max-width: 110ch;
 }
 
@@ -354,7 +337,7 @@ dl.stats dd small {
    to; each links to the frame it was cut from. */
 .hero {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px; margin: 4px 0 14px;
+  gap: var(--sp-4); margin: 4px 0 var(--sp-4);
 }
 .hero figure {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
@@ -368,7 +351,7 @@ dl.stats dd small {
   object-fit: cover; background: var(--shade);
 }
 .hero figcaption {
-  display: flex; justify-content: space-between; gap: 10px; padding: 5px 9px;
+  display: flex; justify-content: space-between; gap: var(--sp-3); padding: 5px var(--sp-2);
   font: 400 var(--fs-xs) var(--mono); color: var(--muted);
 }
 .hero figcaption b { color: var(--fg); font-weight: 500; }
@@ -377,32 +360,32 @@ dl.stats dd small {
 /* The info cards, three to a row on the same columns as the hero frames above,
    every card in a row as tall as the tallest. A card with nothing to say is
    not rendered at all. */
-.cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
-.cards .card { padding: 12px 16px 16px; display: flex; flex-direction: column; margin: 0; }
-.cards .card > .cardnote:first-of-type { margin-top: auto; padding-top: 12px; }
+.cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.cards .card { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: flex; flex-direction: column; margin: 0; }
+.cards .card > .cardnote:first-of-type { margin-top: auto; padding-top: var(--sp-3); }
 @media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
 .card > header { padding-bottom: 7px; border-bottom: 1px solid var(--line); }
 .card > header h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
 .card > header .cov { font-size: var(--fs-xs); }
-.card dl.stats { margin-top: 10px; }
-.card .bar { margin-top: 12px; }
+.card dl.stats { margin-top: var(--sp-3); }
+.card .bar { margin-top: var(--sp-3); }
 .card .cardnote {
-  margin: 12px 0 0; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere;
+  margin: var(--sp-3) 0 0; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere;
 }
 .card .cardnote.warn { color: var(--warn); }
-details.matrix { margin-top: 10px; }
+details.matrix { margin-top: var(--sp-3); }
 details.matrix summary {
   font: 500 var(--fs-xs) var(--mono); color: var(--muted); cursor: pointer;
 }
 details.matrix summary:hover { color: var(--fg); }
 details.matrix pre { margin: 6px 0 0; background: var(--shade); }
 /* Disk usage, folded at the foot of the file card. */
-details.diskusage { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-details.diskusage dl.stats { margin-top: 8px; }
+details.diskusage { margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--line); }
+details.diskusage dl.stats { margin-top: var(--sp-2); }
 .files .chips { margin-top: 0; }
 /* The inventory, one row per what the files are for. */
-.filegroups { display: grid; gap: 8px; margin-top: 10px; }
+.filegroups { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
 .fgtitle {
   display: block; margin-bottom: 3px;
   font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
@@ -422,24 +405,24 @@ button.chip[aria-expanded="true"] {
   border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--fg);
 }
 .fileinfo {
-  margin-top: 12px; padding: 10px 12px; border: 1px solid var(--line);
+  margin-top: var(--sp-3); padding: var(--sp-3) var(--sp-3); border: 1px solid var(--line);
   border-radius: 6px; background: var(--shade);
 }
 .fileinfo > header {
-  display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
+  display: flex; align-items: center; gap: var(--sp-2); padding: 0; border: 0; background: none;
 }
 .fileinfo h3 { margin: 0; font-size: var(--fs-base); font-weight: 600; }
 .fileinfo > header .chip { margin-left: auto; font: 400 var(--fs-xs) var(--mono); padding: 0 7px; }
 .fileinfo .filepath {
   display: block; margin-top: 2px; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere;
 }
-.fileinfo dl.stats { margin-top: 10px; }
-.fileinfo p { margin: 8px 0 0; font-size: var(--fs-sm); max-width: 78ch; }
+.fileinfo dl.stats { margin-top: var(--sp-3); }
+.fileinfo p { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); max-width: 78ch; }
 .fileinfo p.holds { font-size: var(--fs-sm); color: var(--muted); }
 .fileinfo p.holds span {
   font: 500 var(--fs-2xs) var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-right: 6px;
 }
-.fileinfo .bar { margin-top: 10px; }
+.fileinfo .bar { margin-top: var(--sp-3); }
 /* Coverage of a per-frame directory: green where a frame has its file, the
    gaps in orange -- at least a pixel, however short. */
 .bar .track.cover { background: var(--ok); height: 10px; border-radius: 2px; }
@@ -454,7 +437,7 @@ button.chip[aria-expanded="true"] {
    labels. Not panel shades -- --panel is lighter than --bg in the light theme
    and darker in the dark one, so a shade reads the opposite way in one of them. */
 .tab {
-  padding: 7px 14px; border: 1px solid transparent; border-bottom: 0;
+  padding: 7px var(--sp-4); border: 1px solid transparent; border-bottom: 0;
   border-radius: 6px 6px 0 0; color: var(--muted);
   margin-bottom: -1px; font-size: var(--fs-base);
 }
@@ -464,18 +447,18 @@ button.chip[aria-expanded="true"] {
   border-color: var(--line); box-shadow: inset 0 2px 0 var(--accent);
 }
 
-.framebar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.framebar form { display: flex; align-items: center; gap: 8px; margin: 0; }
+.framebar { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.framebar form { display: flex; align-items: center; gap: var(--sp-2); margin: 0; }
 .framebar label { color: var(--muted); font-size: var(--fs-base); }
 .framebar input {
-  width: 8em; padding: 4px 8px; border-radius: 6px; background: var(--bg);
+  width: 8em; padding: 4px var(--sp-2); border-radius: 6px; background: var(--bg);
   border: 1px solid var(--line); color: var(--fg); font: inherit;
   font-variant-numeric: tabular-nums;
 }
 
 .framegrid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px; margin-top: 12px;
+  gap: var(--sp-2); margin-top: var(--sp-3);
 }
 .frametile {
   display: block; background: var(--panel); border: 1px solid var(--line);
@@ -489,10 +472,10 @@ button.chip[aria-expanded="true"] {
 }
 .framelabel small { color: var(--muted); font-size: var(--fs-xs); }
 
-.pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
+.pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: var(--sp-4) 0 0; }
 
-.framenav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-.framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 14px; }
+.framenav { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-4); flex-wrap: wrap; }
+.framepage { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: var(--sp-4); }
 @media (max-width: 1000px) { .framepage { grid-template-columns: 1fr; } }
 .bigframe {
   width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: var(--shade);
@@ -508,12 +491,12 @@ button.chip[aria-expanded="true"] {
 .bigoverlay figcaption code { font-size: var(--fs-sm); }
 .framemain .tiles {
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  gap: 14px; margin: 14px 0;
+  gap: var(--sp-4); margin: var(--sp-4) 0;
 }
 @media (max-width: 700px) { .framemain .tiles { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .framemain .tile {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 8px; padding: 8px; min-width: 0;
+  border-radius: 8px; padding: var(--sp-2); min-width: 0;
 }
 .framemain .tile figcaption { color: var(--muted); font-size: var(--fs-sm); margin-bottom: 6px; }
 .framemain .tile img {
@@ -533,11 +516,11 @@ button.chip[aria-expanded="true"] {
 /* The frame page's zoom (zoom.js): one picture as big as the window allows, and
    on the height-map grids a probe -- the outlined cell and its values below. */
 .zoom {
-  max-width: 96vw; max-height: 96vh; padding: 12px; border: 1px solid var(--line);
+  max-width: 96vw; max-height: 96vh; padding: var(--sp-3); border: 1px solid var(--line);
   border-radius: 8px; background: var(--panel); color: var(--fg);
 }
 .zoom::backdrop { background: rgb(0 0 0 / 0.6); }
-.zoomhead { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.zoomhead { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); }
 .zoomhead form { margin-left: auto; }
 .zoomhead .btn { font: inherit; cursor: pointer; }
 .zoomhead .zoomcloud { margin-left: auto; }
@@ -564,7 +547,7 @@ button.chip[aria-expanded="true"] {
    dialog and wraps inside it, rather than widening the dialog as its lines
    grow and shrink under the pointer -- which shook the picture. Room for four
    lines, so wrapping does not move it vertically either. */
-.zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: 8px; min-height: 6em; width: 0; min-width: 100%; }
+.zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
 .zoomread[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ notes
@@ -573,46 +556,46 @@ button.chip[aria-expanded="true"] {
    probed facts around it -- it is not a separate app, it is the half of the
    scene's description that only a person can write. */
 /* Last on every page, often after a table or pager that has no margin under it. */
-.card.notes { margin-top: 14px; }
+.card.notes { margin-top: var(--sp-4); }
 .notelist { list-style: none; margin: 0; padding: 0; }
-.notelist li { padding: 9px 0; border-top: 1px solid var(--line); }
+.notelist li { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
 .notelist li:first-child { border-top: 0; padding-top: 2px; }
-.notehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); }
+.notehead { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-sm); }
 .notehead .chip { font-family: var(--mono); }
 .chip.topic { color: var(--accent); border-color: var(--accent-line); }
-.notetools { margin-left: auto; display: flex; gap: 10px; }
+.notetools { margin-left: auto; display: flex; gap: var(--sp-3); }
 .linkbtn {
   background: none; border: 0; padding: 0; color: var(--muted);
   font: inherit; cursor: pointer; text-decoration: underline;
 }
 .linkbtn:hover { color: var(--fg); }
 .notetext { margin: 4px 0 0; font-size: var(--fs-base); white-space: pre-wrap; overflow-wrap: anywhere; }
-.noteform { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
-.noterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.noteform { margin-top: var(--sp-3); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.noterow { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .noterow label { color: var(--muted); font-size: var(--fs-base); display: flex; align-items: center; gap: 6px; }
 .noteform input, .noteform select, .noteform textarea,
 .noteedit input, .noteedit select, .noteedit textarea {
-  padding: 4px 8px; border-radius: 6px; background: var(--bg);
+  padding: 4px var(--sp-2); border-radius: 6px; background: var(--bg);
   border: 1px solid var(--line); color: var(--fg); font: inherit;
 }
 .noteform input, .noteedit input { width: 7em; font-variant-numeric: tabular-nums; }
 .noteform textarea, .noteedit textarea {
-  width: 100%; margin-top: 8px; font-size: var(--fs-base); resize: vertical;
+  width: 100%; margin-top: var(--sp-2); font-size: var(--fs-base); resize: vertical;
 }
 .noteform .btn { margin-left: auto; }
 /* The inline editor is the compose form again, over one note: the same range,
    topic and text, so correcting any of them is the same gesture as writing
    them was. */
-.noteedit { margin-top: 4px; display: flex; flex-direction: column; gap: 8px; }
-.noteedit .noterow { gap: 8px; }
+.noteedit { margin-top: 4px; display: flex; flex-direction: column; gap: var(--sp-2); }
+.noteedit .noterow { gap: var(--sp-2); }
 .noteedit textarea { margin-top: 0; }
-.noteeditactions { display: flex; gap: 8px; }
+.noteeditactions { display: flex; gap: var(--sp-2); }
 .noteedit .btn { margin-top: 0; }
-.notemsg { margin: 8px 0 0; font-size: var(--fs-sm); color: var(--muted); }
+.notemsg { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); color: var(--muted); }
 .notemsg.bad { color: var(--bad); }
 /* The windows table's marker: a window whose frames someone has written about. */
 .notemark {
-  margin-left: 8px; font: 400 var(--fs-xs) var(--mono); color: var(--warn);
+  margin-left: var(--sp-2); font: 400 var(--fs-xs) var(--mono); color: var(--warn);
   border: 1px solid var(--warn-line); border-radius: 2px; padding: 0 5px; white-space: nowrap;
 }
 .notemark:hover { text-decoration: none; border-color: var(--warn); }
@@ -633,7 +616,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .pair {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 14px;
+  gap: var(--sp-4);
   align-items: stretch;
 }
 .pair > .card { display: flex; flex-direction: column; min-width: 0; }
@@ -644,18 +627,18 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 /* The strip no longer runs to the bottom of the card: an opened file panel
    follows it, and the note is what holds the card's foot instead. */
 .pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }
-.pair > .card.files > .cardnote:first-of-type { margin-top: auto; padding-top: 12px; }
+.pair > .card.files > .cardnote:first-of-type { margin-top: auto; padding-top: var(--sp-3); }
 
 .mapbox {
   flex: 1;
   min-height: 300px;
-  margin-top: 10px;
+  margin-top: var(--sp-3);
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
   background: var(--shade);
 }
-.mapnote { color: var(--muted); font-size: var(--fs-sm); margin: 8px 0 0; }
+.mapnote { color: var(--muted); font-size: var(--fs-sm); margin: var(--sp-2) 0 0; }
 .mapnote.warn { color: var(--warn); }
 
 /* OpenStreetMap ships one raster style, and it is a light one. Inverting the
@@ -695,7 +678,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .mapdot.here { background: var(--warn); }
 
 /* Paging between one scene's segments, above the segment page's own cards. */
-.segnav { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.segnav { display: flex; gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-4); flex-wrap: wrap; }
 .btn.disabled { color: var(--muted); border-style: dashed; cursor: default; }
 
 /* --------------------------------------------------------- signal charts
@@ -704,13 +687,13 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
    nothing to do with good or bad. Validated (dataviz validate_palette.js) as a
    categorical triple against each theme's panel; identity is also carried by
    the legend and the readout, never by colour alone. */
-.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 0 0 14px; }
+.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 0 0 var(--sp-4); }
 :root[data-theme="dark"] .signals { --s1: #5b8ef8; --s2: #c77d12; --s3: #a266f2; }
 .signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.signals > header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.signals > header { display: flex; gap: var(--sp-3); align-items: baseline; flex-wrap: wrap; }
 .signals .sigtime { font: 400 var(--fs-xs) var(--mono); }
-.sig { margin-top: 12px; }
-.sighead { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); }
+.sig { margin-top: var(--sp-3); }
+.sighead { display: flex; gap: 6px var(--sp-3); align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); }
 /* The chart's toggle: a flex summary loses the native marker, so the arrow is
    drawn here and turns down while the chart is open. */
 .sighead { cursor: pointer; list-style: none; user-select: none; }
@@ -722,7 +705,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .sig[open] > .sighead::before { transform: rotate(90deg); }
 .sig:not([open]) > .sighead { color: var(--muted); }
 .sighead:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.sighead .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2); }
+.sighead .legend { display: flex; gap: var(--sp-3); flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2); }
 .signals .s1 { --c: var(--s1); }
 .signals .s2 { --c: var(--s2); }
 .signals .s3 { --c: var(--s3); }
@@ -779,15 +762,15 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   max-height: 60vh; overflow-y: auto; width: max-content; box-shadow: 0 4px 12px rgb(0 0 0 / .2);
 }
-.scene-jump li a { display: block; padding: 2px 10px; font-family: var(--mono); }
+.scene-jump li a { display: block; padding: 2px var(--sp-3); font-family: var(--mono); }
 .scene-jump li a:hover { background: var(--panel-2); text-decoration: none; }
 .scene-jump li a[aria-current] { color: var(--fg); font-weight: 600; }
 
 /* Something about the data on this page is not what it claims to be. */
-.databanner { color: var(--bad); border: 1px solid var(--bad-line); border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; }
+.databanner { color: var(--bad); border: 1px solid var(--bad-line); border-radius: 6px; padding: var(--sp-2) var(--sp-3); margin: 0 0 var(--sp-3); }
 
 /* The validator's findings on the scene page, most severe first. */
-.findings { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--fs-sm); max-height: 16em; overflow-y: auto; }
+.findings { list-style: none; margin: var(--sp-2) 0 0; padding: 0; font-size: var(--fs-sm); max-height: 16em; overflow-y: auto; }
 .findings li { margin: 2px 0; }
 .findings li.error b { color: var(--bad); }
 .findings li.warn b { color: var(--warn); }

@@ -7,7 +7,7 @@
 @import url("theme.css");
 
 #dt-panel, .dt-build {
-  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: var(--fs-sm)/1.45 var(--sans);
   color: var(--fg);
   box-sizing: border-box;
 }
@@ -26,10 +26,10 @@
 
 .dt-panel-head {
   display: flex; justify-content: space-between; align-items: flex-start;
-  gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line);
+  gap: var(--sp-2); padding: var(--sp-3) var(--sp-3); border-bottom: 1px solid var(--line);
 }
 .dt-title { font-weight: 600; }
-.dt-sub { color: var(--muted); font-size: 11.5px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dt-sub { color: var(--muted); font-size: var(--fs-xs); display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
 .dt-sub a { color: var(--accent); text-decoration: none; }
 .dt-sub a:hover { text-decoration: underline; }
 
@@ -41,7 +41,7 @@
   display: flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 4px;
   border: 1px solid var(--line); background: var(--panel-2); color: var(--fg-2);
-  font-size: 15px; line-height: 1; text-decoration: none; user-select: none;
+  font-size: var(--fs-base); line-height: 1; text-decoration: none; user-select: none;
 }
 .dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration: none; }
 .dt-winstep-off { opacity: 0.35; cursor: default; }
@@ -65,7 +65,7 @@
   background: color-mix(in srgb, var(--panel) 94%, transparent); color: var(--muted);
   border: 1px solid var(--line); border-right: none;
   border-radius: 6px 0 0 6px;
-  cursor: pointer; font-size: 15px; line-height: 1;
+  cursor: pointer; font-size: var(--fs-base); line-height: 1;
   transition: color 0.15s ease, background 0.15s ease;
 }
 .dt-edge:hover { color: var(--fg); background: var(--panel-2); }
@@ -73,23 +73,23 @@
 .dt-panel.collapsed .dt-edge span { transform: rotate(180deg); }
 
 .dt-readout {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
-  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--sp-3);
+  padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line);
   font-variant-numeric: tabular-nums;
 }
 .dt-k { color: var(--muted); margin-right: 6px; }
 .dt-v { font-weight: 500; }
 
-.dt-view, .dt-legend { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.dt-view, .dt-legend { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); }
 .dt-view[hidden], .dt-legend[hidden], .dt-toggle[hidden] { display: none; }
-.dt-hint { color: var(--faint); font-size: 10.5px; line-height: 1.35; }
-.dt-hint code { font-size: 10px; color: var(--muted); }
+.dt-hint { color: var(--faint); font-size: var(--fs-2xs); line-height: 1.35; }
+.dt-hint code { font-size: var(--fs-2xs); color: var(--muted); }
 
 /* 3D-view options: compact switches. The full explanation is a hover tooltip
    (title=) on each row rather than always-on prose -- these toggle things (a
    drift ghost) most viewers leave alone. */
 .dt-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
-.dt-toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.dt-toggle { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .dt-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
 .dt-toggle-sw {
   flex: none; width: 26px; height: 15px; border-radius: 8px;
@@ -104,7 +104,7 @@
 .dt-toggle input:checked + .dt-toggle-sw { background: var(--accent-soft); border-color: var(--accent-line); }
 .dt-toggle input:checked + .dt-toggle-sw::after { transform: translateX(11px); background: var(--fg); }
 .dt-toggle input:focus-visible + .dt-toggle-sw { outline: 2px solid var(--accent); outline-offset: 1px; }
-.dt-toggle-name { font-size: 11.5px; color: var(--fg-2); }
+.dt-toggle-name { font-size: var(--fs-xs); color: var(--fg-2); }
 .dt-toggle input:checked ~ .dt-toggle-name { color: var(--fg); }
 .dt-sw-g { background: #ffb347; vertical-align: middle; }
 
@@ -126,18 +126,18 @@
 }
 .dt-legend[open] summary::before { transform: rotate(90deg); }
 .dt-legend-now {
-  color: var(--accent); font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent); font-size: var(--fs-xs);
+  font-family: var(--mono);
 }
 .dt-legend dl { margin: 5px 0 6px; }
 .dt-legend dt {
-  font-size: 11px; color: var(--fg-2); font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-xs); color: var(--fg-2); font-weight: 600;
+  font-family: var(--mono);
 }
 .dt-legend dd {
-  margin: 0 0 6px; padding-left: 8px;
+  margin: 0 0 6px; padding-left: var(--sp-2);
   border-left: 2px solid var(--line);
-  color: var(--faint); font-size: 10.5px; line-height: 1.35;
+  color: var(--faint); font-size: var(--fs-2xs); line-height: 1.35;
 }
 .dt-legend .active dt { color: var(--accent); }
 .dt-legend .active dd { border-left-color: var(--accent-line); color: var(--muted); }
@@ -154,19 +154,19 @@
    tile's heading further down, so this rule was giving those a blue bar and a
    left indent they were never meant to have. */
 .dt-notes .dt-note {
-  border-left: 2px solid var(--accent-line); padding-left: 8px;
+  border-left: 2px solid var(--accent-line); padding-left: var(--sp-2);
   display: flex; align-items: flex-start; gap: 6px;
 }
 .dt-notemain { flex: 1; min-width: 0; }
 .dt-notehead { display: flex; align-items: baseline; gap: 6px; }
 .dt-notetopic {
-  color: var(--accent); font-size: 10px; letter-spacing: .04em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--accent); font-size: var(--fs-2xs); letter-spacing: .04em;
+  font-family: var(--mono);
 }
 .dt-noterangebtn {
   background: none; border: 0; padding: 0; cursor: pointer;
-  color: var(--fg-2); font-size: 11px; font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fg-2); font-size: var(--fs-xs); font-weight: 600;
+  font-family: var(--mono);
 }
 .dt-noterangebtn:hover { color: var(--accent); text-decoration: underline; }
 /* Edit above delete, each one glyph wide. Amber for the one that opens a form,
@@ -176,13 +176,13 @@
 .dt-notebtn {
   width: 20px; height: 18px; padding: 0; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  border: 1px solid; border-radius: 4px; font-size: 10px; line-height: 1;
+  border: 1px solid; border-radius: 4px; font-size: var(--fs-2xs); line-height: 1;
 }
 .dt-notebtn-edit { background: color-mix(in srgb, var(--caution) 15%, var(--panel)); border-color: color-mix(in srgb, var(--caution) 45%, var(--panel)); }
 .dt-notebtn-edit:hover { background: color-mix(in srgb, var(--caution) 25%, var(--panel)); border-color: var(--caution); }
 .dt-notebtn-del { background: color-mix(in srgb, var(--bad) 15%, var(--panel)); border-color: var(--bad-line); }
 .dt-notebtn-del:hover { background: color-mix(in srgb, var(--bad) 25%, var(--panel)); border-color: var(--bad); }
-.dt-notebody { color: var(--muted); font-size: 10.5px; line-height: 1.4; white-space: pre-wrap; }
+.dt-notebody { color: var(--muted); font-size: var(--fs-2xs); line-height: 1.4; white-space: pre-wrap; }
 /* A note opened for editing. Its range row is a .dt-noterange, so the fields,
    the `now` buttons and the topic are already the compose form's -- all this
    adds is the column and the textarea, which the form styles by its own id. */
@@ -191,40 +191,40 @@
      width rather than shrinking to their content. */
   flex-direction: column; align-items: stretch;
 }
-.dt-noteform { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dt-noteform { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: 6px; }
 .dt-noterange { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 /* Each end of the range is a field with a `now` button beside it: type a frame
    number, or take the one showing. Both spellings write the same value. */
 .dt-rangefield {
   display: flex; align-items: center; gap: 4px;
-  color: var(--faint); font-size: 10.5px;
+  color: var(--faint); font-size: var(--fs-2xs);
 }
 .dt-noterange input {
   width: 5.5em; background: var(--shade); border: 1px solid var(--line); border-radius: 4px;
-  color: var(--fg); font: inherit; font-size: 10.5px; padding: 2px 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fg); font: inherit; font-size: var(--fs-2xs); padding: 2px 4px;
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .dt-noterange input:focus { outline: none; border-color: var(--accent-line); }
 .dt-nowbtn {
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--muted); font: inherit; font-size: 10px; padding: 1px 5px; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: var(--fs-2xs); padding: 1px 5px; cursor: pointer;
 }
 .dt-nowbtn:hover { border-color: var(--accent-line); color: var(--fg-2); }
 .dt-rangebtn {
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--muted); font: inherit; font-size: 10.5px; padding: 2px 7px; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: var(--fs-2xs); padding: 2px 7px; cursor: pointer;
 }
 .dt-rangebtn:hover { border-color: var(--accent-line); }
 .dt-noterange select {
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--fg-2); font: inherit; font-size: 10.5px; padding: 2px 4px; margin-left: auto;
+  color: var(--fg-2); font: inherit; font-size: var(--fs-2xs); padding: 2px 4px; margin-left: auto;
 }
 .dt-noteform textarea, .dt-noteediting textarea {
   background: var(--shade); border: 1px solid var(--line); border-radius: 4px;
-  color: var(--fg); font: inherit; font-size: 11px; padding: 5px 6px; resize: vertical;
+  color: var(--fg); font: inherit; font-size: var(--fs-xs); padding: 5px 6px; resize: vertical;
 }
-.dt-noteactions { display: flex; align-items: center; gap: 8px; }
+.dt-noteactions { display: flex; align-items: center; gap: var(--sp-2); }
 .dt-noteactions .dt-hint { flex: 1; }
 .dt-save { color: var(--fg-2); background: var(--accent-soft); border-color: var(--accent-line); }
 .dt-notes .dt-hint { margin-top: 6px; }
@@ -234,8 +234,8 @@
    than a restatement of it -- the summary line carries the live number and
    the verdict, which is the part worth keeping on screen. */
 .dt-att-grid {
-  display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
-  margin: 5px 0 6px; font-size: 11px; font-variant-numeric: tabular-nums;
+  display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3);
+  margin: 5px 0 6px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
 }
 .dt-att-ok { color: var(--ok); }
 .dt-att-warn { color: var(--warn); }
@@ -244,17 +244,17 @@
 .dt-attitude summary .dt-att-warn,
 .dt-attitude summary .dt-att-bad { font-weight: 600; }
 
-.dt-tiles { overflow-y: auto; flex: 1; padding: 8px 12px; }
-.dt-tile { margin-bottom: 12px; }
+.dt-tiles { overflow-y: auto; flex: 1; padding: var(--sp-2) var(--sp-3); }
+.dt-tile { margin-bottom: var(--sp-3); }
 .dt-tile h3 {
-  font-size: 12px; font-weight: 600; margin: 0 0 4px;
-  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  font-size: var(--fs-xs); font-weight: 600; margin: 0 0 4px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2);
 }
 /* The grey half of a tile's heading ("BEV, forward up", the validity swatches).
    Scoped to the tile: `.dt-note` unqualified also names a reviewer note in the
    notes list above, and this rule, being the later of the two, was quietly
    restyling those as well. */
-.dt-tile .dt-note { color: var(--muted); font-weight: 400; font-size: 10.5px; display: flex; align-items: center; gap: 3px; }
+.dt-tile .dt-note { color: var(--muted); font-weight: 400; font-size: var(--fs-2xs); display: flex; align-items: center; gap: 3px; }
 .dt-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 4px; }
 .dt-sw-m { background: #3caa5a; }
 .dt-sw-i { background: #e6be46; }
@@ -266,14 +266,14 @@
 .dt-imgwrap img { display: block; width: 100%; border-radius: 4px; }
 .dt-imgwrap img.hidden { display: none; }
 .dt-absent {
-  display: none; padding: 14px 10px; text-align: center;
-  color: var(--muted); font-size: 11.5px;
+  display: none; padding: var(--sp-4) var(--sp-3); text-align: center;
+  color: var(--muted); font-size: var(--fs-xs);
 }
 .dt-imgwrap.absent .dt-absent { display: block; }
 .dt-tile.unavailable { opacity: 0.45; }
 .dt-tile.hidden { display: none; }
 
-.dt-foot { padding: 8px 12px; border-top: 1px solid var(--line); }
+.dt-foot { padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); }
 
 /* Build progress, shown until the window's bundle exists. */
 .dt-build {
@@ -281,10 +281,10 @@
   background: var(--shade); display: flex; align-items: center; justify-content: center;
 }
 .dt-build.done { display: none; }
-.dt-build-box { max-width: 460px; text-align: center; padding: 24px; }
-.dt-build-box h2 { margin: 0 0 6px; font-size: 17px; }
-.dt-build-msg { margin: 0 0 14px; color: var(--muted); }
-.dt-build-sub { color: var(--faint); font-size: 12px; margin-top: 14px; }
+.dt-build-box { max-width: 460px; text-align: center; padding: var(--sp-5); }
+.dt-build-box h2 { margin: 0 0 6px; font-size: var(--fs-lg); }
+.dt-build-msg { margin: 0 0 var(--sp-4); color: var(--muted); }
+.dt-build-sub { color: var(--faint); font-size: var(--fs-xs); margin-top: var(--sp-4); }
 .dt-build-bar { height: 4px; background: var(--panel-2); border-radius: 2px; overflow: hidden; }
 .dt-build-bar > span {
   display: block; height: 100%; width: 35%; background: var(--accent);

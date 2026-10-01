@@ -394,10 +394,11 @@ def test_the_index_and_the_scene_page_share_one_palette():
         assert token not in index_scope, f"{token} is redefined for the index"
     assert "--display" in index_scope  # only the type stacks are the index's own
     assert '@import url("theme.css")' in css
-    assert "--mono" in css[css.index(":root {") :].split("}", 1)[0]
     # The palette is theme.css's: light on :root, and dark redefining every
     # hue the light one sets, so no token leaks from one theme into the other.
     theme = (Path(viewer.__file__).parent / "static" / "theme.css").read_text()
+    # So are the type stacks and scales, which the 3D panel shares.
+    assert "--mono:" in theme and "--fs-sm:" in theme and "--sp-3:" in theme
     light = theme[theme.index(":root {") :].split("}", 1)[0]
     dark = theme[theme.index(':root[data-theme="dark"]') :].split("}", 1)[0]
     for token in ("--bg", "--panel", "--fg", "--accent", "--ok", "--warn", "--line", "--track", "--shade"):

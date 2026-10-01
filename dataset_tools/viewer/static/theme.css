@@ -68,6 +68,37 @@
   --accent-line: color-mix(in srgb, var(--accent) 55%, var(--panel));
 }
 
+/* Type and spacing, shared by the pages (style.css) and the 3D panel
+   (overlay.css). */
+:root {
+  /* Type stacks. System fonts only: the viewer runs where there is no route
+     to the internet. Inter, the web page's heading face, is used for display
+     type where it is installed locally. */
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", monospace;
+  /* Type scale. Every size on these pages and the 3D panel is one of these;
+     the two smallest are for mono labels and captions, which read larger than
+     sans at a size. */
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 13px;
+  --fs-base: 14.5px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  /* Spacing scale, for every margin, padding and gap of 8px and up. Smaller
+     ones are the insides of chips and buttons and stay literal. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 40px;
+  --sp-8: 64px;
+}
+
 /* The toggle theme.js puts at the end of a page's header. */
 .theme-toggle {
   margin-left: auto; align-self: center;
