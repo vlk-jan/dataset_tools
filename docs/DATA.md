@@ -458,6 +458,12 @@ the v2.2 bags the two agree to 2–5 cm over 1–5 s windows and 1 % in scale; t
 Odin1's failure mode is a discrete relocalisation jump, which breaks a
 segment and is counted in the check. v2 beta through v2.2 were built on the
 Fixposition instead (`odometry` in their manifests says so).
+`gravity_align.npy` follows the same source: levelled by the Odin1 attitude
+the paved ground of scene 0000 comes out level to 0.03° of pitch, where the
+Fixposition attitude of v2.0–v2.2 left +1.77° (the receiver's mounting against
+`base_link`, about +0.9°, on top of the robot's own +0.9° nose-up pitch). Height
+maps and compression labels of v2.0–v2.2 are therefore tilted by about 1.6 cm
+per metre ahead; v2.3's are not (see `NEW_RIG_READINESS.md`).
 
 **`gps.npy`** is new with this generation: `(M, 8)` `float64` rows of
 `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]` at the receiver's own rate

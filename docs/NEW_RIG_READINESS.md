@@ -283,6 +283,24 @@ question of a root already on disk. See `dataset_tools/time_align.py` for what
 the objective is and why a window is judged on the depth of its minimum rather
 than on how far that minimum beats zero.
 
+**Attitude, measured 2026-10-01 (v2.3).** Two readings rank the two
+attitude sources against gravity. (1) On the paved scene 0000, the ground-plane
+slope in the yaw-carrying levelled frame regressed on `[1, cos ψ, sin ψ]`
+separates a body-fixed levelling error (the constant) from the world's slope
+(the harmonic); injecting ±2° moves the constant by exactly ±2°. Levelled by
+the Fixposition attitude (v2.2) the constant is +1.77° of pitch; by the Odin1
+odometry's attitude (v2.3) it is +0.03°; the raw base frame carries +0.90°,
+the robot's real nose-up pitch, which the Odin1 removes and the Fixposition
+double-counts. (2) During standstills the Odin1 accelerometer (`/odin1/imu`,
+frame `imu_link`, identity to `base_link` in TF) puts the Odin1 attitude within
+0.3° of gravity and the Fixposition 1.45° off, in two bags alike. So
+`gravity_align.npy` of v2 beta–v2.2 is tilted by about +0.9° of pitch (1.6 cm
+per metre, 10 cm at the map edge) and v2.3's, from the Odin1, is level. The
+"−2.2° plaza figure" above was the same offset plus the robot's own pitch.
+`/imu/data` is no reference at all: its accelerometer reads roll and pitch with
+the opposite sign to the Odin1's, so the sensor is mounted turned about z and
+the `base_link -> imu` identity in the 2026-09 bags' tf_static is wrong.
+
 **Resolved 2026-10-01 — it stamps at capture; the frame is a sweep.** On the
 2026-09 bags the publish latency is gone (recv − header steady at +0.12 s,
 IMU and odometry on GNSS time within 5 ms). What remained, +27..+52 ms per
