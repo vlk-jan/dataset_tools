@@ -363,14 +363,31 @@ def _derived_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 STATUS_FILTERS = {"ok": ("OK",), "warn": ("WARN",), "fail": ("FAIL", "FAIL (--strict)")}
 
 
-def build_index(root: DatasetRoot, probes: list[SceneProbe], status: str | None = None) -> dict[str, Any]:
+def build_index(
+    root: DatasetRoot,
+    probes: list[SceneProbe],
+    status: str | None = None,
+    notes: dict[str, list] | None = None,
+    verdict: str | None = None,
+) -> dict[str, Any]:
     """Everything the index template needs, curated half included when present.
 
     ``status`` keeps only the scenes ``validation.csv`` gives that status
     (``STATUS_FILTERS``); the totals then describe the scenes shown.
+    ``notes`` is every scene's notes (``NoteStore.list_all``): each card then
+    says how many it has and what verdicts they carry, and ``verdict`` keeps
+    only the scenes with a note of that verdict.
     """
     atlas = root.atlas() or {}
     rows = [build_row(root, p) for p in probes]
+    for r in rows:
+        mine = (notes or {}).get(r["probe"].scene_id, [])
+        r["notes"] = {
+            "count": len(mine),
+            "verdicts": {v: n for v in ("drop", "fix", "keep") if (n := sum(1 for x in mine if x.verdict == v))},
+        }
+    if verdict:
+        rows = [r for r in rows if verdict in r["notes"]["verdicts"]]
     counts = {k: sum(1 for r in rows if (r["validation"] or {}).get("status") in v) for k, v in STATUS_FILTERS.items()}
     status_filter = {"current": status, "counts": counts} if any(r["validation"] for r in rows) else None
     if status in STATUS_FILTERS:

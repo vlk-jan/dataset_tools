@@ -482,7 +482,14 @@ the data, the way `atlas/` is, one file per scene:
 
 A note is free text pinned to a **frame range**, with a topic (`odometry`,
 `camera`, `event`, `other`) so a stretch can be found again by what is wrong
-with it. The range is the anchor because it is the most durable identifier a
+with it, and optionally a **verdict** -- `keep`, `drop` or `fix` -- when the
+reviewer has decided what should happen to that range. Verdicts are what make a
+review campaign trackable: each index card shows its note count and verdicts,
+`/?verdict=drop` lists the scenes with a range marked drop, the `/segments`
+table marks the windows a verdict touches, and `/api/notes.csv` exports every
+note with its frame range *and* the same range as frame times (`t_start`,
+`t_end` from `data_ts.txt`), so whatever applies the verdicts needs neither the
+viewer nor the scene's clock. The range is the anchor because it is the most durable identifier a
 scene has: segment indices are renumbered whenever `scripts/filter_segments.py`
 or `scripts/relabel_segments.py` rewrites `odometry_segments.txt`, so a note
 anchored to "segment 7" would afterwards point at different driving. Both ends
@@ -772,6 +779,9 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
 | `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
+| `/api/notes.csv` | every note as one table: scene, frame range, frame times, topic, verdict, author, date, text |
+| `/segments` | every ground-truth window of the root in one table, sortable (`?sort=scene\|att\|rate\|duration`), with the notes and verdicts touching each |
+| `/?status=ok\|warn\|fail`, `/?verdict=keep\|drop\|fix` | the index, only the scenes `validation.csv` gave that status, or that carry a note with that verdict |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
 | `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |

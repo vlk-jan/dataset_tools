@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import bisect
+import csv
 import functools
 import hashlib
+import io
 import json
 import logging
 import re
@@ -61,6 +63,7 @@ from .loaders import (
     VALIDITY_LABELS,
     load_cloud,
     load_npz_key,
+    read_timestamps,
     roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
@@ -326,9 +329,13 @@ def create_app(
         return response
 
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request, status: str | None = Query(None, pattern="^(ok|warn|fail)$")):
+    async def index(
+        request: Request,
+        status: str | None = Query(None, pattern="^(ok|warn|fail)$"),
+        verdict: str | None = Query(None, pattern="^(keep|drop|fix)$"),
+    ):
         def work():
-            return build_index(root, root.probe_all(), status)
+            return build_index(root, root.probe_all(), status, notes_store.list_all(), verdict)
 
         page = await run_in_threadpool(work)
         return templates.TemplateResponse(
@@ -358,6 +365,60 @@ def create_app(
     @app.get("/api/notes")
     async def api_notes_index(topic: str | None = Query(None, max_length=32)):
         return await run_in_threadpool(_notes_index, state, notes_store, topic)
+
+    #: How the segments table can be ordered: key -> (label, sort key, descending).
+    segment_sorts = {
+        "scene": ("scene", lambda r: (r["scene"], r["window"].frame_start), False),
+        "att": ("GT attitude", lambda r: r["att"]["median"] if r["att"] else -1.0, True),
+        "rate": ("pose rate", lambda r: r["window"].pose_rate or 0.0, False),
+        "duration": ("duration", lambda r: r["window"].duration, True),
+    }
+    segment_rows: dict[tuple, list[dict]] = {}
+
+    @app.get("/segments", response_class=HTMLResponse)
+    async def segments_page(request: Request, sort: str = Query("scene", pattern="^(scene|att|rate|duration)$")):
+        """Every ground-truth window of the root in one table.
+
+        The GT-versus-IMU verdict means reading each scene's odometry and
+        gravity, so the rows are kept for as long as no scene's fingerprint
+        moves; notes are read fresh every time.
+        """
+
+        def work() -> list[dict]:
+            ids = root.scene_ids(refresh=True)
+            key = tuple((sid, root.probe(sid).fingerprint) for sid in ids) + (state.max_frames, state.max_seconds)
+            if key not in segment_rows:
+                rows = []
+                for sid in ids:
+                    access = state.access(sid)
+                    wins = [w for w in access.windows(state.max_frames, state.max_seconds) if w.kind == "segment"]
+                    att = attitude_per_window(access, wins)
+                    rows += [{"scene": sid, "window": w, "att": att.get(w.key)} for w in wins]
+                segment_rows.clear()
+                segment_rows[key] = rows
+            notes = notes_store.list_all()
+            out = []
+            for r in segment_rows[key]:
+                w = r["window"]
+                touching = [n for n in notes.get(r["scene"], []) if n.overlaps(w.frame_start, w.frame_end)]
+                verdicts = sorted({n.verdict for n in touching if n.verdict})
+                out.append({**r, "notes": touching, "verdicts": verdicts})
+            return out
+
+        rows = await run_in_threadpool(work)
+        _, by, descending = segment_sorts[sort]
+        rows.sort(key=by, reverse=descending)
+        return templates.TemplateResponse(
+            request=request,
+            name="segments.html",
+            context={
+                "root": root,
+                "rows": rows,
+                "n_scenes": len({r["scene"] for r in rows}),
+                "sort": sort,
+                "sorts": [(k, v[0]) for k, v in segment_sorts.items()],
+            },
+        )
 
     @app.get("/scene/{scene_id}", response_class=HTMLResponse)
     async def scene_page(
@@ -524,6 +585,7 @@ def create_app(
         config = json.dumps(
             {
                 "frameBase": f"/api/scene/{scene_id}/frame",
+                "framePage": f"/scene/{scene_id}/frame",
                 "metaUrl": f"/api/data/{bundle_key}/{stamp}/meta.json",
                 "initialFrame": initial_frame,
                 "notesUrl": f"/api/scene/{scene_id}/notes",
@@ -719,6 +781,48 @@ def create_app(
     # window it touches to rebuild. Notes are their own resource, fetched
     # uncached, and nothing about them can invalidate a built window.
 
+    @app.get("/api/notes.csv")
+    async def api_notes_csv():
+        """Every note in the root as one table, for whatever applies the
+        verdicts: frame range and the same range as frame times
+        (``data_ts.txt``), so a consumer needs neither the viewer nor the
+        scene's clock to cut a ``drop`` stretch out."""
+
+        def work() -> str:
+            out = io.StringIO()
+            writer = csv.writer(out)
+            writer.writerow(
+                [
+                    "scene",
+                    "frame_start",
+                    "frame_end",
+                    "t_start",
+                    "t_end",
+                    "topic",
+                    "verdict",
+                    "author",
+                    "created",
+                    "text",
+                ]
+            )
+            for scene_id, scene_notes in notes_store.list_all().items():
+                ts = read_timestamps(root.path / scene_id / "data_ts.txt")
+                for n in scene_notes:
+                    span = ["", ""]
+                    if ts is not None and len(ts):
+                        last = len(ts) - 1
+                        span = [f"{ts[min(n.frame_start, last)]:.6f}", f"{ts[min(n.frame_end, last)]:.6f}"]
+                    writer.writerow(
+                        [scene_id, n.frame_start, n.frame_end, *span, n.topic, n.verdict, n.author, n.created, n.text]
+                    )
+            return out.getvalue()
+
+        return Response(
+            await run_in_threadpool(work),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="notes.csv"'},
+        )
+
     @app.get("/api/scene/{scene_id}/notes")
     async def api_notes(scene_id: str):
         access = _access_or_404(state, scene_id)
@@ -746,6 +850,7 @@ def create_app(
             topic=payload.get("topic", "other"),
             author=payload.get("author", ""),
             n_frames=access.probe.n_frames,
+            verdict=payload.get("verdict", ""),
         )
         return note.to_json()
 
@@ -767,6 +872,7 @@ def create_app(
             frame_start=start,
             frame_end=end,
             n_frames=access.probe.n_frames,
+            verdict=payload.get("verdict"),
         )
         if note is None:
             raise HTTPException(404, f"scene {scene_id} has no note {note_id!r}")
@@ -1312,6 +1418,16 @@ def _frame_indices(access: SceneAccess, frame_range: tuple[int, int] | None = No
     return indices
 
 
+def _segment_page_of_frame(access: SceneAccess, segment: int, index: int, max_frames: int, max_seconds: float) -> int:
+    """Which page of a segment page's frame strip holds ``index`` (0 when it cannot tell)."""
+    wins = [w for w in access.windows(max_frames, max_seconds) if w.kind == "segment" and w.segment_index == segment]
+    if not wins:
+        return 0
+    lo, hi = wins[0].frame_start, wins[-1].frame_end
+    inside = [i for i in _frame_indices(access) if lo <= i < hi]
+    return bisect.bisect_left(inside, index) // FRAMES_PER_PAGE
+
+
 def _page_of_frame(access: SceneAccess, index: int) -> int:
     """Which page of the frame browser holds ``index``.
 
@@ -1433,6 +1549,7 @@ def _frame_details(
                 0.0,
                 round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
             ),
+            "strip_page": _segment_page_of_frame(access, seg.index, index, max_frames, max_seconds),
         }
     else:
         details["segment"] = None

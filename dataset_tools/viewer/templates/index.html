@@ -6,7 +6,9 @@
   <h1>Dataset viewer</h1>
   <span class="path">{{ root.path }}</span>
   <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
-  {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
+  <a href="/segments" title="every ground-truth window in the root, sortable by GT quality">segments</a>
+  {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>
+  <a href="/api/notes.csv" title="every note as a table, with its frame range and frame times" download>notes.csv</a>{% endif %}
   <span class="muted">simview {{ simview_version }}</span>
 {% endblock %}
 {% block main %}
@@ -193,6 +195,13 @@
             {# What helhest-validate made of the scene, when validation.csv sits at the root. #}
             {% if row.validation %}
               <span class="chip {{ row.validation.cls }} validated" title="{{ row.validation.title }}">{{ row.validation.label }}</span>
+            {% endif %}
+            {# What reviewers decided about stretches of this scene (notes with a verdict). #}
+            {% if row.notes and row.notes.count %}
+              <a class="chip topic" href="/scene/{{ p.scene_id }}#notes">{{ row.notes.count }} note{{ "s" if row.notes.count != 1 }}</a>
+              {% for v, n in row.notes.verdicts.items() %}
+              <a class="chip verdict-{{ v }}" href="/?verdict={{ v }}" title="{{ n }} noted range{{ 's' if n != 1 }} marked {{ v }}">{{ v }} {{ n }}</a>
+              {% endfor %}
             {% endif %}
           </div>
 

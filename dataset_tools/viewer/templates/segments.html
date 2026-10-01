@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}Segments - dataset viewer{% endblock %}
+{% block header %}
+  <h1><a href="/">Dataset viewer</a> / segments</h1>
+  <span class="muted">{{ rows | length }} window{{ "s" if rows | length != 1 }} of ground truth across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
+{% endblock %}
+{% block main %}
+  <p class="muted">
+    Every ground-truth window in the root, so the worst can be found without opening every scene.
+    Sort by: {% for key, label in sorts %}<a href="/segments?sort={{ key }}"{% if sort == key %} aria-current="page"{% endif %}>{{ label }}</a>{{ " · " if not loop.last }}{% endfor %}.
+    GT attitude is the median tilt gap between the ground truth and the IMU; a pose rate under 2 Hz is
+    interpolated over a second or more.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Scene</th><th>Window</th><th>Frames</th><th class="num">Count</th><th class="num">Duration</th>
+        <th class="num">GT poses</th><th class="num">GT attitude</th><th>Notes</th><th>Ends</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      {% set w = r.window %}
+      <tr>
+        <td><a href="/scene/{{ r.scene }}">{{ r.scene }}</a></td>
+        <td><a href="/scene/{{ r.scene }}/segment/{{ w.segment_index }}"><strong>{{ w.label }}</strong></a></td>
+        {{ ui.window_cells(w) }}
+        {{ ui.gt_cells(w, r.att) }}
+        <td>
+          {%- if r.notes %}<a class="notemark" href="/scene/{{ r.scene }}#notes"
+             title="{{ r.notes | map(attribute='text') | join(' / ') | truncate(160) }}">{{ r.notes | length }}</a>{% endif %}
+          {%- for v in r.verdicts %} <span class="chip verdict-{{ v }}">{{ v }}</span>{% endfor %}
+        </td>
+        <td class="muted">{{ reason_text(w.reason) if w.reason else "" }}</td>
+        <td><a class="btn primary" href="/view/{{ r.scene }}/{{ w.key }}">Open 3D</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endblock %}

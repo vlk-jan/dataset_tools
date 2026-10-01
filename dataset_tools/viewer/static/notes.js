@@ -3,9 +3,10 @@
  *
  * The list itself is rendered by the server, so the notes are on the page
  * before this file loads and stay there if it fails. This only adds the three
- * mutations, and each one reloads afterwards rather than patching the DOM --
- * a note changes the windows table's markers too, and one reload is honest
- * about the whole page where hand-updating two places invites them to disagree.
+ * mutations, and each one re-renders afterwards rather than patching the DOM --
+ * a note changes the windows table's markers too, so the card and the tab
+ * panel are fetched again from the server (swap.js `refresh`) and swapped in,
+ * which keeps the scroll position and cannot let the two disagree.
  *
  * An edit reaches every field a note has -- range, topic and text -- because
  * all three are things that get typed wrong: a range pinned one segment too
@@ -15,6 +16,19 @@
  */
 
 import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
+import { refresh } from "./swap.js";
+
+/** The card and what shows notes elsewhere on the page, re-rendered; the
+ *  whole page when that fails. */
+async function rerender() {
+  try {
+    await refresh(["notes", "tabpanel"]);
+    const fresh = document.getElementById("notes");
+    if (fresh) setup(fresh);
+  } catch (error) {
+    window.location.reload();
+  }
+}
 
 const card = document.getElementById("notes");
 if (card) setup(card);
@@ -47,9 +61,10 @@ function setup(card) {
         await noteRequest(base, "POST", {
           frames: [start, end],
           topic: data.get("topic"),
+          verdict: data.get("verdict") || "",
           text,
         });
-        window.location.reload();
+        await rerender();
       } catch (error) {
         say(`Could not save: ${error.message}`, true);
       }
@@ -77,13 +92,18 @@ function setup(card) {
     const to = frameField(item.dataset.frameEnd, "last frame of the range", last);
     const topics = (card.dataset.topics || "").split(",").filter(Boolean);
     const topic = topicSelect(topics, item.dataset.topic);
+    const verdicts = (card.dataset.verdicts || "").split(",").filter(Boolean);
+    const verdict = topicSelect(["", ...verdicts], item.dataset.verdict || "");
+    verdict.querySelector('option[value=""]').textContent = "none";
+    const verdictLabel = document.createElement("label");
+    verdictLabel.append("verdict ", verdict);
     const fromLabel = document.createElement("label");
     fromLabel.append("frames ", from);
     const toLabel = document.createElement("label");
     toLabel.append("to ", to);
     const topicLabel = document.createElement("label");
     topicLabel.append("topic ", topic);
-    range.append(fromLabel, toLabel, topicLabel);
+    range.append(fromLabel, toLabel, topicLabel, verdictLabel);
 
     const box = document.createElement("textarea");
     box.rows = 3;
@@ -121,9 +141,10 @@ function setup(card) {
         await noteRequest(`${base}/${id}`, "PATCH", {
           frames: [start, end],
           topic: topic.value,
+          verdict: verdict.value,
           text,
         });
-        window.location.reload();
+        await rerender();
       } catch (error) {
         say(`Could not save: ${error.message}`, true);
       }
@@ -141,7 +162,7 @@ function setup(card) {
       if (!window.confirm("Delete this note?")) return;
       try {
         await noteRequest(`${base}/${id}`, "DELETE");
-        window.location.reload();
+        await rerender();
       } catch (error) {
         say(`Could not delete: ${error.message}`, true);
       }

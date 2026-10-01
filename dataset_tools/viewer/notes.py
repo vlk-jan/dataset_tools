@@ -43,6 +43,10 @@ logger = logging.getLogger("dataset_tools.viewer.notes")
 #: it: an unknown topic is rendered verbatim, exactly as an unknown segment
 #: `reason` tag is (``windows.describe_reason``), rather than being rewritten.
 TOPICS: tuple[str, ...] = ("odometry", "camera", "event", "other")
+#: A reviewer's decision about the noted range, if they made one: keep it,
+#: drop it from the dataset, or fix it (re-extract, re-segment). Empty when
+#: the note only describes. Exported with the range by ``/api/notes.csv``.
+VERDICTS: tuple[str, ...] = ("keep", "drop", "fix")
 
 #: Caps, so one pasted log cannot make a scene's notes file unreadable.
 MAX_TEXT = 4000
@@ -74,6 +78,7 @@ class Note:
     author: str = ""
     created: str = ""
     updated: str | None = None
+    verdict: str = ""
 
     @property
     def n_frames(self) -> int:
@@ -117,6 +122,13 @@ def _clean_author(value: object) -> str:
     return str(value or "").strip()[:MAX_AUTHOR]
 
 
+def _clean_verdict(value: object) -> str:
+    verdict = str(value or "").strip().lower()
+    if verdict and verdict not in VERDICTS:
+        raise ValueError(f"verdict must be one of {', '.join(VERDICTS)} or empty, not {verdict!r}")
+    return verdict
+
+
 def _note_from_json(entry: dict) -> Note | None:
     """One stored entry, or None when it is not a note at all.
 
@@ -146,6 +158,8 @@ def _note_from_json(entry: dict) -> Note | None:
         author=_clean_author(entry.get("author")),
         created=str(entry.get("created") or ""),
         updated=str(entry["updated"]) if entry.get("updated") else None,
+        # Hand-edited files may say anything; an unknown verdict reads as none.
+        verdict=v if (v := str(entry.get("verdict") or "").strip().lower()) in VERDICTS else "",
     )
 
 
@@ -159,6 +173,7 @@ def _note_to_json(note: Note) -> dict:
         "author": note.author,
         "created": note.created,
         "updated": note.updated,
+        **({"verdict": note.verdict} if note.verdict else {}),
     }
 
 
@@ -247,6 +262,7 @@ class NoteStore:
             "author": self.author,
             "dataset_version": self.dataset_version,
             "topics": list(TOPICS),
+            "verdicts": list(VERDICTS),
         }
 
     # -- reading -----------------------------------------------------------
@@ -370,6 +386,7 @@ class NoteStore:
         topic: str = "other",
         author: str = "",
         n_frames: int | None = None,
+        verdict: str = "",
     ) -> Note:
         """Add one note and return it as stored.
 
@@ -380,6 +397,7 @@ class NoteStore:
         text = _clean_text(text)
         if not text:
             raise ValueError("a note needs some text")
+        verdict = _clean_verdict(verdict)
         start, end = _clamp_range(frame_start, frame_end, n_frames)
         notes = self.list(scene_id)
         taken = {n.id for n in notes}
@@ -391,6 +409,7 @@ class NoteStore:
             text=text,
             author=_clean_author(author) or self.author,
             created=_now(),
+            verdict=verdict,
         )
         notes.append(note)
         notes.sort(key=lambda n: (n.frame_start, n.frame_end))
@@ -406,6 +425,7 @@ class NoteStore:
         frame_start: int | None = None,
         frame_end: int | None = None,
         n_frames: int | None = None,
+        verdict: str | None = None,
     ) -> Note | None:
         """Edit a note in place. None when the scene has no such note.
 
@@ -424,6 +444,8 @@ class NoteStore:
                 note.text = cleaned
             if topic is not None:
                 note.topic = _clean_topic(topic)
+            if verdict is not None:
+                note.verdict = _clean_verdict(verdict)
             if frame_start is not None or frame_end is not None:
                 start = note.frame_start if frame_start is None else frame_start
                 end = note.frame_end if frame_end is None else frame_end

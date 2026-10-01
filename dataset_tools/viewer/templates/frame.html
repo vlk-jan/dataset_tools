@@ -3,6 +3,8 @@
 {% block title %}Scene {{ scene_id }} frame {{ index }} - dataset viewer{% endblock %}
 {% block head %}
 {% if map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
+{# Stepping to the next frame is the usual next click: have its picture ready. #}
+{% if index + 1 < probe.n_frames %}<link rel="prefetch" href="/api/scene/{{ scene_id }}/frame/{{ index + 1 }}/image.jpg?w=1280">{% endif %}
 {% endblock %}
 {% block header %}
   <h1><a href="/">Dataset viewer</a> /
@@ -17,6 +19,10 @@
     <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index - 1 }}">&larr; frame {{ index - 1 }}</a>
     {% else %}<span class="btn disabled">&larr; first frame</span>{% endif %}
     <a class="btn" href="/scene/{{ scene_id }}?tab=frames&amp;page={{ details.strip_page }}">back to the frame strip</a>
+    {% if details.segment %}
+    <a class="btn" href="/scene/{{ scene_id }}/segment/{{ details.segment.index }}?page={{ details.segment.strip_page }}#framestrip"
+       title="the frame strip of the segment this frame is in">segment {{ details.segment.index }}'s strip</a>
+    {% endif %}
     {% if index + 1 < probe.n_frames %}
     <a class="btn" href="/scene/{{ scene_id }}/frame/{{ index + 1 }}">frame {{ index + 1 }} &rarr;</a>
     {% else %}<span class="btn disabled">last frame &rarr;</span>{% endif %}

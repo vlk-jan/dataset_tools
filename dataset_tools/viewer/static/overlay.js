@@ -185,8 +185,31 @@ function pumpTiles() {
 }
 
 function requestTiles(frame) {
+  // A collapsed panel shows no tiles, so it fetches none; expanding it
+  // calls update(true), which asks for the frame shown then.
+  if (els.panel && els.panel.classList.contains("collapsed")) return;
   tileWantFrame = frame;
   pumpTiles();
+}
+
+/* The playhead's frame in the address (?frame=N), so a reload or a copied
+ * link opens where the view is -- at most once a second, since browsers
+ * refuse a page that rewrites its history faster than that for long. */
+const URL_WRITE_MS = 1000;
+let lastUrlWrite = 0;
+let urlTimer = null;
+
+function writeFrameToUrl(frame) {
+  clearTimeout(urlTimer);
+  const write = () => {
+    lastUrlWrite = performance.now();
+    const url = new URL(window.location.href);
+    url.searchParams.set("frame", String(frame));
+    history.replaceState(history.state, "", url);
+  };
+  const wait = URL_WRITE_MS - (performance.now() - lastUrlWrite);
+  if (wait <= 0) write();
+  else urlTimer = setTimeout(write, wait);
 }
 
 function update(force) {
@@ -203,6 +226,8 @@ function update(force) {
 
   const frame = meta.frames[index];
   els.frame.textContent = frame;
+  if (cfg.framePage) els.frame.href = `${cfg.framePage}/${frame}`;
+  writeFrameToUrl(frame);
   els.stamp.textContent = meta.abs_times ? meta.abs_times[index].toFixed(3) : "-";
   showAttitude(index);
 

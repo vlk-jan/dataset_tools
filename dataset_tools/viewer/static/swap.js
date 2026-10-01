@@ -14,19 +14,57 @@
 
 const SWAP_LINKS = "a.tab, .pager a";
 
-async function swap(region, url, push) {
-  region.setAttribute("aria-busy", "true");
+/** The request in flight per region: a newer click on the same region aborts
+ *  the older one, so the address and the content can never end up from two
+ *  different clicks. */
+const pending = new Map();
+/** What the swapped regions show now, so back after an in-page anchor
+ *  (#notes) does not refetch a page that has not changed. */
+let shown = window.location.pathname + window.location.search;
+
+async function fetchPage(url, signal) {
+  const response = await fetch(url, { headers: { Accept: "text/html" }, signal });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return new DOMParser().parseFromString(await response.text(), "text/html");
+}
+
+async function swap(id, url, push) {
+  pending.get(id)?.abort();
+  const controller = new AbortController();
+  pending.set(id, controller);
+  document.getElementById(id)?.setAttribute("aria-busy", "true");
   try {
-    const response = await fetch(url, { headers: { Accept: "text/html" } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
-    const fresh = doc.getElementById(region.id);
-    if (!fresh) throw new Error(`no #${region.id} in the response`);
+    const doc = await fetchPage(url, controller.signal);
+    const fresh = doc.getElementById(id);
+    // Looked up again: the region from before the fetch may have been
+    // replaced by another swap in the meantime.
+    const region = document.getElementById(id);
+    if (!fresh || !region) throw new Error(`no #${id} in the response`);
     region.replaceWith(fresh);
-    if (push) history.pushState({ swap: region.id }, "", url);
+    if (push) history.pushState({ swap: id }, "", url);
+    const at = new URL(url, window.location.href);
+    shown = at.pathname + at.search;
   } catch (error) {
+    if (error.name === "AbortError") return; // a newer click on this region took over
     console.warn("in-place swap failed, loading the page instead:", error);
     window.location.assign(url);
+  } finally {
+    if (pending.get(id) === controller) pending.delete(id);
+  }
+}
+
+/**
+ * Re-render the regions with these ids from the current address, in place.
+ * For a change made on this page (a note saved) that shows in more than one
+ * place; the server renders every place, so they cannot disagree. Throws if
+ * the page cannot be fetched -- the caller then reloads.
+ */
+export async function refresh(ids) {
+  const doc = await fetchPage(window.location.href);
+  for (const id of ids) {
+    const fresh = doc.getElementById(id);
+    const region = document.getElementById(id);
+    if (fresh && region) region.replaceWith(fresh);
   }
 }
 
@@ -37,11 +75,13 @@ document.addEventListener("click", (event) => {
   const region = link && link.closest("[data-swap]");
   if (!region) return;
   event.preventDefault();
-  swap(region, link.href, true);
+  swap(region.id, link.href, true);
 });
 
 // Back and forward: the address already says which tab or page; fetch it and
-// swap the region, exactly as the click did.
+// swap the region, exactly as the click did -- unless only the #fragment moved.
 window.addEventListener("popstate", () => {
-  for (const region of document.querySelectorAll("[data-swap]")) swap(region, window.location.href, false);
+  const now = window.location.pathname + window.location.search;
+  if (now === shown) return;
+  for (const region of document.querySelectorAll("[data-swap]")) swap(region.id, window.location.href, false);
 });

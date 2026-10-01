@@ -745,3 +745,8 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .findings li.warn b { color: var(--warn); }
 .findings li.info b, .findings li.expected b { color: var(--muted, inherit); font-weight: normal; }
 .statusfilter a[aria-current] { font-weight: bold; }
+
+/* A note's verdict about its range. */
+.chip.verdict-drop { color: var(--bad); border-color: var(--bad-line); }
+.chip.verdict-fix { color: var(--warn); }
+.chip.verdict-keep { color: var(--ok, inherit); }

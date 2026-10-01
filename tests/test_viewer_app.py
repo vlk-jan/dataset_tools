@@ -879,3 +879,29 @@ def test_a_mistyped_address_gets_a_page_with_a_way_back(client):
     assert page.status_code == 404 and 'href="/"' in page.text and "<html" in page.text
     assert client.get("/scene/9999").headers["content-type"].startswith("application/json")
     assert client.get("/api/scene/9999/gps.json", headers={"Accept": "text/html"}).json()
+
+
+def test_a_verdict_travels_from_the_note_to_the_index_the_segments_table_and_the_export(client):
+    made = client.post(
+        "/api/scene/0001/notes", json={"frames": [2, 4], "topic": "odometry", "text": "GT slides", "verdict": "drop"}
+    )
+    assert made.status_code == 201 and made.json()["verdict"] == "drop"
+    assert (
+        client.post("/api/scene/0001/notes", json={"frames": [1, 1], "text": "x", "verdict": "maybe"}).status_code
+        == 400  # what every refused note write answers (_notes_write)
+    )
+
+    index = client.get("/?verdict=drop").text
+    assert 'id="s0001"' in index and 'id="s0000"' not in index and "verdict-drop" in index
+
+    table = client.get("/segments").text
+    assert "/scene/0001/segment/" in table and "verdict-drop" in table
+    assert client.get("/segments?sort=att").status_code == 200
+
+    rows = client.get("/api/notes.csv").text.splitlines()
+    assert rows[0].startswith("scene,frame_start,frame_end,t_start,t_end,topic,verdict")
+    assert rows[1].startswith("0001,2,4,") and ",odometry,drop," in rows[1]
+
+    edited = client.patch(f"/api/scene/0001/notes/{made.json()['id']}", json={"verdict": ""})
+    assert edited.json()["verdict"] == ""
+    assert 'id="s0001"' not in client.get("/?verdict=drop").text

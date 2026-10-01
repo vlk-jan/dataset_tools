@@ -12,7 +12,8 @@
   <div class="card notes" id="notes"
        data-scene="{{ scene_id }}"
        data-frames="{{ probe.n_frames }}"
-       data-topics="{{ notes_status.topics | join(',') }}">
+       data-topics="{{ notes_status.topics | join(',') }}"
+       data-verdicts="{{ (notes_status.verdicts or []) | join(',') }}">
     <header>
       <h2>Notes</h2>
       <span class="scount">{{ notes | length }}</span>
@@ -34,11 +35,12 @@
          them, and re-parsing "frames 3-7" out of the label to get them back
          would break the first time the label reads differently. #}
       <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
-          data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}">
+          data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}" data-verdict="{{ n.verdict }}">
         <div class="notehead">
           <a class="chip" href="/scene/{{ scene_id }}/frame/{{ n.frame_start }}"
              title="open the first frame of this range">{{ n.label }}</a>
           <span class="chip topic">{{ n.topic }}</span>
+          {% if n.verdict %}<span class="chip verdict-{{ n.verdict }}" title="the reviewer's decision about this range">{{ n.verdict }}</span>{% endif %}
           <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
             {%- if n.updated %} &middot; edited{% endif %}</span>
           {% if notes_status.writable %}
@@ -76,6 +78,12 @@
         <label>topic
           <select name="topic">
             {% for t in notes_status.topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+        </label>
+        <label title="what should happen to this range, if you have decided">verdict
+          <select name="verdict">
+            <option value="">none</option>
+            {% for v in notes_status.verdicts or [] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
           </select>
         </label>
         <button class="btn primary" type="submit">Save note</button>
