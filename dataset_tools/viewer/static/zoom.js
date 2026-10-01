@@ -152,8 +152,8 @@
   // page's own button (so the choice is shared and remembered) and swaps the
   // zoomed picture to match, leaving the magnification where it was. Where
   // there is no page button -- the 3D view's camera tile -- the dialog keeps
-  // the choice itself, under the frame page's key, and the picture names its
-  // projected twin in data-cloud.
+  // the choice itself, for as long as the page is open, and the picture names
+  // its projected twin in data-cloud. Off on every page load, like the page's.
   const zoomCloud = document.getElementById("zoomcloud");
   const pageCloud = document.getElementById("cloudtoggle");
   const bigframe = document.getElementById("bigframe");
@@ -162,7 +162,6 @@
   const fullSize = (url) =>
     /[?&]w=\d+/.test(url) ? url.replace(/([?&]w=)\d+/, "$11920") : `${url}${url.includes("?") ? "&" : "?"}w=1920`;
   let ownCloud = false;
-  try { ownCloud = !!localStorage.getItem("cloudOnImage"); } catch {}
   const cloudOn = () => (pageCloud ? pageCloud.getAttribute("aria-pressed") === "true" : ownCloud);
   let current = null;
   zoomCloud?.addEventListener("click", () => {
@@ -172,7 +171,6 @@
       img.alt = bigframe.alt;
     } else {
       ownCloud = !ownCloud;
-      try { localStorage.setItem("cloudOnImage", ownCloud ? "1" : ""); } catch {}
       img.src = ownCloud ? current.dataset.cloud : fullSize(current.src);
     }
     zoomCloud.setAttribute("aria-pressed", String(cloudOn()));

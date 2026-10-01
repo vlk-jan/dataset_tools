@@ -239,8 +239,8 @@
 {% endif %}
 {% if details.overlay %}
 <script>
-// The cloud toggle. Remembered across frames, so paging through a scene with
-// the cloud on keeps it on; the overlay is only fetched once it is asked for.
+// The cloud toggle. Off on every page load -- it is a check to make on purpose,
+// not a mode to land in; the overlay is only fetched once it is asked for.
 (() => {
   const img = document.getElementById("bigframe");
   const btn = document.getElementById("cloudtoggle");
@@ -252,10 +252,8 @@
                  : img.alt.replace(/, lidar cloud.*$/, "");
     btn.setAttribute("aria-pressed", on);
     cap.hidden = !on;
-    try { localStorage.setItem("cloudOnImage", on ? "1" : ""); } catch {}
   };
   btn.addEventListener("click", () => set(btn.getAttribute("aria-pressed") !== "true"));
-  try { if (localStorage.getItem("cloudOnImage")) set(true); } catch {}
 })();
 </script>
 {% endif %}
