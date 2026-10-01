@@ -366,3 +366,7 @@ body:not(.dt-collapsed) .sv-playback {
 }
 .dt-zoom .btn:hover { border-color: var(--accent); }
 .dt-zoom .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* A single frame's view ("Visualise this frame") has nothing to play and no
+   series to plot: SimView's playback bar and Analysis panel are dropped. */
+body:has(#dt-panel[data-kind="frame"]) :is(.sv-playback, .analysis-container) { display: none; }
