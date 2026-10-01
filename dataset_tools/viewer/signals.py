@@ -258,10 +258,20 @@ def signal_charts(
         sp = access.joint_setpoints
         has_sp = sp is not None and np.ndim(sp) == 2 and sp.shape[1] >= 7
         # One chart per wheel, on one shared y-range so the three read against each other.
+        # Each in its wheel's colour from the effort chart below (left s1, rear s2,
+        # right s3), so a wheel is one colour on every chart; measured and
+        # commanded are told apart by the dash, as the note says.
         per_wheel = [
-            [{"label": "measured", "cls": "s1", "values": resample(js[:, 0], js[:, 4 + k], t0, t1)}]
+            [{"label": "measured", "cls": f"s{k + 1}", "values": resample(js[:, 0], js[:, 4 + k], t0, t1)}]
             + (
-                [{"label": "commanded", "cls": "s2", "dash": True, "values": resample(sp[:, 0], sp[:, 4 + k], t0, t1)}]
+                [
+                    {
+                        "label": "commanded",
+                        "cls": f"s{k + 1}",
+                        "dash": True,
+                        "values": resample(sp[:, 0], sp[:, 4 + k], t0, t1),
+                    }
+                ]
                 if has_sp
                 else []
             )

@@ -647,12 +647,17 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 
 /* --------------------------------------------------------- signal charts
    One chart per unit, stacked on a shared time axis (templates/_signals.html).
-   Series hues are their own, not the status tokens: which wheel a line is has
-   nothing to do with good or bad. Validated (dataviz validate_palette.js) as a
-   categorical triple against each theme's panel; identity is also carried by
-   the legend and the readout, never by colour alone. */
-.signals { --s1: #1e66f5; --s2: #df8e1d; --s3: #8839ef; margin: 0 0 var(--sp-4); }
-:root[data-theme="dark"] .signals { --s1: #5b8ef8; --s2: #c77d12; --s3: #a266f2; }
+   Series are Catppuccin blue / red / green -- Mocha in the dark theme, SimView's
+   own palette, and Latte in the light one. The only Catppuccin triple that
+   passes dataviz validate_palette.js (--pairs all, against each plot
+   background): blue / peach / mauve, SimView's batch order, puts blue and
+   mauve at CVD dE ~1, one line to a red-green colour-blind reader. Red and
+   green are status hues elsewhere in the viewer, but which wheel a line is has
+   nothing to do with good or bad; identity is also carried by the legend and
+   the readout, never by colour alone. (Mocha's accents sit above the
+   validator's lightness band; they are pastels by design.) */
+.signals { --s1: #1e66f5; --s2: #d20f39; --s3: #40a02b; margin: 0 0 var(--sp-4); }
+:root[data-theme="dark"] .signals { --s1: #89b4fa; --s2: #f38ba8; --s3: #a6e3a1; }
 .signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .signals > header { display: flex; gap: var(--sp-3); align-items: baseline; flex-wrap: wrap; }
 .signals .sigtime { font: 400 var(--fs-xs) var(--mono); }
