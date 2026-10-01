@@ -89,6 +89,7 @@ export function installSimviewPatches(app) {
     styleGhost(app);
     defaultPointCloudsOff(app);
     defaultPanelState(app);
+    shortTimeReadout(app);
 
     // ---------------------------------------------------------------- ghost
     //
@@ -181,6 +182,33 @@ function applyFolderDefaults(app) {
             console.info(`no lil-gui folder titled "${title}"; leaving it as SimView left it.`);
         }
     }
+}
+
+/**
+ * Print the playback time to two decimals, on one line.
+ *
+ * SimView writes "time: 0.000 / 489.060" every redraw, and the span may wrap
+ * where the control row runs short. A millisecond is finer than any frame here
+ * (~70 ms apart), so the third decimal only cost width. Its `updateElements`
+ * is replaced on the instance: it still runs, and the readout is rewritten
+ * after it. The controls are built in SimView's onStoreReady, which can land
+ * after the store this patch set waited for, so it waits for them in turn.
+ */
+function shortTimeReadout(app, framesLeft = 600) {
+    const pc = app.animationController && app.animationController.playbackControls;
+    if (!pc || !pc.frameCounter) {
+        if (framesLeft > 0) requestAnimationFrame(() => shortTimeReadout(app, framesLeft - 1));
+        return;
+    }
+    pc.frameCounter.style.whiteSpace = "nowrap";
+    const update = pc.updateElements.bind(pc);
+    pc.updateElements = () => {
+        update();
+        const ac = pc.animationController;
+        pc.frameCounter.textContent =
+            `time: ${ac.getCurrentTime().toFixed(2)} / ${ac.getTotalTime().toFixed(2)}`;
+    };
+    pc.updateElements();
 }
 
 /**
