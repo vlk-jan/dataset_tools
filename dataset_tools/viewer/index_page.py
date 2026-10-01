@@ -304,7 +304,8 @@ def validation_totals(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str
     seen = sum(tally.values())
     if not seen:
         return None
-    sub = f"{tally['partial']} with warnings, {tally['no']} with errors"
+    w, e = tally["partial"], tally["no"]
+    sub = f"{w} warning{'s' if w != 1 else ''}, {e} error{'s' if e != 1 else ''}"
     if seen < len(rows):
         sub += f"; {len(rows) - seen} not in the report"
     return stat("validated", f"{tally['yes']} ok", sub)

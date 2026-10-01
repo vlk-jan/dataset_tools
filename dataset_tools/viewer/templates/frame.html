@@ -96,7 +96,7 @@
 
     <div class="frameside">
       <div class="card">
-        <h2 style="margin-top:0">This frame</h2>
+        <header><h2>This frame</h2></header>
         <dl class="kv">
           <dt>Index</dt><dd>{{ index }}</dd>
           {% if details.timestamp is defined %}
@@ -136,7 +136,7 @@
             <span class="muted">alt {{ m.gnss.alt }} m</span></dd>
           {% endif %}
         </dl>
-        <div style="margin-top:10px">
+        <div class="chips">
           {% for kind in ("images", "clouds", "height_maps", "height_masks") %}
           <span class="chip {{ 'yes' if details.present.get(kind) else 'no' }}">{{ kind }}</span>
           {% endfor %}
@@ -148,7 +148,7 @@
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">Ground truth</h2>
+        <header><h2>Ground truth</h2></header>
         {% if details.segment %}
         <dl class="kv">
           <dt>Segment</dt>
@@ -159,13 +159,13 @@
           <dt>Poses</dt><dd>{{ details.segment.n_poses }}</dd>
           <dt>Ends because</dt><dd class="muted">{{ reason_text(details.segment.reason) or details.segment.reason }}</dd>
         </dl>
-        <p class="muted" style="margin-bottom:0">
+        <p class="cardnote">
           The segment is anchored at its own first pose, so this frame's pose is meaningful
           only relative to the rest of this segment.
         </p>
         {% else %}
-        <p class="warn" style="margin-top:0">No ground-truth pose for this frame.</p>
-        <p class="muted" style="margin-bottom:0">
+        <p class="cardnote warn">No ground-truth pose for this frame.</p>
+        <p class="cardnote">
           It falls between ground-truth segments - where the odometry run diverged or was
           filtered out. The single-frame view below is robot-centric instead: the robot at the
           origin, with this frame's own cloud and height map around it.
@@ -174,29 +174,29 @@
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">Look at it</h2>
+        <header><h2>Look at it</h2></header>
         {% if frame_window %}
-        <p>
+        <p class="cardact">
           <a class="btn primary" href="/view/{{ scene_id }}/{{ frame_window }}">Visualise this frame</a>
         </p>
-        <p class="muted" style="margin-top:-6px">
+        <p class="cardnote">
           A static 3D scene of this frame alone: the robot at
           {% if details.segment %}its ground-truth pose{% else %}the origin{% endif %},
           this frame's height map as terrain (its cloud when there is no map) and its cloud as points.
         </p>
         {% if details.window %}
-        <p>
+        <p class="cardact">
           <a class="btn" href="/view/{{ scene_id }}/{{ details.window.key }}?frame={{ index }}">
             View in {{ details.window.label|lower }}</a>
         </p>
-        <p class="muted" style="margin-top:-6px">
+        <p class="cardnote">
           The motion around this frame: {{ details.window.n_frames }} frames from
           <span class="chip {{ ui.pose_chip(details.window.pose_source) }}">{{ details.window.pose_source }}</span>,
           opening at frame {{ index }}.
         </p>
         {% endif %}
         {% else %}
-        <p class="warn" style="margin:0">
+        <p class="cardnote warn">
           This frame is past the end of <code>data_ts.txt</code>, so it has no timestamp
           to place it on the playback clock and there is nothing 3D to build for it.
         </p>

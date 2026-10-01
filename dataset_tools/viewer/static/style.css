@@ -8,13 +8,22 @@
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", monospace;
+  /* Type scale. Every size on these pages is one of these; the two smallest
+     are for mono labels and captions, which read larger than sans at a size. */
+  --fs-2xs: 10.5px;
+  --fs-xs: 11.5px;
+  --fs-sm: 13px;
+  --fs-base: 14.5px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
 }
 * { box-sizing: border-box; }
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 16px/1.55 var(--sans);
+  font: var(--fs-md)/1.55 var(--sans);
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -39,11 +48,13 @@ header {
 /* The site header stays on screen; theme.js writes its height to --headh so
    sticky table headings park below it rather than under it. */
 body > header { position: sticky; top: 0; z-index: 1100; }
-header h1 { font-size: 22px; margin: 0; font-weight: 600; }
-header .path { color: var(--muted); font-family: var(--mono); font-size: 14px; }
+header h1 { font-size: var(--fs-xl); margin: 0; font-weight: 600; }
+header nav { margin-left: auto; display: flex; gap: 16px; }
+header nav ~ .theme-toggle { margin-left: 0; }
+header .path { color: var(--muted); font-family: var(--mono); font-size: var(--fs-base); }
 main { padding: 20px 24px 60px; width: 100%; }
-h2 { font-size: 17px; margin: 26px 0 10px; font-weight: 600; }
-table { border-collapse: collapse; width: 100%; font-size: 15px; }
+h2 { font-size: var(--fs-lg); margin: 26px 0 10px; font-weight: 600; }
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-base); }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 0); background: var(--panel); }
 tr:hover td { background: var(--panel-2); }
@@ -55,10 +66,10 @@ th, td { white-space: nowrap; }
 td.prose { white-space: normal; width: 100%; }
 @media (max-width: 1000px) { th, td { white-space: normal; } }
 /* The rate under a count in a numeric cell: same column, quieter, on its own line. */
-td.num small { display: block; font-size: 12px; font-family: var(--mono); }
+td.num small { display: block; font-size: var(--fs-sm); font-family: var(--mono); }
 .chip {
   display: inline-block; padding: 1px 6px; border-radius: 2px;
-  font: 400 11.5px var(--mono); border: 1px solid var(--line); color: var(--muted);
+  font: 400 var(--fs-xs) var(--mono); border: 1px solid var(--line); color: var(--muted);
 }
 .chip.yes { color: var(--ok); border-color: var(--ok-line); }
 .chip.no { color: color-mix(in srgb, var(--bad) 55%, var(--muted)); border-color: color-mix(in srgb, var(--bad) 25%, var(--panel)); text-decoration: line-through; }
@@ -72,10 +83,17 @@ td.num small { display: block; font-size: 12px; font-family: var(--mono); }
   border-radius: 8px; padding: 14px 16px; margin-bottom: 14px;
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
-.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; font-size: 15px; }
-.kv dt { color: var(--muted); }
-.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
-code, pre { font-family: var(--mono); font-size: 14px; }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 5px 16px; margin: 12px 0 0; font-size: var(--fs-base); align-items: baseline; }
+/* Labelled like dl.stats, so a list of values reads as the same furniture. */
+.kv dt {
+  font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em;
+  text-transform: uppercase; color: var(--muted);
+}
+.kv dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.kv dd .muted, .kv dd.muted { font-weight: 400; }
+.kv dd .muted { font-size: var(--fs-sm); }
+.card .cardact { margin: 12px 0 0; }
+code, pre { font-family: var(--mono); font-size: var(--fs-base); }
 pre { background: var(--shade); padding: 10px 12px; border-radius: 6px; overflow-x: auto; border: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
@@ -103,11 +121,11 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 .stale {
   margin: 0 0 14px; padding: 8px 12px; border: 1px solid var(--warn);
   border-left-width: 4px; border-radius: 6px; background: var(--panel);
-  font-size: 13.5px; color: var(--warn);
+  font-size: var(--fs-sm); color: var(--warn);
 }
 .masthead { padding: 4px 0 12px; border-bottom: 2px solid var(--fg); margin-bottom: 8px; }
 .kicker {
-  font: 500 12px/1 var(--mono); letter-spacing: .14em;
+  font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em;
   text-transform: uppercase; color: var(--accent);
 }
 .masthead-title {
@@ -122,13 +140,13 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 }
 .totals > div { background: var(--panel); padding: 10px 12px; }
 .totals dt {
-  font: 500 11px/1.3 var(--mono); letter-spacing: .08em;
+  font: 500 var(--fs-xs)/1.3 var(--mono); letter-spacing: .08em;
   text-transform: uppercase; color: var(--muted);
 }
 .totals dd {
-  margin: 2px 0 0; font: 600 20px/1.2 var(--display); font-variant-numeric: tabular-nums;
+  margin: 2px 0 0; font: 600 var(--fs-lg)/1.2 var(--display); font-variant-numeric: tabular-nums;
 }
-.totals dd small { font: 400 12px/1 var(--sans); color: var(--muted); }
+.totals dd small { display: block; margin-top: 2px; font: 400 var(--fs-xs)/1.3 var(--sans); color: var(--muted); }
 /* Disk usage by modality. Categorical slots validated against --panel for
    colour-blind separation; the legend names every slot, so hue is never the
    only thing that says which modality a segment is. */
@@ -145,25 +163,25 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 .dk-other { background: var(--dk-5); }
 .disklegend {
   list-style: none; padding: 0; margin: 8px 0 0;
-  display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; color: var(--muted);
+  display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: var(--fs-sm); color: var(--muted);
 }
 .disklegend li { display: flex; align-items: center; gap: 6px; }
 .disklegend i { width: 10px; height: 10px; border-radius: 2px; }
 .disklegend b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
-.disklegend small { font: 12px var(--mono); }
-.diskcap { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
-.diskcap code { font: 12px var(--mono); }
-.note { font-size: 14px; color: var(--muted); max-width: 100ch; margin: 0; }
-.note code { font: 13px var(--mono); }
+.disklegend small { font: var(--fs-xs) var(--mono); }
+.diskcap { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--muted); }
+.diskcap code { font: var(--fs-xs) var(--mono); }
+.note { font-size: var(--fs-base); color: var(--muted); max-width: 100ch; margin: 0; }
+.note code { font: var(--fs-sm) var(--mono); }
 
 section { margin-top: 34px; }
 .shead {
   display: flex; align-items: baseline; gap: 14px;
   border-bottom: 1px solid var(--line); padding-bottom: 6px;
 }
-.shead h2 { font-size: 21px; font-weight: 600; margin: 0; }
-.scount { font: 500 12px var(--mono); color: var(--muted); }
-.sblurb { color: var(--muted); font-size: 14.5px; max-width: 78ch; margin: 8px 0 18px; }
+.shead h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0; }
+.scount { font: 500 var(--fs-xs) var(--mono); color: var(--muted); }
+.sblurb { color: var(--muted); font-size: var(--fs-base); max-width: 78ch; margin: 8px 0 18px; }
 
 /* One card per scene, two or more cards per row when the window allows it. */
 .scenes {
@@ -180,23 +198,23 @@ section { margin-top: 34px; }
 .strip a { display: block; line-height: 0; flex: 1 1 0; min-height: 96px; }
 .strip img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .strip.empty {
-  align-items: center; justify-content: center; font-size: 13px; min-height: 120px;
+  align-items: center; justify-content: center; font-size: var(--fs-sm); min-height: 120px;
 }
 .scene > .body { padding: 12px 16px 14px; min-width: 0; }
 .scene .body > header, .card > header {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   padding: 0; border: 0; background: none;
 }
-.scene h3 { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
+.scene h3 { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
 .scene h3 a { color: var(--fg); }
-.date { font: 400 13px var(--mono); color: var(--muted); }
+.date { font: 400 var(--fs-sm) var(--mono); color: var(--muted); }
 .cov {
-  margin-left: auto; font: 500 12px var(--mono); padding: 2px 8px; border-radius: 2px;
+  margin-left: auto; font: 500 var(--fs-xs) var(--mono); padding: 2px 8px; border-radius: 2px;
 }
 .cov.hi { background: var(--ok-soft); color: var(--ok); }
 .cov.mid { background: var(--track); color: var(--muted); }
 .cov.lo { background: var(--track); color: var(--warn); box-shadow: inset 0 0 0 1px var(--warn); }
-.env { font-size: 14.5px; margin: 6px 0 12px; max-width: 74ch; }
+.env { font-size: var(--fs-base); margin: 6px 0 12px; max-width: 74ch; }
 
 /* ------------------------------------------------------- train / val split
    Which side of the scene-level split a scene is on: a labelled band down the
@@ -211,7 +229,7 @@ section { margin-top: 34px; }
 .splitband {
   display: flex; align-items: center; justify-content: center;
   writing-mode: vertical-rl; transform: rotate(180deg);
-  font: 600 12px/1 var(--mono); letter-spacing: .2em; text-transform: uppercase;
+  font: 600 var(--fs-xs)/1 var(--mono); letter-spacing: .2em; text-transform: uppercase;
 }
 .splitband.val, .split-tag.val { background: var(--val); color: var(--bg); }
 .splitband.train, .split-tag.train { background: var(--train-soft); color: var(--train); }
@@ -233,7 +251,7 @@ section { margin-top: 34px; }
 /* The scene page's tag, in the site header, whose items are baseline aligned
    against a 22px h1. */
 .split-tag {
-  font: 600 12px var(--mono); padding: 3px 9px; border-radius: 2px;
+  font: 600 var(--fs-xs) var(--mono); padding: 3px 9px; border-radius: 2px;
   text-transform: uppercase; letter-spacing: .08em;
 }
 header > .split-tag { align-self: center; }
@@ -243,32 +261,32 @@ header > .split-tag { align-self: center; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
 }
 .splithead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-.splithead h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.splithead h2 { font-size: var(--fs-lg); font-weight: 600; margin: 0; }
 .splitfilter { display: flex; flex-wrap: wrap; gap: 8px; }
 .sf {
   display: inline-flex; align-items: baseline; gap: 7px; padding: 7px 12px;
-  font: 14.5px var(--sans); color: var(--muted); cursor: pointer;
+  font: var(--fs-base) var(--sans); color: var(--muted); cursor: pointer;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
 }
 .sf:hover { color: var(--fg); border-color: var(--muted); }
 .sf:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .sf[aria-pressed="true"] { color: var(--fg); border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
 .sf:is(.val, .train)[aria-pressed="true"] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
-.sf b { font: 600 15px var(--display); color: var(--fg); font-variant-numeric: tabular-nums; }
-.sf small { font: 12px var(--mono); color: var(--muted); }
+.sf b { font: 600 var(--fs-base) var(--display); color: var(--fg); font-variant-numeric: tabular-nums; }
+.sf small { font: var(--fs-xs) var(--mono); color: var(--muted); }
 .sf i { align-self: center; width: 11px; height: 11px; border-radius: 2px; background: var(--c); }
 /* The same shares as the buttons, drawn: how lopsided the fold is. */
 .splitbar { display: flex; gap: 2px; height: 8px; margin: 12px 0 0; background: var(--track); }
 .splitbar i { background: var(--c); }
-.splitabout { margin-top: 12px; font-size: 14px; color: var(--muted); }
+.splitabout { margin-top: 12px; font-size: var(--fs-base); color: var(--muted); }
 .splitabout summary {
   cursor: pointer; width: fit-content;
-  font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  font: 500 var(--fs-xs) var(--mono); letter-spacing: .06em; text-transform: uppercase;
 }
 .splitabout p { max-width: 90ch; margin: 8px 0 0; }
-.splitabout code { font: 13px var(--mono); }
+.splitabout code { font: var(--fs-sm) var(--mono); }
 /* "4 of 12 shown" beside a section title while a filter is on. */
-.sshown { font: 500 12px var(--mono); color: var(--muted); margin-left: auto; }
+.sshown { font: 500 var(--fs-xs) var(--mono); color: var(--muted); margin-left: auto; }
 
 /* The GT timeline: blocks scaled over the scene's own time span. On a scene
    page each block is a link to its own segment (`a.seg`); on the index card,
@@ -293,9 +311,9 @@ header > .split-tag { align-self: center; }
 .bar .track:hover a.seg:not(:hover) { opacity: .55; }
 .barcap {
   display: flex; justify-content: space-between;
-  font: 400 11px var(--mono); color: var(--muted); margin-top: 2px;
+  font: 400 var(--fs-xs) var(--mono); color: var(--muted); margin-top: 2px;
 }
-.barhint { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
+.barhint { margin: 6px 0 0; font-size: var(--fs-sm); color: var(--muted); }
 
 dl.stats {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
@@ -303,25 +321,25 @@ dl.stats {
 }
 dl.stats > div { border-top: 1px solid var(--line); padding-top: 4px; min-width: 0; }
 dl.stats dt {
-  font: 500 10.5px/1.4 var(--mono); letter-spacing: .06em;
+  font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted);
 }
 dl.stats dd {
-  margin: 1px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 15px;
+  margin: 1px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; font-size: var(--fs-base);
 }
 dl.stats dd small {
-  display: block; font-weight: 400; font-size: 11.5px; color: var(--muted);
+  display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--muted);
 }
 
 .chips { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 4px; }
 .bagline {
-  margin: 8px 0 0; font: 400 11.5px var(--mono); color: var(--muted);
+  margin: 8px 0 0; font: 400 var(--fs-xs) var(--mono); color: var(--muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.small { font-size: 12.5px; }
+.small { font-size: var(--fs-sm); }
 .atlas-footer {
   margin-top: 40px; border-top: 1px solid var(--line); padding-top: 12px;
-  font-size: 13px; color: var(--muted); max-width: 110ch;
+  font-size: var(--fs-sm); color: var(--muted); max-width: 110ch;
 }
 
 @media (max-width: 700px) {
@@ -351,7 +369,7 @@ dl.stats dd small {
 }
 .hero figcaption {
   display: flex; justify-content: space-between; gap: 10px; padding: 5px 9px;
-  font: 400 12px var(--mono); color: var(--muted);
+  font: 400 var(--fs-xs) var(--mono); color: var(--muted);
 }
 .hero figcaption b { color: var(--fg); font-weight: 500; }
 @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
@@ -365,17 +383,17 @@ dl.stats dd small {
 @media (max-width: 1100px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
 .card > header { padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-.card > header h2 { margin: 0; font-size: 16px; font-weight: 600; }
-.card > header .cov { font-size: 11.5px; }
+.card > header h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
+.card > header .cov { font-size: var(--fs-xs); }
 .card dl.stats { margin-top: 10px; }
 .card .bar { margin-top: 12px; }
 .card .cardnote {
-  margin: 12px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere;
+  margin: 12px 0 0; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere;
 }
 .card .cardnote.warn { color: var(--warn); }
 details.matrix { margin-top: 10px; }
 details.matrix summary {
-  font: 500 11.5px var(--mono); color: var(--muted); cursor: pointer;
+  font: 500 var(--fs-xs) var(--mono); color: var(--muted); cursor: pointer;
 }
 details.matrix summary:hover { color: var(--fg); }
 details.matrix pre { margin: 6px 0 0; background: var(--shade); }
@@ -387,7 +405,7 @@ details.diskusage dl.stats { margin-top: 8px; }
 .filegroups { display: grid; gap: 8px; margin-top: 10px; }
 .fgtitle {
   display: block; margin-bottom: 3px;
-  font: 500 10.5px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
+  font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
 
 /* The inventory strip is a set of toggles, and the entry that is open reads
@@ -396,7 +414,7 @@ details.diskusage dl.stats { margin-top: 8px; }
    card's height moves by one panel at most -- it sits beside the map. */
 button.chip {
   background: none; color: inherit; cursor: pointer;
-  font: 400 11.5px var(--mono); line-height: 1.5;
+  font: 400 var(--fs-xs) var(--mono); line-height: 1.5;
 }
 button.chip:hover { color: var(--fg); border-color: var(--accent); }
 button.chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
@@ -410,16 +428,16 @@ button.chip[aria-expanded="true"] {
 .fileinfo > header {
   display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: none;
 }
-.fileinfo h3 { margin: 0; font-size: 15px; font-weight: 600; }
-.fileinfo > header .chip { margin-left: auto; font: 400 11px var(--mono); padding: 0 7px; }
+.fileinfo h3 { margin: 0; font-size: var(--fs-base); font-weight: 600; }
+.fileinfo > header .chip { margin-left: auto; font: 400 var(--fs-xs) var(--mono); padding: 0 7px; }
 .fileinfo .filepath {
-  display: block; margin-top: 2px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+  display: block; margin-top: 2px; font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere;
 }
 .fileinfo dl.stats { margin-top: 10px; }
-.fileinfo p { margin: 8px 0 0; font-size: 13.5px; max-width: 78ch; }
-.fileinfo p.holds { font-size: 13px; color: var(--muted); }
+.fileinfo p { margin: 8px 0 0; font-size: var(--fs-sm); max-width: 78ch; }
+.fileinfo p.holds { font-size: var(--fs-sm); color: var(--muted); }
 .fileinfo p.holds span {
-  font: 500 10.5px var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-right: 6px;
+  font: 500 var(--fs-2xs) var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-right: 6px;
 }
 .fileinfo .bar { margin-top: 10px; }
 /* Coverage of a per-frame directory: green where a frame has its file, the
@@ -438,7 +456,7 @@ button.chip[aria-expanded="true"] {
 .tab {
   padding: 7px 14px; border: 1px solid transparent; border-bottom: 0;
   border-radius: 6px 6px 0 0; color: var(--muted);
-  margin-bottom: -1px; font-size: 15px;
+  margin-bottom: -1px; font-size: var(--fs-base);
 }
 .tab:hover { text-decoration: none; color: var(--fg); background: var(--panel); }
 .tab.active {
@@ -448,7 +466,7 @@ button.chip[aria-expanded="true"] {
 
 .framebar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .framebar form { display: flex; align-items: center; gap: 8px; margin: 0; }
-.framebar label { color: var(--muted); font-size: 14px; }
+.framebar label { color: var(--muted); font-size: var(--fs-base); }
 .framebar input {
   width: 8em; padding: 4px 8px; border-radius: 6px; background: var(--bg);
   border: 1px solid var(--line); color: var(--fg); font: inherit;
@@ -467,9 +485,9 @@ button.chip[aria-expanded="true"] {
 .frametile img { width: 100%; display: block; aspect-ratio: 8 / 5; object-fit: cover; background: var(--shade); }
 .framelabel {
   display: flex; justify-content: space-between; align-items: baseline;
-  padding: 3px 7px; font: 13px var(--mono); font-variant-numeric: tabular-nums;
+  padding: 3px 7px; font: var(--fs-sm) var(--mono); font-variant-numeric: tabular-nums;
 }
-.framelabel small { color: var(--muted); font-size: 11.5px; }
+.framelabel small { color: var(--muted); font-size: var(--fs-xs); }
 
 .pager { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 14px 0 0; }
 
@@ -482,12 +500,12 @@ button.chip[aria-expanded="true"] {
 /* The big frame. The frame bar's button swaps the lidar cloud onto it, and
    what the cloud shows is said under it while it is on. */
 .bigoverlay { margin: 0; }
-.bigoverlay figcaption { font-size: 13px; margin-top: 6px; max-width: 100ch; }
+.bigoverlay figcaption { font-size: var(--fs-sm); margin-top: 6px; max-width: 100ch; }
 .cloudtoggle { margin-left: auto; font: inherit; cursor: pointer; }
 .btn[aria-pressed="true"] {
   background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
 }
-.bigoverlay figcaption code { font-size: 12px; }
+.bigoverlay figcaption code { font-size: var(--fs-sm); }
 .framemain .tiles {
   display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
   gap: 14px; margin: 14px 0;
@@ -497,16 +515,15 @@ button.chip[aria-expanded="true"] {
   margin: 0; background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 8px; min-width: 0;
 }
-.framemain .tile figcaption { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.framemain .tile figcaption { color: var(--muted); font-size: var(--fs-sm); margin-bottom: 6px; }
 .framemain .tile img {
   width: 100%; display: block; border-radius: 4px; background: var(--shade);
   image-rendering: pixelated;
 }
 .framemain .tile .absent {
   aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
-  border: 1px dashed var(--line); border-radius: 4px; font-size: 13px; text-align: center;
+  border: 1px dashed var(--line); border-radius: 4px; font-size: var(--fs-sm); text-align: center;
 }
-.frameside .card h2 { font-size: 16px; }
 .zoomable { cursor: zoom-in; }
 /* The frame page's signals: the frame itself, as a line through every chart. */
 .framesignals .sig .plot::after {
@@ -526,7 +543,7 @@ button.chip[aria-expanded="true"] {
 .zoomhead .zoomcloud { margin-left: auto; }
 .zoomhead .zoomcloud[hidden] { display: none; }
 .zoomhead .zoomcloud:not([hidden]) + form { margin-left: 0; }
-.zoomhint { font-size: 13px; }
+.zoomhint { font-size: var(--fs-sm); }
 .zoomstage { position: relative; width: fit-content; margin: 0 auto; }
 .zoomstage img { display: block; max-width: 92vw; max-height: calc(96vh - 170px); border-radius: 4px; }
 /* The BEV tiles are square: fill the window rather than stop at the render's size. */
@@ -547,7 +564,7 @@ button.chip[aria-expanded="true"] {
    dialog and wraps inside it, rather than widening the dialog as its lines
    grow and shrink under the pointer -- which shook the picture. Room for four
    lines, so wrapping does not move it vertically either. */
-.zoomread { display: block; white-space: pre-wrap; font: 14px/1.5 var(--mono); margin-top: 8px; min-height: 6em; width: 0; min-width: 100%; }
+.zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: 8px; min-height: 6em; width: 0; min-width: 100%; }
 .zoomread[hidden] { display: none; }
 
 /* ------------------------------------------------------------------ notes
@@ -560,7 +577,7 @@ button.chip[aria-expanded="true"] {
 .notelist { list-style: none; margin: 0; padding: 0; }
 .notelist li { padding: 9px 0; border-top: 1px solid var(--line); }
 .notelist li:first-child { border-top: 0; padding-top: 2px; }
-.notehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.notehead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--fs-sm); }
 .notehead .chip { font-family: var(--mono); }
 .chip.topic { color: var(--accent); border-color: var(--accent-line); }
 .notetools { margin-left: auto; display: flex; gap: 10px; }
@@ -569,10 +586,10 @@ button.chip[aria-expanded="true"] {
   font: inherit; cursor: pointer; text-decoration: underline;
 }
 .linkbtn:hover { color: var(--fg); }
-.notetext { margin: 4px 0 0; font-size: 14.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notetext { margin: 4px 0 0; font-size: var(--fs-base); white-space: pre-wrap; overflow-wrap: anywhere; }
 .noteform { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
 .noterow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.noterow label { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.noterow label { color: var(--muted); font-size: var(--fs-base); display: flex; align-items: center; gap: 6px; }
 .noteform input, .noteform select, .noteform textarea,
 .noteedit input, .noteedit select, .noteedit textarea {
   padding: 4px 8px; border-radius: 6px; background: var(--bg);
@@ -580,7 +597,7 @@ button.chip[aria-expanded="true"] {
 }
 .noteform input, .noteedit input { width: 7em; font-variant-numeric: tabular-nums; }
 .noteform textarea, .noteedit textarea {
-  width: 100%; margin-top: 8px; font-size: 14.5px; resize: vertical;
+  width: 100%; margin-top: 8px; font-size: var(--fs-base); resize: vertical;
 }
 .noteform .btn { margin-left: auto; }
 /* The inline editor is the compose form again, over one note: the same range,
@@ -591,11 +608,11 @@ button.chip[aria-expanded="true"] {
 .noteedit textarea { margin-top: 0; }
 .noteeditactions { display: flex; gap: 8px; }
 .noteedit .btn { margin-top: 0; }
-.notemsg { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+.notemsg { margin: 8px 0 0; font-size: var(--fs-sm); color: var(--muted); }
 .notemsg.bad { color: var(--bad); }
 /* The windows table's marker: a window whose frames someone has written about. */
 .notemark {
-  margin-left: 8px; font: 400 11.5px var(--mono); color: var(--warn);
+  margin-left: 8px; font: 400 var(--fs-xs) var(--mono); color: var(--warn);
   border: 1px solid var(--warn-line); border-radius: 2px; padding: 0 5px; white-space: nowrap;
 }
 .notemark:hover { text-decoration: none; border-color: var(--warn); }
@@ -638,7 +655,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   overflow: hidden;
   background: var(--shade);
 }
-.mapnote { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.mapnote { color: var(--muted); font-size: var(--fs-sm); margin: 8px 0 0; }
 .mapnote.warn { color: var(--warn); }
 
 /* OpenStreetMap ships one raster style, and it is a light one. Inverting the
@@ -652,7 +669,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .leaflet-container { background: var(--shade); font: inherit; }
 :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(0.5) brightness(0.95) contrast(0.85); }
 .leaflet-container .leaflet-control-attribution {
-  background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--muted); font-size: 11px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent); color: var(--muted); font-size: var(--fs-xs);
 }
 .leaflet-container .leaflet-control-attribution a { color: var(--accent); }
 .leaflet-bar a, .leaflet-bar a:hover {
@@ -691,9 +708,9 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 :root[data-theme="dark"] .signals { --s1: #5b8ef8; --s2: #c77d12; --s3: #a266f2; }
 .signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .signals > header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
-.signals .sigtime { font: 400 12px var(--mono); }
+.signals .sigtime { font: 400 var(--fs-xs) var(--mono); }
 .sig { margin-top: 12px; }
-.sighead { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.sighead { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; font-size: var(--fs-sm); }
 /* The chart's toggle: a flex summary loses the native marker, so the arrow is
    drawn here and turns down while the chart is open. */
 .sighead { cursor: pointer; list-style: none; user-select: none; }
@@ -705,7 +722,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .sig[open] > .sighead::before { transform: rotate(90deg); }
 .sig:not([open]) > .sighead { color: var(--muted); }
 .sighead:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.sighead .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--fg-2); }
+.sighead .legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--fg-2); }
 .signals .s1 { --c: var(--s1); }
 .signals .s2 { --c: var(--s2); }
 .signals .s3 { --c: var(--s3); }
@@ -714,7 +731,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   border-top: 2px solid var(--c, var(--line-2));
 }
 .sighead .key.dash::before { border-top-style: dashed; }
-.sighead .sigval { margin-left: auto; font: 400 12px var(--mono); color: var(--fg); }
+.sighead .sigval { margin-left: auto; font: 400 var(--fs-xs) var(--mono); color: var(--fg); }
 .sig .plot {
   position: relative; height: 84px; margin-top: 4px;
   background: var(--shade); border-radius: 4px; overflow: hidden;
@@ -726,14 +743,14 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .sig line.zero { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .sig line.cursor { stroke: var(--fg); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .sig .ylab {
-  position: absolute; left: 4px; font: 400 10.5px var(--mono); color: var(--muted);
+  position: absolute; left: 4px; font: 400 var(--fs-2xs) var(--mono); color: var(--muted);
   pointer-events: none;
 }
 .sig .ylab.hi { top: 2px; }
 .sig .ylab.lo { bottom: 2px; }
 /* The time axis: round-numbered ticks under each plot, centred on their
    position, except those at an edge, which align to it rather than spill. */
-.sig .xaxis { position: relative; height: 14px; font: 400 10.5px var(--mono); color: var(--muted); }
+.sig .xaxis { position: relative; height: 14px; font: 400 var(--fs-2xs) var(--mono); color: var(--muted); }
 .sig .xaxis span { position: absolute; top: 1px; transform: translateX(-50%); white-space: nowrap; }
 .sig .xaxis span::before {
   content: ""; position: absolute; left: 50%; top: -4px; height: 3px; border-left: 1px solid var(--line-2);
@@ -742,10 +759,10 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .sig .xaxis span.l::before { left: 0; }
 .sig .xaxis span.r { transform: translateX(-100%); }
 .sig .xaxis span.r::before { left: auto; right: 0; }
-.sig .signote { margin: 3px 0 0; font-size: 12px; color: var(--muted); }
+.sig .signote { margin: 3px 0 0; font-size: var(--fs-sm); color: var(--muted); }
 
 /* The scene page's jump-to-scene arrow, next to the scene number in the h1. */
-.scene-jump { display: inline-block; position: relative; font-size: 16px; font-weight: 400; }
+.scene-jump { display: inline-block; position: relative; font-size: var(--fs-md); font-weight: 400; }
 .scene-jump summary { list-style: none; cursor: pointer; color: var(--muted); padding: 0 4px; }
 .scene-jump summary::-webkit-details-marker { display: none; }
 .scene-jump summary::after { content: "▾"; }
@@ -764,7 +781,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .databanner { color: var(--bad); border: 1px solid var(--bad-line); border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; }
 
 /* The validator's findings on the scene page, most severe first. */
-.findings { list-style: none; margin: 8px 0 0; padding: 0; font-size: 0.9em; max-height: 16em; overflow-y: auto; }
+.findings { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--fs-sm); max-height: 16em; overflow-y: auto; }
 .findings li { margin: 2px 0; }
 .findings li.error b { color: var(--bad); }
 .findings li.warn b { color: var(--warn); }

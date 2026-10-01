@@ -300,7 +300,7 @@ def test_the_validation_report_marks_each_scene_it_names(tmp_path):
     assert "max_step_m 1.842" in marks["0001"]["title"]
     total = next(t for t in page["totals"] if t["label"] == "validated")
     # Counted over the scenes the index shows: 0009 is in the file, not the root.
-    assert total["value"] == "1 ok" and total["sub"] == "1 with warnings, 1 with errors; 1 not in the report"
+    assert total["value"] == "1 ok" and total["sub"] == "1 warning, 1 error; 1 not in the report"
 
     card = build_scene_page(root, SceneAccess(root, "0001"))["cards"][-1]
     assert card["title"] == "Validation" and card["badge"] == "WARN"

@@ -6,9 +6,11 @@
   <h1>Dataset viewer</h1>
   <span class="path">{{ root.path }}</span>
   <span class="muted">{{ rows|length }} scene{{ "s" if rows|length != 1 }}</span>
-  <a href="/segments" title="every ground-truth window in the root, sortable by GT quality">segments</a>
-  {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
   <span class="muted">simview {{ simview_version }}</span>
+  <nav>
+    <a href="/segments" title="every ground-truth window in the root, sortable by GT quality">segments</a>
+    {% if notes_enabled %}<a href="/notes" title="every reviewer note in this root, by topic">notes</a>{% endif %}
+  </nav>
 {% endblock %}
 {% block main %}
 
