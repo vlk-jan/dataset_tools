@@ -105,9 +105,23 @@
       {% for part in sp.parts %}{% if part.share %}<i class="{{ part.which }}" style="width:{{ "%.2f"|format(part.share * 100) }}%"></i>{% endif %}{% endfor %}
     </div>
     {% endif %}
-    {% if sp.note or sp.source %}
+    {% if sp.note or sp.source or sp.measures %}
     <details class="splitabout">
       <summary>What this split measures</summary>
+      {% if sp.measures %}
+      <div class="splitsizes"><table>
+        <thead><tr><th></th>
+          {% for m in sp.measures %}<th class="num">{{ m.label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+        {% for part in sp.parts %}{% set side = loop.index0 %}
+        <tr><th scope="row"><i class="{{ part.which }}"></i>{{ part.name }}</th>
+          {% for m in sp.measures %}{% set c = m.cells[side] %}<td class="num">{{ c.value }} <small>{{ c.pct }}</small></td>{% endfor %}</tr>
+        {% endfor %}
+        <tr class="all"><th scope="row">All</th>
+          {% for m in sp.measures %}<td class="num">{{ m.total }}</td>{% endfor %}</tr>
+        </tbody>
+      </table></div>
+      {% endif %}
       {% if sp.note %}<p>{{ sp.note }}</p>{% endif %}
       {% if sp.source %}<p>Scene lists from <code>{{ sp.source }}</code>.</p>{% endif %}
     </details>

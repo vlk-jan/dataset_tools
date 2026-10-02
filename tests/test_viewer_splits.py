@@ -280,6 +280,19 @@ def test_the_panel_counts_the_scenes_this_root_has_not_the_file_s_lists(tmp_path
     # Over this root's frames (12 per scene), not the file's window counts.
     assert panel["unit"] == "frames"
     assert {i["which"]: i["pct"] for i in panel["parts"]} == {"val": "50%", "train": "50%"}
+    # The sizes table: one row per unit the root counts, a cell per side.
+    measures = {m["label"]: m for m in panel["measures"]}
+    assert measures["Scenes"]["total"] == "2"
+    assert [c["value"] for c in measures["Scenes"]["cells"]] == ["1", "1"]
+    assert [c["pct"] for c in measures["Windows"]["cells"]] == ["25%", "75%"]
+    assert "Keyframes" not in measures  # no keyframes.lst: no row, not a row of zeros
+
+    (root_path / "keyframes.lst").write_text(
+        "0000/clouds/0.npy\n0000/clouds/1.npy\n0000/clouds/2.npy\n0001/clouds/0.npy\n"
+    )
+    panel = index_page.build_index(root, root.probe_all())["split_panel"]
+    keyframes = next(m for m in panel["measures"] if m["label"] == "Keyframes")
+    assert [c["value"] for c in keyframes["cells"]] == ["1", "3"] and keyframes["total"] == "4"
 
 
 def test_an_unsplit_root_gets_no_panel_and_no_marks(tmp_path):

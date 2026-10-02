@@ -276,6 +276,15 @@ header > .split-tag { align-self: center; }
 }
 .splitabout p { max-width: 90ch; margin: var(--sp-2) 0 0; }
 .splitabout code { font: var(--fs-sm) var(--mono); }
+/* Each side's size in every unit the root counts; the share sits under the value. */
+.splitsizes { max-width: 100%; overflow-x: auto; margin-top: var(--sp-2); }
+.splitsizes table { width: auto; color: var(--fg); }
+.splitsizes th, .splitsizes td { white-space: nowrap; }
+.splitsizes th { position: static; background: none; }
+.splitsizes tbody th { font-weight: 500; }
+.splitsizes td.num small { color: var(--muted); }
+.splitsizes tr.all > * { border-bottom: 0; }
+.splitsizes tbody i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 2px; background: var(--c); }
 /* "4 of 12 shown" beside a section title while a filter is on. */
 .sshown { font: 500 var(--fs-xs) var(--mono); color: var(--muted); margin-left: auto; }
 

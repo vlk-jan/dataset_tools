@@ -531,6 +531,23 @@ class DatasetRoot:
         """
         return self._root_files_any(("splits.json", *DECLARED_FILES), lambda: read_splits(self.path) or NO_SPLITS)
 
+    def keyframe_counts(self) -> dict[str, int]:
+        """Lines of ``keyframes.lst`` per scene (its first path component); empty without the file."""
+
+        def load() -> dict[str, int]:
+            counts: dict[str, int] = {}
+            try:
+                with open(self.path / "keyframes.lst") as f:
+                    for line in f:
+                        if line.strip():
+                            scene = line.split("/", 1)[0]
+                            counts[scene] = counts.get(scene, 0) + 1
+            except OSError:
+                pass
+            return counts
+
+        return self._root_file("keyframes.lst", load)
+
     def _root_files_any(self, relpaths: tuple[str, ...], load):
         """`_root_file` over several files: re-run ``load()`` when any of them changed."""
         keys = []

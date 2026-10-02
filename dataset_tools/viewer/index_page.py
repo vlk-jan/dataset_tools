@@ -520,6 +520,7 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
     if not tally:
         return None
     fractions = splits.shares({r["probe"].scene_id: r["probe"].n_frames for r in rows}) or {}
+    sides = [which for which in SPLIT_ORDER if which in tally]
     return {
         "name": splits.name,
         "dataset_version": splits.dataset_version,
@@ -540,10 +541,51 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
                 "share": fractions.get(which),
                 "pct": f"{fractions[which] * 100:.0f}%" if which in fractions else None,
             }
-            for which in SPLIT_ORDER
-            if which in tally
+            for which in sides
         ],
+        "measures": split_measures(root, splits, rows, sides),
     }
+
+
+def split_measures(
+    root: DatasetRoot, splits: Any, rows: list[dict[str, Any]], sides: list[str]
+) -> list[dict[str, Any]]:
+    """How big each side of the split is, in every unit the root can count.
+
+    One row per unit -- scenes, frames, recorded time, keyframes, proprio
+    labels, training windows -- with a cell per side and the total over every
+    scene shown. A unit the root does not carry (no keyframes.lst, no label
+    counts) is left out rather than shown as zeros.
+    """
+    keyframes = root.keyframe_counts()
+    units: list[tuple[str, Any, Any]] = [
+        ("Scenes", lambda r: 1, fmt_count),
+        ("Frames", lambda r: r["probe"].n_frames, fmt_count),
+        ("Recorded", lambda r: r["probe"].duration or 0, fmt_duration),
+    ]
+    for label, counts in (("Keyframes", keyframes), ("Proprio labels", splits.labels), ("Windows", splits.windows)):
+        if counts:
+            units.append((label, lambda r, c=counts: c.get(r["probe"].scene_id, 0), fmt_count))
+    out = []
+    for label, value, fmt in units:
+        per_side = {which: 0.0 for which in sides}
+        total = 0.0
+        for row in rows:
+            v = value(row) or 0
+            total += v
+            mark = row.get("split")
+            if mark and mark["which"] in per_side:
+                per_side[mark["which"]] += v
+        if not total:
+            continue
+        out.append(
+            {
+                "label": label,
+                "cells": [{"value": fmt(per_side[w]), "pct": fmt_share(per_side[w] / total)} for w in sides],
+                "total": fmt(total),
+            }
+        )
+    return out
 
 
 def atlas_warning(root: DatasetRoot, atlas: dict) -> str | None:
