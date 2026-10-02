@@ -131,8 +131,8 @@ def test_scene_ids_written_as_integers_still_match_their_directories():
     assert parsed.of("0009") == "val"
 
 
-def test_the_held_out_share_names_the_count_it_was_taken_over():
-    """23.7 % by label and 25.8 % by window is the same fold; a bare % is noise."""
+def test_the_held_out_share_is_taken_over_frames():
+    """Every root has frames; label and window counts exist only in an export."""
     parsed = splits.parse_splits(
         {
             "val_scenes": ["0000"],
@@ -141,24 +141,17 @@ def test_the_held_out_share_names_the_count_it_was_taken_over():
             "windows_per_scene": {"train": {"0001": 1}, "val": {"0000": 1}},
         }
     )
-    # Windows win when both are there: they are what a run iterates. Both halves
-    # of windows_per_scene count towards the total, so this is 1 of 2, not 1 of 1.
-    assert parsed.shares() == ({"val": 0.5, "train": 0.5}, "windows")
+    # The file's own counts would say 10 % or 50 %; the frames say 25 %.
+    assert parsed.shares({"0000": 100, "0001": 300}) == {"val": 0.25, "train": 0.75}
     # Limited to the scenes a page shows, the fractions are over those alone.
-    assert parsed.shares(["0000"]) == ({"val": 1.0}, "windows")
-
-    # Labels are the fallback for a file exported with --no_windows.
-    no_windows = splits.parse_splits({"val_scenes": ["0000"], "labels_per_scene": {"0000": 1, "0001": 9}})
-    assert no_windows.shares() == ({"val": 0.1, "train": 0.9}, "labels")
-
-    assert splits.parse_splits({"val_scenes": ["0000"]}).shares() is None
+    assert parsed.shares({"0000": 100}) == {"val": 1.0}
+    assert parsed.shares({}) is None
+    assert parsed.shares({"0000": 0}) is None
 
 
 def test_a_scene_the_file_does_not_assign_counts_towards_no_side():
-    parsed = splits.parse_splits(
-        {"val_scenes": ["0000"], "train_scenes": ["0001"], "labels_per_scene": {"0000": 1, "0001": 2, "0002": 1}}
-    )
-    assert parsed.shares() == ({"val": 0.25, "train": 0.5}, "labels")
+    parsed = splits.parse_splits({"val_scenes": ["0000"], "train_scenes": ["0001"]})
+    assert parsed.shares({"0000": 1, "0001": 2, "0002": 1}) == {"val": 0.25, "train": 0.5}
 
 
 @pytest.mark.parametrize(
@@ -272,7 +265,7 @@ def test_the_panel_counts_the_scenes_this_root_has_not_the_file_s_lists(tmp_path
         val=("0001", "7777", "8888"),
         name="scene_strat",
         note="why these.",
-        # 7777 is not in this root, so its windows must not skew the shares.
+        # 7777 is not in this root, so it must not skew the shares.
         windows={"train": {"0000": 300}, "val": {"0001": 100, "7777": 600}},
     )
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
@@ -284,8 +277,9 @@ def test_the_panel_counts_the_scenes_this_root_has_not_the_file_s_lists(tmp_path
     assert {i["which"]: i["count"] for i in panel["parts"]} == {"val": 1, "train": 1}
     # Held out first: it is the shorter list and the one a reader is looking for.
     assert [i["which"] for i in panel["parts"]] == ["val", "train"]
-    assert panel["unit"] == "windows"
-    assert {i["which"]: i["pct"] for i in panel["parts"]} == {"val": "25%", "train": "75%"}
+    # Over this root's frames (12 per scene), not the file's window counts.
+    assert panel["unit"] == "frames"
+    assert {i["which"]: i["pct"] for i in panel["parts"]} == {"val": "50%", "train": "50%"}
 
 
 def test_an_unsplit_root_gets_no_panel_and_no_marks(tmp_path):
@@ -363,8 +357,8 @@ def test_the_rendered_index_carries_the_bands_the_panel_and_the_filter(tmp_path)
     # The panel: one button per side plus "All", each count in scenes, each
     # share with its unit spelled out.
     assert 'data-split="" aria-pressed="true">All scenes <b>3</b>' in html
-    assert "Validation <b>1</b> <small>20% of windows</small>" in html
-    assert "Training <b>2</b> <small>80% of windows</small>" in html
+    assert "Validation <b>1</b> <small>33% of frames</small>" in html
+    assert "Training <b>2</b> <small>67% of frames</small>" in html
     assert 'class="splitbar"' in html
     assert "scene_strat &middot; dataset" not in html  # no version in this file
     assert "not unseen terrain" in html

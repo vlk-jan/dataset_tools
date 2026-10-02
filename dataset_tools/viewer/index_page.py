@@ -519,19 +519,16 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
             tally[mark["which"]] = tally.get(mark["which"], 0) + 1
     if not tally:
         return None
-    shares = splits.shares(r["probe"].scene_id for r in rows)
-    fractions, unit = shares if shares else ({}, None)
+    fractions = splits.shares({r["probe"].scene_id: r["probe"].n_frames for r in rows}) or {}
     return {
         "name": splits.name,
         "dataset_version": splits.dataset_version,
         "note": splits.note,
         "source": splits.source,
         "total": len(rows),
-        # Named unit, never a bare percentage: the same fold is 23.7 % of the
-        # labels and 25.8 % of the windows, and one scene is 30 % of the held-out
-        # labels but 56 % of the held-out windows. An unlabelled number here
-        # would be read as whichever the reader had in mind.
-        "unit": unit,
+        # Named unit, never a bare percentage: the same fold is a different
+        # share of the frames, the labels and the training windows.
+        "unit": "frames" if fractions else None,
         # "parts", not "items": Jinja resolves `panel.items` to dict.items and
         # the template would iterate the bound method instead of the list.
         "parts": [

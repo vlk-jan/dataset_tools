@@ -55,15 +55,14 @@ carries ``keyframes_train.lst`` and ``keyframes_heldout.lst`` beside
 facts DRIFT's loader enforces (``datasets.helhest.held_out_scenes``), so the
 viewer tags them the way it tags a ``scene_strat`` fold: held out as
 ``val``, the training list's scenes as ``train``, a scene in neither as
-unassigned. ``splits.json`` still wins when present, because it carries the
-window counts a declaration cannot.
+unassigned. ``splits.json`` still wins when present, because it names the fold.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -111,7 +110,7 @@ class SceneSplits:
     val: frozenset[str] = field(default_factory=frozenset)
     train: frozenset[str] | None = None
     excluded: frozenset[str] = field(default_factory=frozenset)
-    #: Per-scene weights, for the held-out share. ``{scene: count}``.
+    #: Per-scene counts as the export wrote them. ``{scene: count}``.
     labels: dict[str, int] = field(default_factory=dict)
     windows: dict[str, int] = field(default_factory=dict)
 
@@ -140,33 +139,25 @@ class SceneSplits:
             return TRAIN  # a bare holdout list: everything it omits trains
         return TRAIN if scene_id in self.train else None
 
-    def shares(self, scene_ids: Iterable[str] | None = None) -> tuple[dict[str, float], str] | None:
-        """``({side: fraction}, unit)`` from the richest count the file carries.
+    def shares(self, frames: Mapping[str, int]) -> dict[str, float] | None:
+        """``{side: fraction}`` of the frames in ``{scene: n_frames}``.
 
-        Windows are preferred over labels because windows are what a training
-        run actually iterates; the unit travels with the numbers because the two
-        answers differ by several points and by a lot for a single scene. Given
-        `scene_ids`, only those scenes count, so the fractions describe the
-        scenes a page shows; a scene the file does not assign still counts
-        towards the total, and towards no side.
+        Frames, not the file's label or window counts: those exist only in an
+        exported ``splits.json`` and disagree with each other by several points
+        (one scene is 30 % of the held-out labels but 56 % of the held-out
+        windows), while every root has frames and a declared split has nothing
+        else. The scenes given are the ones a page shows; one the split does not
+        assign still counts towards the total, and towards no side.
         """
-        wanted = None if scene_ids is None else set(scene_ids)
-        # The two disagree substantially -- one scene is 30 % of the held-out
-        # labels but 56 % of the held-out windows -- so a bare percentage would
-        # be meaningless and the panel always names its unit.
-        for counts, unit in ((self.windows, "windows"), (self.labels, "labels")):
-            if wanted is not None:
-                counts = {scene: n for scene, n in counts.items() if scene in wanted}
-            total = sum(counts.values())
-            if not total:
-                continue
-            sides: dict[str, int] = {}
-            for scene, n in counts.items():
-                which = self.of(scene)
-                if which is not None:
-                    sides[which] = sides.get(which, 0) + n
-            return {which: n / total for which, n in sides.items()}, unit
-        return None
+        total = sum(frames.values())
+        if not total:
+            return None
+        sides: dict[str, int] = {}
+        for scene, n in frames.items():
+            which = self.of(scene)
+            if which is not None:
+                sides[which] = sides.get(which, 0) + n
+        return {which: n / total for which, n in sides.items()}
 
 
 #: A root that declares nothing. Shared so the common case allocates nothing and
