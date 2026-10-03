@@ -171,20 +171,32 @@
   const plainOf = (src) => fullSize(src.dataset.plain ?? src.src);
   const cloudOf = (src) => (pageCloud ? fullSize(pageCloud.dataset.cloud) : src.dataset.cloud);
   let photoTurn = 0;
+  // Resolves once the picture set has loaded (or failed), so following
+  // playback can wait for one before asking for the next.
+  const loaded = () => new Promise((resolve) => {
+    img.addEventListener("load", resolve, { once: true });
+    img.addEventListener("error", resolve, { once: true });
+  });
+  const setPicture = (url) => {
+    // The same source again fires no load event, and would hold up following.
+    if (new URL(url, location.href).href === img.src) return Promise.resolve();
+    const done = loaded();
+    dtDepth.setSrc(img, url);
+    return done;
+  };
   const showPhoto = async (src) => {
     const turn = ++photoTurn;
     if (cloudOn() && cloudOf(src)) {
       try {
         const overlay = await dtDepth.load(cloudOf(src));
         if (turn !== photoTurn) return URL.revokeObjectURL(overlay.src);
-        dtDepth.setSrc(img, overlay.src);
         dtDepth.show(legend, overlay.range);
-        return;
+        return setPicture(overlay.src);
       } catch {}
     }
     if (turn !== photoTurn) return;
-    dtDepth.setSrc(img, plainOf(src));
     dtDepth.show(legend, null);
+    return setPicture(plainOf(src));
   };
   zoomCloud?.addEventListener("click", () => {
     if (pageCloud) {
@@ -194,6 +206,7 @@
       ownCloud = !ownCloud;
     }
     zoomCloud.setAttribute("aria-pressed", String(cloudOn()));
+    shownKey = keyOf(current);
     showPhoto(current);
   });
 
@@ -203,6 +216,57 @@
 
   // A click on the backdrop (the dialog box itself, outside its content) closes it.
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+
+  // What the dialog is showing for its picture, as the URLs it came from: on
+  // the 3D view a tile moves on with playback, and the dialog follows it.
+  const keyOf = (src) =>
+    src.dataset.zoom ? `${src.dataset.zoom}|${src.dataset.grid ?? ""}` : `${plainOf(src)}|${cloudOn() ? cloudOf(src) ?? "" : ""}`;
+  let shownKey = null;
+  let gridTurn = 0;
+  const loadGrid = async (src) => {
+    const url = src.dataset.grid;
+    if (!url) return;
+    const turn = ++gridTurn;
+    if (!grids.has(url)) grids.set(url, fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    const g = await grids.get(url);
+    if (!dlg.open || turn !== gridTurn) return; // closed or moved on meanwhile
+    if (!g) { grid = null; cell.hidden = true; read.textContent = "no cell values for this frame"; return; }
+    grid = g;
+    // A pinned cell stays pinned across frames, reading the new frame's values.
+    pinned ? show(...pinned) : idle();
+  };
+
+  // Follow the picture the dialog was opened from as it changes (3D playback),
+  // keeping the magnification and the pinned cell. One frame at a time: a
+  // frame that arrives while one is loading is skipped for the newest.
+  let following = false;
+  let followAgain = false;
+  const follow = async () => {
+    if (!dlg.open || !current) return;
+    if (following) { followAgain = true; return; }
+    following = true;
+    try {
+      const src = current;
+      const key = keyOf(src);
+      if (key !== shownKey) {
+        shownKey = key;
+        title.textContent = src.alt.replace(/, lidar cloud.*$/, "");
+        img.alt = src.alt;
+        if (src.dataset.zoom) {
+          photoTurn += 1;
+          if (src.dataset.grid) grids.clear(); // one frame's grid at a time, not the whole run
+          loadGrid(src);
+          await setPicture(src.dataset.zoom);
+        } else {
+          if (zoomCloud) zoomCloud.hidden = !pageCloud && !src.dataset.cloud;
+          await showPhoto(src);
+        }
+      }
+    } finally {
+      following = false;
+    }
+    if (followAgain) { followAgain = false; follow(); }
+  };
 
   const open = async (src) => {
     grid = null;
@@ -220,6 +284,7 @@
     title.textContent = src.alt.replace(/, lidar cloud.*$/, "");
     img.alt = src.alt;
     current = src;
+    shownKey = keyOf(src);
     if (photo) showPhoto(src);
     else {
       photoTurn += 1; // a photo still loading must not land on this picture
@@ -232,18 +297,15 @@
     }
     img.classList.toggle("bev", !!src.dataset.zoom);
     dlg.showModal();
-    const url = src.dataset.grid;
-    if (!url) return;
-    if (!grids.has(url)) grids.set(url, fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null));
-    const g = await grids.get(url);
-    if (!dlg.open || img.alt !== src.alt) return; // closed or moved on meanwhile
-    if (!g) { read.textContent = "no cell values for this frame"; return; }
-    grid = g;
-    idle();
+    gridTurn += 1;
+    loadGrid(src);
   };
 
   for (const el of document.querySelectorAll(".zoomable")) {
     el.addEventListener("click", () => open(el));
+    // A new picture in the element the dialog came from: show it there too.
+    // On the frame page nothing it is keyed on changes, so this does nothing.
+    el.addEventListener("load", () => { if (el === current) follow(); });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(el); }
     });

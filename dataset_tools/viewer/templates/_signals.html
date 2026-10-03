@@ -2,15 +2,16 @@
    axis (signals.signal_charts). Drawn here as SVG, so every line is on the
    page without JavaScript; charts.js adds the crosshair, the readout and the
    click that opens the frame under the pointer. Included only when `signals`
-   exists: a scene with none of the arrays renders no markup. #}
-<div class="card signals" data-signals data-scene="{{ scene_id }}"
+   exists: a scene with none of the arrays renders no markup. The whole card
+   folds away under its header's arrow, as each chart does under its own. #}
+<details class="card signals" open data-signals data-scene="{{ scene_id }}"
      data-duration="{{ signals.duration }}"
      {% if signals.offset %}data-offset="{{ signals.offset }}"{% endif %}
      {% if signals.frames %}data-frames="{{ signals.frames }}"{% endif %}>
-  <header>
+  <summary class="sigcardhead">
     <h2>Signals</h2>
     <span class="sigtime muted" data-sigtime>{{ signals.charts|length }} charts &middot; point at one to read every chart at that instant, click to open the frame</span>
-  </header>
+  </summary>
   {% for c in signals.charts %}
   {# Each chart folds away under its own arrow; all start open. #}
   <details class="sig" open data-series="{{ c.data }}">
@@ -41,4 +42,4 @@
   </details>
   {% endfor %}
   {% if signals.shade %}<p class="cardnote">Shaded: where ground truth exists. The robot's own signals run straight through the gaps.</p>{% endif %}
-</div>
+</details>

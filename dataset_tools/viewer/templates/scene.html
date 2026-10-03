@@ -21,6 +21,10 @@
   <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.which }}</span>
   {% endif %}
   {% if atlas and atlas.description %}<span class="muted">{{ atlas.description }}</span>{% endif %}
+  {# The first window in the table: segments come first, in order, part one of
+     a split segment before the rest; the whole-scene fallback only when there
+     is no segment at all. #}
+  {% if windows %}<a class="btn primary open3d" href="/view/{{ scene_id }}/{{ windows[0].key }}">Open 3D</a>{% endif %}
 {% endblock %}
 {% block main %}
 
