@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import bisect
 import csv
+import dataclasses
 import functools
 import hashlib
 import io
@@ -69,7 +70,7 @@ from .loaders import (
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
 from .scene_page import build_scene_page, map_card
-from .segment_page import COLUMN_TITLES, attitude_per_window, build_segment_page
+from .segment_page import COLUMN_TITLES, attitude_per_window, build_segment_page, segment_windows
 from .segment_page import find as find_segment
 from .signals import MAX_GT_SPEED, signal_charts
 from .splits import SPLIT_NAMES, SPLIT_ORDER
@@ -740,14 +741,10 @@ def create_app(
         index = thumb_index(root.atlas_scene(scene_id), slot, n_frames)
 
         def work():
-            path = access.frame_path("images", index)
-            if not path.is_file():
-                # Sparse images/: fall back to the nearest index that exists.
-                available = sorted(access.available_frames("images"))
-                if not available:
-                    return None
-                path = access.frame_path("images", min(available, key=lambda i: abs(i - index)))
-            return _safe_render(render.render_camera_image, path, 384)
+            nearest = access.nearest_frame("images", index)
+            if nearest is None:
+                return None
+            return _safe_render(render.render_camera_image, access.frame_path("images", nearest), 384)
 
         data = await run_in_threadpool(work)
         if data is None:
@@ -759,17 +756,17 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_maps", "height_map", render.render_height_map, size)
+        return await _npz_png(access, index, "height_maps", _npz_key("height_map"), render.render_height_map, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_masks", "validity", render.render_validity, size)
+        return await _npz_png(access, index, "height_masks", _npz_key("validity"), render.render_validity, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
     async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _driven_png(access, index, size)
+        return await _npz_png(access, index, "driven_similarity", read_driven_similarity, _render_driven, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/grid.json")
     async def api_frame_grid(scene_id: str, index: int):
@@ -781,9 +778,7 @@ def create_app(
         return Response(json.dumps(grid, separators=(",", ":")), media_type="application/json")
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
-    async def api_frame_cloud(
-        scene_id: str, index: int, color: str = "z", size: int = Query(TILE_SIZE, ge=128, le=1536)
-    ):
+    async def api_frame_cloud(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
 
         path = access.frame_path("clouds", index)
@@ -792,7 +787,7 @@ def create_app(
             cloud = load_cloud(path)
             if cloud is None:
                 return None
-            return render.render_cloud_bev(cloud, size=size, color_by=color)
+            return render.render_cloud_bev(cloud, size=size)
 
         data = await run_in_threadpool(work)
         if data is None:
@@ -883,10 +878,7 @@ def create_app(
     @app.patch("/api/scene/{scene_id}/notes/{note_id}")
     async def api_edit_note(scene_id: str, note_id: str, payload: dict = Body(...)):
         access = _access_or_404(state, scene_id)
-        # Either end may move on its own -- ``update`` leaves out whatever is
-        # None -- so this does not go through _frames_from_payload, which is
-        # for a whole range being named at once.
-        start, end = _optional_frames(payload)
+        start, end = _frames_from_payload(payload, required=False)
         note = await _notes_write(
             state,
             scene_id,
@@ -960,38 +952,22 @@ def create_app(
 # ---------------------------------------------------------------- helpers
 
 
-def _frames_from_payload(payload: dict) -> tuple[int, int]:
-    """The inclusive frame range a request names.
+def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int | None, int | None]:
+    """The inclusive ``{"frames": [a, b]}`` range a note request names -- the
+    stored form, and the only one the pages send.
 
-    Accepts ``{"frames": [a, b]}`` (the stored form) or the two fields spelled
-    out, and a bare ``{"frame": n}`` for a note on one frame -- which is what
-    the overlay sends when you mark the frame you are paused on.
+    An edit may leave the range out (``required=False``) and gets
+    ``(None, None)``: the note keeps the range it has.
     """
     frames = payload.get("frames")
-    if isinstance(frames, list | tuple) and len(frames) == 2:
-        start, end = frames
-    elif "frame" in payload:
-        start = end = payload["frame"]
-    else:
-        start = payload.get("frame_start")
-        end = payload.get("frame_end", start)
+    if frames is None and not required:
+        return None, None
     try:
-        return int(start), int(end)
+        if not isinstance(frames, list | tuple) or len(frames) != 2:
+            raise ValueError(frames)
+        return int(frames[0]), int(frames[1])
     except (TypeError, ValueError):
-        raise HTTPException(400, "a note needs a frame range") from None
-
-
-def _optional_frames(payload: dict) -> tuple[int | None, int | None]:
-    """The ends of a range an edit names, ``None`` for each one it leaves alone."""
-    frames = payload.get("frames")
-    if isinstance(frames, list | tuple) and len(frames) == 2:
-        pair = list(frames)
-    else:
-        pair = [payload.get("frame_start"), payload.get("frame_end")]
-    try:
-        return tuple(None if v is None else int(v) for v in pair)  # type: ignore[return-value]
-    except (TypeError, ValueError):
-        raise HTTPException(400, "frame numbers must be integers") from None
+        raise HTTPException(400, "a note needs a frame range: frames [first, last]") from None
 
 
 async def _notes_write(state: ViewerState, scene_id: str, fn, *args, **kwargs):
@@ -1097,17 +1073,12 @@ def _bundle_key(scene_id: str, window_key: str, opts: BuildOptions) -> str:
 def _options_from_key(opts_key: str) -> BuildOptions:
     """Recover the build options a bundle path encodes (see ``BuildOptions.cache_key``)."""
     parts = opts_key.split("-")
-    if len(parts) != 6:
+    fields = dataclasses.fields(BuildOptions)
+    if len(parts) != len(fields):
         return BuildOptions()
     try:
-        return BuildOptions(
-            max_cloud_frames=int(parts[0]),
-            max_cloud_points=int(parts[1]),
-            max_hm_frames=int(parts[2]),
-            max_terrain_cells=int(parts[3]),
-            terrain_res=float(parts[4]),
-            cloud_color=parts[5],
-        ).sanitized()
+        # Each field parsed as the type of its default: int, float or str.
+        return BuildOptions(**{f.name: type(f.default)(v) for f, v in zip(fields, parts, strict=True)}).sanitized()
     except ValueError:
         return BuildOptions()
 
@@ -1247,12 +1218,14 @@ async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key
         logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
 
-async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, renderer, size: int) -> Response:
+async def _npz_png(access: SceneAccess, index: int, kind: str, load, renderer, size: int) -> Response:
+    """One frame's ``kind`` file as a PNG tile: ``renderer(load(path), size=size)``,
+    absent or unreadable when ``load`` gives None."""
     path = access.frame_path(kind, index)
 
     def work():
-        arr = load_npz_key(path, key)
-        return None if arr is None else renderer(arr, size=size)
+        data = load(path)
+        return None if data is None else renderer(data, size=size)
 
     data = await run_in_threadpool(work)
     if data is None:
@@ -1260,21 +1233,14 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, key: str, rendere
     return Response(data, media_type="image/png")
 
 
-async def _driven_png(access: SceneAccess, index: int, size: int) -> Response:
+def _npz_key(key: str):
+    """A loader for ``_npz_png`` reading one array out of an ``.npz``."""
+    return lambda path: load_npz_key(path, key)
+
+
+def _render_driven(sidecar: dict[str, Any], size: int) -> bytes:
     """The driven-similarity tile: three keys of one small npz, one image."""
-
-    path = access.frame_path("driven_similarity", index)
-
-    def work():
-        sidecar = read_driven_similarity(path)
-        if sidecar is None:
-            return None
-        return render.render_driven_similarity(sidecar["driven"], sidecar["max_sim"], sidecar["threshold"], size=size)
-
-    data = await run_in_threadpool(work)
-    if data is None:
-        return _absent_or_unreadable(path, f"driven_similarity for frame {index}")
-    return Response(data, media_type="image/png")
+    return render.render_driven_similarity(sidecar["driven"], sidecar["max_sim"], sidecar["threshold"], size=size)
 
 
 def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
@@ -1458,24 +1424,13 @@ def _frame_indices(access: SceneAccess, frame_range: tuple[int, int] | None = No
     return indices
 
 
-def _segment_page_of_frame(access: SceneAccess, segment: int, index: int, max_frames: int, max_seconds: float) -> int:
-    """Which page of a segment page's frame strip holds ``index`` (0 when it cannot tell)."""
-    wins = [w for w in access.windows(max_frames, max_seconds) if w.kind == "segment" and w.segment_index == segment]
-    if not wins:
-        return 0
-    lo, hi = wins[0].frame_start, wins[-1].frame_end
-    inside = [i for i in _frame_indices(access) if lo <= i < hi]
-    return bisect.bisect_left(inside, index) // FRAMES_PER_PAGE
-
-
-def _page_of_frame(access: SceneAccess, index: int) -> int:
-    """Which page of the frame browser holds ``index``.
+def _page_of(indices: list[int], index: int) -> int:
+    """Which page of a frame strip over ``indices`` holds ``index`` (0 when empty).
 
     Not ``index // FRAMES_PER_PAGE``: on a scene with a sparse per-frame
-    directory the browser pages through the frames that *exist*, so a frame's
+    directory the strip pages through the frames that *exist*, so a frame's
     page is its position in that list, not its own number.
     """
-    indices = _frame_indices(access)
     if not indices:
         return 0
     # The list is sorted, so the position is a search -- and for the usual
@@ -1530,7 +1485,7 @@ def _frame_details(
         # Which page of the frame browser this frame sits on, so "back to the
         # frame strip" lands where the frame actually is even on a scene whose
         # per-frame directory is sparse.
-        "strip_page": _page_of_frame(access, index),
+        "strip_page": _page_of(_frame_indices(access), index),
     }
 
     ts = access.frame_ts
@@ -1578,6 +1533,9 @@ def _frame_details(
 
     seg = access.segment_of_frame(index)
     if seg is not None:
+        # The segment page's strip covers the frames of the segment's windows.
+        wins = segment_windows(access, seg, max_frames, max_seconds)
+        strip = _frame_indices(access, (wins[0].frame_start, wins[-1].frame_end)) if wins else []
         details["segment"] = {
             "index": seg.index,
             "reason": seg.reason,
@@ -1589,7 +1547,7 @@ def _frame_details(
                 0.0,
                 round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
             ),
-            "strip_page": _segment_page_of_frame(access, seg.index, index, max_frames, max_seconds),
+            "strip_page": _page_of(strip, index),
         }
     else:
         details["segment"] = None

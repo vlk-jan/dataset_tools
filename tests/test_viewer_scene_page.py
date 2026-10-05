@@ -74,20 +74,17 @@ def test_camera_info_of_a_missing_or_malformed_file_is_simply_absent(tmp_path):
     read_camera_info(bad)  # must not raise; whatever it salvages is fine
 
 
-def test_a_series_reports_the_files_own_rate_not_the_sampled_one(tmp_path):
-    from dataset_tools.viewer.scene_page import read_series
-
-    arr = np.zeros((10_000, 4))
+def test_the_proprioception_card_reports_each_files_own_count_and_rate(tmp_path):
+    root_path = make_root(tmp_path)
+    arr = np.zeros((10_000, 7))
     arr[:, 0] = 1_700_000_000.0 + 0.01 * np.arange(10_000)  # 100 Hz
-    arr[:, 1] = 2.0
-    path = tmp_path / "series.npy"
-    np.save(path, arr)
+    arr[:, 1] = -2.0
+    np.save(root_path / "0000" / "cmd_vel.npy", arr)
 
-    series = read_series(path, max_rows=50)
-    assert series.n == 10_000  # the header count, not the sampled one
-    assert len(series.rows) <= 51
-    assert series.rate == pytest.approx(100.0, rel=0.01)
-    assert series.mean_abs(1) == pytest.approx(2.0)
+    proprio = card_of(scene_page(tmp_path, root_path), "Proprioception")
+    assert value_of(proprio, "cmd_vel") == "10,000 × 7"
+    assert sub_of(proprio, "cmd_vel") == "100.0 Hz"
+    assert value_of(proprio, "commanded speed") == "2.00 m/s"
 
 
 def test_the_four_cards_state_what_the_scene_has(tmp_path):

@@ -20,7 +20,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .loaders import HM_RES
+from .loaders import CHASSIS, CHASSIS_CENTER, HM_RES, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 
 logger = logging.getLogger("dataset_tools.viewer.render")
 
@@ -75,21 +75,6 @@ DRIVEN_COLOR = np.array([40, 220, 235], dtype=np.uint8)
 #: Brightening applied to cells above the sidecar's trust threshold, so the gate
 #: DRIFT actually applies is visible as a step inside the smooth ramp.
 DRIVEN_TRUST_BOOST = 1.18
-
-
-#: HELHEST's footprint in its own frame (metres), forward = +x, left = +y.
-#:
-#: Deliberately duplicated from :mod:`build`'s ``CHASSIS``/``WHEELS`` rather
-#: than imported: ``build`` imports *this* module, so importing back would be a
-#: cycle. ``tests/test_viewer_app.py`` asserts the two stay in agreement.
-#: base_link is the front axle (DRIFT's helhest_robot_model), so the chassis
-#: box sits mostly behind the origin.
-ROBOT_CHASSIS_HALF = (0.35, 0.25)  # half length (x), half width (y)
-ROBOT_CHASSIS_CENTER = (-0.15, 0.0)  # box centre in the base frame
-ROBOT_WHEEL_RADIUS = 0.334
-ROBOT_WHEEL_WIDTH = 0.142
-#: (x, y) of each wheel hub -- two front wheels on the axle, one rear centre wheel.
-ROBOT_WHEEL_HUBS = ((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0))
 
 
 def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
@@ -247,12 +232,12 @@ def draw_robot_silhouette(img, px_per_m: float):
             width=width,
         )
 
-    r, half_w = ROBOT_WHEEL_RADIUS, ROBOT_WHEEL_WIDTH / 2.0
-    for wx, wy in ROBOT_WHEEL_HUBS:
+    r, half_w = WHEEL_RADIUS, WHEEL_WIDTH / 2.0
+    for wx, wy, *_ in WHEELS.values():
         box(wx - r, wx + r, wy - half_w, wy + half_w, (0, 0, 0, 150), (255, 255, 255, 210))
 
-    hx, hy = ROBOT_CHASSIS_HALF
-    cx0, cy0 = ROBOT_CHASSIS_CENTER
+    hx, hy = CHASSIS["hx"], CHASSIS["hy"]
+    cx0, cy0, _ = CHASSIS_CENTER
     box(cx0 - hx, cx0 + hx, cy0 - hy, cy0 + hy, (255, 255, 255, 70), (255, 255, 255, 235))
 
     # Heading wedge just ahead of the chassis: which end is the front is not
@@ -263,18 +248,18 @@ def draw_robot_silhouette(img, px_per_m: float):
     return img
 
 
-def render_cloud_bev(
-    cloud: np.ndarray,
-    extent: float = 12.0,
-    size: int = 384,
-    color_by: str = "z",
-) -> bytes:
-    """Top-down scatter of one raw cloud, in the robot's own frame.
+#: Half the side of the cloud tile (m): it shows ``[-12, 12]`` m about the robot.
+CLOUD_BEV_EXTENT = 12.0
+
+
+def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
+    """Top-down scatter of one raw cloud, in the robot's own frame, coloured by z.
 
     Rendered by binning rather than plotting, so it costs one pass over the
     points. Empty cells stay dark, which makes the sensor's blind wedge (no
     returns behind the robot on a forward-only lidar) immediately visible.
     """
+    extent = CLOUD_BEV_EXTENT
     cloud = np.asarray(cloud)
     n = size
     rgb = np.zeros((n, n, 3), dtype=np.uint8)
@@ -286,9 +271,6 @@ def render_cloud_bev(
     if not keep.any():
         return _png(_image(rgb))
     x, y, z = x[keep], y[keep], z[keep]
-    values = z
-    if color_by == "intensity" and cloud.shape[1] > 3:
-        values = cloud[keep, 3]
 
     # Screen: +x forward -> up (row 0 at top), +y left -> left (col 0 at left).
     row = np.clip(((extent - x) / (2 * extent) * n).astype(np.int32), 0, n - 1)
@@ -297,7 +279,7 @@ def render_cloud_bev(
 
     acc = np.zeros(n * n, dtype=np.float64)
     cnt = np.zeros(n * n, dtype=np.int32)
-    np.add.at(acc, flat, values)
+    np.add.at(acc, flat, z)
     np.add.at(cnt, flat, 1)
     filled = cnt > 0
     mean = np.full(n * n, np.nan)

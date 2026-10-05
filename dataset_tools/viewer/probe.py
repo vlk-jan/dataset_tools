@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -377,9 +378,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
     if probe.present.get("odometry_segments"):
         segments = read_segments(scene_dir / "odometry_segments.txt")
         probe.n_segments = len(segments)
-        for seg in segments:
-            reason = seg.reason or "unlabelled"
-            probe.segment_reasons[reason] = probe.segment_reasons.get(reason, 0) + 1
+        probe.segment_reasons = dict(Counter(seg.reason or "unlabelled" for seg in segments))
         if segments:
             probe.start_ts = segments[0].start_ts
             probe.end_ts = segments[-1].end_ts
@@ -529,27 +528,29 @@ class DatasetRoot:
         validation data, because that is a modelling decision and not something
         a directory listing can answer.
         """
-        return self._root_files_any(("splits.json", *DECLARED_FILES), lambda: read_splits(self.path) or NO_SPLITS)
+        return self._root_file(("splits.json", *DECLARED_FILES), lambda: read_splits(self.path) or NO_SPLITS)
 
     def keyframe_counts(self) -> dict[str, int]:
         """Lines of ``keyframes.lst`` per scene (its first path component); empty without the file."""
 
         def load() -> dict[str, int]:
-            counts: dict[str, int] = {}
             try:
                 with open(self.path / "keyframes.lst") as f:
-                    for line in f:
-                        if line.strip():
-                            scene = line.split("/", 1)[0]
-                            counts[scene] = counts.get(scene, 0) + 1
+                    return dict(Counter(line.split("/", 1)[0] for line in f if line.strip()))
             except OSError:
-                pass
-            return counts
+                return {}
 
         return self._root_file("keyframes.lst", load)
 
-    def _root_files_any(self, relpaths: tuple[str, ...], load):
-        """`_root_file` over several files: re-run ``load()`` when any of them changed."""
+    def _root_file(self, relpaths: str | tuple[str, ...], load):
+        """``load()``, re-run only when one of ``relpaths`` (under the root) changed.
+
+        These files are small and change by hand or by a tool run beside the
+        viewer -- ``helhest-validate`` rewriting validation.csv, an atlas being
+        regenerated -- so a stat per use replaces reading them once per process.
+        """
+        if isinstance(relpaths, str):
+            relpaths = (relpaths,)
         keys = []
         for relpath in relpaths:
             try:
@@ -562,24 +563,6 @@ class DatasetRoot:
         if cached is None or cached[0] != keys:
             cached = (keys, load())
             self._root_files[name] = cached
-        return cached[1]
-
-    def _root_file(self, relpath: str, load):
-        """``load()``, re-run only when ``relpath`` (under the root) changed.
-
-        These files are small and change by hand or by a tool run beside the
-        viewer -- ``helhest-validate`` rewriting validation.csv, an atlas being
-        regenerated -- so a stat per use replaces reading them once per process.
-        """
-        try:
-            st = (self.path / relpath).stat()
-            key = (st.st_mtime_ns, st.st_size, st.st_ino)
-        except OSError:
-            key = None
-        cached = self._root_files.get(relpath)
-        if cached is None or cached[0] != key:
-            cached = (key, load())
-            self._root_files[relpath] = cached
         return cached[1]
 
     @property
@@ -705,7 +688,7 @@ class DatasetRoot:
             self.save_probe_cache()
         return probe
 
-    def probe_all(self, refresh: bool = False) -> list[SceneProbe]:
+    def probe_all(self) -> list[SceneProbe]:
         """Probe every scene, writing the cache at most once.
 
         Saving inside the loop rewrote the whole (growing) cache file once per
@@ -718,7 +701,7 @@ class DatasetRoot:
         index render rather than after a restart. Each scene's probe still
         stands while its fingerprint does.
         """
-        probes = [self.probe(sid, refresh=refresh, persist=False) for sid in self.scene_ids(refresh=True)]
+        probes = [self.probe(sid, persist=False) for sid in self.scene_ids(refresh=True)]
         self.save_probe_cache()
         return probes
 

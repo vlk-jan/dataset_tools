@@ -13,6 +13,7 @@ small JSON read.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any
 from urllib.parse import urlencode
 
@@ -67,6 +68,14 @@ def fmt_count(value: Any) -> str:
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return "-"
+
+
+def images_clouds_stat(p: SceneProbe) -> dict[str, Any] | None:
+    """The ``images · clouds`` file counts off the probe; None with neither counted."""
+    images, clouds = p.counts.get("images"), p.counts.get("clouds")
+    if images is None and clouds is None:
+        return None
+    return stat("images · clouds", f"{fmt_count(images)} · {fmt_count(clouds)}")
 
 
 def fmt_bytes(n: float) -> str:
@@ -142,15 +151,8 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
         stat("duration", fmt_duration(p.duration)),
         stat("frames", fmt_count(p.n_frames)),
     ]
-    images, clouds = p.counts.get("images"), p.counts.get("clouds")
-    if images is not None or clouds is not None:
-        stats.append(
-            stat(
-                "images · clouds",
-                f"{fmt_count(images) if images is not None else '-'}"
-                f" · {fmt_count(clouds) if clouds is not None else '-'}",
-            )
-        )
+    if counted := images_clouds_stat(p):
+        stats.append(counted)
     if p.n_segments:
         reasons = ", ".join(f"{n}× {r}" for r, n in sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])[:2])
         stats.append(stat("segments", p.n_segments, reasons or None))
@@ -307,12 +309,8 @@ def validation_totals(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str
     """
     if root.validation() is None:
         return None
-    tally = {"yes": 0, "partial": 0, "no": 0}
-    for row in rows:
-        mark = row.get("validation")
-        if mark:
-            tally[mark["cls"]] += 1
-    seen = sum(tally.values())
+    tally = Counter(row["validation"]["cls"] for row in rows if row.get("validation"))
+    seen = tally.total()
     if not seen:
         return None
     w, e = tally["partial"], tally["no"]
@@ -511,11 +509,10 @@ def disk_parts(entries: Any) -> list[dict[str, Any]]:
     """The disk bar's slices, largest first, summed over ``disk_usage.json``
     scene entries, linked bytes included. One function for the index's bar and a scene page's, so a
     modality has the same colour and name on both."""
-    by_mod: dict[str, int] = {}
+    by_mod: Counter[str] = Counter()
     for entry in entries:
         for name, m in (entry.get("modalities") or {}).items():
-            key = name if name in DISK_MODALITIES else "other"
-            by_mod[key] = by_mod.get(key, 0) + content_bytes(m)
+            by_mod[name if name in DISK_MODALITIES else "other"] += content_bytes(m)
     total = sum(by_mod.values())
     if not total:
         return []

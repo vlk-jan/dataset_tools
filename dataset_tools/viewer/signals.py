@@ -172,7 +172,7 @@ def time_ticks(duration: float, offset: float = 0.0) -> list[dict[str, Any]]:
 
 
 def _speed(ts: np.ndarray, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Speed between consecutive samples, at their midpoints; sub-millisecond steps are dropped."""
+    """Speed between consecutive positions (any number of columns), at their midpoints; sub-millisecond steps are dropped."""
     dt = np.diff(ts)
     ok = dt > 1e-3
     return (ts[1:][ok] + ts[:-1][ok]) / 2, np.linalg.norm(np.diff(xy, axis=0), axis=1)[ok] / dt[ok]

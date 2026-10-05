@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import asdict, dataclass
+from typing import Any
 
 import numpy as np
 
@@ -211,6 +212,11 @@ def segment_bounds(frame_ts: np.ndarray | None, segments: list[Segment]) -> list
     return bounds
 
 
+def frames_within(frame_ts: np.ndarray, lo_ts: float, hi_ts: float) -> tuple[int, int]:
+    """The ``[start, end)`` frames whose stamps fall inside ``[lo_ts, hi_ts]``."""
+    return int(np.searchsorted(frame_ts, lo_ts, side="left")), int(np.searchsorted(frame_ts, hi_ts, side="right"))
+
+
 def windows_for_scene(
     frame_ts: np.ndarray | None,
     segments: list[Segment],
@@ -229,37 +235,24 @@ def windows_for_scene(
     windows: list[Window] = []
 
     if frame_ts is not None and len(frame_ts) and segments:
-        for seg, (lo_ts, hi_ts) in zip(segments, segment_bounds(frame_ts, segments), strict=False):
-            lo = int(np.searchsorted(frame_ts, lo_ts, side="left"))
-            hi = int(np.searchsorted(frame_ts, hi_ts, side="right"))
+        for seg, bounds in zip(segments, segment_bounds(frame_ts, segments), strict=False):
+            lo, hi = frames_within(frame_ts, *bounds)
             if hi - lo < MIN_WINDOW_FRAMES:
                 continue
-            chunks = _chunk_ranges(lo, hi, max_frames, frame_ts, max_seconds)
-            for ci, (cs, ce) in enumerate(chunks):
-                suffix = f".{ci}" if len(chunks) > 1 else ""
-                label = f"Segment {seg.index}"
-                if len(chunks) > 1:
-                    label += f" ({ci + 1}/{len(chunks)})"
-                windows.append(
-                    Window(
-                        key=f"seg{seg.index:03d}{suffix}",
-                        kind="segment",
-                        label=label,
-                        frame_start=cs,
-                        frame_end=ce,
-                        pose_source="odometry",
-                        segment_index=seg.index,
-                        chunk=ci,
-                        n_chunks=len(chunks),
-                        reason=seg.reason,
-                        # The segment file counts poses per segment, not per
-                        # chunk, and the split is even, so an even share is the
-                        # honest estimate; the rate it gives is unchanged.
-                        n_poses=round(seg.n_poses / len(chunks)),
-                        t_start=float(frame_ts[cs]),
-                        t_end=float(frame_ts[ce - 1]),
-                    )
-                )
+            windows += _chunked(
+                lo,
+                hi,
+                max_frames,
+                frame_ts,
+                max_seconds,
+                key=f"seg{seg.index:03d}",
+                kind="segment",
+                label=f"Segment {seg.index}",
+                pose_source="odometry",
+                segment_index=seg.index,
+                reason=seg.reason,
+                n_poses=seg.n_poses,
+            )
 
     # Whole-scene wheel-odometry fallback: drifty and NOT ground truth, so it is
     # offered only when the scene yields no ground-truth window at all, where it
@@ -272,33 +265,56 @@ def windows_for_scene(
     # zero frames and died with an IndexError.
     playable = _playable_frames(frame_ts, n_frames)
     if not windows and playable >= MIN_WINDOW_FRAMES:
-        source = "transforms" if has_transforms else "none"
-        chunks = _chunk_ranges(0, playable, max_frames, frame_ts, max_seconds)
-        for ci, (cs, ce) in enumerate(chunks):
-            suffix = f".{ci}" if len(chunks) > 1 else ""
-            label = "Whole scene, wheel odometry" if source == "transforms" else "Whole scene, no pose"
-            if len(chunks) > 1:
-                label += f" ({ci + 1}/{len(chunks)})"
-            windows.append(
-                Window(
-                    key=f"raw{suffix}",
-                    kind="raw",
-                    label=label,
-                    frame_start=cs,
-                    frame_end=ce,
-                    pose_source=source,
-                    chunk=ci,
-                    n_chunks=len(chunks),
-                    reason=(
-                        "wheel odometry, drifts; not ground truth"
-                        if source == "transforms"
-                        else "no pose data in this scene"
-                    ),
-                    t_start=float(frame_ts[cs]) if frame_ts is not None and len(frame_ts) > cs else 0.0,
-                    t_end=float(frame_ts[ce - 1]) if frame_ts is not None and len(frame_ts) >= ce else 0.0,
-                )
-            )
+        windows += _chunked(
+            0,
+            playable,
+            max_frames,
+            frame_ts,
+            max_seconds,
+            key="raw",
+            kind="raw",
+            label="Whole scene, wheel odometry" if has_transforms else "Whole scene, no pose",
+            pose_source="transforms" if has_transforms else "none",
+            reason="wheel odometry, drifts; not ground truth" if has_transforms else "no pose data in this scene",
+        )
     return windows
+
+
+def _chunked(
+    start: int,
+    end: int,
+    max_frames: int,
+    frame_ts: np.ndarray | None,
+    max_seconds: float,
+    key: str,
+    label: str,
+    n_poses: int = 0,
+    **fields: Any,
+) -> list[Window]:
+    """One window per chunk of ``[start, end)`` (:func:`_chunk_ranges`), keyed and labelled in turn.
+
+    A lone chunk keeps the bare ``key`` and ``label``; several get ``.i`` and
+    ``(i/n)``. ``n_poses`` is the whole stretch's: the segment file counts poses
+    per segment, not per chunk, and the split is even, so each chunk gets an
+    even share -- the honest estimate, and the rate it gives is unchanged.
+    """
+    chunks = _chunk_ranges(start, end, max_frames, frame_ts, max_seconds)
+    n = len(chunks)
+    return [
+        Window(
+            key=key + (f".{ci}" if n > 1 else ""),
+            label=label + (f" ({ci + 1}/{n})" if n > 1 else ""),
+            frame_start=cs,
+            frame_end=ce,
+            chunk=ci,
+            n_chunks=n,
+            n_poses=round(n_poses / n),
+            t_start=float(frame_ts[cs]) if frame_ts is not None and len(frame_ts) > cs else 0.0,
+            t_end=float(frame_ts[ce - 1]) if frame_ts is not None and len(frame_ts) >= ce else 0.0,
+            **fields,
+        )
+        for ci, (cs, ce) in enumerate(chunks)
+    ]
 
 
 def neighbour_windows(windows: list[Window], current: Window) -> tuple[Window | None, Window | None]:
@@ -442,11 +458,9 @@ def segment_of_frame(frame_ts: np.ndarray | None, segments: list[Segment], index
     if frame_ts is None or index < 0 or index >= len(frame_ts):
         return None
     t = float(frame_ts[index])
-    for seg in segments:
-        if seg.start_ts <= t <= seg.end_ts:
-            return seg
-    # Nothing contains it outright: a frame just off an edge is still that
-    # segment's, on the widened bounds (see ``segment_bounds``).
+    # On the widened bounds (see ``segment_bounds``), so a frame just off an
+    # edge is still that segment's. They contain every raw span and never reach
+    # into a later segment's, so a frame inside one segment is that segment's.
     for seg, (lo, hi) in zip(segments, segment_bounds(frame_ts, segments), strict=False):
         if lo <= t <= hi:
             return seg

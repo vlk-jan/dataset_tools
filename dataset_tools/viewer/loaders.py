@@ -26,17 +26,44 @@ import numpy as np
 
 from .. import gt_io
 from ..gt_io import SegmentRow as Segment
-from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat, quat_slerp
+from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat
 
 logger = logging.getLogger("dataset_tools.viewer.loaders")
 
-__all__ = ["Segment", "interpolate_poses", "mat_to_quat", "poses_from_quat", "quat_slerp"]
+__all__ = ["Segment", "interpolate_poses", "mat_to_quat", "poses_from_quat"]
 
 # Per-frame BEV height map geometry. These are the values the DRIFT height-map
 # generator uses; they are re-derived per file from the array shape where
 # possible so a differently-sized map still lands in the right place.
 HM_RES = 0.1
 HM_EXTENT = (-6.4, 6.4)
+
+# HELHEST geometry from DRIFT's robot model (simulator/utils.py,
+# helhest_robot_model, sourced from the robot URDF): base_link IS the front
+# axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
+# 0.334 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
+# axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
+# ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
+# middle of the box and every return looked 0.4 m too close.
+#
+# The chassis box is the body the view centres on and the wheels hang off, so
+# it carries base_link's trajectory; its visual centre is pushed back by
+# CHASSIS_CENTER (a body-frame offset) so the box spans the real chassis, from
+# behind the rear-wheel fork to the sensor face just ahead of the axle
+# (tf_static: front sensors at x = +0.10..+0.17, wheel holders at -0.477).
+#
+# Kept here rather than in build so that render, which build imports, draws
+# the tile robot from the same numbers as the 3D one.
+CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
+CHASSIS_CENTER = (-0.15, 0.0, 0.0)
+WHEEL_RADIUS = 0.334
+WHEEL_WIDTH = 0.142
+#: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
+WHEELS = {
+    "wheel_left": (0.0, 0.36, 0.0, 0, -1.0),
+    "wheel_rear": (-0.697, 0.0, 0.0, 1, -1.0),
+    "wheel_right": (0.0, -0.36, 0.0, 2, 1.0),
+}
 
 VALIDITY_LABELS = {
     0: "extrapolated",
@@ -107,10 +134,10 @@ def read_matrix(path: Path, shape: tuple[int, ...] | None = None) -> np.ndarray 
     return arr
 
 
-def load_npy(path: Path, mmap: bool = False) -> np.ndarray | None:
+def load_npy(path: Path) -> np.ndarray | None:
     """``np.load`` that returns None instead of raising."""
     try:
-        return np.load(path, mmap_mode="r" if mmap else None)
+        return np.load(path)
     except (OSError, ValueError) as exc:
         _unreadable("load", path, exc)
         return None
@@ -297,11 +324,15 @@ def height_map_cell_centers(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndar
     return x, y
 
 
-def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarray, max_gap: float = 1.0) -> np.ndarray:
+#: A resampled value further than this (s) from every source sample is NaN.
+RESAMPLE_MAX_GAP = 1.0
+
+
+def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarray) -> np.ndarray:
     """Linearly resample ``src_vals`` (T, K) onto ``query_ts``.
 
-    Samples further than ``max_gap`` seconds from any source sample become NaN
-    rather than being invented by extrapolation.
+    Samples further than :data:`RESAMPLE_MAX_GAP` seconds from any source
+    sample become NaN rather than being invented by extrapolation.
     """
     src_ts = np.asarray(src_ts, dtype=np.float64)
     src_vals = np.asarray(src_vals, dtype=np.float64)
@@ -317,7 +348,7 @@ def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarr
     nearest = np.searchsorted(src_ts, query_ts)
     nearest = np.clip(nearest, 1, len(src_ts) - 1)
     gap = np.minimum(np.abs(query_ts - src_ts[nearest - 1]), np.abs(src_ts[nearest] - query_ts))
-    out[gap > max_gap] = np.nan
+    out[gap > RESAMPLE_MAX_GAP] = np.nan
     return out
 
 

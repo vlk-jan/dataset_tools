@@ -373,19 +373,6 @@ def test_every_bev_tile_carries_the_same_robot():
     assert len(sizes) == 1, sizes
 
 
-def test_the_tile_robot_matches_the_3d_robot():
-    """render.py duplicates build.py's geometry (it cannot import it: build
-    imports render). The two must not be allowed to drift apart."""
-    pytest.importorskip("torch")
-    from dataset_tools.viewer import build
-
-    assert (build.CHASSIS["hx"], build.CHASSIS["hy"]) == render.ROBOT_CHASSIS_HALF
-    assert tuple(build.CHASSIS_CENTER[:2]) == render.ROBOT_CHASSIS_CENTER
-    assert render.ROBOT_WHEEL_RADIUS == build.WHEEL_RADIUS
-    assert render.ROBOT_WHEEL_WIDTH == build.WHEEL_WIDTH
-    assert sorted(render.ROBOT_WHEEL_HUBS) == sorted((x, y) for x, y, _z, _col, _sign in build.WHEELS.values())
-
-
 def test_the_robot_model_is_drifts():
     """base_link is HELHEST's front axle: the front hubs sit on the origin and
     the box must not reach ahead of the sensors (x <= +0.2). A stale copy once
@@ -667,6 +654,29 @@ def test_a_bundle_key_that_is_not_canonical_is_refused(client):
         r = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
         assert r.status_code == 404, (opts, r.status_code)
     assert client.get("/api/data/0000/seg000/40-160000-80-500000-0.1-height/x/meta.json").status_code == 200
+
+
+def test_a_bundle_key_is_spelled_as_the_caches_on_disk_spell_it():
+    """Bundles already cached are found by this spelling, so it must not move:
+    the sanitized fields in order, floats as ``str`` prints them."""
+    pytest.importorskip("fastapi")
+    from dataset_tools.viewer.app import _options_from_key
+    from dataset_tools.viewer.build import BuildOptions
+
+    for opts, key in (
+        ({}, "40-160000-80-500000-0.1-height"),
+        ({"terrain_res": 1}, "40-160000-80-500000-1.0-height"),
+        ({"terrain_res": 0.1 + 0.2}, "40-160000-80-500000-0.30000000000000004-height"),
+        ({"max_cloud_frames": -3, "terrain_res": 2.5}, "0-160000-80-500000-2.0-height"),
+        ({"max_cloud_points": 1e9, "cloud_color": "intensity"}, "40-1500000-80-500000-0.1-intensity"),
+        ({"max_terrain_cells": 12.7, "cloud_color": "bogus"}, "40-160000-80-1000-0.1-height"),
+        ({"max_hm_frames": True, "max_cloud_frames": False}, "0-160000-1-500000-0.1-height"),
+    ):
+        assert BuildOptions(**opts).cache_key() == key
+        assert _options_from_key(key).cache_key() == key
+    assert _options_from_key("1-2-3") == BuildOptions()
+    assert _options_from_key("40-160000-80-500000-1.0-height-x") == BuildOptions()
+    assert _options_from_key("x-160000-80-500000-0.1-height") == BuildOptions()
 
 
 def test_an_empty_root_says_what_a_scene_is(tmp_path):

@@ -10,6 +10,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from dataset_tools.transforms import quat_slerp
 from dataset_tools.viewer import loaders
 
 # --------------------------------------------------------------------------
@@ -37,7 +38,7 @@ def test_slerp_midpoint_is_the_half_angle():
     q0 = np.array([[1.0, 0, 0, 0]])
     angle = np.pi / 2
     q1 = np.array([[np.cos(angle / 2), 0, 0, np.sin(angle / 2)]])
-    mid = loaders.quat_slerp(q0, q1, np.array([0.5]))
+    mid = quat_slerp(q0, q1, np.array([0.5]))
     expected = np.array([np.cos(angle / 4), 0, 0, np.sin(angle / 4)])
     assert np.allclose(mid[0], expected, atol=1e-12)
 
@@ -66,7 +67,7 @@ def test_interpolate_poses_counts_a_query_within_tolerance_as_on_the_track():
 def test_resample_series_does_not_invent_values_across_a_long_gap():
     src_ts = np.array([0.0, 1.0, 50.0, 51.0])
     vals = np.array([[0.0], [1.0], [2.0], [3.0]])
-    out = loaders.resample_series(src_ts, vals, np.array([0.5, 25.0]), max_gap=1.0)
+    out = loaders.resample_series(src_ts, vals, np.array([0.5, 25.0]))
     assert out[0, 0] == pytest.approx(0.5)
     assert np.isnan(out[1, 0])
 

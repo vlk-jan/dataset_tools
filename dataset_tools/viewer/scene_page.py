@@ -7,10 +7,10 @@ Where the scene's bytes go sits beside the file inventory when the root has a
 ``disk_usage.json``; the sizes in the inventory come from the same entry.
 
 The reading budget is deliberate: everything is either already in memory or in
-a file bounded by the frame count (the proprioception arrays, read strided
-through a memory map; ``camera_info.yaml``). Clouds, images and height maps are
-never opened, and ``odometry.txt`` only when no curated path length exists and
-the file is small.
+a file bounded by the recording length (the proprioception arrays, cached on
+the scene handle and shared with the signal charts; ``camera_info.yaml``).
+Clouds, images and height maps are never opened, and ``odometry.txt`` only when
+no curated path length exists and the file is small.
 
 Nothing here is rig-specific -- wheel speeds stay in the file's own rad/s,
 never divided through a wheel radius that belongs to one robot. Each card
@@ -24,8 +24,7 @@ import math
 import os
 import re
 import time
-from dataclasses import dataclass
-from pathlib import Path
+from collections import Counter
 from typing import Any
 from urllib.parse import urlencode
 
@@ -44,6 +43,7 @@ from .index_page import (
     fmt_disk_rate,
     fmt_duration,
     fmt_share,
+    images_clouds_stat,
     segment_timeline,
     split_mark,
     stat,
@@ -53,7 +53,7 @@ from .index_page import (
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS, DatasetRoot, _npy_shape
-from .signals import signal_charts
+from .signals import _speed, signal_charts
 from .windows import describe_marks, describe_reason
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
@@ -67,10 +67,6 @@ MIN_CARD_STATS = 2
 #: segment page both carry the real duration.
 MIN_MARK_FRAC = 0.006
 
-#: Rows read out of a proprioception array. The array is memory-mapped and
-#: strided, so this bounds the work rather than the bytes the kernel faults in.
-PROPRIO_SAMPLES = 4000
-
 #: A wheel counts as turning above this angular speed (rad/s) -- fast enough to
 #: separate driving from a robot sitting still with noise on the encoders.
 TURNING_RAD_S = 0.1
@@ -82,55 +78,6 @@ ODOMETRY_READ_LIMIT = 8_000_000
 #: A frame counts as moving above this speed (m/s), matching the atlas's own
 #: ``moving_frac`` definition closely enough to stand in for it.
 MOVING_M_S = 0.1
-
-
-# --------------------------------------------------------------------------
-# series
-# --------------------------------------------------------------------------
-
-
-@dataclass
-class Series:
-    """A timestamped ``(T, K)`` array, sampled down to a readable number of rows."""
-
-    rows: np.ndarray
-    n: int
-    t0: float
-    t1: float
-
-    @property
-    def duration(self) -> float:
-        return max(0.0, self.t1 - self.t0)
-
-    @property
-    def rate(self) -> float | None:
-        return self.n / self.duration if self.duration > 0 else None
-
-    def mean_abs(self, cols) -> float:
-        return float(np.nanmean(np.abs(self.rows[:, cols])))
-
-    def max_abs(self, cols) -> float:
-        return float(np.nanmax(np.abs(self.rows[:, cols])))
-
-
-def read_series(path: Path, max_rows: int = PROPRIO_SAMPLES) -> Series | None:
-    """Evenly-spaced rows of a timestamped ``.npy``, read through a memory map.
-
-    The header gives the true row count and the first and last row give the
-    time span, so the reported rate is the file's real rate and not the sampled
-    one. Column 0 is assumed to be the timestamp, as every proprioception array
-    an extraction writes has it there.
-    """
-    try:
-        arr = np.load(path, mmap_mode="r")
-    except (OSError, ValueError) as exc:
-        logger.warning("cannot read series %s: %s", path, exc)
-        return None
-    if arr.ndim != 2 or arr.shape[0] == 0 or arr.shape[1] < 2:
-        return None
-    step = max(1, arr.shape[0] // max_rows)
-    rows = np.asarray(arr[::step], dtype=np.float64)
-    return Series(rows=rows, n=int(arr.shape[0]), t0=float(arr[0, 0]), t1=float(arr[-1, 0]))
 
 
 def utc_stamp(ts: float | None) -> tuple[str, str] | None:
@@ -157,15 +104,10 @@ def _sampled_cloud_points(access: SceneAccess) -> tuple[int, int] | None:
     """
     if not access.probe.has("clouds") or not access.probe.n_frames:
         return None
-    index = access.probe.n_frames // 2
-    path = access.frame_path("clouds", index)
-    if not path.is_file():
-        available = sorted(access.available_frames("clouds"))
-        if not available:
-            return None
-        index = available[len(available) // 2]
-        path = access.frame_path("clouds", index)
-    shape = _npy_shape(path)
+    index = access.nearest_frame("clouds", access.probe.n_frames // 2)
+    if index is None:
+        return None
+    shape = _npy_shape(access.frame_path("clouds", index))
     return (int(shape[0]), index) if shape else None
 
 
@@ -190,15 +132,8 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
         if step > 0:
             stats.append(stat("frame rate", f"{1.0 / step:.2f} Hz"))
 
-    images, clouds = p.counts.get("images"), p.counts.get("clouds")
-    if images is not None or clouds is not None:
-        stats.append(
-            stat(
-                "images · clouds",
-                f"{fmt_count(images) if images is not None else '-'}"
-                f" · {fmt_count(clouds) if clouds is not None else '-'}",
-            )
-        )
+    if counted := images_clouds_stat(p):
+        stats.append(counted)
 
     if a.get("pts_mean"):
         stats.append(stat("pts / cloud", fmt_count(a["pts_mean"]), "mean over the scene"))
@@ -238,13 +173,7 @@ def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | Non
     the camera and lidar came up is real odometry, but it is not distance this
     dataset covers, and counting it makes the total disagree with the frames.
     """
-    path = access.dir / "odometry.txt"
-    try:
-        if path.stat().st_size > ODOMETRY_READ_LIMIT:
-            return None
-    except OSError:
-        return None
-    odom = access.odometry
+    odom = small_odometry(access)
     if odom is None:
         return None
     ts, poses = odom
@@ -254,20 +183,51 @@ def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | Non
         bounds = [(s.start_ts, s.end_ts) for s in access.segments] or [(ts[0], ts[-1])]
     total, moving, count = 0.0, 0, 0
     for lo, hi in bounds:
-        take = (ts >= lo) & (ts <= hi)
-        if take.sum() < 2:
+        stretch = poses_between(odom, lo, hi)
+        if stretch is None:
             continue
-        xyz, stamps = poses[take, :3, 3], ts[take]
-        steps = np.linalg.norm(np.diff(xyz, axis=0), axis=1)
-        dt = np.diff(stamps)
-        total += float(steps.sum())
-        with np.errstate(divide="ignore", invalid="ignore"):
-            speed = np.where(dt > 0, steps / np.where(dt > 0, dt, 1.0), 0.0)
+        path, speed = path_motion(*stretch)
+        total += path
         moving += int((speed > MOVING_M_S).sum())
         count += len(speed)
     if not count:
         return None
     return total, moving / count
+
+
+def small_odometry(access: SceneAccess) -> tuple[np.ndarray, np.ndarray] | None:
+    """``access.odometry``, but only when ``odometry.txt`` is at most
+    :data:`ODOMETRY_READ_LIMIT`: it is parsed text, and a summary card is not
+    worth a full parse of a scene with hundreds of thousands of poses."""
+    try:
+        if (access.dir / "odometry.txt").stat().st_size > ODOMETRY_READ_LIMIT:
+            return None
+    except OSError:
+        return None
+    return access.odometry
+
+
+def poses_between(
+    odom: tuple[np.ndarray, np.ndarray] | None, lo: float, hi: float
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(ts, poses)`` of the odometry inside ``[lo, hi]``, or None under two poses."""
+    if odom is None:
+        return None
+    ts, poses = odom
+    take = (ts >= lo) & (ts <= hi)
+    if take.sum() < 2:
+        return None
+    return ts[take], poses[take]
+
+
+def path_motion(ts: np.ndarray, poses: np.ndarray) -> tuple[float, np.ndarray]:
+    """``(path metres, speed per step)`` along one stretch of poses.
+
+    The path sums every 3-D step; the speeds are :func:`signals._speed`'s, so a
+    card and the speed chart cannot disagree about how fast the robot went.
+    """
+    xyz = poses[:, :3, 3]
+    return float(np.linalg.norm(np.diff(xyz, axis=0), axis=1).sum()), _speed(ts, xyz)[1]
 
 
 def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
@@ -393,10 +353,7 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         # count -- a scene whose fills were refined one at a time would
         # otherwise read the same sentence twice, once per tail.
         sources = sorted({describe_reason((s.reason or "").split("+")[0]) for s in filled})
-        mark_counts: dict[str, int] = {}
-        for s in filled:
-            for m in describe_marks(s.reason or "", brief=True):
-                mark_counts[m] = mark_counts.get(m, 0) + 1
+        mark_counts = Counter(m for s in filled for m in describe_marks(s.reason or "", brief=True))
         detail = "; ".join(sources) if sources else "filled from another root through the same quality gate"
         for text, n in sorted(mark_counts.items(), key=lambda kv: -kv[1]):
             detail += f"; {n} of them {text}"
@@ -478,57 +435,77 @@ def calibration_card(access: SceneAccess, info: dict | None) -> dict[str, Any] |
     }
 
 
+def _series(arr: np.ndarray | None) -> np.ndarray | None:
+    """A timestamped ``(T, K)`` array (column 0 the time) with rows in it, or None."""
+    return arr if arr is not None and np.ndim(arr) == 2 and len(arr) and arr.shape[1] >= 2 else None
+
+
+def _rate(arr: np.ndarray) -> float | None:
+    """The file's own rate (Hz): its rows over the span its first and last stamps cover."""
+    span = float(arr[-1, 0] - arr[0, 0])
+    return len(arr) / span if span > 0 else None
+
+
+def _mean_abs(arr: np.ndarray, cols) -> float:
+    return float(np.nanmean(np.abs(arr[:, cols])))
+
+
+def _max_abs(arr: np.ndarray, cols) -> float:
+    return float(np.nanmax(np.abs(arr[:, cols])))
+
+
+def roll_pitch_stat(ga: np.ndarray) -> dict[str, Any]:
+    """The ``roll · pitch`` cell over a stack of gravity-alignment rotations: mean and max tilt."""
+    roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga))
+    roll, pitch = np.degrees(np.abs(roll)), np.degrees(np.abs(pitch))
+    return stat(
+        "roll · pitch", f"{roll.mean():.1f}° · {pitch.mean():.1f}°", f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°"
+    )
+
+
 def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     """What the robot reported about itself: wheels, commands, attitude."""
     p = access.probe
     stats: list[dict[str, Any]] = []
     notes: list[str] = []
 
-    js = read_series(access.dir / "joint_states.npy") if p.has("joint_states") else None
-    if js is not None and js.rows.shape[1] >= 10:
+    js = _series(access.joint_states)
+    if js is not None and js.shape[1] >= 10:
         vel = slice(4, 7)
-        stats.append(stat("wheel speed", f"{js.mean_abs(vel):.2f} rad/s", f"mean |ω|, max {js.max_abs(vel):.1f}"))
-        turning = float((np.abs(js.rows[:, vel]) > TURNING_RAD_S).any(axis=1).mean())
+        stats.append(stat("wheel speed", f"{_mean_abs(js, vel):.2f} rad/s", f"mean |ω|, max {_max_abs(js, vel):.1f}"))
+        turning = float((np.abs(js[:, vel]) > TURNING_RAD_S).any(axis=1).mean())
         stats.append(stat("wheels turning", f"{turning * 100:.0f}%", f"any |ω| > {TURNING_RAD_S} rad/s"))
-        stats.append(
-            stat("wheel effort", f"{js.mean_abs(slice(7, 10)):.1f}", f"mean, max {js.max_abs(slice(7, 10)):.0f}")
-        )
+        effort = slice(7, 10)
+        stats.append(stat("wheel effort", f"{_mean_abs(js, effort):.1f}", f"mean, max {_max_abs(js, effort):.0f}"))
     elif js is not None:
-        notes.append(f"joint_states.npy is {js.rows.shape[1]} columns wide, not the expected 10.")
+        notes.append(f"joint_states.npy is {js.shape[1]} columns wide, not the expected 10.")
     if js is not None:
-        stats.append(
-            stat("joint states", f"{fmt_count(js.n)} × {js.rows.shape[1]}", f"{js.rate:.1f} Hz" if js.rate else None)
-        )
+        rate = _rate(js)
+        stats.append(stat("joint states", f"{fmt_count(len(js))} × {js.shape[1]}", f"{rate:.1f} Hz" if rate else None))
 
-    cv = read_series(access.dir / "cmd_vel.npy") if p.has("cmd_vel") else None
-    if cv is not None and cv.rows.shape[1] >= 7:
-        stats.append(stat("commanded speed", f"{cv.mean_abs(1):.2f} m/s", f"mean |v|, |ω| {cv.mean_abs(6):.2f} rad/s"))
+    cv = _series(access.cmd_vel)
+    if cv is not None and cv.shape[1] >= 7:
+        stats.append(
+            stat("commanded speed", f"{_mean_abs(cv, 1):.2f} m/s", f"mean |v|, |ω| {_mean_abs(cv, 6):.2f} rad/s")
+        )
     if cv is not None:
-        stats.append(
-            stat("cmd_vel", f"{fmt_count(cv.n)} × {cv.rows.shape[1]}", f"{cv.rate:.1f} Hz" if cv.rate else None)
-        )
+        rate = _rate(cv)
+        stats.append(stat("cmd_vel", f"{fmt_count(len(cv))} × {cv.shape[1]}", f"{rate:.1f} Hz" if rate else None))
 
-    sp = read_series(access.dir / "joint_setpoints.npy") if p.has("joint_setpoints") else None
-    if sp is not None and sp.rows.shape[1] >= 7:
+    sp = _series(access.joint_setpoints)
+    if sp is not None and sp.shape[1] >= 7:
+        rate = _rate(sp)
         stats.append(
             stat(
                 "commanded wheels",
-                f"{sp.mean_abs(slice(4, 7)):.2f} rad/s",
-                f"setpoints, {sp.rate:.1f} Hz" if sp.rate else "setpoints",
+                f"{_mean_abs(sp, slice(4, 7)):.2f} rad/s",
+                f"setpoints, {rate:.1f} Hz" if rate else "setpoints",
             )
         )
 
     ga = access.gravity_align
     if ga is not None and np.ndim(ga) == 3:
-        roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga))
-        roll, pitch = np.degrees(np.abs(roll)), np.degrees(np.abs(pitch))
-        stats.append(
-            stat(
-                "roll · pitch",
-                f"{roll.mean():.1f}° · {pitch.mean():.1f}°",
-                f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°",
-            )
-        )
+        stats.append(roll_pitch_stat(ga))
 
     if len(stats) < MIN_CARD_STATS:
         return None

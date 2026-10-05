@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,11 +153,11 @@ class SceneSplits:
         total = sum(frames.values())
         if not total:
             return None
-        sides: dict[str, int] = {}
+        sides: Counter[str] = Counter()
         for scene, n in frames.items():
             which = self.of(scene)
             if which is not None:
-                sides[which] = sides.get(which, 0) + n
+                sides[which] += n
         return {which: n / total for which, n in sides.items()}
 
 
@@ -232,11 +233,10 @@ def parse_splits(data: Any) -> SceneSplits:
     # The exporter splits windows by mode; only the val half is needed, and the
     # total has to be both halves added up, so flatten them back together.
     per_mode = data.get("windows_per_scene")
-    windows: dict[str, int] = {}
+    windows: Counter[str] = Counter()
     if isinstance(per_mode, dict):
         for half in per_mode.values():
-            for scene, count in _counts(half).items():
-                windows[scene] = windows.get(scene, 0) + count
+            windows.update(_counts(half))
     return SceneSplits(
         name=_str(data, "split_mode", "name"),
         note=_str(data, "note", "n_folds_note"),
@@ -247,7 +247,7 @@ def parse_splits(data: Any) -> SceneSplits:
         train=train,
         excluded=excluded,
         labels=_counts(data.get("labels_per_scene")),
-        windows=windows,
+        windows=dict(windows),
     )
 
 
@@ -266,7 +266,7 @@ def _list_scenes(path: Path) -> frozenset[str] | None:
     return frozenset(line.split("/", 1)[0] for line in text.splitlines() if line.strip())
 
 
-def declared_splits(root_path: Path, manifest: dict | None = None) -> SceneSplits:
+def declared_splits(root_path: Path) -> SceneSplits:
     """The split a root declares itself: ``manifest.held_out.scenes`` as the held-out
     side, ``keyframes_train.lst`` as the training side when the root carries one.
 
@@ -274,11 +274,10 @@ def declared_splits(root_path: Path, manifest: dict | None = None) -> SceneSplit
     nothing is shown unmarked, as before.
     """
     root_path = Path(root_path)
-    if manifest is None:
-        try:
-            manifest = json.loads((root_path / "manifest.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            return NO_SPLITS
+    try:
+        manifest = json.loads((root_path / "manifest.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        return NO_SPLITS
     if not isinstance(manifest, dict):
         return NO_SPLITS
     held = manifest.get("held_out")

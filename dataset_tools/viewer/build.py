@@ -15,7 +15,7 @@ import logging
 import math
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field, replace
+from dataclasses import astuple, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ import numpy as np
 
 from .. import image_format
 from . import loaders as L
+from .loaders import CHASSIS, CHASSIS_CENTER, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 from .probe import OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
 from .render import unit_colors
 from .windows import (
@@ -38,23 +39,6 @@ from .windows import (
 
 logger = logging.getLogger("dataset_tools.viewer.build")
 
-# HELHEST geometry from DRIFT's robot model (simulator/utils.py,
-# helhest_robot_model, sourced from the robot URDF): base_link IS the front
-# axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
-# 0.334 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
-# axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
-# ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
-# middle of the box and every return looked 0.4 m too close.
-#
-# The chassis box is the body the view centres on and the wheels hang off, so
-# it carries base_link's trajectory; its visual centre is pushed back by
-# CHASSIS_CENTER (a body-frame offset) so the box spans the real chassis, from
-# behind the rear-wheel fork to the sensor face just ahead of the axle
-# (tf_static: front sensors at x = +0.10..+0.17, wheel holders at -0.477).
-CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
-CHASSIS_CENTER = (-0.15, 0.0, 0.0)
-WHEEL_RADIUS = 0.334
-WHEEL_WIDTH = 0.142
 #: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
 #: being how far the sample sat from the robot that measured it. A window splats
 #: ~80 maps 12.8 m across along a path a few tens of metres long, so every cell
@@ -66,12 +50,6 @@ HM_BLEND_SIGMA = 3.0
 #: Ground (m) the terrain grid reaches beyond the window's path on every side.
 TERRAIN_MARGIN = 7.0
 
-#: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
-WHEELS = {
-    "wheel_left": (0.0, 0.36, 0.0, 0, -1.0),
-    "wheel_rear": (-0.697, 0.0, 0.0, 1, -1.0),
-    "wheel_right": (0.0, -0.36, 0.0, 2, 1.0),
-}
 WHEEL_LABELS = ("left", "rear", "right")
 
 #: File suffix of each per-frame directory's entries.
@@ -209,18 +187,8 @@ class BuildOptions:
         )
 
     def cache_key(self) -> str:
-        s = self.sanitized()
-        return "-".join(
-            str(v)
-            for v in (
-                s.max_cloud_frames,
-                s.max_cloud_points,
-                s.max_hm_frames,
-                s.max_terrain_cells,
-                s.terrain_res,
-                s.cloud_color,
-            )
-        )
+        """The sanitized fields in declaration order, ``-``-joined: a bundle path segment."""
+        return "-".join(map(str, astuple(self.sanitized())))
 
 
 #: Window length the budgets in :class:`BuildOptions` were chosen against. A
@@ -423,6 +391,14 @@ class SceneAccess:
 
     def frame_path(self, kind: str, index: int) -> Path:
         return self.dir / kind / f"{index:05d}{self.frame_suffix(kind)}"
+
+    def nearest_frame(self, kind: str, index: int) -> int | None:
+        """``index`` when it has a ``kind`` file, else the nearest frame that has
+        one (a sparse directory), else None."""
+        if self.frame_path(kind, index).is_file():
+            return index
+        available = sorted(self.available_frames(kind))
+        return min(available, key=lambda i: abs(i - index)) if available else None
 
     # -- windows -----------------------------------------------------------
 
@@ -702,6 +678,24 @@ def _pick(indices: np.ndarray, budget: int) -> np.ndarray:
     return indices[np.unique(sel)]
 
 
+def _read_window(
+    access: SceneAccess, kind: str, frames: np.ndarray, budget: int, loader: Callable
+) -> tuple[np.ndarray, list, dict]:
+    """``(chosen, loaded, stats)``: the positions in ``frames`` that have a ``kind``
+    file, thinned to ``budget`` by :func:`_pick`, and their files read in threads."""
+    have = access.available_frames(kind)
+    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
+    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0}
+    chosen = _pick(usable, budget)
+    return chosen, _read_all([access.frame_path(kind, int(frames[i])) for i in chosen], loader), stats
+
+
+def _cell_xy(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
+    """Flattened local (x, y) of every cell of a robot-centred BEV map, row-major."""
+    X, Y = np.meshgrid(*L.height_map_cell_centers(shape), indexing="ij")
+    return X.ravel(), Y.ravel()
+
+
 def _place(
     local: np.ndarray, pose: np.ndarray, ga: np.ndarray | None, frame: int, grid: TerrainGrid
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -765,20 +759,14 @@ def splat_height_maps(
     frames that drove over it rather than averaged flat across every frame that
     could see it.
     """
-    have = access.available_frames("height_maps")
-    have_mask = access.available_frames("height_masks")
-    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
-    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0, "with_masks": 0}
-    if len(usable) == 0:
-        return stats
-    chosen = _pick(usable, opts.max_hm_frames)
-    ga = access.gravity_align
-
-    # Every file of the window in flight at once, then the arithmetic in order.
-    maps = _read_all(
-        [access.frame_path("height_maps", int(frames[i])) for i in chosen],
-        lambda p: L.load_npz_key(p, "height_map"),
+    chosen, maps, stats = _read_window(
+        access, "height_maps", frames, opts.max_hm_frames, lambda p: L.load_npz_key(p, "height_map")
     )
+    stats["with_masks"] = 0
+    if not stats["available"]:
+        return stats
+    have_mask = access.available_frames("height_masks")
+    ga = access.gravity_align
     masks = _read_all(
         [access.frame_path("height_masks", int(frames[i])) if int(frames[i]) in have_mask else None for i in chosen],
         lambda p: None if p is None else L.load_npz_key(p, "validity"),
@@ -788,8 +776,7 @@ def splat_height_maps(
         frame = int(frames[i])
         if hm is None or hm.ndim != 2:
             continue
-        xs, ys = L.height_map_cell_centers(hm.shape)
-        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        X, Y = _cell_xy(hm.shape)
         z = np.asarray(hm, dtype=np.float64).ravel()
         # A cell the generator left as NaN has to go before the grid ever sees
         # it. It would poison its grid cell for good -- the weighted sums go
@@ -800,7 +787,7 @@ def splat_height_maps(
         finite = np.isfinite(z)
         if not finite.any():
             continue
-        local = np.stack([X.ravel()[finite], Y.ravel()[finite], z[finite]], axis=1)
+        local = np.stack([X[finite], Y[finite], z[finite]], axis=1)
 
         world, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
@@ -849,17 +836,12 @@ def splat_driven_similarity(
     Frames without a sidecar (no driven cell in their horizon) contribute
     nothing, which is what they have to say.
     """
-    have = access.available_frames("driven_similarity")
-    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
-    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0}
-    if len(usable) == 0:
-        return stats
-    chosen = _pick(usable, opts.max_hm_frames)
-    ga = access.gravity_align
-
-    sidecars = _read_all(
-        [access.frame_path("driven_similarity", int(frames[i])) for i in chosen], read_driven_similarity
+    chosen, sidecars, stats = _read_window(
+        access, "driven_similarity", frames, opts.max_hm_frames, read_driven_similarity
     )
+    if not stats["available"]:
+        return stats
+    ga = access.gravity_align
 
     driven_layer = grid.layers.setdefault("driven", np.zeros((grid.ny, grid.nx), dtype=np.float64))
     drivable_layer = grid.layers.setdefault("drivable", np.zeros((grid.ny, grid.nx), dtype=np.float64))
@@ -868,8 +850,7 @@ def splat_driven_similarity(
             continue
         driven, max_sim = sidecar["driven"], sidecar["max_sim"]
         frame = int(frames[i])
-        xs, ys = L.height_map_cell_centers(driven.shape)
-        X, Y = np.meshgrid(xs, ys, indexing="ij")
+        X, Y = _cell_xy(driven.shape)
         sim = np.clip(np.nan_to_num(max_sim, nan=0.0), 0.0, 1.0).ravel()
         drv = driven.ravel()
         # Only cells that say something: the driven ones and any with a
@@ -878,7 +859,7 @@ def splat_driven_similarity(
         keep = drv | (sim > 0.0)
         if not keep.any():
             continue
-        local = np.stack([X.ravel()[keep], Y.ravel()[keep], np.zeros(int(keep.sum()))], axis=1)
+        local = np.stack([X[keep], Y[keep], np.zeros(int(keep.sum()))], axis=1)
         _, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
             continue
@@ -902,12 +883,8 @@ def aggregate_clouds(
     Also fills the grid's cloud-derived layers (point count, mean intensity,
     vertical spread) when a grid is given, since the points are in hand anyway.
     """
-    have = access.available_frames("clouds")
-    usable = np.array([i for i, f in enumerate(frames) if int(f) in have], dtype=int)
-    stats = {"requested": int(len(frames)), "available": int(len(usable)), "used": 0, "points": 0}
-    if len(usable) == 0:
-        return None, stats
-    chosen = _pick(usable, opts.max_cloud_frames)
+    chosen, clouds, stats = _read_window(access, "clouds", frames, opts.max_cloud_frames, L.load_cloud)
+    stats["points"] = 0
     if len(chosen) == 0:
         return None, stats
     per_frame = max(200, opts.max_cloud_points // max(1, len(chosen)))
@@ -918,8 +895,6 @@ def aggregate_clouds(
         cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int64)
         max_z = np.full((grid.ny, grid.nx), -np.inf)
         min_z = np.full((grid.ny, grid.nx), np.inf)
-
-    clouds = _read_all([access.frame_path("clouds", int(frames[i])) for i in chosen], L.load_cloud)
 
     parts: list[np.ndarray] = []
     for i, cloud in zip(chosen, clouds, strict=True):

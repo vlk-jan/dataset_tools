@@ -784,12 +784,12 @@ Dataset roots usually live on contended network storage, so:
 | `/scene/{scene}/jump?index=N` | the frames tab's jump box: redirects to that frame, clamped to the scene |
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
-| `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`) |
+| `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`, a JSON body `{"frames": [first, last], "text", "topic", "verdict"}`) |
 | `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
 | `/api/notes.csv` | every note as one table: scene, frame range, frame times, topic, verdict, author, date, text |
 | `/segments` | every ground-truth window of the root in one table, sortable (`?sort=scene\|att\|rate\|duration`), with the notes and verdicts touching each |
 | `/?status=ok\|warn\|fail`, `/?verdict=keep\|drop\|fix` | the index, only the scenes `validation.csv` gave that status, or that carry a note with that verdict |
-| `/api/scene/{scene}/notes/{id}` | edit (`PATCH`) or remove (`DELETE`) one note |
+| `/api/scene/{scene}/notes/{id}` | edit (`PATCH`, the same body; a field left out stays as it is) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
 | `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |
 | `/api/scene/{scene}/thumb/{slot}.jpg` | one index thumbnail (`a`, `b` or `c`): the stored `atlas/thumbs/` file, else the frame rendered live at 384 px |

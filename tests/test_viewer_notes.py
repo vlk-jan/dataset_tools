@@ -76,7 +76,7 @@ def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path)
     be shown by anything that reads it back."""
     _, client = _notes_client(tmp_path)
 
-    one = client.post("/api/scene/0000/notes", json={"frame": 5, "text": "here"}).json()
+    one = client.post("/api/scene/0000/notes", json={"frames": [5, 5], "text": "here"}).json()
     assert (one["frame_start"], one["frame_end"], one["n_frames"]) == (5, 5, 1)
     assert one["label"] == "frame 5"
 
@@ -88,7 +88,8 @@ def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path)
 
     assert client.post("/api/scene/0000/notes", json={"frames": [1, 2]}).status_code == 400
     assert client.post("/api/scene/0000/notes", json={"text": "nowhere"}).status_code == 400
-    assert client.post("/api/scene/9999/notes", json={"frame": 0, "text": "x"}).status_code == 404
+    assert client.post("/api/scene/0000/notes", json={"frames": [3], "text": "one end"}).status_code == 400
+    assert client.post("/api/scene/9999/notes", json={"frames": [0, 0], "text": "x"}).status_code == 404
 
 
 def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path):
@@ -115,11 +116,11 @@ def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path)
         note["created"],
     )
 
-    # One end on its own moves; everything left out of the request stays put.
-    one_end = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"frame_end": 9}).json()
-    assert (one_end["frame_start"], one_end["frame_end"]) == (1, 9)
-    assert one_end["topic"] == "odometry"
-    assert one_end["text"] == "GT jumps sideways"
+    # Everything left out of the request stays put, the range included.
+    text_only = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"text": "GT jumps 2 m sideways"}).json()
+    assert (text_only["frame_start"], text_only["frame_end"]) == (1, 4)
+    assert text_only["topic"] == "odometry"
+    assert text_only["text"] == "GT jumps 2 m sideways"
 
     # An edited range is ordered and clamped exactly as a new note's is.
     fixed = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"frames": [900, 2]}).json()
@@ -206,7 +207,7 @@ def test_a_read_only_root_still_reads_its_notes_but_refuses_new_ones(tmp_path):
         assert [n["text"] for n in body["notes"]] == ["from before"]
         assert body["status"]["writable"] is False
         assert "not writable" in body["status"]["reason"]
-        refused = client.post("/api/scene/0000/notes", json={"frame": 0, "text": "no"})
+        refused = client.post("/api/scene/0000/notes", json={"frames": [0, 0], "text": "no"})
         assert refused.status_code == 403
         page = client.get("/scene/0000").text
         assert "from before" in page
@@ -228,7 +229,7 @@ def test_notes_can_be_kept_outside_a_root_that_cannot_take_them(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     try:
         _, client = _notes_client(tmp_path, root_path=root_path, notes_dir=elsewhere)
-        assert client.post("/api/scene/0000/notes", json={"frame": 4, "text": "kept aside"}).status_code == 201
+        assert client.post("/api/scene/0000/notes", json={"frames": [4, 4], "text": "kept aside"}).status_code == 201
     finally:
         root_path.chmod(0o755)
     assert json.loads((elsewhere / "0000.json").read_text())["notes"][0]["text"] == "kept aside"
@@ -244,7 +245,7 @@ def test_notes_off_reads_writes_and_shows_nothing(tmp_path):
     _, client = _notes_client(tmp_path, root_path=root_path, notes=False)
     body = client.get("/api/scene/0000/notes").json()
     assert body["notes"] == [] and body["status"]["enabled"] is False
-    assert client.post("/api/scene/0000/notes", json={"frame": 0, "text": "x"}).status_code == 403
+    assert client.post("/api/scene/0000/notes", json={"frames": [0, 0], "text": "x"}).status_code == 403
     assert "invisible" not in client.get("/scene/0000").text
     assert client.get("/healthz").json()["notes"]["enabled"] is False
 
@@ -303,7 +304,7 @@ def test_notes_written_against_another_dataset_version_are_flagged(tmp_path):
     assert "written against dataset v1.2" in client.get("/scene/0000").text
 
     # A note written now carries this root's version, and the warning goes.
-    client.post("/api/scene/0000/notes", json={"frame": 5, "text": "current"})
+    client.post("/api/scene/0000/notes", json={"frames": [5, 5], "text": "current"})
     assert client.get("/api/scene/0000/notes").json()["stale_version"] is None
 
 

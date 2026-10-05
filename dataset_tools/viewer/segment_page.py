@@ -27,10 +27,10 @@ import numpy as np
 from . import geo
 from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
 from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, band, fmt_count, fmt_duration, stat
-from .loaders import Segment, roll_pitch_from_gravity_align
-from .scene_page import MOVING_M_S, ODOMETRY_READ_LIMIT, map_card, utc_stamp
+from .loaders import Segment
+from .scene_page import MOVING_M_S, map_card, path_motion, poses_between, roll_pitch_stat, small_odometry, utc_stamp
 from .signals import signal_charts
-from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, segment_bounds
+from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, frames_within, segment_bounds
 
 logger = logging.getLogger("dataset_tools.viewer.segment_page")
 
@@ -104,32 +104,7 @@ def frame_range(access: SceneAccess, position: int) -> tuple[int, int]:
     segments = access.segments
     if ts is None or not len(ts) or position >= len(segments):
         return (0, 0)
-    lo_ts, hi_ts = segment_bounds(ts, segments)[position]
-    lo = int(np.searchsorted(ts, lo_ts, side="left"))
-    hi = int(np.searchsorted(ts, hi_ts, side="right"))
-    return (lo, min(hi, len(ts)))
-
-
-def poses_in(access: SceneAccess, seg: Segment) -> tuple[np.ndarray, np.ndarray] | None:
-    """``(ts, poses)`` of the segment's own ground truth, or None.
-
-    Guarded by the same file-size limit the scene page uses: ``odometry.txt``
-    is parsed text, and a root whose scenes carry hundreds of thousands of
-    poses should not pay for a full parse to render a summary card.
-    """
-    try:
-        if (access.dir / "odometry.txt").stat().st_size > ODOMETRY_READ_LIMIT:
-            return None
-    except OSError:
-        return None
-    odom = access.odometry
-    if odom is None:
-        return None
-    ts, poses = odom
-    take = (ts >= seg.start_ts) & (ts <= seg.end_ts)
-    if take.sum() < 2:
-        return None
-    return ts[take], poses[take]
+    return frames_within(ts, *segment_bounds(ts, segments)[position])
 
 
 def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple[int, int]) -> dict[str, Any]:
@@ -208,16 +183,12 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
     stats: list[dict[str, Any]] = []
     notes: list[str] = []
 
-    track = poses_in(access, seg)
+    track = poses_between(small_odometry(access), seg.start_ts, seg.end_ts)
     if track is not None:
         ts, poses = track
         xyz = poses[:, :3, 3]
-        steps = np.linalg.norm(np.diff(xyz, axis=0), axis=1)
-        dt = np.diff(ts)
-        path = float(steps.sum())
+        path, speed = path_motion(ts, poses)
         stats.append(stat("path", f"{path:.0f} m", "along the ground truth"))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            speed = np.where(dt > 0, steps / np.where(dt > 0, dt, 1.0), 0.0)
         moving = speed > MOVING_M_S
         stats.append(stat("moving", f"{moving.mean() * 100:.0f}%", f"over {MOVING_M_S} m/s"))
         if moving.any():
@@ -260,15 +231,7 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
     if ga is not None and np.ndim(ga) == 3 and hi > lo:
         window = np.asarray(ga[lo : min(hi, len(ga))])
         if len(window):
-            roll, pitch = roll_pitch_from_gravity_align(window)
-            roll, pitch = np.degrees(np.abs(roll)), np.degrees(np.abs(pitch))
-            stats.append(
-                stat(
-                    "roll · pitch",
-                    f"{roll.mean():.1f}° · {pitch.mean():.1f}°",
-                    f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°",
-                )
-            )
+            stats.append(roll_pitch_stat(window))
             notes.append(
                 "Attitude comes from gravity_align.npy, which the anchoring did not touch: "
                 "roll and pitch are absolute, measured against gravity."
