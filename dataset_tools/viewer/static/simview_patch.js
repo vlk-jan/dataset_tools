@@ -147,10 +147,8 @@ function defaultPointCloudsOff(app) {
 function collapseBodyStates(app) {
     const bsw = app.bodyStateWindow;
     if (!bsw || !bsw.window) return;
-    // A <details> since simview's collapsible-panel refactor: closing it is
-    // all there is. Before that, `toggleCollapse` (which also flips the caret).
-    if ("open" in bsw.window) bsw.window.open = false;
-    else if (!bsw.window.classList.contains("collapsed")) bsw.toggleCollapse();
+    // A <details> since simview's collapsible-panel refactor: closing it is all there is.
+    bsw.window.open = false;
 }
 
 /** Which of SimView's lil-gui folders start open, by their title -- all four
@@ -165,21 +163,11 @@ const FOLDER_DEFAULTS = {
 function applyFolderDefaults(app) {
     const gui = app.uiControls && app.uiControls.gui;
     const folders = (gui && gui.folders) || [];
-    const seen = new Set();
     for (const folder of folders) {
         // `$title` is lil-gui's title element; the folder's own `_title` is
         // private, and matching on text is what survives a lil-gui bump.
         const title = folder.$title ? folder.$title.textContent.trim() : "";
-        if (!(title in FOLDER_DEFAULTS)) continue;
-        seen.add(title);
-        folder.open(FOLDER_DEFAULTS[title]);
-    }
-    for (const title of Object.keys(FOLDER_DEFAULTS)) {
-        if (!seen.has(title)) {
-            // A rename upstream, not a bug here: say so rather than silently
-            // leaving the panel in SimView's default state.
-            console.info(`no lil-gui folder titled "${title}"; leaving it as SimView left it.`);
-        }
+        if (title in FOLDER_DEFAULTS) folder.open(FOLDER_DEFAULTS[title]);
     }
 }
 

@@ -3,7 +3,8 @@
  * and the 3D view's panel (overlay.js).
  */
 
-/** One note mutation. Throws carrying the server's own reason, which is the
+/** One request to the viewer's JSON API (a note mutation, the 3D view's
+ *  meta.json). Throws carrying the server's own reason, which is the
  *  useful half of a refusal ("this root is not writable", not "403"). */
 export async function noteRequest(url, method, body) {
   const init = { method, headers: { "Content-Type": "application/json" } };

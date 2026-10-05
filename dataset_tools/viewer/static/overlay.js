@@ -43,7 +43,6 @@ const els = {
   attErr: document.getElementById("dt-att-err"),
   attVerdict: document.getElementById("dt-att-verdict"),
   buildInfo: document.getElementById("dt-buildinfo"),
-  notes: document.getElementById("dt-notes"),
   noteList: document.getElementById("dt-notelist"),
   noteCount: document.getElementById("dt-notes-count"),
   noteForm: document.getElementById("dt-noteform"),
@@ -52,7 +51,6 @@ const els = {
   noteTopic: document.getElementById("dt-note-topic"),
   noteText: document.getElementById("dt-note-text"),
   noteMsg: document.getElementById("dt-note-msg"),
-  notesWhy: document.getElementById("dt-notes-why"),
   tiles: Array.from(document.querySelectorAll(".dt-tile")),
 };
 
@@ -81,18 +79,7 @@ function fail(message) {
 
 /** Fetch the window's metadata, which also triggers the (cached) build. */
 async function loadMeta() {
-  const response = await fetch(cfg.metaUrl);
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (body && body.detail) detail = body.detail;
-    } catch (e) {
-      /* a non-JSON error body is fine; the status line is enough */
-    }
-    throw new Error(detail);
-  }
-  return response.json();
+  return (await noteRequest(cfg.metaUrl, "GET")).json();
 }
 
 /** Load SimView's own entry point, now that its data exists. */
@@ -149,11 +136,9 @@ function applyTiles(frame) {
     // way there is nothing to fetch -- a request would 404 per frame.
     if (!list || !list.has(frame)) {
       wrap.classList.add("absent");
-      img.classList.add("hidden");
       img.removeAttribute("src");
       continue;
     }
-    img.classList.remove("hidden");
     wrap.classList.remove("absent");
     const url = `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}`;
     // What the zoom dialog (zoom.js) opens for this tile, on this frame: a
@@ -169,27 +154,15 @@ function applyTiles(frame) {
       if (available.clouds && available.clouds.has(frame)) img.dataset.cloud = `${cfg.frameBase}/${frame}/overlay.jpg?w=1920`;
       else delete img.dataset.cloud;
     }
-    pending.push({ img, url });
+    img.src = url;
+    pending.push(img.decode());
   }
-  if (pending.length === 0) {
-    tileShownFrame = frame;
-    tileInFlight = false;
-    pumpTiles();
-    return;
-  }
-  let remaining = pending.length;
-  const done = () => {
-    remaining -= 1;
-    if (remaining > 0) return;
+  // Settled, loaded or not: a failed image reads as absent (setupPanel).
+  Promise.allSettled(pending).then(() => {
     tileShownFrame = frame;
     tileInFlight = false;
     pumpTiles(); // a newer frame may have been wanted while this batch loaded
-  };
-  for (const { img, url } of pending) {
-    img.onload = () => { img.onload = img.onerror = null; done(); };
-    img.onerror = () => { img.onload = img.onerror = null; done(); };
-    img.src = url;
-  }
+  });
 }
 
 function pumpTiles() {
@@ -393,15 +366,6 @@ function readNoteRange() {
 
 function rangeText(lo, hi) {
   return lo === hi ? `frame ${lo}` : `frames ${lo}-${hi}`;
-}
-
-function noteRangeText() {
-  return rangeText(...readNoteRange());
-}
-
-function setNoteRange(lo, hi) {
-  els.noteFrom.value = lo;
-  els.noteTo.value = hi;
 }
 
 /** The dataset frame the playhead is on, or null before the first update. */
@@ -619,22 +583,13 @@ async function loadNotes() {
 }
 
 /**
- * Wire up the notes section.
- *
- * Never fatal: a root whose notes are disabled or read-only still gets the
- * panel and the 3D view, with the section saying which -- the same rule the
- * page follows for an absent artefact, where "this scene has none" is shown
- * rather than implied by an empty space.
+ * Wire up the notes section. The template has already rendered it as the
+ * root allows (hidden, read-only with the reason, or the form); this loads the
+ * list and makes the form work.
  */
 async function setupNotes() {
   const status = cfg.notes || {};
-  if (!status.enabled) {
-    els.notes.hidden = true;
-    return;
-  }
-  // Opens as the whole window: the common case is "this whole segment is
-  // wrong", and either end is then narrowed by hand or by `now`.
-  setNoteRange(cfg.frameStart, cfg.frameEnd);
+  if (!status.enabled) return;
 
   try {
     await loadNotes();
@@ -643,19 +598,7 @@ async function setupNotes() {
     console.warn("could not load notes:", error);
   }
 
-  if (!status.writable) {
-    els.notesWhy.textContent = `Read-only here: ${status.reason}`;
-    return;
-  }
-  els.notesWhy.textContent =
-    "Saved to " + status.dir + ". Both ends of the range are included.";
-
-  for (const topic of status.topics || []) {
-    const option = document.createElement("option");
-    option.value = option.textContent = topic;
-    els.noteTopic.appendChild(option);
-  }
-  els.noteForm.hidden = false;
+  if (!status.writable) return;
 
   for (const button of els.noteForm.querySelectorAll(".dt-nowbtn[data-act]")) {
     const field = button.dataset.act === "from" ? els.noteFrom : els.noteTo;
@@ -670,15 +613,11 @@ async function setupNotes() {
       return;
     }
     els.noteMsg.textContent = "saving…";
+    const frames = readNoteRange();
     try {
-      await noteRequest(cfg.notesUrl, "POST", {
-        frames: readNoteRange(),
-        topic: els.noteTopic.value,
-        text,
-      });
-      const saved = noteRangeText();
+      await noteRequest(cfg.notesUrl, "POST", { frames, topic: els.noteTopic.value, text });
       els.noteText.value = "";
-      els.noteMsg.textContent = `saved on ${saved}`;
+      els.noteMsg.textContent = `saved on ${rangeText(...frames)}`;
       await loadNotes();
     } catch (error) {
       els.noteMsg.textContent = `could not save: ${error.message}`;
@@ -748,15 +687,9 @@ function tick() {
   // panel went static" report, 2026-09-02). The loop must outlive one bad frame.
   try {
     update(false);
+    syncLegendHighlight();
   } catch (error) {
     if (!tick._warned) { console.warn("panel update skipped a frame:", error); tick._warned = true; }
-  }
-  if (patches) {
-    try {
-      syncLegendHighlight();
-    } catch (error) {
-      if (!tick._patchWarned) { console.warn("legend highlight skipped a frame:", error); tick._patchWarned = true; }
-    }
   }
   requestAnimationFrame(tick);
 }
@@ -777,13 +710,9 @@ function tick() {
  */
 /** Is this node something a person types into? Shared by the two key handlers. */
 function editable(node) {
-  return Boolean(
-    node &&
-      (node.tagName === "INPUT" ||
-        node.tagName === "TEXTAREA" ||
-        node.tagName === "SELECT" ||
-        node.isContentEditable),
-  );
+  // isContentEditable, not [contenteditable]: it is false for
+  // contenteditable="false" and true inside an editable host.
+  return Boolean(node?.matches?.("input, textarea, select") || node?.isContentEditable);
 }
 
 function claimKeyboardForFields() {
@@ -925,13 +854,9 @@ function setupPanel() {
   // image icon: a scene legitimately has gaps in any per-frame directory.
   for (const tile of els.tiles) {
     const img = tile.querySelector("img");
-    img.addEventListener("error", () => {
-      tile.querySelector(".dt-imgwrap").classList.add("absent");
-      img.classList.add("hidden");
-    });
-    img.addEventListener("load", () => {
-      tile.querySelector(".dt-imgwrap").classList.remove("absent");
-    });
+    const wrap = tile.querySelector(".dt-imgwrap");
+    img.addEventListener("error", () => wrap.classList.add("absent"));
+    img.addEventListener("load", () => wrap.classList.remove("absent"));
   }
 }
 
@@ -957,13 +882,12 @@ async function main() {
       // (DRIFT's driven-similarity maps); saying "not present" would be the
       // panel's own noise, so it is removed instead of dimmed.
       if (tile.dataset.optional !== undefined) {
-        tile.classList.add("hidden");
+        tile.hidden = true;
         continue;
       }
       tile.classList.add("unavailable");
       tile.querySelector(".dt-imgwrap").classList.add("absent");
       tile.querySelector(".dt-absent").textContent = "not present in this scene";
-      tile.querySelector("img").classList.add("hidden");
     }
   }
 

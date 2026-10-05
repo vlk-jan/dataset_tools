@@ -222,20 +222,15 @@
   font-variant-numeric: tabular-nums;
 }
 .dt-noterange input:focus { outline: none; border-color: var(--accent-line); }
-.dt-nowbtn {
+.dt-nowbtn, .dt-rangebtn, .dt-noterange select {
   background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--muted); font: inherit; font-size: var(--fs-2xs); padding: 1px 5px; cursor: pointer;
+  color: var(--muted); font: inherit; font-size: var(--fs-2xs); cursor: pointer;
 }
+.dt-nowbtn { padding: 1px 5px; }
 .dt-nowbtn:hover { border-color: var(--accent-line); color: var(--fg-2); }
-.dt-rangebtn {
-  background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--muted); font: inherit; font-size: var(--fs-2xs); padding: 2px 7px; cursor: pointer;
-}
+.dt-rangebtn { padding: 2px 7px; }
 .dt-rangebtn:hover { border-color: var(--accent-line); }
-.dt-noterange select {
-  background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 4px;
-  color: var(--fg-2); font: inherit; font-size: var(--fs-2xs); padding: 2px 4px; margin-left: auto;
-}
+.dt-noterange select { color: var(--fg-2); cursor: auto; padding: 2px 4px; margin-left: auto; }
 .dt-noteform textarea, .dt-noteediting textarea {
   background: var(--shade); border: 1px solid var(--line); border-radius: 4px;
   color: var(--fg); font: inherit; font-size: var(--fs-xs); padding: 5px 6px; resize: vertical;
@@ -280,14 +275,13 @@
 
 .dt-imgwrap { position: relative; background: var(--shade); border: 1px solid var(--line); border-radius: 5px; min-height: 40px; }
 .dt-imgwrap img { display: block; width: 100%; border-radius: 4px; }
-.dt-imgwrap img.hidden { display: none; }
+.dt-imgwrap.absent img { display: none; }
 .dt-absent {
   display: none; padding: var(--sp-4) var(--sp-3); text-align: center;
   color: var(--muted); font-size: var(--fs-xs);
 }
 .dt-imgwrap.absent .dt-absent { display: block; }
 .dt-tile.unavailable { opacity: 0.45; }
-.dt-tile.hidden { display: none; }
 
 .dt-foot { padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line); }
 
@@ -357,17 +351,9 @@ body:not(.dt-collapsed) .sv-playback {
   max-width: calc(100vw - 340px - 32px);
 }
 
-/* The zoom dialog over the 3D view. style.css is not loaded here, so its two
-   classes the dialog uses are given here; the palette is the panel's (dark),
-   via .dt-zoom in theme.css. */
+/* The zoom dialog over the 3D view; its .btn and .muted come from zoom.css,
+   the palette is the panel's (dark), via .dt-zoom in theme.css. */
 .dt-zoom { font: var(--fs-sm)/1.45 var(--sans); }
-.dt-zoom .muted { color: var(--muted); }
-.dt-zoom .btn {
-  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--line);
-  background: var(--panel-2); color: var(--fg);
-}
-.dt-zoom .btn:hover { border-color: var(--accent); }
-.dt-zoom .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 /* A single frame's view ("Visualise this frame") has nothing to play and no
    series to plot: SimView's playback bar and Analysis panel are dropped. */

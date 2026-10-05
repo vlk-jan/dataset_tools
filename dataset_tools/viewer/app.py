@@ -339,9 +339,10 @@ def create_app(
         request: Request,
         status: str | None = Query(None, pattern="^(ok|warn|fail)$"),
         verdict: str | None = Query(None, pattern="^(keep|drop|fix)$"),
+        split: str = Query("", pattern=f"^({'|'.join(SPLIT_ORDER)})?$"),
     ):
         def work():
-            return build_index(root, root.probe_all(), status, notes_store.list_all(), verdict)
+            return build_index(root, root.probe_all(), status, notes_store.list_all(), verdict, split)
 
         page = await run_in_threadpool(work)
         return templates.TemplateResponse(
@@ -601,6 +602,7 @@ def create_app(
             # back to the scene page.
             n_segments=len(access.segments),
             scene_url=f"/scene/{scene_id}",
+            notes=notes_store.status(),
         )
         config = json.dumps(
             {

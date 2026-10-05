@@ -2,6 +2,15 @@
    one picture as big as the window allows, and on the height-map grids a
    probe -- the outlined cell and its values below. Tokens come from theme.css,
    which both pages' stylesheets import. */
+/* The two classes the dialog shares with the pages around it, here because
+   this is the one stylesheet both pages load. */
+.muted { color: var(--muted); }
+.btn {
+  display: inline-block; padding: 5px var(--sp-3); border-radius: 6px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
+}
+.btn:hover { border-color: var(--accent); text-decoration: none; }
+.btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .zoomable { cursor: zoom-in; }
 .zoom {
   max-width: 96vw; max-height: 96vh; padding: var(--sp-3); border: 1px solid var(--line);
@@ -23,8 +32,7 @@
    and the picture moves under it. */
 .zoomstage.photo { overflow: hidden; }
 /* No readout under a photo, so it may take the room the probe's lines need. */
-.zoomstage.photo img { max-height: calc(96vh - 80px); }
-.zoomstage.photo img { transform-origin: 0 0; touch-action: none; }
+.zoomstage.photo img { max-height: calc(96vh - 80px); transform-origin: 0 0; touch-action: none; }
 .zoomstage.photo.zoomed { cursor: grab; }
 .zoomstage.photo.dragging { cursor: grabbing; }
 .zoomstage.photo.dragging img { user-select: none; }

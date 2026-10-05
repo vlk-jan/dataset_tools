@@ -363,22 +363,34 @@ def test_the_rendered_index_carries_the_bands_the_panel_and_the_filter(tmp_path)
     assert html.status_code == 200
     html = html.text
 
-    # The band on each card, and the attribute the filter reads.
-    assert 'class="scene split" id="s0001" data-split="val"' in html
-    assert 'class="scene split" id="s0000" data-split="train"' in html
+    # The band on each card.
+    assert 'class="scene split" id="s0001"' in html
+    assert 'class="scene split" id="s0000"' in html
     assert '<div class="splitband val"' in html and '<div class="splitband train"' in html
-    # The panel: one button per side plus "All", each count in scenes, each
+    # The panel: one link per side plus "All", each count in scenes, each
     # share with its unit spelled out.
-    assert 'data-split="" aria-pressed="true">All scenes <b>3</b>' in html
+    assert '<a class="sf" href="/" aria-current="page">All scenes <b>3</b>' in html
+    assert 'href="/?split=val" title=' in html
     assert "Validation <b>1</b> <small>33% of frames</small>" in html
     assert "Training <b>2</b> <small>67% of frames</small>" in html
     assert 'class="splitbar"' in html
     assert "scene_strat &middot; dataset" not in html  # no version in this file
     assert "not unseen terrain" in html
-    assert '<script type="module" src="/viewer-static/index.js">' in html
-    assert client.get("/viewer-static/index.js").status_code == 200
     # Nothing is wrong with this root, so it must not be banner-ed.
     assert 'class="stale"' not in html
+
+
+def test_the_split_filter_is_applied_by_the_server(tmp_path):
+    client = _split_client(tmp_path, val=("0001",), train=("0000", "0002"))
+    html = client.get("/?split=val").text
+    assert 'id="s0001"' in html
+    assert 'id="s0000"' not in html and 'id="s0002"' not in html
+    assert '<span class="sshown">1 of 3 shown</span>' in html
+    assert 'href="/?split=val" aria-current="page"' in html
+    # The panel and the header still count the whole root.
+    assert "All scenes <b>3</b>" in html and "3 scenes" in html
+    # A side the root does not have is refused like any bad query value.
+    assert client.get("/?split=bogus").status_code == 422
 
 
 def test_the_rendered_scene_page_badges_the_scene(tmp_path):
@@ -398,9 +410,8 @@ def test_an_unsplit_root_renders_exactly_as_it_did_before(tmp_path):
     root_path = make_root(tmp_path, scenes=("0000", "0001"), frames=8)
     html = viewer_client(root_path, tmp_path / "cache").get("/").text
     assert "splitband" not in html
-    assert "data-split" not in html
+    assert "split=" not in html
     assert 'class="splitpanel"' not in html
-    assert "index.js" not in html
 
 
 # --------------------------------------------------------------------------

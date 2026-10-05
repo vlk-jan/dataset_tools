@@ -90,7 +90,6 @@
   --fs-xl: 22px;
   /* Spacing scale, for every margin, padding and gap of 8px and up. Smaller
      ones are the insides of chips and buttons and stay literal. */
-  --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;

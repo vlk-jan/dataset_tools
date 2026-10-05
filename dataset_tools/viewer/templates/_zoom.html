@@ -1,0 +1,22 @@
+{# The zoom dialog zoom.js drives, shared by the frame and overlay pages.
+   `zoom_cloud` adds the cloud-on-image toggle; `zoom_class` extra classes. #}
+<dialog id="zoom" class="zoom{% if zoom_class %} {{ zoom_class }}{% endif %}" aria-label="Zoomed view">
+  <div class="zoomhead">
+    <strong class="zoomtitle"></strong>
+    <span class="muted zoomhint" hidden>hover to read a cell &middot; click to pin it &middot; arrow keys move the pin</span>
+    {% if zoom_cloud %}
+    <button type="button" class="btn zoomcloud" id="zoomcloud" aria-pressed="false" hidden
+            title="Project this frame's lidar cloud onto the image">Cloud on image</button>
+    {% endif %}
+    <form method="dialog"><button class="btn" aria-label="Close">&times;</button></form>
+  </div>
+  <div class="zoomstage">
+    <img alt="">
+    <div class="zoomcell" hidden></div>
+    <div class="depthlegend" hidden aria-hidden="true">
+      <span>lidar depth from camera</span><i></i>
+      <span class="depthrange"><b data-near></b><b data-far></b></span>
+    </div>
+  </div>
+  <output class="zoomread" hidden></output>
+</dialog>

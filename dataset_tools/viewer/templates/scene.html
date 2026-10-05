@@ -7,15 +7,14 @@
 {% endblock %}
 {% block header %}
   <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}
-    {# Jump to another scene; scenes only, a frame list here would drown it. #}
-    <details class="scene-jump">
-      <summary title="other scenes" aria-label="other scenes"></summary>
-      <ul>
-        {% for sid in scene_ids %}
-        <li><a href="/scene/{{ sid }}"{% if sid == scene_id %} aria-current="page"{% endif %}>{{ sid }}</a></li>
-        {% endfor %}
-      </ul>
-    </details>
+    {# Jump to another scene; scenes only, a frame list here would drown it.
+       A native popover: a click outside or Escape closes it. #}
+    <button type="button" class="scene-jump" popovertarget="scene-jump-list" title="other scenes" aria-label="other scenes"></button>
+    <ul class="scene-jump-list" id="scene-jump-list" popover>
+      {% for sid in scene_ids %}
+      <li><a href="/scene/{{ sid }}"{% if sid == scene_id %} aria-current="page"{% endif %}>{{ sid }}</a></li>
+      {% endfor %}
+    </ul>
   </h1>
   {% if page.split %}
   <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.which }}</span>
@@ -243,14 +242,6 @@
 
 {% endblock %}
 {% block scripts %}
-<script>
-// The scene jump list closes on a click anywhere outside it, and on Escape.
-{
-  const jump = document.querySelector(".scene-jump");
-  document.addEventListener("click", (e) => { if (!jump.contains(e.target)) jump.open = false; });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") jump.open = false; });
-}
-</script>
 <script type="module" src="/viewer-static/notes.js"></script>
 <script type="module" src="/viewer-static/swap.js"></script>
 {% if page.signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}

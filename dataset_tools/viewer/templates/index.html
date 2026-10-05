@@ -78,8 +78,8 @@
 
   {# What the card bands mean, and the filter over them. Only on a root that
      declares a split, and counted over the scenes this root actually has rather
-     than over the file's own lists. The buttons do nothing until index.js
-     loads; without it every scene simply stays listed. #}
+     than over the file's own lists. The filter is plain links (`/?split=val`),
+     applied by the server, so a filtered index can be linked and reloaded. #}
   {% if split_panel %}
   {% set sp = split_panel %}
   <div class="splitpanel" id="splits">
@@ -91,15 +91,15 @@
         {%- if sp.dataset_version %}dataset {{ sp.dataset_version }}{% endif -%}
       </span>
     </div>
-    <div class="splitfilter" role="group" aria-label="Show scenes by split">
-      <button type="button" class="sf" data-split="" aria-pressed="true">All scenes <b>{{ sp.total }}</b></button>
+    <nav class="splitfilter" aria-label="Show scenes by split">
+      <a class="sf" href="{{ sp.href }}"{% if not sp.current %} aria-current="page"{% endif %}>All scenes <b>{{ sp.total }}</b></a>
       {% for part in sp.parts %}
-      <button type="button" class="sf {{ part.which }}" data-split="{{ part.which }}" aria-pressed="false" title="{{ part.title }}">
+      <a class="sf {{ part.which }}" href="{{ part.href }}"{% if sp.current == part.which %} aria-current="page"{% endif %} title="{{ part.title }}">
         <i></i>{{ part.name }} <b>{{ part.count }}</b>
         {%- if part.pct %} <small>{{ part.pct }} of {{ sp.unit }}</small>{% endif %}
-      </button>
+      </a>
       {% endfor %}
-    </div>
+    </nav>
     {% if sp.unit %}
     <div class="splitbar" title="share of this root's {{ sp.unit }} on each side of the split">
       {% for part in sp.parts %}{% if part.share %}<i class="{{ part.which }}" style="width:{{ "%.2f"|format(part.share * 100) }}%"></i>{% endif %}{% endfor %}
@@ -144,16 +144,16 @@
     <div class="shead">
       <h2>{{ group.title }}</h2>
       {% if group.range %}<span class="scount">{{ group.range }}</span>{% endif %}
+      {% if group.shown %}<span class="sshown">{{ group.shown }}</span>{% endif %}
     </div>
     {% if group.blurb %}<p class="sblurb">{{ group.blurb }}</p>{% endif %}
 
     <div class="scenes">
     {% for row in group.rows %}
       {% set p = row.probe %}
-      {# The band says which side of the train/val split the scene is on, and
-         `data-split` is what the filter reads; a root with no splits.json adds
-         neither and the card looks as it always did. #}
-      <article class="scene{% if row.split %} split{% endif %}" id="s{{ p.scene_id }}"{% if row.split %} data-split="{{ row.split.which }}"{% endif %}>
+      {# The band says which side of the train/val split the scene is on; a
+         root with no splits.json adds none and the card looks as it always did. #}
+      <article class="scene{% if row.split %} split{% endif %}" id="s{{ p.scene_id }}">
         {% if row.split %}
         <div class="splitband {{ row.split.which }}" title="{{ row.split.title }}">{{ row.split.which }}</div>
         {% endif %}
@@ -233,7 +233,4 @@
   <footer class="atlas-footer">{{ atlas.footer }}</footer>
   {% endif %}
 
-{% endblock %}
-{% block scripts %}
-{% if split_panel %}<script type="module" src="/viewer-static/index.js"></script>{% endif %}
 {% endblock %}

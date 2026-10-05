@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import pytest
 from helpers_viewer import (
@@ -49,6 +50,14 @@ def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
     listed = client.get("/api/scene/0000/notes").json()
     assert [n["id"] for n in listed["notes"]] == [note["id"]]
     assert listed["status"]["writable"] is True
+
+    # The 3D view's compose form comes rendered: topics, the window as the
+    # range, and where a note will be saved.
+    view = client.get("/view/0000/seg000").text
+    assert '<form class="dt-noteform" id="dt-noteform">' in view
+    assert '<option value="odometry">odometry</option>' in view
+    assert re.search(r'id="dt-note-from" min="0" max="11" value="\d+"', view)
+    assert "Saved to " in view
 
     edited = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"text": "and never recovers"})
     assert edited.status_code == 200
@@ -203,6 +212,9 @@ def test_a_read_only_root_still_reads_its_notes_but_refuses_new_ones(tmp_path):
         assert "from before" in page
         assert "read-only" in page.lower()
         assert 'id="noteform"' not in page
+        view = client.get("/view/0000/seg000").text
+        assert 'id="dt-noteform" hidden>' in view
+        assert "Read-only here: " in view
     finally:
         root_path.chmod(0o755)
         (root_path / "notes").chmod(0o755)

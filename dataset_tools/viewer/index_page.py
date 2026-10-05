@@ -14,6 +14,7 @@ small JSON read.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 from .probe import DatasetRoot, SceneProbe
 from .splits import SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
@@ -381,6 +382,7 @@ def build_index(
     status: str | None = None,
     notes: dict[str, list] | None = None,
     verdict: str | None = None,
+    split: str = "",
 ) -> dict[str, Any]:
     """Everything the index template needs, curated half included when present.
 
@@ -388,7 +390,9 @@ def build_index(
     (``STATUS_FILTERS``); the totals then describe the scenes shown.
     ``notes`` is every scene's notes (``NoteStore.list_all``): each card then
     says how many it has and what verdicts they carry, and ``verdict`` keeps
-    only the scenes with a note of that verdict.
+    only the scenes with a note of that verdict. ``split`` keeps only the
+    cards on that side of the train/val split; unlike ``status`` it leaves the
+    totals and the split panel counting every scene.
     """
     atlas = root.atlas() or {}
     rows = [build_row(root, p) for p in probes]
@@ -434,6 +438,22 @@ def build_index(
             }
         )
 
+    panel = split_panel(root, rows)
+    if panel:
+        # Each filter link keeps the status and verdict filters already on.
+        keep = {k: v for k, v in (("status", status), ("verdict", verdict)) if v}
+        panel["href"] = "/?" + urlencode(keep) if keep else "/"
+        for part in panel["parts"]:
+            part["href"] = "/?" + urlencode({**keep, "split": part["which"]})
+        panel["current"] = split if any(part["which"] == split for part in panel["parts"]) else ""
+        if panel["current"]:
+            for group in groups:
+                shown = [r for r in group["rows"] if (r["split"] or {}).get("which") == split]
+                group["shown"] = f"{len(shown)} of {len(group['rows'])} shown"
+                group["rows"] = shown
+            # A group with nothing left in it would be a heading over empty space.
+            groups = [g for g in groups if g["rows"]]
+
     totals = list(atlas.get("totals") or _derived_totals(rows))
     disk = disk_panel(root, rows)
     if disk:
@@ -454,7 +474,7 @@ def build_index(
         # The split panel under the masthead: what the card bands mean, and the
         # filter over them. Absent -- not empty -- on a root with no splits.json,
         # so the index of an unsplit root gains nothing at all.
-        "split_panel": split_panel(root, rows),
+        "split_panel": panel,
         # Links that show only the scenes validation.csv passed, warned on or
         # failed; None on a root that was never validated.
         "status_filter": status_filter,
