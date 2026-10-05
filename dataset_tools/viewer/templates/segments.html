@@ -6,24 +6,37 @@
   <span class="muted">{{ rows | length }} window{{ "s" if rows | length != 1 }} of ground truth across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
 {% endblock %}
 {% block main %}
-  <p class="muted">
-    Every ground-truth window in the root, so the worst can be found without opening every scene.
-    Sort by: {% for key, label in sorts %}<a href="/segments?sort={{ key }}"{% if sort == key %} aria-current="page"{% endif %}>{{ label }}</a>{{ " · " if not loop.last }}{% endfor %}.
-    GT attitude is the median tilt gap between the ground truth and the IMU; a pose rate under 2 Hz is
-    interpolated over a second or more.
-  </p>
+  {# A plain GET form, so the choice stays in the address and a reload or a
+     shared link shows the same table; the button is for a browser without script. #}
+  <form class="tablemenu" method="get" action="/segments">
+    {% if splits %}
+    <label>Filter
+      <select name="split" onchange="this.form.submit()">
+        <option value="">all scenes</option>
+        {% for key, name in splits %}<option value="{{ key }}"{% if split == key %} selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select>
+    </label>
+    {% endif %}
+    <label>Sort by
+      <select name="sort" onchange="this.form.submit()">
+        {% for key, label in sorts %}<option value="{{ key }}"{% if sort == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button class="btn" type="submit">Apply</button></noscript>
+  </form>
   <table>
     <thead>
       <tr>
-        <th>Scene</th><th>Window</th><th>Frames</th><th class="num">Count</th><th class="num">Duration</th>
-        <th class="num">GT poses</th><th class="num">GT attitude</th><th>Notes</th><th>Ends</th><th></th>
+        {{ ui.th("Scene") }}{{ ui.th("Window") }}{{ ui.th("Frames") }}{{ ui.th("Count", num=True) }}{{ ui.th("Duration", num=True) }}
+        {{ ui.th("GT poses", num=True) }}{{ ui.th("GT attitude", num=True) }}{{ ui.th("Notes") }}{{ ui.th("Ends") }}<th></th>
       </tr>
     </thead>
     <tbody>
     {% for r in rows %}
       {% set w = r.window %}
       <tr>
-        <td><a href="/scene/{{ r.scene }}">{{ r.scene }}</a></td>
+        <td><a href="/scene/{{ r.scene }}">{{ r.scene }}</a>
+          {%- if r.split %} <span class="split-tag {{ r.split.which }}" title="{{ r.split.title }}">{{ r.split.which }}</span>{% endif %}</td>
         <td><a href="/scene/{{ r.scene }}/segment/{{ w.segment_index }}"><strong>{{ w.label }}</strong></a></td>
         {{ ui.window_cells(w) }}
         {{ ui.gt_cells(w, r.att) }}

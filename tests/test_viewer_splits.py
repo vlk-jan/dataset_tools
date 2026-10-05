@@ -474,3 +474,26 @@ def test_a_root_declaring_no_hold_out_is_unmarked(tmp_path):
     root_path = make_root(tmp_path, scenes=("0000",))
     (root_path / "keyframes_train.lst").write_text("0000/clouds/00000.npy 0000/images/00000.png\n")
     assert not probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache").splits()
+
+
+def test_the_segments_table_tags_each_window_s_split_and_filters_on_it(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000", "0001"))
+    write_splits(root_path, val=("0001",))
+    client = viewer_client(root_path, tmp_path)
+
+    every = client.get("/segments").text
+    assert "/scene/0000/segment/" in every and "/scene/0001/segment/" in every
+    assert '<option value="val">Validation</option>' in every and 'class="split-tag val"' in every
+    held = client.get("/segments?split=val&sort=att").text
+    assert "/scene/0001/segment/" in held and "/scene/0000/segment/" not in held
+    assert client.get("/segments?split=nonsense").status_code == 422
+
+
+def test_every_window_table_header_explains_itself_on_hover(tmp_path):
+    root_path = make_root(tmp_path, scenes=("0000",))
+    client = viewer_client(root_path, tmp_path)
+
+    for url in ("/segments", "/scene/0000", "/scene/0000/segment/0"):
+        page = client.get(url).text
+        assert '<th class="num" title="median tilt gap' in page, url
+        assert '<th title="first and last frame index' in page, url

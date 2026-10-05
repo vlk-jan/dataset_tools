@@ -41,6 +41,33 @@ THIN_POSE_RATE = 2.0
 #: A segment anchored at least this densely is anchored well.
 GOOD_POSE_RATE = 5.0
 
+#: What each window-table column means, shown on hovering its header. One
+#: dict for the scene, segment and segments tables, so the three cannot drift.
+COLUMN_TITLES: dict[str, str] = {
+    "Scene": "the recording this window comes from",
+    "Window": "one buildable 3D view: a ground-truth segment, or a part of one when it runs past the length cap",
+    "Frames": "first and last frame index of the window, both inclusive",
+    "Count": "how many camera frames the window covers",
+    "Duration": "time from the window's first frame to its last",
+    "Pose source": (
+        "where the 3D view takes the robot's pose from: odometry is ground truth, "
+        "transforms is wheel odometry (drifts), none has no pose at all"
+    ),
+    "GT poses": (
+        "ground-truth poses behind the window, and their rate; a window cut from a longer segment gets "
+        f"its share of the segment's poses. Under {THIN_POSE_RATE:.0f} Hz the path between poses is "
+        "interpolated over a second or more"
+    ),
+    "GT attitude": (
+        "median tilt gap between the ground truth's orientation and the IMU's gravity over the window: "
+        f"under {ATTITUDE_BANDS['ok']:.0f}° they agree, over {ATTITUDE_BANDS['warn']:.0f}° the ground truth "
+        "has diverged; - when there is no ground truth or no gravity to compare"
+    ),
+    "Notes": "notes whose frame range touches this window, with any verdict they carry",
+    "Note": "for a ground-truth segment, why it ends (or where its poses were filled from); otherwise what the window's pose is",
+    "Ends": "why the ground-truth segment stops where it does",
+}
+
 #: The GNSS track and the ground-truth path over the same span are flagged as
 #: disagreeing when they differ by BOTH this fraction and this many metres. The
 #: fraction alone cries wolf on a segment where the robot barely moved (a 2 m

@@ -56,7 +56,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene, read_driven_similarity
-from .index_page import THUMB_SLOTS, build_index, thumb_index
+from .index_page import THUMB_SLOTS, build_index, split_mark, thumb_index
 from .loaders import (
     HM_EXTENT,
     HM_RES,
@@ -69,9 +69,10 @@ from .loaders import (
 from .notes import NoteStore, NotesUnavailable
 from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
 from .scene_page import build_scene_page, map_card
-from .segment_page import attitude_per_window, build_segment_page
+from .segment_page import COLUMN_TITLES, attitude_per_window, build_segment_page
 from .segment_page import find as find_segment
 from .signals import MAX_GT_SPEED, signal_charts
+from .splits import SPLIT_NAMES, SPLIT_ORDER
 from .windows import (
     DEFAULT_MAX_FRAMES,
     DEFAULT_MAX_SECONDS,
@@ -227,6 +228,7 @@ def create_app(
 
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals["reason_text"] = describe_reason
+    templates.env.globals["column_titles"] = COLUMN_TITLES
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
@@ -380,7 +382,11 @@ def create_app(
     segment_rows: dict[tuple, list[dict]] = {}
 
     @app.get("/segments", response_class=HTMLResponse)
-    async def segments_page(request: Request, sort: str = Query("scene", pattern="^(scene|att|rate|duration)$")):
+    async def segments_page(
+        request: Request,
+        sort: str = Query("scene", pattern="^(scene|att|rate|duration)$"),
+        split: str = Query("", pattern=f"^({'|'.join(SPLIT_ORDER)})?$"),
+    ):
         """Every ground-truth window of the root in one table.
 
         The GT-versus-IMU verdict means reading each scene's odometry and
@@ -401,15 +407,21 @@ def create_app(
                 segment_rows.clear()
                 segment_rows[key] = rows
             notes = notes_store.list_all()
+            # Read fresh like the notes: splits.json is not in any scene's fingerprint.
+            marks = {sid: split_mark(root, sid) for sid in ids}
             out = []
             for r in segment_rows[key]:
                 w = r["window"]
                 touching = [n for n in notes.get(r["scene"], []) if n.overlaps(w.frame_start, w.frame_end)]
                 verdicts = sorted({n.verdict for n in touching if n.verdict})
-                out.append({**r, "notes": touching, "verdicts": verdicts})
+                out.append({**r, "notes": touching, "verdicts": verdicts, "split": marks[r["scene"]]})
             return out
 
         rows = await run_in_threadpool(work)
+        # Which sides the menu offers: the ones some row is on, in drawing order.
+        sides = [s for s in SPLIT_ORDER if any(r["split"] and r["split"]["which"] == s for r in rows)]
+        if split:
+            rows = [r for r in rows if r["split"] and r["split"]["which"] == split]
         _, by, descending = segment_sorts[sort]
         rows.sort(key=by, reverse=descending)
         return templates.TemplateResponse(
@@ -421,6 +433,8 @@ def create_app(
                 "n_scenes": len({r["scene"] for r in rows}),
                 "sort": sort,
                 "sorts": [(k, v[0]) for k, v in segment_sorts.items()],
+                "split": split,
+                "splits": [(s, SPLIT_NAMES[s]) for s in sides],
             },
         )
 

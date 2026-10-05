@@ -48,6 +48,11 @@
 {{ 'yes' if source == 'odometry' else ('partial' if source == 'transforms' else 'no') }}
 {%- endmacro %}
 
+{# A window table's header cell, explained on hover (COLUMN_TITLES). #}
+{% macro th(name, num=False) -%}
+<th{% if num %} class="num"{% endif %}{% if name in column_titles %} title="{{ column_titles[name] }}"{% endif %}>{{ name }}</th>
+{%- endmacro %}
+
 {# A window table's Frames / Count / Duration cells. #}
 {% macro window_cells(w) -%}
 <td class="muted">{{ w.frame_start }} - {{ w.frame_end - 1 }}</td>

@@ -49,6 +49,7 @@ h2 { font-size: var(--fs-lg); margin: var(--sp-5) 0 var(--sp-3); font-weight: 60
 table { border-collapse: collapse; width: 100%; font-size: var(--fs-base); }
 th, td { text-align: left; padding: 6px var(--sp-3); border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 0); background: var(--panel); }
+th[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* Short cells (ids, ranges, counts, the Open button) keep to one line; the one
@@ -561,6 +562,9 @@ button.chip[aria-expanded="true"] {
 .noteform { margin-top: var(--sp-3); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
 .noterow { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
 .noterow label { color: var(--muted); font-size: var(--fs-base); display: flex; align-items: center; gap: 6px; }
+.tablemenu { display: flex; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.tablemenu label { color: var(--muted); font-size: var(--fs-base); display: flex; align-items: center; gap: 6px; }
+.tablemenu select,
 .noteform input, .noteform select, .noteform textarea,
 .noteedit input, .noteedit select, .noteedit textarea {
   padding: 4px var(--sp-2); border-radius: 6px; background: var(--bg);

@@ -202,9 +202,9 @@
   <table>
     <thead>
       <tr>
-        <th>Window</th><th>Frames</th><th class="num">Count</th>
-        <th class="num">Duration</th><th>Pose source</th><th class="num">GT poses</th>
-        <th class="num">GT attitude</th><th>Note</th><th></th>
+        {{ ui.th("Window") }}{{ ui.th("Frames") }}{{ ui.th("Count", num=True) }}
+        {{ ui.th("Duration", num=True) }}{{ ui.th("Pose source") }}{{ ui.th("GT poses", num=True) }}
+        {{ ui.th("GT attitude", num=True) }}{{ ui.th("Note") }}<th></th>
       </tr>
     </thead>
     <tbody>
