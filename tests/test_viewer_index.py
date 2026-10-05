@@ -323,3 +323,32 @@ def test_disk_sizes_read_in_decimal_units():
     assert index_page.fmt_bytes(454_081_342_044_000) == "454.08 TB"
     assert index_page.fmt_bytes(3_625_000) == "3.6 MB" and index_page.fmt_bytes(326_000) == "326 kB"
     assert index_page.fmt_share(0.00025) == "<0.1%" and index_page.fmt_share(0.074) == "7.4%"
+
+
+def test_a_scene_reached_entirely_through_links_is_sized_by_what_it_links_to(tmp_path):
+    """v2.4 links 25 scenes into v2.3: the viewer sizes them as if the files were there."""
+    from dataset_tools.disk_usage import update
+    from dataset_tools.viewer.build import SceneAccess
+    from dataset_tools.viewer.scene_page import disk_card, file_sizes
+
+    old = make_root(tmp_path, scenes=("0000",))
+    root_path = tmp_path / "new"
+    root_path.mkdir()
+    (root_path / "0000").mkdir()
+    for entry in (old / "0000").iterdir():
+        (root_path / "0000" / entry.name).symlink_to(entry)
+    for entry in old.iterdir():
+        if entry.name != "0000":
+            (root_path / entry.name).symlink_to(entry)
+    doc = update(root_path)
+    assert doc["scenes"]["0000"]["bytes"] == 0 and doc["scenes"]["0000"]["linked_bytes"] > 0
+
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    page = index_page.build_index(root, root.probe_all())
+    card = next(s for s in page["rows"][0]["stats"] if s["label"] == "on disk")
+    assert card["value"] == disk_card(SceneAccess(root, "0000"))["stats"][0]["value"] != "0 B"
+    assert page["disk_panel"]["parts"]
+
+    access = SceneAccess(root, "0000")
+    sizes = file_sizes(access)
+    assert sizes["images"] > 0 and sizes["data_ts.txt"] > 0

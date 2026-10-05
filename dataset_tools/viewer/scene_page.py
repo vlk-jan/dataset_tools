@@ -36,6 +36,7 @@ from .build import SceneAccess
 from .index_page import (
     THUMB_FRACTIONS,
     THUMB_SLOTS,
+    content_bytes,
     coverage_class,
     disk_parts,
     fmt_bytes,
@@ -876,10 +877,11 @@ def disk_card(access: SceneAccess) -> dict[str, Any] | None:
     stats = [stat("on disk", fmt_bytes(total), fmt_disk_rate(total, d.get("span_s")))]
     if d.get("frames"):
         mods = d.get("modalities") or {}
+        count = {name: (m.get("files") or 0) + (m.get("linked_files") or 0) for name, m in mods.items()}
         each = [
-            f"{name.replace('_', ' ')} {fmt_bytes(mods[name]['bytes'] / mods[name]['files'])}"
+            f"{name.replace('_', ' ')} {fmt_bytes(content_bytes(mods[name]) / count[name])}"
             for name in ("images", "clouds")
-            if (mods.get(name) or {}).get("files")
+            if count.get(name)
         ]
         stats.append(stat("per frame", fmt_bytes(total / d["frames"]), " · ".join(each) or None))
     return {
@@ -892,8 +894,9 @@ def disk_card(access: SceneAccess) -> dict[str, Any] | None:
 def file_sizes(access: SceneAccess) -> dict[str, int]:
     """Bytes per top-level entry of the scene, directories included, as last measured."""
     d = access.root.disk_usage_scene(access.scene_id)
-    sizes = {name: m.get("bytes") for name, m in (d.get("modalities") or {}).items() if name != "other"}
+    sizes = {name: content_bytes(m) for name, m in (d.get("modalities") or {}).items() if name != "other"}
     sizes.update(d.get("files") or {})
+    sizes.update({name: f.get("bytes") for name, f in (d.get("linked_files") or {}).items()})
     return {k: v for k, v in sizes.items() if isinstance(v, int)}
 
 

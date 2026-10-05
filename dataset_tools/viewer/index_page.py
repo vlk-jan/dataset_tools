@@ -82,6 +82,16 @@ def fmt_disk_rate(nbytes: float, seconds: float | None) -> str | None:
     return f"{nbytes / seconds * 3600 / 1e9:.0f} GB/h" if seconds else None
 
 
+def content_bytes(entry: dict) -> int:
+    """A ``disk_usage.json`` scene or modality entry's size, linked bytes included.
+
+    A root built from links into another (v2.4 into v2.3) stores almost nothing
+    itself, but its scenes still hold everything they link to; showing only the
+    own ``bytes`` would read a fully linked scene as empty.
+    """
+    return int(entry.get("bytes") or 0) + int(entry.get("linked_bytes") or 0)
+
+
 def fmt_share(f: float) -> str:
     """``91%`` / ``7.4%`` / ``<0.1%``: a sliver of the bar still reads as present."""
     if f >= 0.1:
@@ -320,7 +330,8 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     stats = _curated_stats(a) if a else _probed_stats(probe)
     disk = root.disk_usage_scene(probe.scene_id)
     if isinstance(disk.get("bytes"), int):
-        stats.append(stat("on disk", fmt_bytes(disk["bytes"]), fmt_disk_rate(disk["bytes"], disk.get("span_s"))))
+        total = content_bytes(disk)
+        stats.append(stat("on disk", fmt_bytes(total), fmt_disk_rate(total, disk.get("span_s"))))
 
     return {
         "probe": probe,
@@ -478,13 +489,13 @@ def disk_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] 
 
 def disk_parts(entries: Any) -> list[dict[str, Any]]:
     """The disk bar's slices, largest first, summed over ``disk_usage.json``
-    scene entries. One function for the index's bar and a scene page's, so a
+    scene entries, linked bytes included. One function for the index's bar and a scene page's, so a
     modality has the same colour and name on both."""
     by_mod: dict[str, int] = {}
     for entry in entries:
         for name, m in (entry.get("modalities") or {}).items():
             key = name if name in DISK_MODALITIES else "other"
-            by_mod[key] = by_mod.get(key, 0) + int(m.get("bytes") or 0)
+            by_mod[key] = by_mod.get(key, 0) + content_bytes(m)
     total = sum(by_mod.values())
     if not total:
         return []
