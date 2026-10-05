@@ -9,7 +9,7 @@ library, so **no ROS installation is required**.
 
 | Tool | Entry point | What it does |
 | --- | --- | --- |
-| `dataset_tools/extract/` | `helhest-extract` | bags -> scene directories (`cli`, `scene` per bag, `scene_io`, `sync`, `pointcloud`, `gps`, `tf_graph`, `camera`, `ground_truth`) |
+| `dataset_tools/extract/` | `helhest-extract` | bags -> scene directories (`cli`, `scene` per bag, `scene_io`, `sync`, `pointcloud`, `deskew`, `gps`, `tf_graph`, `camera`, `ground_truth`, `pose_check`) |
 | `dataset_tools/validate_scene.py` | `helhest-validate` | check extracted scenes |
 | `dataset_tools/sort_bag.py` | `helhest-sort-bag` | rewrite a bag sorted by header stamp |
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
@@ -21,11 +21,11 @@ library, so **no ROS installation is required**.
 For a bag recorded on the current robot (Odin1 + Fixposition, 2026-08 onwards):
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e .                  # extraction: Python >= 3.10
+python3 -m venv .venv && .venv/bin/pip install -e .                  # extraction only; Python >= 3.12
 .venv/bin/helhest-extract  /path/to/bags /path/to/dataset --jobs 8   # one scene per bag: 0000/, 0001/, ...
 .venv/bin/helhest-validate /path/to/dataset --csv /path/to/dataset/validation.csv
 
-python3.12 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer]"   # viewer: Python >= 3.12
+python3 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer]"   # plus the viewer (pulls in torch)
 .venv-viewer/bin/helhest-viewer /path/to/dataset                     # then open http://127.0.0.1:8080/
 ```
 
@@ -70,7 +70,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[test]"
 ```
 
-Python >= 3.10 (CI runs 3.10 and 3.12). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
+Python >= 3.12. Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
 
 ### Container (CTU cluster)
 
@@ -180,6 +180,7 @@ lidar works.
 | `--deskew_imu TOPIC` | the gyro that gives the rotation inside each sweep when deskewing (default `/odin1/imu`, 400 Hz; needs a TF path to `--base_frame`). Used per sweep only where it agrees with the pose track's slerp to 1 deg, else the slerp; `off` or a missing topic means slerp throughout. Counted in `extract_meta.json` |
 | `--check_odom TOPIC` | the pose stream the odometry is checked against at the base frame (default `/fixposition/odometry_enu`; `off` skips). Nothing in the scene is built from it; the result is `pose_check.txt` and `extract_meta.json` -> `frames.pose_check` |
 | `--deskew auto\|off` | `auto` (default): where the cloud carries a per-point time (the Odin1's `offset_time`: its 256 x 192 raster is scanned bottom to top over 67 ms behind one stamp) and the pose stream covers the sweep, every return is moved to where the robot was at the frame's instant, so the cloud is a snapshot at `data_ts` like the image beside it. `off` writes the sweep as recorded, with its motion smear (4 deg across the raster at 60 deg/s), as every root before 2026-10-01. Counted per scene in `extract_meta.json` (`frames.deskew`) |
+| `--image_format camera\|png` | `camera` (default): the camera's own compressed bytes, unmodified, as `.jpg` or `.png` by what they are. `png`: decode and store the pixels as PNG, four times the size; only for extending a root that already holds PNG |
 | `--lidar_extrinsic` | manual lidar->base transform when TF has no path |
 | `--allow_frame_fallback` | extract a bag whose TF does not reach `--base_frame` from the lidar (and no `--lidar_extrinsic`), the odometry child frame or the orientation frame, leaving that stream in its own frame. Without it such a scene **fails**: clouds, poses or gravity in the wrong frame look plausible and are found late. What fell back is listed in `extract_meta.json` |
 | `--max_sync_dt S` | largest camera/lidar stamp difference a frame may pair (default `0.1`); further-apart mutual nearest neighbours, an image across a camera stall, are dropped and counted in `extract_meta.json` |
@@ -336,7 +337,7 @@ are reported as optional extras, and `float64` clouds are accepted.
 ## Viewer
 
 ```bash
-pip install "dataset_tools[viewer]"     # needs Python 3.12+ (a SimView requirement)
+pip install "dataset_tools[viewer]"     # Python >= 3.12
 helhest-viewer /path/to/dataset         # then open http://127.0.0.1:8080/
 ```
 
@@ -387,16 +388,10 @@ construction (constant, and changing halfway), the scene validator, and the
 viewer (probing, window enumeration, pose
 interpolation, the map's geodesy, the segment page, rendering and every route,
 against synthetic scene directories). `.github/workflows/ci.yml` runs
-the same on Python 3.10 (extraction) and 3.12 (with the viewer), plus `black`
-and `ruff`.
+the same with and without the viewer extra, plus `black` and `ruff`.
 
-The viewer's tests need its extra too, and with it Python 3.12+; run them from
-the viewer's own virtualenv:
-
-```bash
-.venv-viewer/bin/pip install -e ".[viewer,test]"
-.venv-viewer/bin/python -m pytest tests
-```
+The viewer's tests need its extra too;
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the virtualenvs and the lint.
 
 ## Known caveats
 
@@ -588,8 +583,8 @@ the viewer's own virtualenv:
   pose copied in -- 184 frames across ten scenes of HELHEST v2.2, all at a
   scene's ends.
 - **Out-of-order bags.** Timestamps are sorted before synchronisation. If a bag
-  is badly out of order for other reasons, `sort_bag.py` rewrites it sorted by
-  header stamp.
+  is badly out of order for other reasons, `helhest-sort-bag` rewrites it sorted
+  by header stamp.
 
 ## Dataset
 

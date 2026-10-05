@@ -111,7 +111,7 @@ to the nearest-return flood and the wall returns.
 
 The 0.51 % residual is not wake. The rear contact is at x = −0.697 and the
 anchor ring adds 0.45, so the authority disc legitimately reaches −2.15;
-`tests/test_height_map_near_field.py` asserts no anchored cell exists past that.
+DRIFT's `tests/test_height_map_near_field.py` asserts no anchored cell exists past that.
 
 **Do not ship an unbounded build.** If a BEV validity tile shows anything
 `anchored` that is not sitting on the robot's own footprint, the radius is
@@ -128,9 +128,9 @@ Repaired roots write a fourth state into `height_masks/validity`:
 | 2 | `measured` — a lidar return landed here |
 | **3** | **`anchored` — a wheel-contact anchor decided this cell** |
 
-**3 is a provenance, not a better 2.** Rank codes through `VALIDITY_RANK` or
-test them with `founded_in_returns` (`DRIFT/utils/pcd.py`, mirrored in
-`dataset_tools/viewer/loaders.py`); `validity >= 1` now silently *accepts* the
+**3 is a provenance, not a better 2.** Rank codes through `VALIDITY_RANK`
+(`DRIFT/utils/pcd.py`, mirrored in `dataset_tools/viewer/loaders.py`) or test
+them with DRIFT's `founded_in_returns`; `validity >= 1` now silently *accepts* the
 anchors, which is the opposite of what every gate written with that idiom meant.
 Both helpers are the identity on the three states every published root ships.
 
@@ -208,7 +208,7 @@ change.
    ```
 
 5. **Clear the viewer cache** for the root (`~/.cache/dataset_tools_viewer/`, or
-   the viewer's per-root "clear cache" action). Cached bundles hold a splatted
+   start the viewer once with `--clear-cache`). Cached bundles hold a splatted
    terrain and a validity layer built from the old maps.
 
 ## Verify the build before trusting it

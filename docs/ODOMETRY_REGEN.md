@@ -318,8 +318,8 @@ median 2.9 km (79.5 % > 1 m). With restarts: 5/12 intervals show ≤ 0.19 m,
 window error median 0.11 m, p95 0.98 m, 4.9 % > 1 m. Local consistency is
 the only property DRIFT consumes, so **segment restarts are mandatory**, and
 the ranking must come from `scripts/motion_audit.py` (stationary-interval
-drift) and `scripts/local_consistency.py` (windowed error vs `/odom`), never
-from pose counts. The detector still misses some divergences (p99 3.7 m) —
+drift) and `scripts/local_consistency.py` (windowed error vs `/odom`; both
+removed since, see git history), never from pose counts. The detector still misses some divergences (p99 3.7 m) —
 tightening it is the open task.
 
 **Scene 0013** (did not diverge in v1), 10 s windows, rate 0.5:
@@ -504,10 +504,10 @@ For each row of `docs/scene_bags.csv`:
    + FAST-LIO (tuned) + recorder with segment restarts inside the sif at
    `--rate 1.0`; keep the divergence-flag stream per scene, then the
    segment post-filter;
-3. `extract_data.py` for clouds/images/`camera_info.yaml`/`transforms.npy`
-   (`--start_index` gives the scene number; `--frame_fix` is NOT needed — the
+3. `helhest-extract` for clouds/images/`camera_info.yaml`/`transforms.npy`
+   (`--start_index` gives the scene number; no frame fix is needed — the
    new odometry is already `base_link`);
-4. `validate_scene.py`;
+4. `helhest-validate`;
 5. push the scene to RCI (`/mnt/personal/<user>/HELHEST_v1_2/NNNN`), delete
    the local bag.
 
@@ -522,5 +522,5 @@ For each row of `docs/scene_bags.csv`:
   simulator-vs-GT yaw test agrees on strong turns.
 - Driven cells in the rebuilt height maps are ground (valid-cell IoU of the
   proprio labels, DRIFT side).
-- `validate_scene.py` clean on every scene; `scene_bags.csv` gains a column
+- `helhest-validate` clean on every scene; `scene_bags.csv` gains a column
   with the FAST-LIO run id/date; DATA.md gets a v1.2 changelog entry.

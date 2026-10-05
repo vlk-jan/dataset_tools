@@ -17,13 +17,13 @@ banks, a drained reservoir bed, snow, and three tip-over events are all in.
 | Sites | Robotour 2025 venue — chateau landscape park & arboretum [LOCATION]; Temešvár area (Písek district) — village farmyard, pine-forest edge & fallow meadow, forested hills around a drained pond; Milíčovský háj (Prague) — snow-covered lowland deciduous forest |
 | Odometry | present in 32 scenes (17 covering the whole scene, 15 only part of it; see table); absent in 11 |
 | Size on disk | ~7 GB per 10k frames (PNG images dominate) |
-| Location | `/mnt/data/vras/data/HELHEST/` (CTU VRAS storage); raw bags on `subtdata:/data/` (see [Raw recordings](#raw-recordings)) |
+| Location | `/mnt/data/vras/data/HELHEST/` (CTU VRAS storage); raw bags on `subtdata:/data/` (see [Raw recordings](#6-raw-recordings)) |
 
 > This document describes the **first-generation** sensor setup (Livox + OAK-D,
 > Sep 2025 – Feb 2026). The robot was rebuilt in summer 2026 with an Odin1
 > LiDAR-camera unit and a Fixposition GNSS/INS; recordings from that setup are
 > extracted with the same tooling but are **not** part of this dataset yet
-> (see [New sensor generation](#new-sensor-generation)).
+> (see [New sensor generation](#7-new-sensor-generation)).
 
 ---
 
@@ -496,7 +496,7 @@ The first recordings with the new stack
 (`subtdata:/data/helhest/26-08-01-dobyvani_hradu`, `26-08-21-stromovka-roads`)
 exposed integration bugs — missing LiDAR-to-base extrinsic, empty wheel
 velocities, an unreferenced IMU — and are not part of the dataset; see the
-repository README for details and the collection checklist.
+repository README's known caveats.
 
 The 2026-09-02 test recordings show the first two of those fixed. What that rig
 does and does not yet provide, measured against the v1.3 contract, is in

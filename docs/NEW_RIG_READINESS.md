@@ -145,7 +145,7 @@ disagreement is 16.6 m (1 s) and 48.4 m — those are the jumps, nothing else.
 
 So `/odin1/odometry` is usable for `transforms.npy` **provided it is segmented
 at the teleports**, which is exactly what `write_ground_truth()`'s existing
-`max_speed=4.0` break already does. Between jumps it is as good as the wheel
+speed break already does (4 m/s then; 6 m/s since 2026-09-29, `gnss_guard.MAX_SPEED`). Between jumps it is as good as the wheel
 odometry and it is 6-DoF, which `/odom_2d` is not (`z_ptp = 0.00`). No FAST-LIO
 stage is needed on this rig.
 
@@ -300,7 +300,7 @@ sessions. So every `gravity_align.npy` of v2 beta–v2.2 tilts its scene's maps
 and compression labels by a constant 1.2–1.7° of pitch (2.0–2.9 cm per metre,
 13–19 cm at the map edge), the same angle for every frame of a scene -- a
 known, constant, correctable distortion; the v2.3 manifest lists it per scene.
-The "−2.2° plaza figure" above was an estimate of the same offset.
+The "−2.2° plaza figure" of `V2_0_SELECTION.md` §2 was an estimate of the same offset.
 `/imu/data` is no reference at all: its accelerometer reads roll and pitch with
 the opposite sign to the Odin1's, so the sensor is mounted turned about z and
 the `base_link -> imu` identity in the 2026-09 bags' tf_static is wrong.

@@ -12,14 +12,13 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 # then open http://127.0.0.1:8080/
 ```
 
-The viewer needs Python 3.12+ and pulls in
-[SimView](https://pypi.org/project/simview/) (`>=5.1.1`, with its `authoring`
-extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. The 3.12 floor is
-SimView's, not ours — the extraction tools still run on 3.10, so keep the viewer
-in its own virtualenv when the extraction venv is older:
+The viewer pulls in
+[SimView](https://pypi.org/project/simview/) (`>=6.0.0`, with its `authoring`
+extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. Torch is the heavy
+one, so the viewer lives in its own virtualenv next to the extraction one:
 
 ```bash
-python3.12 -m venv .venv-viewer
+python3 -m venv .venv-viewer
 .venv-viewer/bin/pip install -e ".[viewer]"
 .venv-viewer/bin/python -m dataset_tools.viewer /path/to/dataset_root
 ```
@@ -344,12 +343,15 @@ files, and only one of them is written by hand:
 ```sh
 scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
 scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
+scripts/make_atlas.py <root> --bags docs/v2_3_bags.csv   # a v2 root: its own bag list (the default is the v1 list)
 ```
 
 Numbers come from the same code the pages use (`SceneProbe`,
 `scene_page.path_and_motion`), so the atlas cannot disagree with the page it
-feeds; the rest comes from `<scene>/regen/` and, for the 2 s window error, from
-that scene's `regen/odom_ref.txt`. Run it after anything that changes odometry,
+feeds. The 2 s window error and the pose and flag counts come from
+`<scene>/regen/` (`odom_ref.txt`, the live `/odom`), which only the v1
+regeneration wrote: the v2 extractor never writes it, and a scene without it
+simply has no such figures. Run it after anything that changes odometry,
 frames or clouds — and when the atlas's `dataset_version` stops matching
 `manifest.json`, the index says so above the masthead rather than showing the
 old numbers silently.
