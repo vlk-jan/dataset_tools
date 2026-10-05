@@ -722,8 +722,7 @@ function typing(node) {
 function claimKeyboardForFields() {
   for (const type of ["keydown", "keyup", "keypress"]) {
     els.panel.addEventListener(type, (event) => {
-      // Space is the exception: on a checkbox or a select it is still play/pause.
-      if (editable(event.target) && (event.key !== " " || typing(event.target))) event.stopPropagation();
+      if (editable(event.target)) event.stopPropagation();
     });
   }
 }
@@ -733,10 +732,12 @@ function claimKeyboardForFields() {
  *
  * A click leaves its button, checkbox, select or <summary> focused, and the
  * browser then makes space activate that again -- the ghost toggle flipped,
- * the legend folded -- on keydown or keyup depending on the control. SimView
- * blurs the target on keydown, which is not enough on its own. Capture phase,
- * so this runs before anything else sees the key; the event still bubbles on
- * to SimView's listener, which does the toggling.
+ * the legend folded. Worse, lil-gui stops keydown inside SimView's own control
+ * panel, so with one of its controls focused the key never reached SimView's
+ * play/pause at all. So: capture phase on the document, which runs before any
+ * of that; prevent the activation (on keyup too, where buttons fire), toggle
+ * playback through SimView's button, drop the focus, and stop the event so
+ * SimView does not toggle it back. A field one types text into keeps its space.
  */
 function setupSpaceIsPlay() {
   for (const type of ["keydown", "keyup"]) {
@@ -744,7 +745,12 @@ function setupSpaceIsPlay() {
       type,
       (event) => {
         if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-        if (!typing(event.target)) event.preventDefault();
+        if (typing(event.target)) return;
+        event.preventDefault();
+        if (type !== "keydown") return;
+        event.stopPropagation();
+        document.querySelector("button.sv-play")?.click();
+        event.target.blur?.();
       },
       true,
     );

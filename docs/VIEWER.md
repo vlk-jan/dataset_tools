@@ -553,7 +553,10 @@ instead. Both listen in the bubble phase, so the panel stops key events coming
 from a field it holds before they get that far. Space is the one exception:
 it is play/pause everywhere but inside a field one types text into, and it
 never re-activates whatever was clicked last (a toggle, a select, a legend's
-summary), which the browser would otherwise do to the focused control.
+summary), which the browser would otherwise do to the focused control. The
+panel toggles playback itself rather than leaving it to SimView, because
+lil-gui stops key events inside SimView's control panel and a space pressed
+on one of its controls would otherwise do nothing.
 
 The scene page carries the same notes as a card, where they can equally be
 written, edited and deleted; its window table marks every window a note's
