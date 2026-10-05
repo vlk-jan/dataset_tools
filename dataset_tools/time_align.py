@@ -69,11 +69,11 @@ WINDOW = 80
 R_MIN, R_MAX = 1.0, 15.0
 #: Above the sensor there is sky, below it the ground the robot stands on.
 Z_MIN, Z_MAX = -0.5, 3.0
-#: A stationary window has nothing to say and costs the same to measure, so
-#: motion is worth requiring up front. Turning is not: it helps, but how much a
-#: window constrains the offset is read directly off its own curve afterwards
-#: (``MIN_DEPTH``), and screening on turn instead throws away the straight
-#: stretches -- which then inherit a neighbour's offset rather than their own.
+#: A window has to move and turn to be worth measuring. Stationary, it has
+#: nothing to say; driven straight at a steady speed, it cannot see the offset
+#: at all (see ``WINDOW``), so it would only be rejected by ``MIN_DEPTH``
+#: after paying the full cost. Straight stretches therefore inherit the
+#: offset interpolated from the turning windows either side of them.
 MIN_SPEED, MIN_TURN, MAX_SPEED = 0.4, 0.05, 5.0
 #: How deep the minimum must be *relative to its own neighbourhood* for a
 #: window to be believed. This, not the gain below, is what says a window
