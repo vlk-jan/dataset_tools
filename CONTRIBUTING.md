@@ -48,6 +48,5 @@ The long lines that remain are deliberate and held by `# fmt: off`; see the
 - `docs/` holds the user documentation and the dated campaign records;
   `docs/README.md` says which is which.
 
-The version is declared in three places that must agree -- `pyproject.toml`,
-`setup.py` (for the ROS 2 / `colcon` build) and `package.xml` -- plus
+The version is declared in two places that must agree -- `pyproject.toml` and
 `CITATION.cff`.

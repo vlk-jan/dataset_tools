@@ -31,44 +31,18 @@ Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
-from dataset_tools.gt_gaps import ReferencePath, gap_seams, split_runs  # noqa: E402
-from dataset_tools.gt_io import (  # noqa: E402
-    SegmentRow,
-    anchor_to_first,
-    read_segments,
-    read_trajectory,
-    write_segments,
-    write_trajectory,
-)
-
-
-def load_segments(p):
-    """``(start, end, n_poses, reason)`` per row of a segment table."""
-    return [(s.start_ts, s.end_ts, s.n_poses, s.reason) for s in read_segments(p)]
-
-
-def rel(T, i, j):
-    return np.linalg.inv(T[i]) @ T[j]
+from dataset_tools.gt_gaps import ReferencePath, cut_segments, gap_seams, window_errors
+from dataset_tools.gt_io import SegmentRow, read_segments, read_trajectory, write_segments, write_trajectory
 
 
 def bad_poses(t, T, rt, rT, window, max_err):
     """Boolean mask of poses that belong to a window disagreeing with the reference."""
     bad = np.zeros(len(t), bool)
-    for i in range(len(t)):
-        j = np.searchsorted(t, t[i] + window)
-        if j >= len(t) or t[j] - t[i] > window + 0.5:
-            continue
-        ri = np.searchsorted(rt, t[i])
-        rj = np.searchsorted(rt, t[j])
-        if ri >= len(rt) or rj >= len(rt) or abs(rt[ri] - t[i]) > 0.2 or abs(rt[rj] - t[j]) > 0.2:
-            continue
-        err = np.linalg.norm(rel(T, i, j)[:3, 3] - rel(rT, ri, rj)[:3, 3])
+    for i, j, err in window_errors(t, T, rt, rT, window):
         if err > max_err:
             bad[i : j + 1] = True
     return bad
@@ -94,55 +68,39 @@ def main():
     segp = regen / "odometry_segments.txt"
     if not segp.exists():
         segp = regen / "odometry_segments_prefilter.txt"
-    segs = load_segments(segp) if segp.exists() else [(t[0], t[-1], len(t), "whole")] if len(t) else []
+    segs = read_segments(segp) if segp.exists() else [SegmentRow(0, t[0], t[-1], len(t), "whole")] if len(t) else []
     rt, rT = read_trajectory(a.odom_ref)
     ref_path = ReferencePath.from_trajectory(rt, rT)
 
-    kept_ts, kept_T, kept_segs = [], [], []
-    span_in = span_out = 0.0
     seams = {"wheel_gap": 0, "gap": 0}
     hole_s = 0.0
-    for s0, s1, _, reason in segs:
-        idx = np.where((t >= s0) & (t <= s1))[0]
-        if len(idx) == 0:
-            continue
-        span_in += t[idx[-1]] - t[idx[0]]
-        ts, Ts = t[idx], T[idx]
-        bad = bad_poses(ts, Ts, rt, rT, a.window, a.max_err)
+
+    def mark(ts, Ts):
+        """Poses the window test drops, and the seams the gap rules cut at."""
+        nonlocal hole_s
         seam, tags = gap_seams(ts, Ts, ref_path, a.max_gap, a.max_err)
         for k in np.where(seam)[0]:
             seams[tags[k]] += 1
             hole_s += ts[k + 1] - ts[k]
-        # runs of consecutive good poses, cut again at every seam
-        for r0, r1, cut in split_runs(len(ts), seam, tags, bad):
-            if r1 - r0 < a.min_poses:
-                continue
-            run_t, run_T = ts[r0:r1], Ts[r0:r1]
-            kept_ts.append(run_t)
-            kept_T.append(anchor_to_first(run_T))
-            # The input tag says why the input segment ENDED, so only the run
-            # that reaches that end inherits it; every earlier run ends where
-            # this filter cut it, which is a different reason and its own tag.
-            # Without the distinction a segment could read "the recording
-            # ended" 97 s before the recording ended (scene 0000, seg 7).
-            tag = reason if cut is None else cut
-            kept_segs.append(SegmentRow(len(kept_segs), run_t[0], run_t[-1], len(run_t), f"filtered:{tag}"))
-            span_out += run_t[-1] - run_t[0]
+        return seam, tags, bad_poses(ts, Ts, rt, rT, a.window, a.max_err)
 
-    poses_out = int(sum(len(x) for x in kept_ts))
-    write_trajectory(
-        out / "odometry.txt",
-        np.concatenate(kept_ts) if kept_ts else t[:0],
-        np.concatenate(kept_T) if kept_T else T[:0],
+    # The input tag says why the input segment ENDED, so only the run that
+    # reaches that end inherits it; every earlier run ends where this filter
+    # cut it, which is a different reason and its own tag. Without the
+    # distinction a segment could read "the recording ended" 97 s before the
+    # recording ended (scene 0000, seg 7).
+    out_t, out_T, kept_segs, st = cut_segments(
+        t, T, segs, mark, lambda reason, cut: f"filtered:{reason if cut is None else cut}", a.min_poses
     )
+    write_trajectory(out / "odometry.txt", out_t, out_T)
     write_segments(out / "odometry_segments.txt", kept_segs)
     summary = dict(
         poses_in=len(t),
-        poses_out=poses_out,
+        poses_out=st["poses_out"],
         segments_in=len(segs),
         segments_out=len(kept_segs),
-        span_in_s=round(span_in, 1),
-        span_out_s=round(span_out, 1),
+        span_in_s=round(st["span_in"], 1),
+        span_out_s=round(st["span_out"], 1),
         window=a.window,
         max_err=a.max_err,
         min_poses=a.min_poses,

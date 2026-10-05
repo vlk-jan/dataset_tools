@@ -29,6 +29,6 @@ laptop). They are kept because the next campaign starts from them.
 | `scene_bags.csv`, `v2_bags.csv` | scene number to raw bag, per generation; the slurm array jobs index into them and `scripts/make_atlas.py` reads bag sizes and sessions from them |
 | `validation_v1.csv` | `helhest-validate` over the published v1 root |
 | `regen_comparison.csv` | the paired v1 vs v1.2 comparison from `scripts/compare_v1_v12.py` (removed; see git history) |
-| `v13_gt_holes.csv`, `gt_hole_campaign.csv` | the v1.3 hole inventory from `scripts/find_gt_holes.py`, and the subset that was replayed |
+| `v13_gt_holes.csv`, `gt_hole_campaign.csv` | the v1.3 hole inventory from `scripts/find_gt_holes.py` (removed; see git history), and the subset that was replayed |
 
 `img/` holds the figures the documents reference.

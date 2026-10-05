@@ -4,7 +4,7 @@ A note is free text pinned to a **frame range** of one scene, with a topic
 (``odometry``, ``camera``, ``event``, ``other``) so a stretch can be found again
 by what is wrong with it rather than only by reading every note. The frame range
 is the anchor because it is the most durable identifier a scene has: segment
-indices are renumbered whenever ``filter_segments.py`` or ``relabel_segments.py``
+indices are renumbered whenever ``filter_segments.py`` or another cutting pass
 rewrites ``odometry_segments.txt``, and a note anchored to "segment 7" would
 then silently point at a different stretch of driving.
 

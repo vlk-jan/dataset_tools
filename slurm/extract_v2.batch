@@ -97,7 +97,7 @@ bag="$stage/$(basename "$bagdir")"
 fetch_bag "$scene" "$bag"
 
 echo "[$(date '+%F %T')] $scene extract"
-singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.extract_data \
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.extract \
     "$stage" "$local_out" --start_index "$((10#$scene))" --jobs 1 $EXTRA
 rc=$?
 echo "[$(date '+%F %T')] $scene extract rc=$rc"

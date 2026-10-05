@@ -38,6 +38,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 from dataset_tools.time_align import PoseTrack
@@ -111,16 +112,6 @@ def deskew(
     return out.astype(pts.dtype), "deskewed", method
 
 
-def rodrigues(rotvec: np.ndarray) -> np.ndarray:
-    """The rotation matrix of an axis-angle vector."""
-    theta = float(np.linalg.norm(rotvec))
-    if theta < 1e-12:
-        return np.eye(3)
-    k = rotvec / theta
-    K = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
-    return np.eye(3) + np.sin(theta) * K + (1.0 - np.cos(theta)) * (K @ K)
-
-
 def rotation_angle_deg(R: np.ndarray) -> float:
     return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0))))
 
@@ -159,11 +150,11 @@ class GyroTrack:
         seg_t, seg_w = self.ts[i0 : i1 + 1], self.omega[i0 : i1 + 1]
         cum = [np.eye(3)]
         for j in range(len(seg_t) - 1):
-            cum.append(cum[-1] @ rodrigues(seg_w[j] * (seg_t[j + 1] - seg_t[j])))
+            cum.append(cum[-1] @ cv2.Rodrigues(seg_w[j] * (seg_t[j + 1] - seg_t[j]))[0])
 
         def at(t: float) -> np.ndarray:
             j = min(int(np.searchsorted(seg_t, t, side="right")) - 1, len(seg_t) - 1)
-            return cum[j] @ rodrigues(seg_w[j] * (t - seg_t[j]))
+            return cum[j] @ cv2.Rodrigues(seg_w[j] * (t - seg_t[j]))[0]
 
         R_ref_T = at(t_ref).T
         return np.array([R_ref_T @ at(float(t)) for t in times])

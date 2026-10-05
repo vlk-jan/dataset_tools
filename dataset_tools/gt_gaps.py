@@ -29,9 +29,12 @@ sides are re-anchored as separate segments.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
+
+from dataset_tools.gt_io import SegmentRow, anchor_to_first
 
 #: Tags written into ``odometry_segments.txt`` for a run that ends at a seam.
 TAG_WHEEL = "wheel_gap"
@@ -143,3 +146,76 @@ def split_runs(
     if r0 is not None:
         runs.append((r0, n, None))
     return runs
+
+
+def window_errors(
+    t: np.ndarray, T: np.ndarray, rt: np.ndarray, rT: np.ndarray, window: float
+) -> list[tuple[int, int, float]]:
+    """``(i, j, err)`` for every ``window``-second stretch of ``T`` the reference covers.
+
+    ``j`` is the first pose at least ``window`` after ``i`` (skipped when that is
+    over half a second late); ``err`` is the distance between the translation
+    ``T`` and ``rT`` each report across ``[t_i, t_j]``. Both reference
+    endpoints must lie within 0.2 s of the poses'. The window test of
+    ``scripts/filter_segments.py`` and the atlas's 2 s error both read this.
+    """
+    out = []
+    for i in range(len(t)):
+        j = np.searchsorted(t, t[i] + window)
+        if j >= len(t) or t[j] - t[i] > window + 0.5:
+            continue
+        ri, rj = np.searchsorted(rt, t[i]), np.searchsorted(rt, t[j])
+        if ri >= len(rt) or rj >= len(rt) or abs(rt[ri] - t[i]) > 0.2 or abs(rt[rj] - t[j]) > 0.2:
+            continue
+        rel = np.linalg.inv(T[i]) @ T[j]
+        rel_ref = np.linalg.inv(rT[ri]) @ rT[rj]
+        out.append((i, int(j), float(np.linalg.norm(rel[:3, 3] - rel_ref[:3, 3]))))
+    return out
+
+
+def cut_reason(reason: str, tag: str) -> str:
+    """The tag of a run a post-processing pass cut short: the pass prefix of the
+    input's ``reason`` (``filtered`` when it has none) and why this cut."""
+    prefix = reason.split(":", 1)[0] if ":" in reason else "filtered"
+    return f"{prefix}:{tag}"
+
+
+def cut_segments(
+    t: np.ndarray,
+    T: np.ndarray,
+    segs: list[SegmentRow],
+    mark: Callable[[np.ndarray, np.ndarray], tuple[np.ndarray, list[str], np.ndarray | None]],
+    retag: Callable[[str, str | None], str],
+    min_poses: int,
+) -> tuple[np.ndarray, np.ndarray, list[SegmentRow], dict]:
+    """Split every segment into runs, drop the short ones and re-anchor the rest.
+
+    ``mark(ts, Ts)`` returns ``(seam, tags, bad)`` for one segment's poses, as
+    :func:`split_runs` takes them; ``retag(reason, cut)`` names a kept run from
+    its input segment's reason and :func:`split_runs`' third field. Returns the
+    kept poses, their segment rows, and ``span_in``/``span_out``/``poses_out``/
+    ``dropped_short``. Re-anchoring is rigid, so every relative motion inside a
+    run is what it was.
+    """
+    kept_ts, kept_T, rows = [], [], []
+    st = dict(span_in=0.0, span_out=0.0, poses_out=0, dropped_short=0)
+    for seg in segs:
+        idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
+        if len(idx) == 0:
+            continue
+        ts, Ts = t[idx], T[idx]
+        st["span_in"] += ts[-1] - ts[0]
+        seam, tags, bad = mark(ts, Ts)
+        for r0, r1, cut in split_runs(len(ts), seam, tags, bad):
+            if r1 - r0 < min_poses:
+                st["dropped_short"] += r1 - r0
+                continue
+            run_t = ts[r0:r1]
+            kept_ts.append(run_t)
+            kept_T.append(anchor_to_first(Ts[r0:r1]))
+            rows.append(SegmentRow(len(rows), run_t[0], run_t[-1], len(run_t), retag(seg.reason, cut)))
+            st["span_out"] += run_t[-1] - run_t[0]
+            st["poses_out"] += len(run_t)
+    out_t = np.concatenate(kept_ts) if kept_ts else t[:0]
+    out_T = np.concatenate(kept_T) if kept_T else T[:0]
+    return out_t, out_T, rows, st

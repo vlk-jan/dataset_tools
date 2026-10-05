@@ -18,9 +18,11 @@ Reads only. Written for the v1.3 campaign, where it was called survey.py.
 """
 
 import argparse
-import os
 
 import numpy as np
+
+from dataset_tools.gt_io import read_segments, read_trajectory
+from dataset_tools.image_format import scenes
 
 
 def frozen_runs(t, P, lo, hi, min_frozen, frame_ts, odom_p):
@@ -54,21 +56,19 @@ def main():
     ap.add_argument("--min-frozen", type=float, default=1.0, help="report frozen runs longer than this (s)")
     a = ap.parse_args()
 
-    scenes = sorted(d for d in os.listdir(a.root) if d.isdigit())
     rows, gaps, frozen = [], [], []
-    for s in scenes:
-        d = f"{a.root}/{s}"
-        frame_ts = np.loadtxt(f"{d}/data_ts.txt")
-        seg = np.loadtxt(f"{d}/odometry_segments.txt", usecols=(0, 1, 2, 3), ndmin=2)
-        od = np.loadtxt(f"{d}/odometry.txt")
-        t, P = od[:, 0], od[:, 1:].reshape(-1, 4, 4)
-        odom_p = np.load(f"{d}/transforms.npy")[:, :3, 3]  # /odom, one pose per frame
+    for d in scenes(a.root):
+        s = d.name
+        frame_ts = np.loadtxt(d / "data_ts.txt")
+        seg = [(r.start_ts, r.end_ts) for r in read_segments(d / "odometry_segments.txt")]
+        t, P = read_trajectory(d / "odometry.txt")
+        odom_p = np.load(d / "transforms.npy")[:, :3, 3]  # /odom, one pose per frame
         first, last = frame_ts[0], frame_ts[-1]
         span = last - first
-        cov = sum(min(e, last) - max(b, first) for _, b, e, _ in seg if e > first and b < last)
+        cov = sum(min(e, last) - max(b, first) for b, e in seg if e > first and b < last)
 
         scene_gaps, prev = [], first
-        for _, b, e, _ in seg:
+        for b, e in seg:
             if b - prev > a.min_gap:
                 scene_gaps.append((prev, b))
             prev = e
@@ -79,7 +79,7 @@ def main():
             dist = np.linalg.norm(np.diff(odom_p[m], axis=0), axis=1).sum() if m.sum() >= 2 else np.nan
             gaps.append((s, g0 - first, g1 - first, g1 - g0, dist))
 
-        for _, b, e, _ in seg:
+        for b, e in seg:
             for t0, dur, n, wheel in frozen_runs(t, P, b, e, a.min_frozen, frame_ts, odom_p):
                 frozen.append((s, t0 - first, dur, n, wheel))
 

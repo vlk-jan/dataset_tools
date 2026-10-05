@@ -1,9 +1,8 @@
 # Scripts
 
 Command-line tools that work on a dataset root or a bag but are not part of the
-installed package. They import `dataset_tools` from the checkout (each puts the
-repository on `sys.path`), so run them from any directory with the repository's
-virtualenv:
+installed package. They import the installed `dataset_tools`, so run them with
+the virtualenv the checkout is installed into (`pip install -e .`):
 
 ```bash
 .venv/bin/python scripts/make_atlas.py /data/HELHEST_v2_beta --check
@@ -17,10 +16,8 @@ virtualenv:
 | `measure_time_offset.py` | Audit an extracted scene's frame clock against its poses: was `--time_align` applied, is the scene still off, and by how much over its course. |
 | `probe_clock_skew.py` | Every publisher's clock against the recorder's, straight out of a bag (`recv - header` per message), to see *when* a sensor's clock moved. |
 | `survey_gt_coverage.py` | How much of a root's frame time has ground truth, every gap over a threshold with the wheel distance driven through it, and every frozen run inside a segment. |
-| `find_gt_holes.py` | Inventory the ground-truth holes in a root and class each by what the estimator was doing -- the input to a replay campaign. |
 | `split_segments_at_gaps.py` | Cut a root's segments at the holes `gt_gaps` finds and re-anchor each side, in place, keeping the input beside it. |
 | `cut_segments_at_map_mismatch.py` | Cut a root's segments where the ground-truth path leaves the lidar's ground (`gt_map`), the same way. |
-| `relabel_segments.py` | Retag segments whose `reason` column was inherited from the input segment rather than measured. |
 
 ## The v1 ground-truth regeneration (2026-09)
 
@@ -37,8 +34,10 @@ and [`docs/GT_HOLE_REPLAY.md`](../docs/GT_HOLE_REPLAY.md).
 | `filter_segments.py` | post-hoc filter of a regenerated `odometry.txt` against the live `/odom`, the acceptance every later step reuses |
 
 The drivers (`dgx07_regen.sh`, `slurm/regen_scene.batch`), the hole-replay
-scripts, the v1.1 fill, the fill-root builder and the v1 vs v1.2 comparison
-were removed once the campaign finished; see git history.
+scripts and their inventory (`find_gt_holes.py`, whose output is
+`docs/v13_gt_holes.csv`), the v1.1 fill, the fill-root builder, the one-off
+segment relabel (`relabel_segments.py`) and the v1 vs v1.2 comparison were
+removed once the campaign finished; see git history.
 
 ## Cluster helpers
 

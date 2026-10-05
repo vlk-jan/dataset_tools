@@ -10,8 +10,8 @@ root on RCI.
 > branch, which the drivers `scripts/dgx07_regen.sh` and `slurm/regen_scene.batch`
 > (both removed since; see git history) expected checked out at `$REGEN_REPO`. `extract_odom_ref.py`, which both drivers also
 > call, is not committed on any branch; it lived only in that checkout. Main
-> carries the post-processing (`scripts/filter_segments.py`,
-> `relabel_segments.py`; `merge_v11_fill.py` was removed after the fill, see git
+> carries the post-processing (`scripts/filter_segments.py`; the one-off
+> `relabel_segments.py` and `merge_v11_fill.py` were removed once run, see git
 > history) and the extraction.
 >
 > Replaying a single hole rather than a whole scene is a separate pipeline with
@@ -41,7 +41,7 @@ is the only way to get:
    0035 87 % (starts 207 s late), 0036 94 %, 0031 96 %. 0033/0034/0037 are
    mostly stationary and 0021 has a tip-over — some may be unrecoverable and
    should then be marked as such;
-3. the camera distortion coefficients (v1 kept only `K`; `extract_data.py` now
+3. the camera distortion coefficients (v1 kept only `K`; the extractor now
    writes `camera_info.yaml` with `D`, `R`, `P` as well);
 4. a recorded, reproducible pipeline instead of a USB-drive working copy.
 
@@ -78,7 +78,9 @@ Tooling, all on the laptop:
   `--index 30` scene-offset patch; `launch/body_filter.launch.py` (two
   `pcl_ros::CropBox` nodes on `/livox/lidar_front` → `/livox/lidar_front_filtered`),
   `launch/odom_recorder.launch.py` + `dataset_tools/odom_node.py`
-  (`OdomRecorder`: `/Odometry` → `trajectory.txt`, append mode, respawn).
+  (`OdomRecorder`: `/Odometry` → `trajectory.txt`, append mode, respawn; the
+  recorder, its launch file and the ament packaging were removed from main
+  since, see git history).
   `launch/body_filter.launch.py` was an experiment; nothing consumed its output
   (removed from main; see git history).
 - `~/Work/helhest-singularity/helhest-jazzy.sif` (2026-02-18) — ROS Jazzy, the
@@ -249,7 +251,7 @@ there (`ROS_LOCALHOST_ONLY=1`, verified). It is GPU-bound by training (load
 ~15 of 128), leaving CPU headroom for ~8 concurrent scenes at ~6 cores each
 (bag play + FAST-LIO + recorder; pin with `taskset`). Driver: a small
 per-scene script — `rsync` one bag from subtdata → `run_scene.sh` →
-`extract_data.py` (clouds, images, `camera_info.yaml`, `transforms.npy`) →
+`extract_data.py` (now `helhest-extract`; clouds, images, `camera_info.yaml`, `transforms.npy`) →
 `validate_scene.py` → delete the bag — run 8-wide with GNU parallel, one
 `ROS_DOMAIN_ID` per slot. Wall: ~15 h of replay at rate 0.5 / 8 ≈ 2 h, plus
 913 GB of transfer pipelined (~2.5–8 h depending on link rate; the transfer

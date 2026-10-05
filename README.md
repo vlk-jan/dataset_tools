@@ -5,8 +5,7 @@ learning-friendly dataset: synchronised camera frames, point clouds in the
 robot base frame, odometry, gravity alignment and proprioception.
 
 Bags are read with the pure-Python [`rosbags`](https://gitlab.com/ternaris/rosbags)
-library, so **no ROS installation is required** for extraction — only the
-optional `odom_recorder` node needs `rclpy`.
+library, so **no ROS installation is required**.
 
 | Tool | Entry point | What it does |
 | --- | --- | --- |
@@ -16,7 +15,6 @@ optional `odom_recorder` node needs `rclpy`.
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
 | `dataset_tools/disk_usage.py` | `helhest-disk-usage` | bytes per scene, modality and file, for the viewer's disk-usage panels |
 | `dataset_tools/image_format.py` | `helhest-image-format` | declare (or read back) whether a root's images are the camera's JPEG or a PNG |
-| `dataset_tools/odom_node.py` | `ros2 run dataset_tools odom_recorder` | record odometry to a text trajectory |
 
 ## Quickstart: from a recording to the viewer
 
@@ -72,7 +70,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[test]"
 ```
 
-Python >= 3.10 (not declared in `pyproject.toml`: colcon's setup.py introspection cannot evaluate `requires-python`). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
+Python >= 3.10 (CI runs 3.10 and 3.12). Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
 
 ### Container (CTU cluster)
 
@@ -85,7 +83,7 @@ SIF=/mnt/data/vras/data/helhest-jazzy.sif
 singularity exec --bind /mnt/data $SIF python3 -m venv .venv
 singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[test]"
 singularity exec --bind /mnt/data $SIF \
-    .venv/bin/python -m dataset_tools.extract_data <bags> <output> --jobs 8
+    .venv/bin/python -m dataset_tools.extract <bags> <output> --jobs 8
 ```
 
 The `.venv` is not in the repository (it is gitignored) -- `slurm/slurm_extract.batch`
@@ -93,19 +91,6 @@ and the Slurm example below both expect one built this way at `$REPO/.venv`.
 
 Add further `--bind` options for any other filesystem you read or write
 (e.g. `--bind /mnt/personal`).
-
-### ROS 2 (only for `odom_recorder`)
-
-The package still builds as an `ament_python` package:
-
-```bash
-colcon build --packages-select dataset_tools
-ros2 run dataset_tools odom_recorder --ros-args -p topic:=/Odometry \
-    -p file_path:=trajectory.txt
-```
-
-`setup.py`/`package.xml` are kept for that build; `pyproject.toml` is used by
-plain `pip`. Both declare the same console scripts.
 
 ### Building the cloudini shim (new bags only)
 
@@ -125,7 +110,7 @@ not need the shim.
 ### New bags (2026-08 Odin1 + Fixposition)
 
 ```bash
-python -m dataset_tools.extract_data <dir-with-bags> <output-dir> --jobs 8
+helhest-extract <dir-with-bags> <output-dir> --jobs 8
 ```
 
 which is equivalent to spelling out the defaults:
@@ -163,14 +148,14 @@ file, never by its position.
 The Odin1 mount extrinsic is not in the bags' TF tree; pass it once known:
 
 ```bash
-python -m dataset_tools.extract_data <bags> <out> \
+helhest-extract <bags> <out> \
     --lidar_extrinsic X Y Z ROLL PITCH YAW
 ```
 
 ### Old bags (Livox + Luxonis OAK)
 
 ```bash
-python -m dataset_tools.extract_data <dir-with-bags> <output-dir> \
+helhest-extract <dir-with-bags> <output-dir> \
     --cam /luxonis/oak/rgb/image_raw/compressed --lidar /livox/lidar_front \
     --odom /odom --imu /ekf/imu/data
 ```
@@ -376,7 +361,7 @@ part:
 ```bash
 singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
     "$REPO/.venv/bin/python" \
-    -m dataset_tools.extract_data <bags> <output> --jobs 8
+    -m dataset_tools.extract <bags> <output> --jobs 8
 ```
 
 Because complete scenes are skipped, a re-queued job resumes where the previous

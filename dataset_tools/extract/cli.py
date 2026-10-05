@@ -87,6 +87,7 @@ def setup_logging(verbose: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
+        prog="helhest-extract",
         description="Extract HELHEST scenes from ROS 2 bags.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

@@ -1,9 +1,7 @@
 """Small rotation and pose helpers ('sxyz' convention), numpy only.
 
-Shared by the extractor, the viewer and the ROS ``odom_recorder`` node, which
-is why this module imports nothing heavier than numpy: the node runs where
-``cv2`` and ``rosbags`` may not be installed, and the extractor where the
-viewer's extra is not.
+Shared by the extractor and the viewer, which is why this module imports
+nothing heavier than numpy: the extractor runs where the viewer's extra is not.
 
 Single quaternions are ``[x, y, z, w]``, as ROS messages carry them. The
 batched helpers at the bottom are ``[w, x, y, z]`` (scalar-first), matching

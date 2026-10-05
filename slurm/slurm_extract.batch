@@ -32,7 +32,7 @@ BAGS=${1:-/mnt/personal/$USER/helhest_new/bags_raw}
 OUT=${2:-/mnt/personal/$USER/helhest_new}
 
 PYTHONPATH="$REPO" singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
-    "$PY" -m dataset_tools.extract_data "$BAGS" "$OUT" --jobs 8
+    "$PY" -m dataset_tools.extract "$BAGS" "$OUT" --jobs 8
 
 # Sanity-check what came out (non-zero exit on structural problems).
 PYTHONPATH="$REPO" singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \

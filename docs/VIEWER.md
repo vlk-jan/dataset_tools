@@ -342,7 +342,6 @@ files, and only one of them is written by hand:
 | `atlas/atlas.json` | `scripts/make_atlas.py`. The curated half copied through, every number computed from the root, and the `dataset_version` it was generated against. |
 
 ```sh
-scripts/make_atlas.py <root> --init     # seed curation.json from an existing atlas
 scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
 scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
 ```
@@ -499,7 +498,7 @@ note with its frame range *and* the same range as frame times (`t_start`,
 `t_end` from `data_ts.txt`), so whatever applies the verdicts needs neither the
 viewer nor the scene's clock. The range is the anchor because it is the most durable identifier a
 scene has: segment indices are renumbered whenever `scripts/filter_segments.py`
-or `scripts/relabel_segments.py` rewrites `odometry_segments.txt`, so a note
+or another cutting pass rewrites `odometry_segments.txt`, so a note
 anchored to "segment 7" would afterwards point at different driving. Both ends
 of the range are **inclusive** — "frames 1204–1388" means what a person writing
 that means, which is deliberately not `windows.Window`'s convention, where

@@ -59,8 +59,6 @@ torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 Homepage = "https://github.com/vlk-jan/dataset_tools"
 Source = "https://github.com/vlk-jan/dataset_tools"
 
-# Kept in sync with setup.py: the ROS/ament build reads setup.py, plain pip
-# reads this file, and both must install the same console scripts.
 [project.scripts]
 helhest-extract = "dataset_tools.extract.cli:main"
 helhest-validate = "dataset_tools.validate_scene:main"
@@ -68,7 +66,6 @@ helhest-sort-bag = "dataset_tools.sort_bag:main"
 helhest-viewer = "dataset_tools.viewer.__main__:main"
 helhest-disk-usage = "dataset_tools.disk_usage:main"
 helhest-image-format = "dataset_tools.image_format:main"
-odom_recorder = "dataset_tools.odom_node:main"
 
 [tool.setuptools]
 packages = ["dataset_tools", "dataset_tools.extract", "dataset_tools.viewer"]

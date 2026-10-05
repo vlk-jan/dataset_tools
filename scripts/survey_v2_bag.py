@@ -15,21 +15,18 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 import cv2
 import numpy as np
+from rosbags.highlevel import AnyReader
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from rosbags.highlevel import AnyReader  # noqa: E402
-
-from dataset_tools import rosbags_compat  # noqa: F401,E402  (patches rosbags)
-from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr  # noqa: E402
-from dataset_tools.extract.tf_graph import build_tf_graph, get_transform  # noqa: E402
-from dataset_tools.tf_pins import rpy_deg  # noqa: E402
+from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
+from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr
+from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
+from dataset_tools.tf_pins import rpy_deg
+from dataset_tools.transforms import quaternion_matrix
 
 CAM = "/odin1/image/compressed"
 CLOUD = "/odin1/cloud_filtered/cloudini"
@@ -44,17 +41,6 @@ BASE = "base_link"
 #: A step faster than this between consecutive poses is a receiver reset, not motion.
 MAX_SPEED = 4.0
 RANGE_BINS = np.arange(0.0, 6.5, 0.5)
-
-
-def quat_to_R(q):
-    x, y, z, w = q
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
 
 
 def main(argv=None) -> int:
@@ -208,7 +194,7 @@ def main(argv=None) -> int:
         dt = np.diff(o[:, 0])
         ok = (dt > 0) & (dt < 1.0) & (d / np.maximum(dt, 1e-6) < MAX_SPEED)
         v = d[ok] / dt[ok]
-        tilt = np.degrees(np.arccos(np.clip([quat_to_R(q)[2, 2] for q in o[:, 4:8]], -1, 1)))
+        tilt = np.degrees(np.arccos(np.clip([quaternion_matrix(q)[2, 2] for q in o[:, 4:8]], -1, 1)))
         lvl = tilt < 60
         out["motion"] = dict(
             poses=len(o),

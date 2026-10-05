@@ -18,18 +18,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from pathlib import Path
 
 import numpy as np
+from rosbags.highlevel import AnyReader
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from rosbags.highlevel import AnyReader  # noqa: E402
-
-from dataset_tools import rosbags_compat  # noqa: F401,E402  (patches rosbags)
-from dataset_tools.extract.pointcloud import header_stamp_from_cdr  # noqa: E402
-from dataset_tools.transforms import header_stamp  # noqa: E402
+from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
+from dataset_tools.extract.pointcloud import header_stamp_from_cdr
+from dataset_tools.transforms import header_stamp
 
 #: Topics worth probing on the 2026-09 rig: the sensor unit, the pose source,
 #: and the robot's own controller, which is the recorder's own clock domain.

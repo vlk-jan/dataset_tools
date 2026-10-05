@@ -1,6 +1,6 @@
 # What the Odin1 published on /tf_static for its own two extrinsics, per bag, 2026-09-30 survey.
 # Every bag of the 2026-09-14 firmware on subtdata (/data/helhest/26-09-14* .. 26-09-29*), first 80 MB of each mcap.
-# One row per bag and edge: the LAST value in that stretch (what dataset_tools.extract_data.build_tf_graph keeps),
+# One row per bag and edge: the LAST value in that stretch (what dataset_tools.extract.tf_graph.build_tf_graph keeps),
 # the number of samples seen and how many distinct values they took. Pose of child in parent:
 # x y z in m, roll pitch yaw in degrees (sxyz). The medians of the 'last' rows are dataset_tools.tf_pins.PINS.
 # bag  edge  x y z roll pitch yaw  samples distinct

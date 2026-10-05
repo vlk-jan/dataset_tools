@@ -17,15 +17,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from dataset_tools import time_align as ta  # noqa: E402
-from dataset_tools.gt_io import read_trajectory  # noqa: E402
+from dataset_tools import time_align as ta
+from dataset_tools.gt_io import read_trajectory
 
 
 def describe(profile: ta.Profile) -> str:

@@ -31,11 +31,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the package, when it is not installed
-from dataset_tools.gt_gaps import ReferencePath, gap_seams, split_runs  # noqa: E402
-from dataset_tools.gt_io import (  # noqa: E402
-    SegmentRow,
-    anchor_to_first,
+from dataset_tools.gt_gaps import ReferencePath, cut_reason, cut_segments, gap_seams
+from dataset_tools.gt_io import (
     changed_since_written,
     read_segments,
     read_trajectory,
@@ -43,6 +40,7 @@ from dataset_tools.gt_io import (  # noqa: E402
     write_segments,
     write_trajectory,
 )
+from dataset_tools.image_format import scenes as scene_dirs
 
 BACKUP_TRAJ = "odometry_pregapsplit.txt"
 BACKUP_SEGS = "odometry_segments_pregapsplit.txt"
@@ -63,61 +61,31 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
     if (regen / "odom_ref.txt").exists():
         ref = ReferencePath.from_trajectory(*read_trajectory(regen / "odom_ref.txt"))
 
-    kept_ts, kept_T, rows = [], [], []
-    stats = dict(
-        segments_in=len(segs),
-        poses_in=len(t),
-        span_in=0.0,
-        span_out=0.0,
-        poses_out=0,
-        seams_wheel_gap=0,
-        seams_gap=0,
-        hole_s=0.0,
-        ref_m_in_holes=0.0,
-        dropped_short=0,
-    )
-    for seg in segs:
-        idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
-        if len(idx) == 0:
-            continue
-        ts, Ts = t[idx], T[idx]
-        stats["span_in"] += ts[-1] - ts[0]
+    seams = dict(seams_wheel_gap=0, seams_gap=0, hole_s=0.0, ref_m_in_holes=0.0)
+
+    def mark(ts, Ts):
         seam, tags = gap_seams(ts, Ts, ref, max_gap, max_err)
         for k in np.where(seam)[0]:
-            stats["seams_" + tags[k]] += 1
-            stats["hole_s"] += ts[k + 1] - ts[k]
+            seams["seams_" + tags[k]] += 1
+            seams["hole_s"] += ts[k + 1] - ts[k]
             if ref is not None:
                 d = ref.length_between(ts[k], ts[k + 1])
-                stats["ref_m_in_holes"] += float(d) if np.isfinite(d) else 0.0
-        for r0, r1, cut in split_runs(len(ts), seam, tags):
-            if r1 - r0 < min_poses:
-                stats["dropped_short"] += r1 - r0
-                continue
-            run_t, run_T = ts[r0:r1], Ts[r0:r1]
-            kept_ts.append(run_t)
-            kept_T.append(anchor_to_first(run_T))
-            # The run reaching the input segment's end keeps its tag (why that
-            # segment ended); a run cut at a seam ends because of the seam.
-            if cut is None:
-                reason = seg.reason
-            else:
-                prefix = seg.reason.split(":", 1)[0] if ":" in seg.reason else "filtered"
-                reason = f"{prefix}:{cut}"
-            rows.append(SegmentRow(len(rows), run_t[0], run_t[-1], len(run_t), reason))
-            stats["span_out"] += run_t[-1] - run_t[0]
-            stats["poses_out"] += len(run_t)
-    stats["segments_out"] = len(rows)
+                seams["ref_m_in_holes"] += float(d) if np.isfinite(d) else 0.0
+        return seam, tags, None
+
+    # The run reaching the input segment's end keeps its tag (why that
+    # segment ended); a run cut at a seam ends because of the seam.
+    out_t, out_T, rows, st = cut_segments(
+        t, T, segs, mark, lambda reason, cut: reason if cut is None else cut_reason(reason, cut), min_poses
+    )
+    stats = dict(segments_in=len(segs), poses_in=len(t), **st, **seams, segments_out=len(rows))
 
     if not check:
         if src_traj == scene / "odometry.txt":
             regen.mkdir(exist_ok=True)
             shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)
             shutil.copy2(scene / "odometry_segments.txt", regen / BACKUP_SEGS)
-        write_trajectory(
-            scene / "odometry.txt",
-            np.concatenate(kept_ts) if kept_ts else t[:0],
-            np.concatenate(kept_T) if kept_T else T[:0],
-        )
+        write_trajectory(scene / "odometry.txt", out_t, out_T)
         write_segments(scene / "odometry_segments.txt", rows)
         record_written(scene, BACKUP_TRAJ)
     return stats
@@ -136,7 +104,7 @@ def main() -> int:
     )
     a = ap.parse_args()
 
-    scenes = a.scenes or sorted(p.name for p in a.root.iterdir() if p.is_dir() and p.name.isdigit())
+    scenes = a.scenes or [p.name for p in scene_dirs(a.root)]
     tot: dict[str, float] = {}
     print(
         f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s}"

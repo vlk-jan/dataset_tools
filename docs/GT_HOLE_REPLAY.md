@@ -1,9 +1,10 @@
 # Replaying ground-truth holes
 
 Status: **run (v1.3 campaign 2026-09-09, merged as v1.4 / v1.5)**. This is the
-record of that campaign. The replay scripts it names (`fetch_hole_bags.sh`,
-`replay_holes.sh`, `run_scene_offset.sh`, `score_hole_replay.py`,
-`build_fill_root.py`) were removed once it finished; see git history.
+record of that campaign. The scripts it names (`find_gt_holes.py`,
+`fetch_hole_bags.sh`, `replay_holes.sh`, `run_scene_offset.sh`,
+`score_hole_replay.py`, `build_fill_root.py`) were removed once it finished; see
+git history. Only `survey_gt_coverage.py` remains.
 
 A *hole* is a stretch of frame time no odometry segment covers. The frames, the
 clouds, the wheel encoders and `/odom` are all there; only the ground truth is
@@ -13,7 +14,7 @@ missing. On HELHEST v1.3, holes were **30 % of frame time** (coverage 0.698,
 
 ## The finding: two kinds of hole, only one worth replaying
 
-`find_gt_holes.py` splits them by what FAST-LIO was doing:
+`find_gt_holes.py` split them by what FAST-LIO was doing:
 
 | class | what happened | can a re-run fix it |
 |---|---|---|
@@ -85,7 +86,7 @@ where FAST-LIO never initialised at that offset.
 
 ## Files
 
-| file | was | what it is |
+| file | was | what it is (all but `survey_gt_coverage.py` and the CSVs since removed) |
 |---|---|---|
 | `scripts/find_gt_holes.py` | `holes.py` | inventory + classify a root's holes; writes `docs/v13_gt_holes.csv` |
 | `scripts/survey_gt_coverage.py` | `survey.py` | per-scene coverage, gaps with wheel distance, frozen runs |

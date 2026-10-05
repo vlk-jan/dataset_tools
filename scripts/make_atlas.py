@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate ``<root>/atlas/atlas.json`` and its thumbnails from the root itself.
 
-    make_atlas.py <root> [--init] [--check] [--materialize] [--size]
+    make_atlas.py <root> [--check] [--materialize] [--size]
 
 The atlas is what the viewer's index renders: a masthead, per-scene prose, and
 a stat grid. Only the prose is editorial. Everything else -- frames, duration,
@@ -49,20 +49,20 @@ from typing import Any
 
 import numpy as np
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE.parent))  # the package, when it is not installed
-
-from dataset_tools.gt_io import read_trajectory  # noqa: E402
-from dataset_tools.viewer import render  # noqa: E402
-from dataset_tools.viewer.build import SceneAccess  # noqa: E402
-from dataset_tools.viewer.index_page import (  # noqa: E402
+from dataset_tools.gt_gaps import window_errors as scan_windows
+from dataset_tools.gt_io import _replace_atomically, read_trajectory
+from dataset_tools.viewer import render
+from dataset_tools.viewer.build import SceneAccess
+from dataset_tools.viewer.index_page import (
     THUMB_SLOTS,
     fmt_count,
     fmt_duration,
     thumb_index,
 )
-from dataset_tools.viewer.probe import DatasetRoot, SceneProbe  # noqa: E402
-from dataset_tools.viewer.scene_page import path_and_motion  # noqa: E402
+from dataset_tools.viewer.probe import DatasetRoot, SceneProbe
+from dataset_tools.viewer.scene_page import path_and_motion
+
+HERE = Path(__file__).resolve().parent
 
 logger = logging.getLogger("make_atlas")
 
@@ -145,24 +145,15 @@ def as_float(value: Any) -> float | None:
 # --------------------------------------------------------------------------
 
 
-def rel(T, i, j):
-    return np.linalg.inv(T[i]) @ T[j]
-
-
 def windows(t, T, rt, rT, segs, w):
-    """Translation error of every ``w``-second window of ``T`` against ``rT``."""
-    errs = []
-    for i in range(len(t)):
-        j = np.searchsorted(t, t[i] + w)
-        if j >= len(t) or t[j] - t[i] > w + 0.5:
-            continue
-        if segs and not any(a <= t[i] and t[j] <= b for a, b in segs):
-            continue
-        ri, rj = np.searchsorted(rt, t[i]), np.searchsorted(rt, t[j])
-        if ri >= len(rt) or rj >= len(rt) or abs(rt[ri] - t[i]) > 0.2 or abs(rt[rj] - t[j]) > 0.2:
-            continue
-        errs.append(np.linalg.norm(rel(T, i, j)[:3, 3] - rel(rT, ri, rj)[:3, 3]))
-    return np.array(errs)
+    """Translation error of every ``w``-second window of ``T`` against ``rT``, inside one of ``segs``."""
+    return np.array(
+        [
+            err
+            for i, j, err in scan_windows(t, T, rt, rT, w)
+            if not segs or any(a <= t[i] and t[j] <= b for a, b in segs)
+        ]
+    )
 
 
 def window_errors(access: SceneAccess) -> tuple[float, float] | None:
@@ -492,50 +483,6 @@ def read_json(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def seed_curation(root: DatasetRoot, probes: list[SceneProbe]) -> dict:
-    """A ``curation.json`` lifted out of whatever atlas the root has now.
-
-    Prose and groupings copy across; a slot listed the old way (``["a","b"]``,
-    which only claimed a file existed) becomes the frame index that file was
-    actually cut at, which is the fraction the cutter used.
-    """
-    atlas = root.atlas() or {}
-    scenes: dict[str, dict] = {}
-    for probe in probes:
-        entry = root.atlas_scene(probe.scene_id)
-        seeded: dict[str, Any] = {}
-        if entry.get("description"):
-            seeded["description"] = entry["description"]
-        thumbs = curated_thumbs(entry, probe)
-        if thumbs:
-            seeded["thumbs"] = thumbs
-        scenes[probe.scene_id] = seeded
-
-    groups = []
-    for group in atlas.get("groups") or []:
-        groups.append(
-            {
-                "title": group.get("title"),
-                "blurb": group.get("blurb"),
-                "scenes": [s for s in group.get("scenes") or [] if s in scenes],
-            }
-        )
-
-    out = {
-        "schema": CURATION_SCHEMA,
-        "note": (
-            "Hand-edited: everything here has to be written by someone who looked "
-            "at the data. atlas.json is generated from this file plus the root -- "
-            "run scripts/make_atlas.py after editing, and never edit atlas.json."
-        ),
-    }
-    for key in ("title", "kicker", "intro", "root_note", "footer"):
-        out[key] = atlas.get(key) or ""
-    out["groups"] = groups
-    out["scenes"] = scenes
-    return out
-
-
 # --------------------------------------------------------------------------
 # assembly
 # --------------------------------------------------------------------------
@@ -680,9 +627,7 @@ def diff_atlas(new: dict, old: dict, only: list[str] | None = None) -> list[str]
 
 def write_json(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-    tmp.replace(path)
+    _replace_atomically(path, lambda fh: fh.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n"))
 
 
 def resolve_thumbs_dir(atlas_dir: Path, materialize: bool) -> None:
@@ -741,9 +686,6 @@ def resolve_atlas_dir(root: DatasetRoot, materialize: bool) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root", type=Path, help="dataset root to generate an atlas for")
-    ap.add_argument(
-        "--init", action="store_true", help="seed atlas/curation.json from the existing atlas.json and stop"
-    )
     ap.add_argument("--check", action="store_true", help="report what would change; write nothing")
     ap.add_argument("--materialize", action="store_true", help="replace a symlinked atlas/ with a real directory")
     ap.add_argument("--no-thumbs", action="store_true", help="do not render thumbnails")
@@ -760,21 +702,11 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     root = DatasetRoot(args.root)
 
-    if args.init:
-        probes = root.probe_all()
-        path = root.atlas_dir / "curation.json"
-        if path.exists():
-            raise SystemExit(f"{path} already exists; edit it or move it aside")
-        resolve_atlas_dir(root, args.materialize)
-        write_json(path, seed_curation(root, probes))
-        logger.info("wrote %s -- edit it, then re-run without --init", path)
-        return 0
-
     curation = read_json(root.atlas_dir / "curation.json")
     if not curation:
         logger.warning(
             "no atlas/curation.json in this root: generating numbers only, with no prose. "
-            "Run with --init first to seed one."
+            "Write one (see docs/VIEWER.md) to add it."
         )
     previous = read_json(root.atlas_dir / "atlas.json")
     if not args.check:

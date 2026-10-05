@@ -84,7 +84,7 @@ warnings**.
 Working invocation — the defaults are already right, no `--lidar_extrinsic`:
 
 ```bash
-python -m dataset_tools.extract_data <bags> <out> --jobs 8
+helhest-extract <bags> <out> --jobs 8
 ```
 
 ## 4. What the new rig fixed
@@ -385,7 +385,7 @@ None are required to extract; all three make the result better documented.
 
 ```bash
 # smoke extraction of one bag (2 min, 1106 frames)
-.venv/bin/python -m dataset_tools.extract_data \
+.venv/bin/python -m dataset_tools.extract \
     new_rig_bags/helhest_2026_09_02-16_25_23_merged <out> --jobs 1 -v
 .venv/bin/python -m dataset_tools.validate_scene <out>
 ```
