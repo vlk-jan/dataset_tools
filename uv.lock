@@ -161,7 +161,7 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'viewer'", specifier = ">=10.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
     { name = "rosbags", specifier = ">=0.10" },
-    { name = "simview", extras = ["authoring"], marker = "extra == 'viewer'", specifier = ">=6.0.0" },
+    { name = "simview", extras = ["authoring"], marker = "extra == 'viewer'", specifier = ">=6.0.1" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'viewer'", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'viewer'" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'viewer'", specifier = ">=0.27" },
@@ -866,7 +866,7 @@ wheels = [
 
 [[package]]
 name = "simview"
-version = "6.0.0"
+version = "6.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -875,9 +875,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/50/d662232d1353e35d4ec4c8a6a779a09a84a16cc23f6325ff5c4bd47560b6/simview-6.0.0.tar.gz", hash = "sha256:1b9e80babea533d06fb2ca5dbc1b3631e68153d9f5f5203f71ac3118f119764f", size = 713621, upload-time = "2026-10-01T18:37:56.752Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/ed/7b0c20160df3f0d99b281894def5cc5ff5f934c78036ca2f68fc22dc79e5/simview-6.0.1.tar.gz", hash = "sha256:682a4bddc7109e246eb1ea3bb9b637466533e46625ea8145f600782935c7ae74", size = 713513, upload-time = "2026-10-05T14:21:40.535Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/92/c25fdc122bf33ed10f6cc9d2974fea52949da532865d63e966c405ba717c/simview-6.0.0-py3-none-any.whl", hash = "sha256:210f7a2dea62a7e18486af0bb2a9941289fbbae7f065a1be8d169c327acb2092", size = 687140, upload-time = "2026-10-01T18:37:54.86Z" },
+    { url = "https://files.pythonhosted.org/packages/e0/3e/3e565c8174967ba58612a33e77c065b71f44b4aa2c6b8c580d90cffaf7cd/simview-6.0.1-py3-none-any.whl", hash = "sha256:5cb39096a560c6c1d3b4daca2b193291ecb1fdffe43b8e5473e7245f93c4dfa3", size = 687137, upload-time = "2026-10-05T14:21:38.733Z" },
 ]
 
 [package.optional-dependencies]

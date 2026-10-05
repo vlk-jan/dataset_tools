@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer pulls in
-[SimView](https://pypi.org/project/simview/) (`>=6.0.0`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=6.0.1`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. Torch is the heavy
 one, so the viewer lives in its own virtualenv next to the extraction one:
 
