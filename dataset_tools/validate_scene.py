@@ -36,8 +36,10 @@ from pathlib import Path
 import numpy as np
 
 from dataset_tools import image_format
+from dataset_tools.extract.scene_io import DERIVED_DIRS
 from dataset_tools.gnss_guard import MAX_SPEED
 from dataset_tools.gt_io import read_segments, read_trajectory
+from dataset_tools.transforms import MIN_VALID_STAMP
 
 #: Files every extracted scene must have.
 REQUIRED_FILES = (
@@ -61,11 +63,11 @@ OPTIONAL_FILES = (
     "trajectory.txt",
     "T_cam_to_lidar.txt",
     "tf_pins.txt",
+    "extract_meta.json",
+    "joint_names.txt",
+    "gnss_guard.txt",
+    "time_align.txt",
 )
-OPTIONAL_FILES += ("extract_meta.json", "joint_names.txt", "gnss_guard.txt", "time_align.txt")
-#: Built after the extraction, one file per frame index.
-DERIVED_DIRS = ("height_maps", "height_masks", "proprio_labels", "driven_similarity")
-OPTIONAL_DIRS = DERIVED_DIRS
 
 ERROR = "ERROR"
 WARNING = "WARN"
@@ -343,7 +345,7 @@ def check_proprio(
             report.add(ERROR, "SHAPE", f"{name}: expected (M, K) rows, got {arr.shape}")
             continue
         t = arr[:, 0]
-        unset = t < 1e9
+        unset = t < MIN_VALID_STAMP
         if unset.any():
             report.add(
                 WARNING,
@@ -628,9 +630,8 @@ def validate_scene(
         image_ext = image_format.of_scene(scene_dir)
     except image_format.ImageFormatError as exc:
         report.add(ERROR, "IMAGE_FORMAT", str(exc))
-        image_ext = max(image_format.held(scene_dir).items(), key=lambda kv: kv[1], default=(image_format.DEFAULT, 0))[
-            0
-        ]
+        have = image_format.held(scene_dir)
+        image_ext = max(have, key=have.get) if have else image_format.DEFAULT
     report.stats["image_format"] = image_ext.lstrip(".")
     images = _indexed_files(scene_dir / "images", image_ext)
     clouds = _indexed_files(scene_dir / "clouds", ".npy")
@@ -654,7 +655,7 @@ def validate_scene(
     for name in OPTIONAL_FILES:
         if (scene_dir / name).is_file():
             report.extras.append(name)
-    for name in OPTIONAL_DIRS:
+    for name in DERIVED_DIRS:
         if (scene_dir / name).is_dir():
             report.extras.append(f"{name}/")
     full_npz = scene_dir / f"{scene_dir.name}_full.npz"
@@ -1008,7 +1009,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-jump",
         type=float,
         default=1.0,
-        help="Odometry step warning threshold [m]",
+        help="Odometry step reported (as INFO) above this [m]",
     )
     parser.add_argument("--max-tilt", type=float, default=45.0, help="Tilt warning threshold [deg]")
     parser.add_argument("--max-nan", type=float, default=0.01, help="Non-finite cloud value fraction")

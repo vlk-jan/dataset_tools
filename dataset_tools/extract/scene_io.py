@@ -17,7 +17,6 @@ LOG = logging.getLogger("helhest.extract")
 #: Written as the very last step of a scene, so its presence marks completion.
 SENTINEL_FILE = "source_bag.txt"
 SCENES_CSV = "scenes.csv"
-SCENES_CSV_HEADER = ["scene", "bag", "start_time", "frames"]
 
 STATUS_OK = "ok"
 STATUS_SKIPPED = "skipped"
@@ -240,7 +239,7 @@ def merge_scenes_csv(output_dir: Path) -> Path:
     csv_path = output_dir / SCENES_CSV
     with csv_path.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(SCENES_CSV_HEADER)
+        writer.writerow(["scene", "bag", "start_time", "frames"])
         writer.writerows(rows)
     return csv_path
 

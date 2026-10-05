@@ -53,6 +53,11 @@ def roll_pitch_from_matrix(R: np.ndarray) -> tuple[float, float]:
     return roll, pitch
 
 
+def rotation_angle_deg(R: np.ndarray) -> float:
+    """The angle of a 3x3 rotation, in degrees."""
+    return math.degrees(math.acos(max(-1.0, min(1.0, (float(np.trace(R)) - 1.0) / 2.0))))
+
+
 def pose_to_matrix(pose) -> np.ndarray:
     """4x4 pose matrix from a ``geometry_msgs/Pose``-shaped object."""
     T = quaternion_matrix([pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w])

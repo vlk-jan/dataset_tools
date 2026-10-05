@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from dataset_tools.extract import pose_check
 
@@ -60,6 +61,3 @@ def test_the_report_is_written_and_short_streams_are_a_note(tmp_path):
     assert "note" in short
     pose_check.write_report(tmp_path / "short.txt", short, "a", "b")
     assert "too few" in (tmp_path / "short.txt").read_text()
-
-
-import pytest  # noqa: E402

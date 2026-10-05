@@ -70,15 +70,11 @@ def _xyzi(points: np.ndarray) -> np.ndarray:
     )
 
 
-def cloud_to_xyzi(msg) -> np.ndarray:
-    """PointCloud2 or CompressedPointCloud2 message -> (N, 4) float32 [x y z i]."""
-    return _xyzi(_points(msg))
-
-
 def cloud_to_xyzit(msg, stamp: float) -> tuple[np.ndarray, np.ndarray | None]:
-    """As :func:`cloud_to_xyzi`, plus each point's capture time relative to
-    ``stamp`` (the header stamp) in seconds -- or None when the cloud carries
-    no usable per-point time. Rows correspond, so one mask fits both."""
+    """PointCloud2 or CompressedPointCloud2 message -> (N, 4) float32 [x y z i],
+    plus each point's capture time relative to ``stamp`` (the header stamp) in
+    seconds -- or None when the cloud carries no usable per-point time. Rows
+    correspond, so one mask fits both."""
     points = _points(msg)
     return _xyzi(points), point_time_offsets(points, stamp)
 
@@ -122,27 +118,22 @@ def _plausible_offsets(off: np.ndarray) -> bool:
     return len(finite) > 0 and float(finite.min()) >= -MAX_SWEEP_S and float(finite.max()) <= MAX_SWEEP_S
 
 
-def drop_invalid_returns(xyzi: np.ndarray) -> np.ndarray:
-    """Drop the two things a sensor emits for a shot that returned nothing.
+def valid_returns_mask(xyzi: np.ndarray) -> np.ndarray:
+    """Mask off the two things a sensor emits for a shot that returned nothing.
 
     An organised cloud ships every element every sweep (Odin1: 256x192 = 49152,
     constant), so a missed shot has to be encoded rather than omitted. Both
     encodings occur in the same bag: NaN, and exactly (0, 0, 0).
 
-    This MUST run before the cloud is transformed into base_link: afterwards
-    the zeros land on the mount translation, where they read as a dense real
-    object rather than a sentinel. That is HELHEST v1, where 54-70% of every
-    published cloud is (-0.170, 0, 0.145) repeated ten to fourteen thousand
-    times. Measured per sweep on the 2026-08-21 bags: 49152 elements, 11.2%
-    NaN, 47.1% of the rest dropped shots, ~23k real returns left.
+    This MUST be applied before the cloud is transformed into base_link:
+    afterwards the zeros land on the mount translation, where they read as a
+    dense real object rather than a sentinel. That is HELHEST v1, where 54-70%
+    of every published cloud is (-0.170, 0, 0.145) repeated ten to fourteen
+    thousand times. Measured per sweep on the 2026-08-21 bags: 49152 elements,
+    11.2% NaN, 47.1% of the rest dropped shots, ~23k real returns left.
 
     Exact zeros only -- (0, 0, 1e-6) is a real return against the sensor, and
-    range gating is the consumer's decision, not this function's.
+    range gating is the consumer's decision, not this function's. A mask
+    rather than the filtered rows, so per-point columns can follow the same rows.
     """
-    return xyzi[valid_returns_mask(xyzi)]
-
-
-def valid_returns_mask(xyzi: np.ndarray) -> np.ndarray:
-    """The rows :func:`drop_invalid_returns` keeps, as a mask -- for the
-    per-point columns that have to follow the same rows."""
     return ~np.isnan(xyzi).any(axis=1) & np.any(xyzi[:, :3] != 0, axis=1)

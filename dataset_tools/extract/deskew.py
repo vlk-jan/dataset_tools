@@ -42,6 +42,7 @@ import cv2
 import numpy as np
 
 from dataset_tools.time_align import PoseTrack
+from dataset_tools.transforms import rotation_angle_deg
 
 #: Offsets are quantised to this before the poses are looked up.
 BIN_S = 0.001
@@ -54,9 +55,6 @@ GYRO_MAX_GAP_S = 0.02
 #: this, or the gyro is not believed for that sweep. Constant-rate slerp is off
 #: by ~0.2 deg at the robot's angular accelerations; a broken gyro by much more.
 GYRO_TOL_DEG = 1.0
-
-#: What :func:`deskew` can report back, in the order a summary lists them.
-STATUSES = ("deskewed", "instant", "no_pose", "empty")
 
 
 def deskew(
@@ -73,7 +71,7 @@ def deskew(
     ``stamp`` is the header stamp the offsets count from; ``t_ref`` the frame's
     instant on the dataset's clock (on the Odin1 the two differ by under a
     millisecond, the camera's half of the pairing). Returns the moved points, a
-    status from :data:`STATUSES` and how the rotation inside the sweep was
+    status (``deskewed``, ``instant``, ``no_pose`` or ``empty``) and how the rotation inside the sweep was
     found: ``"gyro"`` when a :class:`GyroTrack` covered the sweep and agreed
     with the pose track's slerp to ``gyro_tol_deg`` over it, ``"slerp"``
     otherwise, None when nothing was moved. The points come back untouched for
@@ -110,10 +108,6 @@ def deskew(
     t_rel = (pos_u - pos_r[0]) @ R_ref_T.T  # (U, 3)
     out = np.einsum("nij,nj->ni", R_rel[inv], pts.astype(np.float64)) + t_rel[inv]
     return out.astype(pts.dtype), "deskewed", method
-
-
-def rotation_angle_deg(R: np.ndarray) -> float:
-    return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1.0) / 2.0, -1.0, 1.0))))
 
 
 @dataclass
@@ -168,12 +162,3 @@ def covered(sample_ts: np.ndarray, t_lo: float, t_hi: float, max_gap: float = MA
     i0 = int(np.searchsorted(ts, t_lo, side="right")) - 1
     i1 = int(np.searchsorted(ts, t_hi, side="left"))
     return bool(np.all(np.diff(ts[i0 : i1 + 1]) <= max_gap))
-
-
-def build_track(odom) -> PoseTrack | None:
-    """A pose track from ``[(t, T), ...]``, or None when there is too little to interpolate."""
-    if odom is None or len(odom) < 2:
-        return None
-    ts = np.array([x[0] for x in odom], dtype=np.float64)
-    poses = np.array([x[1] for x in odom], dtype=np.float64)
-    return PoseTrack.build(ts, poses)

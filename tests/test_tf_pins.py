@@ -3,34 +3,14 @@
 import math
 
 import numpy as np
+from test_transforms import make_tf
 
 from dataset_tools import tf_pins
 from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
-from dataset_tools.transforms import euler_matrix
 
 
-class _TF:
-    def __init__(self, parent, child, xyz, rpy_deg=(0.0, 0.0, 0.0)):
-        M = euler_matrix(*(math.radians(a) for a in rpy_deg))
-        q = _quat(M)
-
-        class _O:
-            pass
-
-        self.header, self.child_frame_id, self.transform = _O(), child, _O()
-        self.header.frame_id = parent
-        self.transform.translation, self.transform.rotation = _O(), _O()
-        self.transform.translation.x, self.transform.translation.y, self.transform.translation.z = xyz
-        self.transform.rotation.x, self.transform.rotation.y, self.transform.rotation.z, self.transform.rotation.w = q
-
-
-def _quat(M):
-    R = M[:3, :3]
-    w = math.sqrt(max(0.0, 1 + R[0, 0] + R[1, 1] + R[2, 2])) / 2
-    x = math.copysign(math.sqrt(max(0.0, 1 + R[0, 0] - R[1, 1] - R[2, 2])) / 2, R[2, 1] - R[1, 2])
-    y = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] + R[1, 1] - R[2, 2])) / 2, R[0, 2] - R[2, 0])
-    z = math.copysign(math.sqrt(max(0.0, 1 - R[0, 0] - R[1, 1] + R[2, 2])) / 2, R[1, 0] - R[0, 1])
-    return x, y, z, w
+def _TF(parent, child, xyz, rpy_deg=(0.0, 0.0, 0.0)):
+    return make_tf(parent, child, xyz, tuple(math.radians(a) for a in rpy_deg))
 
 
 def _odin_graph(lidar_xyz=(0.02, 0.0, 0.03), lidar_rpy=(0.0, -1.5, 0.0)):

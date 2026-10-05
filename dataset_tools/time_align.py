@@ -292,7 +292,7 @@ class Profile:
 
     def rows(self, t0: float) -> list[tuple[float, float, float, float]]:
         """``(seconds into the scene, delta, gain, depth)`` for every window."""
-        return [(w["t"] - t0, w["delta"], w["gain"], w.get("depth", 0.0)) for w in self.windows]
+        return [(w["t"] - t0, w["delta"], w["gain"], w["depth"]) for w in self.windows]
 
 
 def _retry_if_shallow(
@@ -316,13 +316,12 @@ def _retry_if_shallow(
         return w
     wide["t"] = w["t"]  # it still speaks for the moment it was centred on
     wide["frame_start"] = w["frame_start"]
-    wide["wide"] = True
     return wide
 
 
 def _knots(windows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     """The believable windows, median-filtered against single-window outliers."""
-    strong = [w for w in windows if w.get("depth", 0.0) >= MIN_DEPTH and abs(w["delta"]) <= MAX_ABS_OFFSET]
+    strong = [w for w in windows if w["depth"] >= MIN_DEPTH and abs(w["delta"]) <= MAX_ABS_OFFSET]
     if not strong:
         return np.zeros(0), np.zeros(0)
     ts = np.array([w["t"] for w in strong])

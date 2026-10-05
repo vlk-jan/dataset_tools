@@ -28,12 +28,7 @@ def test_trajectory_round_trips_and_sorts(tmp_path):
     assert np.allclose(got_poses[:, 0, 3], [0.5, 1.0, 0.0])
 
 
-def test_trajectory_accepts_the_13_column_form_and_rejects_others(tmp_path):
-    row = np.concatenate([[5.0], _poses(1)[0, :3].ravel()])
-    np.savetxt(tmp_path / "short.txt", row[None])
-    ts, poses = gt_io.read_trajectory(tmp_path / "short.txt")
-    assert ts.tolist() == [5.0] and poses.shape == (1, 4, 4) and poses[0, 3, 3] == 1.0
-
+def test_a_trajectory_of_the_wrong_width_is_refused(tmp_path):
     np.savetxt(tmp_path / "odd.txt", np.ones((2, 9)))
     with pytest.raises(ValueError):
         gt_io.read_trajectory(tmp_path / "odd.txt")

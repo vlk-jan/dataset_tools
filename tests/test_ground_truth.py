@@ -12,15 +12,15 @@ def _traj(ts, xs):
     return out
 
 
+def _segs(scene):
+    return [line.split() for line in (scene / "odometry_segments.txt").read_text().splitlines() if line[0] != "#"]
+
+
 def test_continuous_run_is_one_anchored_segment(tmp_path):
     ts = np.arange(0, 10, 0.1)
-    assert write_ground_truth(_traj(ts, ts * 1.0), tmp_path, min_poses=20)
+    assert write_ground_truth(_traj(ts, ts * 1.0), tmp_path)
     rows = np.loadtxt(tmp_path / "odometry.txt", comments="#")
-    segs = [
-        line.split()
-        for line in (tmp_path / "odometry_segments.txt").read_text().splitlines()
-        if not line.startswith("#")
-    ]
+    segs = _segs(tmp_path)
     assert len(segs) == 1 and int(segs[0][3]) == len(ts)
     assert segs[0][4] == "end_of_run"
     T0 = rows[0, 1:].reshape(4, 4)
@@ -31,12 +31,8 @@ def test_teleport_splits_and_spike_dropped(tmp_path):
     ts = np.arange(0, 20, 0.1)
     xs = ts * 1.0
     xs[100] += 750.0  # one-sample out-and-back GNSS spike
-    assert write_ground_truth(_traj(ts, xs), tmp_path, min_poses=20)
-    segs = [
-        line.split()
-        for line in (tmp_path / "odometry_segments.txt").read_text().splitlines()
-        if not line.startswith("#")
-    ]
+    assert write_ground_truth(_traj(ts, xs), tmp_path)
+    segs = _segs(tmp_path)
     assert len(segs) == 2  # spike sample's 1-pose segment discarded
     # The tag names why the segment ENDED: the first ends at the spike, the
     # second runs out the recording.
@@ -54,12 +50,8 @@ def test_teleport_splits_and_spike_dropped(tmp_path):
 
 def test_gap_reason_and_min_poses(tmp_path):
     ts = np.concatenate([np.arange(0, 5, 0.1), np.arange(30, 30.5, 0.1), np.arange(60, 70, 0.1)])
-    assert write_ground_truth(_traj(ts, np.zeros(len(ts))), tmp_path, min_poses=20)
-    segs = [
-        line.split()
-        for line in (tmp_path / "odometry_segments.txt").read_text().splitlines()
-        if not line.startswith("#")
-    ]
+    assert write_ground_truth(_traj(ts, np.zeros(len(ts))), tmp_path)
+    segs = _segs(tmp_path)
     assert len(segs) == 2  # the 5-sample middle chunk is discarded
     assert segs[0][4] == "gap"
     assert segs[1][4] == "end_of_run"

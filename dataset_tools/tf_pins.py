@@ -34,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix
+from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix, rotation_angle_deg
 
 #: The record written beside a scene.
 FILE = "tf_pins.txt"
@@ -94,9 +94,7 @@ class Record:
     @property
     def rotation_deg(self) -> float:
         Rb = euler_matrix(*(math.radians(a) for a in self.bag_rpy_deg))[:3, :3]
-        Rp = self.pin.matrix()[:3, :3]
-        cos = (np.trace(Rp.T @ Rb) - 1) / 2
-        return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+        return rotation_angle_deg(self.pin.matrix()[:3, :3].T @ Rb)
 
     @property
     def far(self) -> bool:

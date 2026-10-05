@@ -39,7 +39,6 @@ def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> in
 
     print(f"Reading messages from {input_path}...")
     with AnyReader([input_path]) as reader:
-        # Map to keep track of connection metadata for the writer
         typestore = reader.typestore
 
         for connection, timestamp, rawdata in reader.messages():

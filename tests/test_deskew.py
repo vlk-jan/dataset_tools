@@ -7,6 +7,7 @@ import pytest
 
 from dataset_tools.extract import deskew
 from dataset_tools.time_align import PoseTrack
+from dataset_tools.transforms import rotation_angle_deg
 
 
 def _yaw(a: float) -> np.ndarray:
@@ -137,13 +138,6 @@ def test_covered_requires_a_bracket_without_a_wide_gap():
     assert not deskew.covered(ts[:1], 0.0, 0.0)
 
 
-def test_build_track_needs_two_poses():
-    assert deskew.build_track([]) is None
-    assert deskew.build_track([(0.0, np.eye(4))]) is None
-    track = deskew.build_track([(1.0, np.eye(4)), (0.0, np.eye(4))])
-    assert track is not None and list(track.ts) == [0.0, 1.0]
-
-
 # --------------------------------------------------------------------------
 # the gyro inside the sweep
 # --------------------------------------------------------------------------
@@ -218,6 +212,6 @@ def test_the_gyro_is_rotated_into_the_base_frame():
     g = deskew.GyroTrack.build(rows, R)
     assert np.allclose(g.omega[:, 2], 1.0) and np.allclose(g.omega[:, :2], 0.0)
     Rr = g.relative_rotations(0.5, np.array([0.6]))
-    assert deskew.rotation_angle_deg(Rr[0]) == pytest.approx(np.degrees(0.1), abs=1e-6)
+    assert rotation_angle_deg(Rr[0]) == pytest.approx(np.degrees(0.1), abs=1e-6)
     assert Rr[0][1, 0] > 0  # a positive yaw
     assert deskew.GyroTrack.build([]) is None

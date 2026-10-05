@@ -6,7 +6,16 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from dataset_tools.extract.pointcloud import PC2_DTYPES, cloud_to_xyzi, drop_invalid_returns, fields_to_dtype
+from dataset_tools.extract.pointcloud import cloud_to_xyzit, fields_to_dtype, valid_returns_mask
+
+
+def cloud_to_xyzi(msg):
+    return cloud_to_xyzit(msg, 0.0)[0]
+
+
+def drop_invalid_returns(xyzi):
+    return xyzi[valid_returns_mask(xyzi)]
+
 
 FLOAT32 = 7
 UINT16 = 4
@@ -59,24 +68,7 @@ def test_fields_to_dtype_respects_offsets_and_point_step():
 
 def test_fields_to_dtype_big_endian():
     dtype = fields_to_dtype([field("x", 0)], point_step=4, big_endian=True)
-    assert dtype["x"].byteorder in (
-        ">",
-        "=" if np.dtype(">f4").byteorder == "=" else ">",
-    )
-
-
-def test_pc2_dtype_table_matches_pointfield_enum():
-    # sensor_msgs/PointField: INT8=1 ... FLOAT64=8
-    assert [PC2_DTYPES[i] for i in range(1, 9)] == [
-        "i1",
-        "u1",
-        "i2",
-        "u2",
-        "i4",
-        "u4",
-        "f4",
-        "f8",
-    ]
+    assert dtype["x"] == np.dtype(">f4")
 
 
 def test_cloud_to_xyzi_round_trip():
@@ -127,7 +119,7 @@ def test_cloud_to_xyzi_organized_cloud_uses_width_times_height():
 
 
 # ---------------------------------------------------------------------------
-# drop_invalid_returns: the guard that keeps the HELHEST v1 origin-delta bug
+# valid_returns_mask: the guard that keeps the HELHEST v1 origin-delta bug
 # from being reproduced on the Odin1 rig. See the function's docstring.
 # ---------------------------------------------------------------------------
 def test_drop_invalid_returns_drops_nan_rows():

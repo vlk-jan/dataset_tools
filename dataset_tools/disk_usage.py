@@ -48,7 +48,7 @@ import json
 import logging
 import os
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from dataset_tools.gt_io import _replace_atomically
 from dataset_tools.image_format import scenes as scene_dirs
@@ -59,7 +59,7 @@ LOG = logging.getLogger(__name__)
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def dir_usage(path, linked=False):

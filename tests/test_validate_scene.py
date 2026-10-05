@@ -400,7 +400,7 @@ def test_root_checks_and_the_allowlist_make_strict_a_gate(tmp_path: Path, capsys
     (root / vs.EXPECT_FILE).write_text('{"expected": [["0000", "TILT"], ["*", "GPS"]]}')
     out = tmp_path / "v.json"
     assert vs.main([str(root), "--strict", "-q", "--json", str(out)]) == 0
-    doc = __import__("json").loads(out.read_text())
+    doc = json.loads(out.read_text())
     tilt = next(m for m in doc["scenes"]["0000"]["messages"] if m["code"] == "TILT")
     assert tilt["expected"] is True and tilt["severity"] == vs.WARNING
     assert [m["code"] for m in doc["root"]] == ["EXPECT_UNUSED"]

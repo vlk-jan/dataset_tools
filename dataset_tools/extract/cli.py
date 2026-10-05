@@ -35,14 +35,9 @@ from dataset_tools.extract.scene_io import (
 LOG = logging.getLogger("helhest.extract")
 
 
-def _ensure_logging() -> None:
-    """Worker processes started without fork inherit no logging configuration."""
-    if not logging.getLogger().handlers:
-        setup_logging(False)
-
-
 def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
-    _ensure_logging()
+    if not logging.getLogger().handlers:  # a worker started without fork inherits no logging
+        setup_logging(False)
     scene_dir = output_dir / f"{idx:04d}"
     try:
         with AnyReader([bag_path]) as reader:

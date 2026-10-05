@@ -473,8 +473,8 @@ def test_gps_topic_selection_prefers_a_fused_fix_that_carries_messages():
 def test_a_second_run_skips_the_complete_scene(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
     assert main([str(bags), str(out), *COMMON]) == 0
-    marker = scene = out / "0000"
-    mtime = (marker / "source_bag.txt").stat().st_mtime_ns
+    scene = out / "0000"
+    mtime = (scene / "source_bag.txt").stat().st_mtime_ns
     assert main([str(bags), str(out), *COMMON]) == 0
     assert (scene / "source_bag.txt").stat().st_mtime_ns == mtime
 

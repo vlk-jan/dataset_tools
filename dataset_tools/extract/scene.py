@@ -81,13 +81,7 @@ def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, ba
         LOG.info("%s: no odometry to align the frame clock against; stamps left as recorded", bag)
         return frame_ts, None
 
-    odom = sorted(odom_data, key=lambda x: x[0])
-    profile = time_align.estimate(
-        scene_dir,
-        frame_ts,
-        np.array([x[0] for x in odom]),
-        np.array([x[1] for x in odom]),
-    )
+    profile = time_align.estimate(scene_dir, frame_ts, *_columns(odom_data))
     LOG.info("%s: frame clock -- %s", bag, profile.summary)
     if profile.is_identity:
         return frame_ts, profile
@@ -95,6 +89,11 @@ def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, ba
     if forced:
         LOG.warning("%s: the measured offset ran backwards faster than the clock; forced monotonic", bag)
     return shifted, profile
+
+
+def _columns(rows) -> tuple[np.ndarray, np.ndarray]:
+    """``[(t, M), ...]`` as two arrays: the stamps and the matrices."""
+    return np.array([r[0] for r in rows]), np.array([r[1] for r in rows])
 
 
 @dataclass
@@ -328,6 +327,10 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
                 p1.gps_rows.append(row)
         elif conn.topic == "/tf_static":
             p1.tf_msgs.extend(msg.transforms)
+    # A bag may hold out-of-order messages; everything below samples these
+    # streams by stamp, so they are put in time order once, here.
+    for rows in (p1.odom, p1.imu, p1.check_odom):
+        rows.sort(key=lambda x: x[0])
     return p1
 
 
@@ -411,7 +414,6 @@ def _select_frames(p1: _Pass1, args, bag: str):
     # fabricated pose with a different author. See dataset_tools.gnss_guard.
     guard_verdict = None
     if _auto(args.gnss_guard, args.odom) and p1.odom:
-        p1.odom.sort(key=lambda x: x[0])
         if args.gnss_guard == "on" or "fixposition" in args.odom:
             # The full guard: asked for, or a Fixposition, whose reset solutions it knows.
             # The stamps of the fixes that carried a position. The gaps in them are
@@ -594,44 +596,45 @@ def _write_frames(
     per-point times and the pose stream covers it, moved onto the frame's own
     instant ``frame_ts[k]`` (see :mod:`dataset_tools.extract.deskew`).
     """
-    camera_topic, lidar_topic = args.cam, args.lidar
     # The poses are at the base frame by now (_resolve_frames), which is the
     # frame the clouds are about to be written in -- the one deskewing needs.
-    track = deskew.build_track(p1.odom) if args.deskew != "off" else None
+    track = time_align.PoseTrack.build(*_columns(p1.odom)) if args.deskew != "off" and len(p1.odom) >= 2 else None
     gyro = deskew.GyroTrack.build(p1.gyro, p1.gyro_rot) if track is not None and p1.gyro else None
     sweeps = Counter()
     span = 0.0
     shift_cam = args.cam_time_offset
     verified = p1.verified
-    cam_ts_to_idx = {ts: i for i, ts in enumerate(valid_cam_ts)}
-    pcd_ts_to_idx = {ts: i for i, ts in enumerate(valid_pcd_ts)}
-    cam_set = set(valid_cam_ts)
-    pcd_set = set(valid_pcd_ts)
+    # Each synchronised stamp and its chronological frame index; a stamp is
+    # taken out once written, so a duplicated message is not a second frame.
+    pending = {
+        args.cam: {ts: i for i, ts in enumerate(valid_cam_ts)},
+        args.lidar: {ts: i for i, ts in enumerate(valid_pcd_ts)},
+    }
 
     intrinsics_saved = False
     image_how = args.image_format
     image_ext = None  # one format per scene, and per root: decided by the first frame
 
     for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
-        # Same stamp arithmetic as pass 1, so the set lookups below hit exactly
-        # -- including the fallback to the bag's own timestamp for a message
-        # type without a header.
-        is_cam = conn.topic == camera_topic
+        # Same stamp arithmetic as pass 1, so the lookups below hit exactly --
+        # including the fallback to the bag's own timestamp for a message type
+        # without a header.
+        is_cam = conn.topic == args.cam
         shift = shift_cam if is_cam else 0.0
+        msg = None
         t = header_stamp_from_cdr(raw) if id(conn) in verified else None
         if t is None:
             msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, timestamp * 1e-9) + shift
-        else:
-            t += shift
-            if t not in (cam_set if is_cam else pcd_set):
-                continue  # not a synchronised frame: never decoded at all
+            t = header_stamp(msg, timestamp * 1e-9)
+        idx = pending[conn.topic].pop(t + shift, None)
+        if idx is None:
+            continue  # not a synchronised frame: never decoded at all
+        if msg is None:
             msg = reader.deserialize(raw, conn.msgtype)
+        t += shift
 
-        if conn.topic == camera_topic and t in cam_set:
-            img_idx = cam_ts_to_idx[t]  # Get correct chronological index
-
-            # Use OpenCV directly
+        if is_cam:
+            img_idx = idx
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if cv_img is None:
@@ -661,15 +664,13 @@ def _write_frames(
 
             # Extract Intrinsics once
             if not intrinsics_saved:
-                save_intrinsics(reader, conns, camera_topic, scene_dir)
+                save_intrinsics(reader, conns, args.cam, scene_dir)
                 save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
                 intrinsics_saved = True
 
-            cam_set.remove(t)  # Handle duplicates
-
-        elif conn.topic == lidar_topic and t in pcd_set:
-            pcd_idx = pcd_ts_to_idx[t]  # Get correct chronological index
-            # Before T_lidar_to_base, never after -- see drop_invalid_returns.
+        else:
+            pcd_idx = idx
+            # Before T_lidar_to_base, never after -- see valid_returns_mask.
             xyzi, offsets = cloud_to_xyzit(msg, t)
             keep = valid_returns_mask(xyzi)
             xyzi = xyzi[keep]
@@ -689,7 +690,6 @@ def _write_frames(
                 scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
                 np.hstack((pcd, xyzi[:, 3:4])),
             )
-            pcd_set.remove(t)
 
     _report_deskew(p1, track, sweeps, span, len(valid_pcd_ts), args, bag)
 
@@ -777,10 +777,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
 
     if p1.odom:
         # The odometry interpolated onto the frame clock, relative to frame 0.
-        p1.odom.sort(key=lambda x: x[0])
-        odom_ts = np.array([x[0] for x in p1.odom])
-        odom_poses = np.array([x[1] for x in p1.odom])
-        matched, n_interp = interpolate_poses(frame_ts, odom_ts, odom_poses)
+        matched, n_interp = interpolate_poses(frame_ts, *_columns(p1.odom))
         LOG.info(
             "%s: transforms.npy -- %d/%d interpolated, %d fell back to the nearest pose (gap or teleport)",
             bag,
@@ -801,15 +798,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     # The odometry this scene is built on, checked against the other stream the
     # rig records (--check_odom): where the two disagree, and by how much.
     if p1.odom and p1.check_odom:
-        p1.check_odom.sort(key=lambda x: x[0])
-        p1.odom.sort(key=lambda x: x[0])
-        result = pose_check.compare(
-            np.array([x[0] for x in p1.odom]),
-            np.array([x[1] for x in p1.odom]),
-            np.array([x[0] for x in p1.check_odom]),
-            np.array([x[1] for x in p1.check_odom]),
-            gnss_guard.MAX_SPEED,
-        )
+        result = pose_check.compare(*_columns(p1.odom), *_columns(p1.check_odom), gnss_guard.MAX_SPEED)
         pose_check.write_report(scene_dir / POSE_CHECK_FILE, result, args.odom, args.check_odom)
         p1.counts["pose_check"] = {"reference": args.check_odom, **result}
         five = (result.get("displacement") or {}).get("5s") or {}
@@ -827,10 +816,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     # Process gravity alignment
     if p1.imu:
         # The orientation interpolated onto the frame clock; yaw is dropped.
-        p1.imu.sort(key=lambda x: x[0])
-        imu_ts = np.array([x[0] for x in p1.imu])
-        imu_mats = np.array([x[1] for x in p1.imu])
-        oriented, _ = interpolate_poses(frame_ts, imu_ts, imu_mats)
+        oriented, _ = interpolate_poses(frame_ts, *_columns(p1.imu))
         gravity_aligns = np.empty((len(frame_ts), 3, 3))
         for k, M in enumerate(oriented):
             roll, pitch = roll_pitch_from_matrix(M)

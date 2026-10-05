@@ -3,9 +3,8 @@
 Two text files make up a scene's ground truth (the HELHEST v1.2 contract):
 
 ``odometry.txt``
-    One pose per line: ``timestamp`` followed by a row-major 4x4 matrix. The
-    17-column form is what every writer here produces; the 13-column form
-    (timestamp + the top 3x4 only) is accepted on read.
+    One pose per line: ``timestamp`` followed by a row-major 4x4 matrix, 17
+    columns.
 ``odometry_segments.txt``
     ``segment start_ts end_ts n_poses reason`` per line. Poses from different
     segments share no reference frame -- each segment is re-anchored to the
@@ -23,7 +22,7 @@ import logging
 import os
 import warnings
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
@@ -65,7 +64,7 @@ def read_trajectory(path: Path | str) -> tuple[np.ndarray, np.ndarray]:
     """``(ts (N,), poses (N, 4, 4))`` sorted by timestamp; empty arrays for an empty file.
 
     Raises ``OSError`` for an unreadable file and ``ValueError`` for a file
-    that is neither 17 nor 13 columns wide.
+    that is not 17 columns wide.
     """
     with warnings.catch_warnings():
         warnings.simplefilter(
@@ -74,21 +73,10 @@ def read_trajectory(path: Path | str) -> tuple[np.ndarray, np.ndarray]:
         raw = np.loadtxt(path, dtype=np.float64, comments="#", ndmin=2)
     if raw.size == 0:
         return np.zeros(0), np.zeros((0, 4, 4))
-    if raw.shape[1] == 17:
-        poses = raw[:, 1:].reshape(-1, 4, 4)
-    elif raw.shape[1] == 13:
-        poses = np.zeros((raw.shape[0], 4, 4), dtype=np.float64)
-        poses[:, :3, :] = raw[:, 1:].reshape(-1, 3, 4)
-        poses[:, 3, 3] = 1.0
-    else:
-        raise ValueError(f"{path}: expected 17 or 13 columns, got {raw.shape[1]}")
+    if raw.shape[1] != 17:
+        raise ValueError(f"{path}: expected 17 columns, got {raw.shape[1]}")
     order = np.argsort(raw[:, 0], kind="stable")
-    return raw[order, 0], poses[order]
-
-
-def format_pose_line(t: float, T: np.ndarray) -> str:
-    """One ``odometry.txt`` line, ``%.6f`` throughout (byte-compatible with v1)."""
-    return " ".join(f"{v:.6f}" for v in (t, *np.asarray(T).ravel()))
+    return raw[order, 0], raw[order, 1:].reshape(-1, 4, 4)
 
 
 def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> None:
@@ -123,8 +111,8 @@ def write_trajectory(dest: Path | str, ts: Iterable[float], poses: Iterable[np.n
 
 def _write_trajectory(fh: TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
     fh.write(GT_HEADER + "\n")
-    for t, T in zip(ts, poses, strict=True):
-        fh.write(format_pose_line(t, T) + "\n")
+    for t, T in zip(ts, poses, strict=True):  # %.6f throughout: byte-compatible with v1
+        fh.write(" ".join(f"{v:.6f}" for v in (t, *np.asarray(T).ravel())) + "\n")
 
 
 def anchor_to_first(poses: np.ndarray) -> np.ndarray:
@@ -179,10 +167,6 @@ def read_segments(path: Path | str) -> list[SegmentRow]:
     return rows
 
 
-def format_segment_line(row: SegmentRow) -> str:
-    return f"{row.index} {row.start_ts:.6f} {row.end_ts:.6f} {row.n_poses} {row.reason}".rstrip()
-
-
 def write_segments(dest: Path | str, rows: Iterable[SegmentRow]) -> None:
     """Write header + one line per segment, atomically."""
     rows = list(rows)
@@ -196,7 +180,7 @@ def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
     worth preserving."""
     fh.write(SEGMENTS_HEADER + "\n")
     for k, row in enumerate(rows):
-        fh.write(format_segment_line(replace(row, index=FIRST_SEGMENT + k)) + "\n")
+        fh.write(f"{FIRST_SEGMENT + k} {row.start_ts:.6f} {row.end_ts:.6f} {row.n_poses} {row.reason}".rstrip() + "\n")
 
 
 # ---------------------------------------------------------------------------

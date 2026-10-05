@@ -4,6 +4,11 @@ import numpy as np
 
 from dataset_tools.extract.camera import write_camera_info_yaml
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 
 def _msg():
     return SimpleNamespace(
@@ -21,7 +26,6 @@ def _msg():
 
 
 def test_camera_info_yaml_round_trips(tmp_path):
-    yaml = __import__("importlib").import_module("yaml") if _has_yaml() else None
     out = tmp_path / "camera_info.yaml"
     write_camera_info_yaml(_msg(), out)
     text = out.read_text()
@@ -32,11 +36,3 @@ def test_camera_info_yaml_round_trips(tmp_path):
         assert doc["distortion_coefficients"]["cols"] == 8
         assert np.allclose(doc["camera_matrix"]["data"], _msg().k)
         assert np.allclose(doc["projection_matrix"]["data"], _msg().p)
-
-
-def _has_yaml():
-    try:
-        import yaml  # noqa: F401
-    except ImportError:
-        return False
-    return True

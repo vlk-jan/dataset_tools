@@ -50,7 +50,6 @@ ENCODINGS = {
     ".jpg": "camera JPEG bytes verbatim, msg.data unmodified",
     ".png": "PNG",
 }
-EXTENSIONS = tuple(ENCODINGS)
 
 #: How a payload says what it is: (first bytes, extension).
 MAGIC = ((b"\xff\xd8\xff", ".jpg"), (b"\x89PNG\r\n\x1a\n", ".png"))
@@ -72,7 +71,7 @@ def sniff(payload) -> str | None:
 def _normalise(value, where) -> str:
     ext = "." + str(value).lower().lstrip(".")
     if ext not in ENCODINGS:
-        known = ", ".join(e.lstrip(".") for e in EXTENSIONS)
+        known = ", ".join(e.lstrip(".") for e in ENCODINGS)
         raise ImageFormatError(f"{where}: images.extension is {value!r}; expected one of {known}")
     return ext
 
@@ -154,12 +153,6 @@ def of_root(root) -> str | None:
     return next(iter(found), None)
 
 
-def block(ext) -> dict[str, str]:
-    """The manifest's ``images`` block for an extension."""
-    ext = _normalise(ext, "images")
-    return {"extension": ext.lstrip("."), "encoding": ENCODINGS[ext]}
-
-
 def declare(root, ext=None) -> str | None:
     """Write what the scenes hold into ``<root>/manifest.json`` and return it.
 
@@ -186,7 +179,7 @@ def declare(root, ext=None) -> str | None:
     if not isinstance(doc, dict):
         raise ImageFormatError(f"{path}: not a JSON object")
     old = doc.get(KEY) if isinstance(doc.get(KEY), dict) else {}
-    doc[KEY] = {**old, **block(ext)}
+    doc[KEY] = {**old, "extension": ext.lstrip("."), "encoding": ENCODINGS[ext]}
     _replace_atomically(path, lambda f: f.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n"))
     return ext
 

@@ -214,7 +214,7 @@ class Verdict:
 
 
 # ---------------------------------------------------------------------------
-# The three signatures
+# The four signatures
 # ---------------------------------------------------------------------------
 def _runs(flags: np.ndarray) -> list[tuple[int, int]]:
     """Maximal half-open index ranges where ``flags`` is true."""
@@ -395,8 +395,6 @@ def find_spans(ts, poses, fix_ts=None) -> list[Span]:
 
 def drop_poses(odom_data, spans: list[Span]):
     """``odom_data`` with every sample inside a span removed."""
-    if not spans:
-        return list(odom_data)
     return [row for row in odom_data if not any(row[0] in s for s in spans)]
 
 
@@ -460,7 +458,13 @@ def guard(odom_data, frame_ts: np.ndarray, fix_ts=None) -> tuple[list, np.ndarra
 
     # Support is measured against what survives, so the holes the spans just
     # opened are covered by the same rule as the ones the receiver left.
-    kept_ts = [row[0] for row in kept]
+    support = _support(verdict, frames, [row[0] for row in kept], mask)
+    return kept, mask & support, verdict
+
+
+def _support(verdict: Verdict, frames: np.ndarray, kept_ts: list, mask: np.ndarray) -> np.ndarray:
+    """:func:`frame_support` over ``kept_ts``, with the frames it costs (among
+    those ``mask`` still keeps) counted into ``verdict`` by where they lay."""
     support = frame_support(frames, kept_ts)
     lost = mask & ~support
     verdict.n_frames_unsupported = int(np.count_nonzero(lost))
@@ -472,7 +476,7 @@ def guard(odom_data, frame_ts: np.ndarray, fix_ts=None) -> tuple[list, np.ndarra
     verdict.n_unsupported_inside = (
         verdict.n_frames_unsupported - verdict.n_unsupported_before - verdict.n_unsupported_after
     )
-    return kept, mask & support, verdict
+    return support
 
 
 def coverage_guard(odom_data, frame_ts: np.ndarray) -> tuple[list, np.ndarray, Verdict]:
@@ -485,14 +489,7 @@ def coverage_guard(odom_data, frame_ts: np.ndarray) -> tuple[list, np.ndarray, V
     frames = np.asarray(frame_ts, dtype=float)
     if not odom_data:
         return list(odom_data), np.ones(len(frames), dtype=bool), verdict
-    kept_ts = [row[0] for row in odom_data]
-    support = frame_support(frames, kept_ts)
-    verdict.n_frames_unsupported = int(np.count_nonzero(~support))
-    verdict.n_unsupported_before = int(np.count_nonzero(~support & (frames < kept_ts[0])))
-    verdict.n_unsupported_after = int(np.count_nonzero(~support & (frames > kept_ts[-1])))
-    verdict.n_unsupported_inside = (
-        verdict.n_frames_unsupported - verdict.n_unsupported_before - verdict.n_unsupported_after
-    )
+    support = _support(verdict, frames, [row[0] for row in odom_data], np.ones(len(frames), dtype=bool))
     return list(odom_data), support, verdict
 
 
