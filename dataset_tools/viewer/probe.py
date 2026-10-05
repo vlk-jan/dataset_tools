@@ -783,8 +783,6 @@ def clear_cache_dir(cache_dir: Path) -> tuple[int, int]:
 
 def default_cache_dir(root: Path) -> Path:
     """Per-root cache directory under ``$XDG_CACHE_HOME``."""
-    import hashlib
-
     base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
     digest = hashlib.sha1(str(root).encode()).hexdigest()[:12]
     return base / "dataset_tools_viewer" / f"{root.name}-{digest}"

@@ -540,11 +540,7 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
     splits = root.splits()
     if not splits:
         return None
-    tally: dict[str, int] = {}
-    for row in rows:
-        mark = row.get("split")
-        if mark:
-            tally[mark["which"]] = tally.get(mark["which"], 0) + 1
+    tally = Counter(row["split"]["which"] for row in rows if row.get("split"))
     if not tally:
         return None
     fractions = splits.shares({r["probe"].scene_id: r["probe"].n_frames for r in rows}) or {}

@@ -75,7 +75,7 @@ async function draw(el) {
   map.once("focus click", () => map.scrollWheelZoom.enable());
 
   let tileErrors = 0;
-  const tiles = L.tileLayer(OSM_URL, { maxZoom: 19, attribution: OSM_ATTRIBUTION });
+  const tiles = L.tileLayer(OSM_URL, { maxZoom: MAX_TILE_ZOOM, attribution: OSM_ATTRIBUTION });
   tiles.on("tileerror", () => {
     if (++tileErrors === MAX_TILE_ERRORS) {
       note(el, "No map tiles could be fetched - the track is drawn on a plain backdrop.");

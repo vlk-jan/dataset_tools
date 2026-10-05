@@ -5,10 +5,14 @@
 /* The two classes the dialog shares with the pages around it, here because
    this is the one stylesheet both pages load. */
 .muted { color: var(--muted); }
+/* An author display rule outranks the browser's own [hidden]; this keeps the
+   attribute meaning what it says on every element either page hides. */
+[hidden] { display: none !important; }
 .btn {
   display: inline-block; padding: 5px var(--sp-3); border-radius: 6px;
   border: 1px solid var(--line); background: var(--panel-2); color: var(--fg);
 }
+button.btn { font: inherit; cursor: pointer; }
 .btn:hover { border-color: var(--accent); text-decoration: none; }
 .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .zoomable { cursor: zoom-in; }
@@ -19,9 +23,7 @@
 .zoom::backdrop { background: rgb(0 0 0 / 0.6); }
 .zoomhead { display: flex; gap: var(--sp-3); align-items: center; margin-bottom: var(--sp-2); }
 .zoomhead form { margin-left: auto; }
-.zoomhead .btn { font: inherit; cursor: pointer; }
 .zoomhead .zoomcloud { margin-left: auto; }
-.zoomhead .zoomcloud[hidden] { display: none; }
 .zoomhead .zoomcloud:not([hidden]) + form { margin-left: 0; }
 .zoomhint { font-size: var(--fs-sm); }
 .zoomstage { position: relative; width: fit-content; margin: 0 auto; }
@@ -46,7 +48,6 @@
    grow and shrink under the pointer -- which shook the picture. Room for four
    lines, so wrapping does not move it vertically either. */
 .zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
-.zoomread[hidden] { display: none; }
 /* The cloud overlay's depth legend (depthlegend.js), over the bottom-left
    corner of the picture's box -- the frame page's photo and the zoom stage --
    and not inside the picture, so zooming and panning leave it where it is.
@@ -57,7 +58,6 @@
   padding: 6px 8px; border-radius: 4px; background: rgb(0 0 0 / 0.63);
   color: #fff; font: var(--fs-xs)/1.3 var(--sans);
 }
-.depthlegend[hidden] { display: none; }
 .depthlegend i {
   display: block; width: 180px; height: 10px; margin: 4px 0 2px;
   background: linear-gradient(90deg, #30123b, #4157be, #3296ef, #31c6d6, #59e790, #a4f84d, #dadd34, #f3ab29, #ef671c, #c9270a, #7a0403);

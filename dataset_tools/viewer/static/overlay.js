@@ -29,7 +29,6 @@ const els = {
   prevWindow: document.getElementById("dt-prev-window"),
   nextWindow: document.getElementById("dt-next-window"),
   view: document.getElementById("dt-view"),
-  ghostRow: document.getElementById("dt-ghost-row"),
   ghost: document.getElementById("dt-ghost"),
   legend: document.getElementById("dt-legend"),
   legendList: document.getElementById("dt-legend-list"),
@@ -274,10 +273,7 @@ function showAttitude(index) {
  */
 function setupViewToggles() {
   if (!patches) return;
-  if (patches.hasGhost) {
-    els.ghostRow.hidden = false;
-    els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
-  }
+  if (patches.hasGhost) els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
   els.view.hidden = !patches.hasGhost;
 }
 

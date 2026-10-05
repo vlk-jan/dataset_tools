@@ -19,7 +19,6 @@ computed across a boundary: poses either side of one share no reference frame.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import numpy as np
@@ -31,8 +30,6 @@ from .loaders import Segment
 from .scene_page import MOVING_M_S, map_card, path_motion, poses_between, roll_pitch_stat, small_odometry, utc_stamp
 from .signals import signal_charts
 from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, frames_within, segment_bounds
-
-logger = logging.getLogger("dataset_tools.viewer.segment_page")
 
 #: Ground-truth poses per second below which a segment's trajectory is a guess
 #: between anchors rather than a measurement. Matches the window table's flag.

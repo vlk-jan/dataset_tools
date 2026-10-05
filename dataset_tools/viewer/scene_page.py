@@ -1,8 +1,9 @@
 """What a scene page states about one scene, above the tabs.
 
-Four cards -- what was recorded, what ground truth is inside it, how the camera
-was calibrated, what the robot reported -- from the directory probe, the curated
-``atlas.json`` entry if there is one, and a few per-scene arrays read only here.
+Cards -- what was recorded, what ground truth is inside it, how the camera was
+calibrated, what the robot reported, what the extractor and the validator did --
+from the directory probe, the curated ``atlas.json`` entry if there is one, and a
+few per-scene arrays read only here.
 Where the scene's bytes go sits beside the file inventory when the root has a
 ``disk_usage.json``; the sizes in the inventory come from the same entry.
 
@@ -52,7 +53,7 @@ from .index_page import (
     validation_mark,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
-from .probe import ARTEFACTS, DatasetRoot, _npy_shape
+from .probe import ARTEFACTS_BY_KEY, DatasetRoot, _npy_shape
 from .signals import _speed, signal_charts
 from .windows import describe_marks, describe_reason
 
@@ -950,12 +951,11 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
     """
     p = access.probe
     sizes = file_sizes(access)
-    by_key = {art.key: art for art in ARTEFACTS}
     grouped = {k for _, keys in FILE_GROUPS for k in keys}
-    groups = [*FILE_GROUPS, ("Other", tuple(k for k in by_key if k not in grouped))]
+    groups = [*FILE_GROUPS, ("Other", tuple(k for k in ARTEFACTS_BY_KEY if k not in grouped))]
     out: list[dict[str, Any]] = []
     for title, keys in groups:
-        for art in (by_key[k] for k in keys if k in by_key):
+        for art in (ARTEFACTS_BY_KEY[k] for k in keys if k in ARTEFACTS_BY_KEY):
             state = p.state(art.key)
             count = p.counts.get(art.key)
             size = sizes.get(art.relpath) if p.has(art.key) else None
@@ -1028,7 +1028,7 @@ def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
-    """Thumbnails and the four cards, cached on the scene handle.
+    """Thumbnails and the cards, cached on the scene handle.
 
     Cached because a page view costs a few megabytes of small-array reads on
     network storage, and switching tabs on the same scene must not pay it twice.
@@ -1052,7 +1052,7 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # the index card is rimmed with, from the same function, so the two
             # pages cannot disagree about a held-out scene.
             "split": split_mark(root, access.scene_id),
-            # Not one of the four: it sits beside the file inventory, and it is
+            # Not one of the cards: it sits beside the file inventory, and it is
             # absent -- not empty -- on a scene without GNSS.
             "map": map_card(access),
             # Between the inventory and the map, likewise absent on a root

@@ -7,9 +7,6 @@
 <link rel="icon" href="/viewer-static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/viewer-static/style.css">
 <script src="/viewer-static/theme.js"></script>
-{# No web fonts: the viewer runs where there is no route to the internet (the
-   reason Leaflet is vendored), and a request to Google Fonts from every page
-   view is a network dependency for three headings. System stacks throughout. #}
 {% block head %}{% endblock %}
 </head>
 <body{% block body_class %}{% endblock %}>

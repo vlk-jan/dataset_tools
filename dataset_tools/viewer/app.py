@@ -68,7 +68,7 @@ from .loaders import (
     roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
-from .probe import ARTEFACTS, BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
+from .probe import BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
 from .scene_page import build_scene_page, map_card
 from .segment_page import COLUMN_TITLES, attitude_per_window, build_segment_page, segment_windows
 from .segment_page import find as find_segment
@@ -241,7 +241,7 @@ def create_app(
         return templates.TemplateResponse(
             request=request,
             name="error.html",
-            context={"root": root, "status": exc.status_code, "detail": exc.detail},
+            context={"status": exc.status_code, "detail": exc.detail},
             status_code=exc.status_code,
         )
 
@@ -351,7 +351,6 @@ def create_app(
             name="index.html",
             context={
                 "root": root,
-                "artefacts": ARTEFACTS,
                 "manifest": root.manifest(),
                 "simview_version": simview_ver,
                 "notes_enabled": notes_store.enabled,
@@ -368,7 +367,7 @@ def create_app(
         with the root. With notes off the page still answers, saying so.
         """
         page = await run_in_threadpool(_notes_index, state, notes_store, topic)
-        return templates.TemplateResponse(request=request, name="notes.html", context={"root": root, **page})
+        return templates.TemplateResponse(request=request, name="notes.html", context=page)
 
     @app.get("/api/notes")
     async def api_notes_index(topic: str | None = Query(None, max_length=32)):
@@ -430,7 +429,6 @@ def create_app(
             request=request,
             name="segments.html",
             context={
-                "root": root,
                 "rows": rows,
                 "n_scenes": len({r["scene"] for r in rows}),
                 "sort": sort,
@@ -449,7 +447,7 @@ def create_app(
     ):
         access = _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
-        # The thumbnails and the four cards. Cached on the scene handle, so
+        # The thumbnails and the cards. Cached on the scene handle, so
         # switching tabs does not re-read this scene's small arrays.
         card_page = await run_in_threadpool(build_scene_page, root, access)
         # The frame strip is only assembled when it is the tab being shown: it
@@ -460,13 +458,11 @@ def create_app(
             request=request,
             name="scene.html",
             context={
-                "root": root,
                 "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "scene_ids": root.scene_ids(),
                 "probe": access.probe,
                 "windows": windows,
-                "artefacts": ARTEFACTS,
                 "tab": tab,
                 "frames": frames,
                 "page": card_page,
@@ -509,7 +505,6 @@ def create_app(
             request=request,
             name="segment.html",
             context={
-                "root": root,
                 "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "seg": seg,
@@ -551,7 +546,6 @@ def create_app(
             request=request,
             name="frame.html",
             context={
-                "root": root,
                 "data_problem": await run_in_threadpool(lambda: access.clock_problem),
                 "scene_id": scene_id,
                 "index": index,
@@ -561,7 +555,7 @@ def create_app(
                 "map": frame_map,
                 "signals": await run_in_threadpool(_frame_signals, access, details.get("timestamp")),
                 # Only the notes whose range holds this frame.
-                "notes": [n for n in scene_notes if n.overlaps(index, index)],
+                "notes": [n for n in scene_notes if n.overlaps(index, index + 1)],
                 "notes_status": notes_store.status(),
                 "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
             },
@@ -575,7 +569,7 @@ def create_app(
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
 
         opts = _options_from_query(request.query_params)
-        bundle_key = _bundle_key(scene_id, window_key, opts)
+        bundle_key = f"{scene_id}/{window_key}/{opts.cache_key()}"
         # The windows either side of this one, so the panel can page through a
         # scene's segments without going back to the scene page each time.
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
@@ -756,12 +750,14 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_maps", _npz_key("height_map"), render.render_height_map, size)
+        load = functools.partial(load_npz_key, key="height_map")
+        return await _npz_png(access, index, "height_maps", load, render.render_height_map, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "height_masks", _npz_key("validity"), render.render_validity, size)
+        load = functools.partial(load_npz_key, key="validity")
+        return await _npz_png(access, index, "height_masks", load, render.render_validity, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
     async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
@@ -859,14 +855,12 @@ def create_app(
     @app.post("/api/scene/{scene_id}/notes", status_code=201)
     async def api_add_note(scene_id: str, payload: dict = Body(...)):
         access = _access_or_404(state, scene_id)
-        start, end = _frames_from_payload(payload)
         note = await _notes_write(
             state,
             scene_id,
             notes_store.add,
             scene_id,
-            start,
-            end,
+            *_frames_from_payload(payload),
             payload.get("text", ""),
             topic=payload.get("topic", "other"),
             author=payload.get("author", ""),
@@ -878,7 +872,6 @@ def create_app(
     @app.patch("/api/scene/{scene_id}/notes/{note_id}")
     async def api_edit_note(scene_id: str, note_id: str, payload: dict = Body(...)):
         access = _access_or_404(state, scene_id)
-        start, end = _frames_from_payload(payload, required=False)
         note = await _notes_write(
             state,
             scene_id,
@@ -887,8 +880,7 @@ def create_app(
             note_id,
             text=payload.get("text"),
             topic=payload.get("topic"),
-            frame_start=start,
-            frame_end=end,
+            frames=_frames_from_payload(payload, required=False),
             n_frames=access.probe.n_frames,
             verdict=payload.get("verdict"),
         )
@@ -952,16 +944,16 @@ def create_app(
 # ---------------------------------------------------------------- helpers
 
 
-def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int | None, int | None]:
+def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int, int] | None:
     """The inclusive ``{"frames": [a, b]}`` range a note request names -- the
     stored form, and the only one the pages send.
 
-    An edit may leave the range out (``required=False``) and gets
-    ``(None, None)``: the note keeps the range it has.
+    An edit may leave the range out (``required=False``) and gets None: the
+    note keeps the range it has.
     """
     frames = payload.get("frames")
     if frames is None and not required:
-        return None, None
+        return None
     try:
         if not isinstance(frames, list | tuple) or len(frames) != 2:
             raise ValueError(frames)
@@ -1064,10 +1056,6 @@ def _view_query(params) -> str:
     """
     kept = [(k, v) for k, v in params.multi_items() if k != "frame"]
     return f"?{urlencode(kept)}" if kept else ""
-
-
-def _bundle_key(scene_id: str, window_key: str, opts: BuildOptions) -> str:
-    return f"{scene_id}/{window_key}/{opts.cache_key()}"
 
 
 def _options_from_key(opts_key: str) -> BuildOptions:
@@ -1231,11 +1219,6 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, load, renderer, s
     if data is None:
         return _absent_or_unreadable(path, f"{kind} for frame {index}")
     return Response(data, media_type="image/png")
-
-
-def _npz_key(key: str):
-    """A loader for ``_npz_png`` reading one array out of an ``.npz``."""
-    return lambda path: load_npz_key(path, key)
 
 
 def _render_driven(sidecar: dict[str, Any], size: int) -> bytes:

@@ -22,6 +22,7 @@ from typing import Any
 import numpy as np
 
 from .. import image_format
+from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat
 from . import loaders as L
 from .loaders import CHASSIS, CHASSIS_CENTER, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 from .probe import OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
@@ -476,7 +477,7 @@ def _level_track(track: PoseTrack, R: np.ndarray | None) -> PoseTrack:
     """Rotate a whole pose track into the gravity-aligned world."""
     if R is None:
         return track
-    q = L.mat_to_quat(R[None])
+    q = mat_to_quat(R[None])
     return PoseTrack(
         track.positions @ R.T,
         _quat_mul(q, track.quats),
@@ -512,7 +513,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         # upright on its own height map. ``pose_source`` still records whether
         # ground truth exists.
         R = _gravity_level(access, window.frame_start)
-        one = L.mat_to_quat(R[None])[0] if R is not None else np.array([1.0, 0.0, 0.0, 0.0])
+        one = mat_to_quat(R[None])[0] if R is not None else np.array([1.0, 0.0, 0.0, 0.0])
         quats = np.tile(one, (n, 1))
         valid = np.ones(n, dtype=bool) if window.pose_source == "odometry" else np.zeros(n, dtype=bool)
         return PoseTrack(np.zeros((n, 3)), quats, valid, window.pose_source, "single frame, robot-centric")
@@ -529,7 +530,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
             ts, poses = ts[lo:hi], poses[lo:hi]
         if len(ts) < 2:
             return _identity_track(n, "none", "segment has fewer than two poses")
-        pos, quat, valid = L.interpolate_poses(ts, poses, times, tol=frame_slack(access.frame_ts))
+        pos, quat, valid = interpolate_poses(ts, poses, times, tol=frame_slack(access.frame_ts))
         track = PoseTrack(pos, quat, valid, "odometry", f"ground truth, segment {window.segment_index}")
         # Levelled about the *segment's* anchor, not the window's first frame:
         # a later chunk of a split segment is still expressed in that anchor.
@@ -547,7 +548,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         rel = np.linalg.inv(tf[idx[0]]) @ tf[idx]
         # Ragged array vs frame count: pad by holding the last pose, marked invalid.
         pos = _hold_last(rel[:, :3, 3], n)
-        quat = _hold_last(L.mat_to_quat(rel[:, :3, :3]), n)
+        quat = _hold_last(mat_to_quat(rel[:, :3, :3]), n)
         valid = np.arange(len(pos)) < len(idx)
         track = PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
         return _level_track(track, _gravity_level(access, int(idx[0])))
@@ -570,10 +571,10 @@ def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrac
     anchor = int(np.flatnonzero(gt.valid)[0])
     if anchor >= len(idx):
         return None
-    gt_anchor = L.poses_from_quat(gt.positions[anchor : anchor + 1], gt.quats[anchor : anchor + 1])[0]
+    gt_anchor = poses_from_quat(gt.positions[anchor : anchor + 1], gt.quats[anchor : anchor + 1])[0]
     rel = np.linalg.inv(tf[idx[anchor]]) @ tf[idx]
     world = gt_anchor @ rel
-    pos, quat = world[:, :3, 3], L.mat_to_quat(world[:, :3, :3])
+    pos, quat = world[:, :3, 3], mat_to_quat(world[:, :3, :3])
     n = len(gt.positions)
     return PoseTrack(
         _hold_last(pos, n)[:n], _hold_last(quat, n)[:n], np.ones(n, dtype=bool), "transforms", "wheel odometry"
@@ -872,7 +873,7 @@ def splat_driven_similarity(
 
 def aggregate_clouds(
     access: SceneAccess,
-    grid: TerrainGrid | None,
+    grid: TerrainGrid,
     frames: np.ndarray,
     poses: np.ndarray,
     opts: BuildOptions,
@@ -881,7 +882,7 @@ def aggregate_clouds(
 
     Returns the stacked ``(N, 4)`` array (x, y, z, intensity) and read stats.
     Also fills the grid's cloud-derived layers (point count, mean intensity,
-    vertical spread) when a grid is given, since the points are in hand anyway.
+    vertical spread), since the points are in hand anyway.
     """
     chosen, clouds, stats = _read_window(access, "clouds", frames, opts.max_cloud_frames, L.load_cloud)
     stats["points"] = 0
@@ -890,11 +891,10 @@ def aggregate_clouds(
     per_frame = max(200, opts.max_cloud_points // max(1, len(chosen)))
     rng = np.random.default_rng(12345)
 
-    if grid is not None:
-        sum_i = np.zeros((grid.ny, grid.nx), dtype=np.float64)
-        cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int64)
-        max_z = np.full((grid.ny, grid.nx), -np.inf)
-        min_z = np.full((grid.ny, grid.nx), np.inf)
+    sum_i = np.zeros((grid.ny, grid.nx), dtype=np.float64)
+    cnt_i = np.zeros((grid.ny, grid.nx), dtype=np.int64)
+    max_z = np.full((grid.ny, grid.nx), -np.inf)
+    min_z = np.full((grid.ny, grid.nx), np.inf)
 
     parts: list[np.ndarray] = []
     for i, cloud in zip(chosen, clouds, strict=True):
@@ -904,14 +904,13 @@ def aggregate_clouds(
         world_xyz = cloud[:, :3].astype(np.float64) @ R.T + t
         intensity = cloud[:, 3].astype(np.float64) if cloud.shape[1] > 3 else np.zeros(len(cloud))
 
-        if grid is not None:
-            row, col, inside = grid.cell_of(world_xyz[:, 0], world_xyz[:, 1])
-            if inside.any():
-                r, c = row[inside], col[inside]
-                sum_i += grid.binned(r, c, intensity[inside])
-                cnt_i += grid.binned(r, c)
-                np.maximum.at(max_z, (r, c), world_xyz[inside, 2])
-                np.minimum.at(min_z, (r, c), world_xyz[inside, 2])
+        row, col, inside = grid.cell_of(world_xyz[:, 0], world_xyz[:, 1])
+        if inside.any():
+            r, c = row[inside], col[inside]
+            sum_i += grid.binned(r, c, intensity[inside])
+            cnt_i += grid.binned(r, c)
+            np.maximum.at(max_z, (r, c), world_xyz[inside, 2])
+            np.minimum.at(min_z, (r, c), world_xyz[inside, 2])
 
         if len(cloud) > per_frame:
             keep = rng.choice(len(cloud), per_frame, replace=False)
@@ -919,17 +918,16 @@ def aggregate_clouds(
         parts.append(np.column_stack([world_xyz, intensity]))
         stats["used"] += 1
 
-    if grid is not None:
-        covered = cnt_i > 0
-        pts = np.zeros((grid.ny, grid.nx))
-        pts[covered] = cnt_i[covered]
-        grid.layers["cloud_points"] = pts
-        inten = np.zeros((grid.ny, grid.nx))
-        inten[covered] = sum_i[covered] / cnt_i[covered]
-        grid.layers["cloud_intensity"] = inten
-        spread = np.zeros((grid.ny, grid.nx))
-        spread[covered] = max_z[covered] - min_z[covered]
-        grid.layers["cloud_spread"] = spread
+    covered = cnt_i > 0
+    pts = np.zeros((grid.ny, grid.nx))
+    pts[covered] = cnt_i[covered]
+    grid.layers["cloud_points"] = pts
+    inten = np.zeros((grid.ny, grid.nx))
+    inten[covered] = sum_i[covered] / cnt_i[covered]
+    grid.layers["cloud_intensity"] = inten
+    spread = np.zeros((grid.ny, grid.nx))
+    spread[covered] = max_z[covered] - min_z[covered]
+    grid.layers["cloud_spread"] = spread
 
     if not parts:
         return None, stats
@@ -1116,7 +1114,7 @@ def build_scalars(
             # absolute attitude too and the two are directly comparable. Row 2
             # of either rotation is the world's up axis in body coordinates,
             # which is what makes the same reader work on both.
-            R_gt = L.poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
+            R_gt = poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
             roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
             scalars["roll_deg_gt"] = np.degrees(roll)
             scalars["pitch_deg_gt"] = np.degrees(pitch)
@@ -1206,7 +1204,7 @@ def window_attitude(access: SceneAccess, window: Window) -> dict | None:
         gt = resolve_poses(access, window, frame_ts[frames])
         if gt.source != "odometry":
             return None
-        R_gt = L.poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
+        R_gt = poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
         R_imu = np.asarray(ga)[np.clip(frames, 0, len(ga) - 1)]
         err = attitude_error_deg(R_gt, R_imu)
         median = float(np.median(err))
@@ -1284,7 +1282,7 @@ def build_scene(
     root: DatasetRoot,
     scene_id: str,
     window_key: str,
-    opts: BuildOptions | None = None,
+    opts: BuildOptions,
     max_frames: int = DEFAULT_MAX_FRAMES,
     max_seconds: float = DEFAULT_MAX_SECONDS,
 ):
@@ -1296,7 +1294,7 @@ def build_scene(
     from simview.scene import BodyShapeType, SimulationScene  # local: heavy import
     from simview.state import BodyTrajectory
 
-    opts = (opts or BuildOptions()).sanitized()
+    opts = opts.sanitized()
     access = SceneAccess(root, scene_id)
     window = access.window(window_key, max_frames, max_seconds)
     if window is None:
@@ -1324,7 +1322,7 @@ def build_scene(
 
     gt = resolve_poses(access, window, abs_times)
     ghost = _ghost_track(access, window, gt)
-    poses = L.poses_from_quat(gt.positions, gt.quats)
+    poses = poses_from_quat(gt.positions, gt.quats)
 
     # ---- terrain -------------------------------------------------------
     grid = _make_grid(gt.positions, opts)
@@ -1389,7 +1387,7 @@ def build_scene(
         scene.create_body("wheel_odom_ghost", BodyShapeType.BOX, hx=0.2, hy=0.12, hz=0.03)
     if cloud is not None and len(cloud):
         values = cloud[:, 2] if opts.cloud_color == "height" else cloud[:, 3]
-        colors = unit_colors(values, cmap="turbo")
+        colors = unit_colors(values)
         scene.create_pointcloud(
             "lidar_cloud",
             points=torch.from_numpy(np.ascontiguousarray(cloud[:, :3], dtype=np.float32)),

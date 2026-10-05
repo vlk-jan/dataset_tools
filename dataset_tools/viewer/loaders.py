@@ -24,13 +24,12 @@ from typing import Any
 
 import numpy as np
 
-from .. import gt_io
+from .. import gt_io, gt_map
 from ..gt_io import SegmentRow as Segment
-from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat
 
 logger = logging.getLogger("dataset_tools.viewer.loaders")
 
-__all__ = ["Segment", "interpolate_poses", "mat_to_quat", "poses_from_quat"]
+__all__ = ["Segment"]
 
 # Per-frame BEV height map geometry. These are the values the DRIFT height-map
 # generator uses; they are re-derived per file from the array shape where
@@ -41,7 +40,9 @@ HM_EXTENT = (-6.4, 6.4)
 # HELHEST geometry from DRIFT's robot model (simulator/utils.py,
 # helhest_robot_model, sourced from the robot URDF): base_link IS the front
 # axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
-# 0.334 m, hubs at z=0. Until 2026-09-25 this was a stale copy that put the front
+# 0.334 m, hubs at z=0. The hubs and the radius are ``gt_map``'s, which the
+# wheel-contact check reads them from, so the drawn robot and the checked one
+# are one robot. Until 2026-09-25 this was a stale copy that put the front
 # axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
 # ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
 # middle of the box and every return looked 0.4 m too close.
@@ -56,13 +57,16 @@ HM_EXTENT = (-6.4, 6.4)
 # the tile robot from the same numbers as the 3D one.
 CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
 CHASSIS_CENTER = (-0.15, 0.0, 0.0)
-WHEEL_RADIUS = 0.334
+WHEEL_RADIUS = gt_map.WHEEL_RADIUS
 WHEEL_WIDTH = 0.142
 #: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
+#: ``gt_map.WHEELS`` rows are left, right, rear; the bodies are made in
+#: joint_states order (left, rear, right).
+_LEFT, _RIGHT, _REAR = (tuple(float(v) for v in row) for row in gt_map.WHEELS)
 WHEELS = {
-    "wheel_left": (0.0, 0.36, 0.0, 0, -1.0),
-    "wheel_rear": (-0.697, 0.0, 0.0, 1, -1.0),
-    "wheel_right": (0.0, -0.36, 0.0, 2, 1.0),
+    "wheel_left": (*_LEFT, 0.0, 0, -1.0),
+    "wheel_rear": (*_REAR, 0.0, 1, -1.0),
+    "wheel_right": (*_RIGHT, 0.0, 2, 1.0),
 }
 
 VALIDITY_LABELS = {

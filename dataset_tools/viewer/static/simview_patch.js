@@ -205,9 +205,8 @@ function fitAnalysisBar(app) {
 /**
  * Give the ghost a look that says "this is not the robot".
  *
- * SimView 4.2 builds every body's material from one shared DEFAULT_MESH_CONFIG,
- * so a per-body colour cannot be declared from Python -- it has to be set here,
- * on the object SimView built.
+ * SimView builds every body's material from one shared mesh config and its
+ * `create_body` takes no colour, so this is set here, on the object it built.
  */
 function styleGhost(app) {
     const ghost = app.bodies.get(GHOST_BODY);

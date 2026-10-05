@@ -235,28 +235,15 @@ def write_splits(
     return path
 
 
-def write_atlas(
-    root_path: Path,
-    scenes=("0000",),
-    *,
-    with_thumbs: bool = True,
-    legacy_thumbs: bool = False,
-    dataset_version: str | None = None,
-) -> Path:
-    """The optional ``atlas/`` half of a root: descriptions, groups, thumbnails.
-
-    ``legacy_thumbs`` writes the pre-generator spelling, a bare list of slots
-    that names no frame -- roots in the wild still carry it.
-    """
+def write_atlas(root_path: Path, scenes=("0000",), *, dataset_version: str | None = None) -> Path:
+    """The optional ``atlas/`` half of a root: descriptions, groups, thumbnails."""
     atlas_dir = root_path / "atlas"
     (atlas_dir / "thumbs").mkdir(parents=True, exist_ok=True)
     slots = ["a", "b", "c"]
-    thumbs = slots if legacy_thumbs else dict(CURATED_THUMBS)
     entries = {}
     for scene in scenes:
-        if with_thumbs:
-            for slot in slots:
-                _write_png(atlas_dir / "thumbs" / f"{scene}{slot}.jpg", size=(64, 40))
+        for slot in slots:
+            _write_png(atlas_dir / "thumbs" / f"{scene}{slot}.jpg", size=(64, 40))
         entries[scene] = {
             "description": f"A synthetic place for scene {scene}, written by hand.",
             "date": "2025-09-12 15:13",
@@ -279,7 +266,7 @@ def write_atlas(
             "flags": 24,
             "bag_gb": 25.1,
             "session": "synthetic_session",
-            "thumbs": thumbs if with_thumbs else {},
+            "thumbs": dict(CURATED_THUMBS),
         }
     (atlas_dir / "atlas.json").write_text(
         json.dumps(

@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 from helpers_viewer import make_root, viewer_client
 
-from dataset_tools.viewer import loaders, probe, render
+from dataset_tools.transforms import poses_from_quat
+from dataset_tools.viewer import probe, render
 
 
 @pytest.fixture
@@ -103,7 +104,7 @@ def test_the_driven_layer_is_one_under_the_robot_s_path_and_zero_beside_it(tmp_p
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)
@@ -136,7 +137,7 @@ def test_a_root_without_the_modality_attaches_no_such_layer(tmp_path):
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)

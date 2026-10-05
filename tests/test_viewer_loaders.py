@@ -10,37 +10,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from dataset_tools.transforms import quat_slerp
+from dataset_tools.transforms import interpolate_poses
 from dataset_tools.viewer import loaders
-
-# --------------------------------------------------------------------------
-# geometry
-# --------------------------------------------------------------------------
-
-
-def test_quaternion_round_trips_through_rotation_matrices():
-    rng = np.random.default_rng(3)
-    a = rng.normal(size=(64, 3, 3))
-    u, _, vt = np.linalg.svd(a)
-    R = u @ vt
-    R[np.linalg.det(R) < 0] *= -1
-    q = loaders.mat_to_quat(R)
-    back = loaders.poses_from_quat(np.zeros((64, 3)), q)[:, :3, :3]
-    assert np.allclose(R, back, atol=1e-9)
-    assert np.allclose(np.linalg.norm(q, axis=1), 1.0)
-
-
-def test_quaternion_of_identity_is_scalar_one():
-    assert np.allclose(loaders.mat_to_quat(np.eye(3)[None]), [[1, 0, 0, 0]])
-
-
-def test_slerp_midpoint_is_the_half_angle():
-    q0 = np.array([[1.0, 0, 0, 0]])
-    angle = np.pi / 2
-    q1 = np.array([[np.cos(angle / 2), 0, 0, np.sin(angle / 2)]])
-    mid = quat_slerp(q0, q1, np.array([0.5]))
-    expected = np.array([np.cos(angle / 4), 0, 0, np.sin(angle / 4)])
-    assert np.allclose(mid[0], expected, atol=1e-12)
 
 
 def test_interpolate_poses_marks_queries_outside_the_track_invalid():
@@ -48,7 +19,7 @@ def test_interpolate_poses_marks_queries_outside_the_track_invalid():
     poses = np.stack([np.eye(4)] * 3)
     for i, x in enumerate([0.0, 1.0, 2.0]):
         poses[i, 0, 3] = x
-    pos, _quat, valid = loaders.interpolate_poses(ts, poses, np.array([9.0, 10.5, 12.0, 13.0]))
+    pos, _quat, valid = interpolate_poses(ts, poses, np.array([9.0, 10.5, 12.0, 13.0]))
     assert valid.tolist() == [False, True, True, False]
     assert pos[1, 0] == pytest.approx(0.5)
     # Outside queries are clamped, not extrapolated.
@@ -60,8 +31,8 @@ def test_interpolate_poses_counts_a_query_within_tolerance_as_on_the_track():
     ts = np.array([10.0, 11.0, 12.0])
     poses = np.stack([np.eye(4)] * 3)
     just_early = np.array([9.99])
-    assert not loaders.interpolate_poses(ts, poses, just_early)[2][0]
-    assert loaders.interpolate_poses(ts, poses, just_early, tol=0.05)[2][0]
+    assert not interpolate_poses(ts, poses, just_early)[2][0]
+    assert interpolate_poses(ts, poses, just_early, tol=0.05)[2][0]
 
 
 def test_resample_series_does_not_invent_values_across_a_long_gap():
@@ -78,19 +49,16 @@ def test_roll_pitch_of_an_identity_gravity_rotation_is_zero():
     assert pitch[0] == pytest.approx(0.0)
 
 
-def test_odometry_parses_both_the_17_and_13_column_forms(tmp_path):
+def test_odometry_reads_as_timestamps_and_poses(tmp_path):
     T = np.eye(4)
     T[:3, 3] = [1.0, 2.0, 3.0]
-    long_form = tmp_path / "long.txt"
-    long_form.write_text("# header\n" + " ".join(["100.0", *[str(v) for v in T.reshape(-1)]]) + "\n")
-    short = tmp_path / "short.txt"
-    short.write_text("# header\n" + " ".join(["100.0", *[str(v) for v in T[:3, :].reshape(-1)]]) + "\n")
-    for path in (long_form, short):
-        result = loaders.read_odometry(path)
-        assert result is not None
-        ts, poses = result
-        assert ts[0] == pytest.approx(100.0)
-        assert np.allclose(poses[0], T)
+    path = tmp_path / "odometry.txt"
+    path.write_text("# header\n" + " ".join(["100.0", *[str(v) for v in T.reshape(-1)]]) + "\n")
+    result = loaders.read_odometry(path)
+    assert result is not None
+    ts, poses = result
+    assert ts[0] == pytest.approx(100.0)
+    assert np.allclose(poses[0], T)
 
 
 def test_segments_parse_and_sort(tmp_path):

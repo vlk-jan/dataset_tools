@@ -44,9 +44,8 @@
   border: 1px solid var(--line); background: var(--panel-2); color: var(--fg-2);
   font-size: var(--fs-base); line-height: 1; text-decoration: none; user-select: none;
 }
-.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration: none; }
+a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration: none; }
 .dt-winstep-off { opacity: 0.35; cursor: default; }
-.dt-winstep-off:hover { background: var(--panel-2); color: var(--fg-2); }
 
 /* One toggle for both directions, riding the panel's own left edge at its
    vertical middle.
@@ -60,10 +59,8 @@
    panel and stays exactly one tab-width on-screen when collapsed, always at
    the vertical middle of the window edge, where nothing else is. */
 .dt-edge {
-  /* Centred by `top`, not by a transform: SimView (>= 5.1) styles every
-     button on the page and its `button:active` sets `transform`, which
-     dropped the tab 33 px under the pointer mid-click, so the release landed
-     on the canvas and the panel never toggled. */
+  /* Centred by `top`, not by a transform, so no `:active` transform of
+     SimView's can ever move the tab out from under a click. */
   position: absolute; left: -24px; top: calc(50% - 33px);
   width: 24px; height: 66px; padding: 0;
   display: flex; align-items: center; justify-content: center;
@@ -88,9 +85,7 @@
 .dt-v { font-weight: 500; }
 
 .dt-view, .dt-legend { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); }
-.dt-view[hidden], .dt-legend[hidden], .dt-toggle[hidden] { display: none; }
 .dt-hint { color: var(--faint); font-size: var(--fs-2xs); line-height: 1.35; }
-.dt-hint code { font-size: var(--fs-2xs); color: var(--muted); }
 
 /* 3D-view options: compact switches. The full explanation is a hover tooltip
    (title=) on each row rather than always-on prose -- these toggle things (a
@@ -135,7 +130,6 @@
   position: sticky; top: 0; z-index: 1; padding-top: var(--sp-2);
   background: color-mix(in srgb, var(--bg) 94%, var(--panel));
 }
-.dt-legend summary::-webkit-details-marker { display: none; }
 .dt-legend summary::before {
   content: "\203A"; color: var(--faint); display: inline-block;
   transition: transform 0.15s ease;
@@ -251,9 +245,7 @@
 .dt-att-ok { color: var(--ok); }
 .dt-att-warn { color: var(--warn); }
 .dt-att-bad { color: var(--bad); }
-.dt-attitude summary .dt-att-ok,
-.dt-attitude summary .dt-att-warn,
-.dt-attitude summary .dt-att-bad { font-weight: 600; }
+.dt-attitude .dt-legend-now { font-weight: 600; }
 
 .dt-tiles { overflow-y: auto; flex: 1; padding: var(--sp-2) var(--sp-3); }
 .dt-tile { margin-bottom: var(--sp-3); }
@@ -312,15 +304,9 @@
    that sticks out of the panel's left side, with a 16 px gap: 340 + 24 + 16
    (a CSS-only adjustment; SimView is untouched). The selector has to beat
    lil-gui's own runtime-injected rule, hence the specificity and !important. */
-body:not(.dt-collapsed) .lil-gui.root.autoPlace,
-body:not(.dt-collapsed) .lil-gui.autoPlace {
-  right: 380px !important;
-}
+body:not(.dt-collapsed) .lil-gui.autoPlace { right: 380px !important; }
 /* Collapsed, the panel is gone but its tab still sits on the window edge. */
-body.dt-collapsed .lil-gui.root.autoPlace,
-body.dt-collapsed .lil-gui.autoPlace {
-  right: calc(24px + 16px) !important;
-}
+body.dt-collapsed .lil-gui.autoPlace { right: calc(24px + 16px) !important; }
 
 /* SimView's Analysis panel is 40% of the viewport centred on it, which
    runs straight under SimView's own control panel -- more so here, because

@@ -13,7 +13,6 @@ piecewise-linear look-up tables built once at import.
 from __future__ import annotations
 
 import io
-import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -21,8 +20,6 @@ import cv2
 import numpy as np
 
 from .loaders import CHASSIS, CHASSIS_CENTER, HM_RES, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
-
-logger = logging.getLogger("dataset_tools.viewer.render")
 
 # Anchor colours (0-255) for a few perceptually reasonable ramps.
 _TURBO_ANCHORS = np.array(
@@ -116,10 +113,10 @@ def colorize(
     return lut[idx]
 
 
-def unit_colors(values: np.ndarray, cmap: str = "turbo") -> np.ndarray:
+def unit_colors(values: np.ndarray) -> np.ndarray:
     """Like :func:`colorize` but returns float RGB in [0, 1], which is what
     SimView's point-cloud ``color`` field expects."""
-    return colorize(values, cmap=cmap).astype(np.float32) / 255.0
+    return colorize(values).astype(np.float32) / 255.0
 
 
 # --------------------------------------------------------------------------
@@ -153,7 +150,7 @@ def _bev_to_display(grid: np.ndarray) -> np.ndarray:
     return grid[::-1, ::-1]
 
 
-def _bev_png(rgb: np.ndarray, size: int, res_m: float = HM_RES) -> bytes:
+def _bev_png(rgb: np.ndarray, size: int) -> bytes:
     """Encode a robot-centred BEV grid, upscaled, with the robot drawn on top.
 
     The silhouette is drawn *after* the nearest-neighbour upscale so it is
@@ -165,7 +162,7 @@ def _bev_png(rgb: np.ndarray, size: int, res_m: float = HM_RES) -> bytes:
     scale = max(1, size // max(img.width, img.height))
     if scale > 1:
         img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
-    draw_robot_silhouette(img, px_per_m=scale / res_m)
+    draw_robot_silhouette(img, px_per_m=scale / HM_RES)
     return _png(img)
 
 

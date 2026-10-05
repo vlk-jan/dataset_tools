@@ -13,10 +13,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from helpers_viewer import (
-    make_root,
-)
+from helpers_viewer import make_root
 
+from dataset_tools.transforms import poses_from_quat
 from dataset_tools.viewer import loaders, windows, wire
 
 # --------------------------------------------------------------------------
@@ -70,7 +69,7 @@ def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
 
 def _roll_pitch(quat):
     """Roll and pitch, in degrees, of a [w, x, y, z] quaternion."""
-    R = loaders.poses_from_quat(np.zeros((1, 3)), np.asarray(quat)[None])[0, :3, :3]
+    R = poses_from_quat(np.zeros((1, 3)), np.asarray(quat)[None])[0, :3, :3]
     return np.degrees(np.arctan2(R[2, 1], R[2, 2])), np.degrees(-np.arcsin(np.clip(R[2, 0], -1, 1)))
 
 
@@ -154,7 +153,7 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)
@@ -201,7 +200,7 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)
@@ -246,7 +245,7 @@ def test_wheel_anchored_cells_do_not_read_as_measured(tmp_path):
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     build.splat_height_maps(access, grid, frames, poses, opts)
@@ -291,7 +290,7 @@ def test_a_nan_in_a_height_map_does_not_poison_the_terrain(tmp_path):
     window = access.window("seg000", 1500)
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = loaders.poses_from_quat(track.positions, track.quats)
+    poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
     with warnings.catch_warnings():

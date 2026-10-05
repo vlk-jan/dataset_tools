@@ -153,6 +153,18 @@ def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):
     assert 'id="noteform"' in page
 
 
+def test_the_frame_page_shows_the_notes_whose_range_holds_the_frame(tmp_path):
+    """Both ends of a note's range are inclusive, so a note on frames 4-6 is on
+    the pages of 4, 5 and 6 -- the first one included, which an exclusive
+    overlap test against ``[index, index)`` used to leave out."""
+    _, client = _notes_client(tmp_path)
+    client.post("/api/scene/0000/notes", json={"frames": [4, 6], "topic": "camera", "text": "lens flare"})
+    for index in (4, 5, 6):
+        assert "lens flare" in client.get(f"/scene/0000/frame/{index}").text, index
+    for index in (3, 7):
+        assert "lens flare" not in client.get(f"/scene/0000/frame/{index}").text, index
+
+
 def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
     """The inline editor opens on a note's own range and topic, so both are on
     the element as stored: re-parsing them back out of the rendered label

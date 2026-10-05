@@ -34,7 +34,7 @@ import os
 import secrets
 import tempfile
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger("dataset_tools.viewer.notes")
@@ -106,7 +106,7 @@ class Note:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 def _clean_text(value: object) -> str:
@@ -422,8 +422,7 @@ class NoteStore:
         note_id: str,
         text: str | None = None,
         topic: str | None = None,
-        frame_start: int | None = None,
-        frame_end: int | None = None,
+        frames: tuple[int, int] | None = None,
         n_frames: int | None = None,
         verdict: str | None = None,
     ) -> Note | None:
@@ -446,10 +445,8 @@ class NoteStore:
                 note.topic = _clean_topic(topic)
             if verdict is not None:
                 note.verdict = _clean_verdict(verdict)
-            if frame_start is not None or frame_end is not None:
-                start = note.frame_start if frame_start is None else frame_start
-                end = note.frame_end if frame_end is None else frame_end
-                note.frame_start, note.frame_end = _clamp_range(start, end, n_frames)
+            if frames is not None:
+                note.frame_start, note.frame_end = _clamp_range(*frames, n_frames)
             note.updated = _now()
             notes.sort(key=lambda n: (n.frame_start, n.frame_end))
             self._save(scene_id, notes)
