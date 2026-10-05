@@ -25,7 +25,7 @@ OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta/.clock_skew}
 # directory rather than through $0, and --output above is relative to it too.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-CSV=$REPO/docs/v2_bags.csv
+CSV=${CSV:-$REPO/docs/v2_bags.csv}
 
 read_row
 scene=$(echo "$row" | cut -d, -f1)

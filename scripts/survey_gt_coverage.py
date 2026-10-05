@@ -14,7 +14,7 @@ The frozen scan runs INSIDE each segment, never across a seam. Segments are
 re-anchored at the identity, so a scan over the whole file reports the anchor
 change as a fake multi-minute freeze; that trap cost a day on v1.3.
 
-Reads only. Written for the v1.3 campaign, where it was called survey.py.
+Reads only.
 """
 
 import argparse

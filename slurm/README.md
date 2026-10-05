@@ -25,7 +25,7 @@ they name is missing -- hence the `mkdir`.
 
 | File | What it does | Array index |
 | --- | --- | --- |
-| `extract_v2.batch` | v2 rig (Odin1 + Fixposition): fetch one bag to node-local scratch, extract, validate, build the height maps with DRIFT's batch, rsync the finished scene out | row of the bag list (`CSV=`, default `docs/v2_bags.csv`; v2.0 uses `docs/v2_0_bags.csv`, v2.1 `docs/v2_1_bags.csv` from row 12: rows 0-11 are v2.0's scenes, linked, and must not be extracted into v2.1) = scene number |
+| `extract_v2.batch` | v2 rig (Odin1 + Fixposition): fetch one bag to node-local scratch, extract, validate, build the height maps with DRIFT's batch, rsync the finished scene out | row of the bag list (`CSV=`, default `docs/v2_bags.csv`; each release has its own cumulative `docs/v2_<n>_bags.csv`, so a root that reuses an earlier release's scenes is submitted with the array range of its new rows only -- v2.1, linked into v2.0, as `--array=12-17`) = scene number |
 | `finalize_v2.sh` | after a v2 array run: rebuild `scenes.csv`, validate the whole root, regenerate the atlas (second argument: the bag list). Run directly on a login node, not through `sbatch` | -- |
 | `survey_v2.batch` | `scripts/survey_v2_bag.py` over one bag of `docs/v2_inventory.csv`: what it carries, how the Odin behaved, where the robot went, thumbnails -- ~1 MB per bag, no extraction. Basis of `docs/V2_0_SELECTION.md` | row of `docs/v2_inventory.csv` |
 | `probe_clock_v2.batch` | `scripts/probe_clock_skew.py` over one v2 bag: every publisher's clock against the recorder's | row of `docs/v2_bags.csv` |

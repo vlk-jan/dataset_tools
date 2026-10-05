@@ -3,20 +3,22 @@
 ## Setting up
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ".[test]"            # the extraction tools, Python >= 3.10
-.venv/bin/pip install -e ".[viewer,test]"     # plus the viewer, Python >= 3.12
+python3 -m venv .venv && .venv/bin/pip install -e ".[test]"                      # the extraction tools
+python3 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer,test]" # plus the viewer
 ```
 
-The viewer's extra pulls in SimView and with it torch; on a machine without a
-GPU, `--extra-index-url https://download.pytorch.org/whl/cpu` keeps that small.
+Python 3.12 or newer. Two venvs, as in the README: the viewer's extra pulls in
+SimView and with it torch, which the extraction tools never need. On a machine
+without a GPU, `--extra-index-url https://download.pytorch.org/whl/cpu` keeps
+that small.
 The cloudini shim is committed prebuilt; `cloudini_shim/build_shim.sh` rebuilds
 it, and its header says on which machine to do that.
 
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest          # extraction tools; the viewer tests skip
+.venv-viewer/bin/python -m pytest   # everything
 ```
 
 No bags are needed: every test runs on synthetic data written with `rosbags`

@@ -5,14 +5,14 @@ installed package. They import the installed `dataset_tools`, so run them with
 the virtualenv the checkout is installed into (`pip install -e .`):
 
 ```bash
-.venv/bin/python scripts/make_atlas.py /data/HELHEST_v2_beta --check
+.venv/bin/python scripts/make_atlas.py /data/HELHEST_v2_beta --bags docs/v2_bags.csv --check
 ```
 
 ## Tools for any root
 
 | Script | What it does |
 | --- | --- |
-| `make_atlas.py` | Generate `<root>/atlas/atlas.json` and its thumbnails from the root itself, merging the hand-written prose in `atlas/curation.json`; `--check` reports a stale atlas without writing. The viewer's index page renders it. |
+| `make_atlas.py` | Generate `<root>/atlas/atlas.json` and its thumbnails from the root itself, merging the hand-written prose in `atlas/curation.json`; `--check` reports a stale atlas without writing. `--bags` names the bag list the sessions and bag sizes come from (`docs/scene_bags.csv` for v1, `docs/v2_<n>_bags.csv` for v2, as `slurm/finalize_v2.sh` does); without it those two fields are left out. There is no default because the v1 and v2 lists number their scenes the same way. The viewer's index page renders it. |
 | `measure_time_offset.py` | Audit an extracted scene's frame clock against its poses: was `--time_align` applied, is the scene still off, and by how much over its course. |
 | `probe_clock_skew.py` | Every publisher's clock against the recorder's, straight out of a bag (`recv - header` per message), to see *when* a sensor's clock moved. |
 | `survey_gt_coverage.py` | How much of a root's frame time has ground truth, every gap over a threshold with the wheel distance driven through it, and every frozen run inside a segment. |

@@ -67,7 +67,6 @@ HERE = Path(__file__).resolve().parent
 logger = logging.getLogger("make_atlas")
 
 ATLAS_SCHEMA = "dataset_tools.viewer/atlas@2"
-CURATION_SCHEMA = "dataset_tools.viewer/curation@1"
 
 #: What the live thumbnail endpoint renders (``app.api_scene_thumb``), so a root
 #: with stored thumbnails and one without show the same picture at the same size.
@@ -87,7 +86,7 @@ CLOUD_SAMPLES = 5
 
 
 def read_kv(path: Path) -> dict[str, str]:
-    """``key=value`` lines (``filter_stats.txt``, ``run_stats.txt``)."""
+    """``key=value`` lines (``regen/filter_stats.txt``)."""
     out: dict[str, str] = {}
     try:
         text = path.read_text()
@@ -288,10 +287,8 @@ def scene_entry(
         entry["poses_raw"] = raw
 
     entry["segments"] = len(segments) or probe.n_segments
-    if segments:
-        lens = sorted((clip((s.start_ts, s.end_ts), win) for s in segments), reverse=True)
-        lens = [v for v in lens if v > 0.0]
-    if segments and lens:
+    lens = sorted((v for s in segments if (v := clip((s.start_ts, s.end_ts), win)) > 0.0), reverse=True)
+    if lens:
         entry["seg_lens"] = [round(v, 1) for v in lens]
         entry["seg_med_s"] = round(float(statistics.median(lens)), 1)
         entry["gt_span_s"] = round(float(sum(lens)), 1)
@@ -489,7 +486,7 @@ def read_json(path: Path) -> dict:
 
 
 def read_bags(path: Path | None) -> dict[str, dict]:
-    """``{scene: {session, bag_gb}}`` from ``docs/scene_bags.csv``, if given.
+    """``{scene: {session, bag_gb}}`` from a bag list CSV, if given.
 
     Recording provenance lives with the extraction tools, not in the root, so
     without the file these two fields are simply left out of the atlas.
@@ -693,8 +690,8 @@ def main() -> int:
     ap.add_argument(
         "--bags",
         type=Path,
-        default=HERE.parent / "docs" / "scene_bags.csv",
-        help="scene_bags.csv for session/bag size (default: docs/scene_bags.csv)",
+        help="the root's bag list (docs/scene_bags.csv for v1, docs/v2_<n>_bags.csv for v2) for session/bag size; "
+        "without it those two fields are left out",
     )
     ap.add_argument("--scenes", nargs="*", default=[], help="limit to these scene ids")
     args = ap.parse_args()

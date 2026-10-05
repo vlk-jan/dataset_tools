@@ -17,21 +17,20 @@ jobs:
       - run: black --check dataset_tools scripts tests
       - run: ruff check dataset_tools scripts tests
 
-  # The extraction tools promise Python 3.10; the viewer needs 3.12 (SimView).
-  # One job per floor, each installing only what that floor supports.
+  # The extraction tools alone, as a user without the viewer installs them.
   extraction:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
       - run: pip install -e ".[test]"
       # The console scripts are what a user installs for; make sure they resolve.
-      - run: helhest-extract --help && helhest-validate --help && helhest-sort-bag --help
+      - run: |
+          for cmd in helhest-extract helhest-validate helhest-sort-bag helhest-disk-usage helhest-image-format; do
+            $cmd --help > /dev/null
+          done
       # The viewer tests skip themselves when its extra is absent.
       - run: python -m pytest tests
 
@@ -43,4 +42,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[viewer,test]" --extra-index-url https://download.pytorch.org/whl/cpu
+      - run: helhest-viewer --help > /dev/null
       - run: python -m pytest tests

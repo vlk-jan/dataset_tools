@@ -23,8 +23,9 @@ import numpy as np
 from rosbags.highlevel import AnyReader
 
 from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
-from dataset_tools.extract.pointcloud import cloud_to_xyzi, drop_invalid_returns, header_stamp_from_cdr
+from dataset_tools.extract.pointcloud import cloud_to_xyzit, header_stamp_from_cdr, valid_returns_mask
 from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
+from dataset_tools.gnss_guard import MAX_SPEED
 from dataset_tools.tf_pins import rpy_deg
 from dataset_tools.transforms import quaternion_matrix
 
@@ -38,8 +39,6 @@ TF_STATIC = "/tf_static"
 DIAG = "/diagnostics"
 CAMINFO = "/odin1/camera_info"
 BASE = "base_link"
-#: A step faster than this between consecutive poses is a receiver reset, not motion.
-MAX_SPEED = 4.0
 RANGE_BINS = np.arange(0.0, 6.5, 0.5)
 
 
@@ -92,9 +91,10 @@ def main(argv=None) -> int:
                 if k_cloud % cloud_every == 0 and len(clouds) < args.clouds:
                     msg = reader.deserialize(raw, conn.msgtype)
                     cloud_frame = msg.header.frame_id
-                    xyzi = drop_invalid_returns(cloud_to_xyzi(msg))
-                    clouds.append(xyzi[:, :3])
-                    cloud_t.append(stamps[t][-1] if stamps[t] else recv)
+                    stamp = stamps[t][-1] if stamps[t] else recv
+                    xyzi, _ = cloud_to_xyzit(msg, stamp)
+                    clouds.append(xyzi[valid_returns_mask(xyzi), :3])
+                    cloud_t.append(stamp)
                 k_cloud += 1
             elif t == ODOM:
                 msg = reader.deserialize(raw, conn.msgtype)
@@ -170,28 +170,24 @@ def main(argv=None) -> int:
                 period_p50=float(np.median(d)), n_over_1s=int((d > 1).sum()), longest_s=float(d.max()), n_msgs=len(s)
             )
     # Diagnostics: anything that names a version or firmware.
+    version_words = ("version", "firmware", "fw", "sdk", "driver", "serial", "build")
+    version_like = {
+        n: {k: v for k, v in kv.items() if any(w in f"{k} {v}".lower() for w in version_words)}
+        for n, kv in diag_values.items()
+    }
     out["diagnostics"] = dict(
         status_names=sorted({n for n, _ in diag}),
         hardware_ids=sorted({h for _, h in diag if h}),
-        version_like={
-            n: {
-                k: v
-                for k, v in kv.items()
-                if any(
-                    w in (k + " " + str(v)).lower()
-                    for w in ("version", "firmware", "fw", "sdk", "driver", "serial", "build")
-                )
-            }
-            for n, kv in diag_values.items()
-        },
+        version_like={n: kv for n, kv in version_like.items() if kv},
     )
-    out["diagnostics"]["version_like"] = {n: kv for n, kv in out["diagnostics"]["version_like"].items() if kv}
     # Odometry: path, speed, tilt.
     if odom:
         o = np.asarray(odom)
         o = o[np.argsort(o[:, 0])]
         d = np.linalg.norm(np.diff(o[:, 1:4], axis=0), axis=1)
         dt = np.diff(o[:, 0])
+        # The extractor's own receiver-reset gate (gnss_guard.MAX_SPEED), so a bag
+        # surveyed here and the scene cut from it agree on what a teleport is.
         ok = (dt > 0) & (dt < 1.0) & (d / np.maximum(dt, 1e-6) < MAX_SPEED)
         v = d[ok] / dt[ok]
         tilt = np.degrees(np.arccos(np.clip([quaternion_matrix(q)[2, 2] for q in o[:, 4:8]], -1, 1)))

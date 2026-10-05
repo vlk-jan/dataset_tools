@@ -13,9 +13,8 @@
 set -uo pipefail
 OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
+. "$REPO/slurm/common.sh"
 BAGS=${2:-$REPO/docs/v2_bags.csv}
-SIF=${SIF:-/mnt/data/vras/data/helhest-jazzy.sif}
-PY="$REPO/.venv/bin/python"
 BINDS="--bind /mnt/personal --bind /mnt/data"
 
 singularity exec $BINDS "$SIF" "$PY" -c "
@@ -35,8 +34,8 @@ singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$OUT" --csv "$OUT/validation.csv"
 vrc=$?
 
-# --bags: make_atlas defaults to the v1 bag list, which numbers its scenes the
-# same way and so silently lends every v2 card a v1 bag size and session.
+# --bags: the v1 list numbers its scenes the same way, so it has to be this
+# release's list or every card gets a v1 bag size and session.
 singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/make_atlas.py" "$OUT" --bags "$BAGS" \
     || echo "atlas generation reported problems"
 

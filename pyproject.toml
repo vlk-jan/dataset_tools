@@ -7,6 +7,7 @@ name = "dataset_tools"
 version = "1.0.1"
 description = "Tools for extracting the HELHEST robot dataset from ROS 2 bags."
 readme = "README.md"
+requires-python = ">=3.12"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
 maintainers = [{ name = "Jan Vlk", email = "vlkjan6@fel.cvut.cz" }]
@@ -32,8 +33,7 @@ test = ["pytest>=7", "httpx>=0.27"]
 # and the scene format; the viewer reads its page template, its columnar state
 # packer and its debug handle, none of which a major release promises to keep,
 # hence the upper bound; its "authoring" extra (torch + einops) is what the
-# scene-building API needs, and it is the reason the viewer requires Python
-# 3.12+ even though the extraction tools do not.
+# scene-building API needs, and it is what sets the project's 3.12 floor.
 viewer = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
@@ -81,16 +81,15 @@ pythonpath = ["."]
 addopts = "-q"
 
 # The tree is formatted with this; 88 described nothing, nineteen files violated
-# it. Twelve lines still sit above 120 and are meant to: probe.py's artefact
-# table, held by `# fmt: off` because one aligned declaration per line is the
-# point of it, and build.py's property accessors, long only because of a
-# trailing `# type: ignore` that black will not move.
+# it. The lines still above 120 are meant to be: aligned declaration tables held
+# by `# fmt: off` (one per line is the point), accessors long only because of a
+# trailing `# type: ignore`, and column headers black cannot split.
 [tool.black]
 line-length = 120
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM"]
