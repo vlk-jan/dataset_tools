@@ -550,7 +550,10 @@ arrows and `p` to `document` and `window` with no useful focus check —
 `PlaybackControls` has none at all, and `Controls` tests for an `INPUT`, which
 a textarea is not — so a space typed into a note used to toggle playback
 instead. Both listen in the bubble phase, so the panel stops key events coming
-from a field it holds before they get that far.
+from a field it holds before they get that far. Space is the one exception:
+it is play/pause everywhere but inside a field one types text into, and it
+never re-activates whatever was clicked last (a toggle, a select, a legend's
+summary), which the browser would otherwise do to the focused control.
 
 The scene page carries the same notes as a card, where they can equally be
 written, edited and deleted; its window table marks every window a note's

@@ -711,11 +711,43 @@ function editable(node) {
   return Boolean(node?.matches?.("input, textarea, select") || node?.isContentEditable);
 }
 
+/** The subset of `editable` one types text into: a space there is a space. */
+function typing(node) {
+  return Boolean(
+    node?.matches?.("textarea, input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit])") ||
+      node?.isContentEditable,
+  );
+}
+
 function claimKeyboardForFields() {
   for (const type of ["keydown", "keyup", "keypress"]) {
     els.panel.addEventListener(type, (event) => {
-      if (editable(event.target)) event.stopPropagation();
+      // Space is the exception: on a checkbox or a select it is still play/pause.
+      if (editable(event.target) && (event.key !== " " || typing(event.target))) event.stopPropagation();
     });
+  }
+}
+
+/**
+ * Space is play/pause whatever was clicked last.
+ *
+ * A click leaves its button, checkbox, select or <summary> focused, and the
+ * browser then makes space activate that again -- the ghost toggle flipped,
+ * the legend folded -- on keydown or keyup depending on the control. SimView
+ * blurs the target on keydown, which is not enough on its own. Capture phase,
+ * so this runs before anything else sees the key; the event still bubbles on
+ * to SimView's listener, which does the toggling.
+ */
+function setupSpaceIsPlay() {
+  for (const type of ["keydown", "keyup"]) {
+    document.addEventListener(
+      type,
+      (event) => {
+        if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+        if (!typing(event.target)) event.preventDefault();
+      },
+      true,
+    );
   }
 }
 
@@ -834,6 +866,7 @@ function restoreCarriedView(app) {
 
 function setupPanel() {
   claimKeyboardForFields();
+  setupSpaceIsPlay();
   setupWindowNav();
   // A single tab on the panel's own edge, so it slides out with the panel and
   // is always reachable at the middle of the window edge -- the old pair of
