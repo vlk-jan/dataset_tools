@@ -39,7 +39,7 @@ import json
 import math
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -193,7 +193,7 @@ def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
     write_trajectory(scene_dir / "odometry.txt", ts, corrected(poses, C))
     _save_npy_atomically(scene_dir / "transforms.npy", corrected(rel, C))
     _save_npy_atomically(scene_dir / "gravity_align.npy", corrected_gravity(gravity, C))
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
     lines = [
         "# The odometry of this scene re-expressed at the frame of its clouds (dataset_tools.odom_frame).",
         f"# {stamp}: odometry.txt, transforms.npy and gravity_align.npy rotated by C (cloud frame -> Odin1 pose frame).",
@@ -218,8 +218,11 @@ def main(argv: list[str] | None = None) -> int:
         for s in a.scenes:
             fits[s] = measure(a.root / s)
             f = fits[s]
-            print(f"{s} roll {f['roll_deg']:+.2f} pitch {f['pitch_deg']:+.2f} deg | kabsch {np.round(f['kabsch_rpy_deg'], 2)} "
-                  f"sd {np.round(f['kabsch_sd_deg'], 2)} | {f['n_translations']} translations", flush=True)
+            print(
+                f"{s} roll {f['roll_deg']:+.2f} pitch {f['pitch_deg']:+.2f} deg | kabsch {np.round(f['kabsch_rpy_deg'], 2)} "
+                f"sd {np.round(f['kabsch_sd_deg'], 2)} | {f['n_translations']} translations",
+                flush=True,
+            )
             a.fits.write_text(json.dumps(fits, indent=1))
         return 0
     fits = json.loads(a.fits.read_text())
