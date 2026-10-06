@@ -7,6 +7,8 @@ cleanly when the viewer extra (SimView + torch) is not installed.
 
 from __future__ import annotations
 
+import os
+
 from helpers_viewer import (
     make_root,
 )
@@ -157,8 +159,13 @@ def test_files_added_inside_a_scene_reach_the_probe_even_across_a_restart(tmp_pa
 
     root_path = make_root(tmp_path, scenes=("0000",), frames=6)
     cache = tmp_path / "cache"
-    before = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
     maps = root_path / "0000" / "height_maps"
+    # The kernel stamps mtimes from a coarse clock (a few ms per tick), so an
+    # unlink right after make_root wrote the directory usually leaves its
+    # mtime where it was. Backdating it first makes the unlink's own update
+    # observable -- which is the thing under test -- on every run.
+    os.utime(maps, ns=(0, maps.stat().st_mtime_ns - 10_000_000_000))
+    before = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
     victim = sorted(maps.iterdir())[0]
     victim.unlink()
 
