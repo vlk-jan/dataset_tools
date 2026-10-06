@@ -5,26 +5,23 @@ from its own app, rooted at ``/`` and so unmountable under a prefix. But it has
 a documented static mode: with ``window.__simviewStaticBase`` set, every fetch
 goes to ``{base}/model.json``, ``{base}/states.json`` and ``{base}/blob/{id}``
 (SimView.js ``loadData`` / ``fetchBlobs``) -- the mode its own GitHub Pages demo
-uses. This module splits ``SimulationScene.save``'s document into those flat
-files. Nothing in SimView is modified or subclassed; the only coupling is its
-documented, versioned on-disk format.
+uses. SimView writes those flat files itself
+(``simview.columnar.write_static_bundle``); this module builds the document in
+memory and moves the bundle into place atomically.
 
-Splitting the base64 payloads back into standalone binaries is not just size:
-the viewer range-requests them to window long trajectories, and files on disk
-get byte-range support from Starlette for free.
+Standalone blob files are not just size: the viewer range-requests them to
+window long trajectories, and files on disk get byte-range support from
+Starlette for free.
 """
 
 from __future__ import annotations
 
 import html
-import json
 import logging
 import re
 from pathlib import Path
 
 logger = logging.getLogger("dataset_tools.viewer.wire")
-
-BLOB_PREFIX = "__b64__"
 
 
 def scene_document(scene) -> dict:
@@ -50,67 +47,36 @@ def scene_document(scene) -> dict:
     return {"model": model_json, "states": states}
 
 
-def split_scene_document(doc: dict) -> tuple[dict, object, list[bytes]]:
-    """Split a saved scene into ``(model, states, blobs)``.
-
-    Every ``"__b64__<payload>"`` string anywhere in the document is replaced in
-    place by a ``"/blob/static/{id}"`` reference and its decoded bytes appended
-    to the returned list. The viewer only reads the final path segment of a
-    blob reference in static mode, so the middle component is arbitrary.
-    """
-    import base64
-
-    blobs: list[bytes] = []
-
-    def rewrite(node):
-        items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
-        for key, value in items:
-            if isinstance(value, str) and value.startswith(BLOB_PREFIX):
-                node[key] = _register(value)
-            else:
-                rewrite(value)
-
-    def _register(value: str) -> str:
-        blob_id = len(blobs)
-        blobs.append(base64.b64decode(value[len(BLOB_PREFIX) :]))
-        return f"/blob/static/{blob_id}"
-
-    model = doc.get("model")
-    states = doc.get("states")
-    if model is None or states is None:
-        raise ValueError("scene document is missing 'model' or 'states'")
-    rewrite(model)
-    rewrite(states)
-    return model, states, blobs
-
-
 def write_static_bundle(doc: dict, dest: Path) -> dict:
     """Write ``model.json``, ``states.json`` and ``blob/N`` under ``dest``.
 
-    Written to a sibling temporary directory and moved into place, so a reader
-    never sees a half-written bundle and two concurrent builds of the same
-    window cannot interleave.
+    The layout is SimView's own (``simview.columnar.write_static_bundle``,
+    which decodes every inline ``__b64__`` payload into ``blob/N``). What this
+    adds is the atomic move: the bundle is written to a sibling temporary
+    directory and moved into place, so a reader never sees a half-written
+    bundle and two concurrent builds of the same window cannot interleave.
     """
     import os
     import shutil
     import tempfile
 
-    model, states, blobs = split_scene_document(doc)
+    from simview.columnar import write_static_bundle as simview_write
+
+    if doc.get("model") is None or doc.get("states") is None:
+        raise ValueError("scene document is missing 'model' or 'states'")
     dest.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{dest.name}.", dir=dest.parent))
     try:
-        (staging / "blob").mkdir()
-        (staging / "model.json").write_bytes(json.dumps(model).encode())
-        (staging / "states.json").write_bytes(json.dumps(states).encode())
-        for i, blob in enumerate(blobs):
-            (staging / "blob" / str(i)).write_bytes(blob)
+        simview_write(doc, staging)
+        blobs = list((staging / "blob").iterdir())
+        info = {"blobs": len(blobs), "bytes": sum(p.stat().st_size for p in blobs)}
         if dest.exists():
             shutil.rmtree(dest, ignore_errors=True)
         os.replace(staging, dest)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return {"blobs": len(blobs), "bytes": sum(len(b) for b in blobs)}
+    return info
 
 
 def render_viewer_page(
@@ -133,18 +99,11 @@ def render_viewer_page(
 
     template = (files("simview") / "templates" / "index.html").read_text()
 
-    # SimView 5 hard-codes its asset URLs under "/static/" (4.x spelled them as
-    # Jinja url_for expressions); point them at our mount instead.
-    page = template.replace('"/static/', f'"{static_prefix.rstrip("/")}/')
-
-    # SimView's config.js refers to a few assets by the document-relative path
-    # "static/textures/...", which resolves correctly only when the page is
-    # served from the site root (as SimView's own server does). This page lives
-    # at /view/<scene>/<window>, so without a base the browser would look for
-    # /view/<scene>/static/... and the point sprite would 404. Declaring the
-    # base restores root-relative resolution; every URL we emit ourselves is
-    # already absolute, so nothing else is affected.
-    page = page.replace("<head>", '<head>\n    <base href="/">', 1)
+    # SimView refers to its assets page-relatively ("./static/..."), which
+    # from /view/<scene>/<window> would resolve under /view/<scene>/; point
+    # them at our versioned mount instead. Anything SimView loads from inside
+    # its modules resolves against the module's own URL, so needs nothing.
+    page = template.replace('"./static/', f'"{static_prefix.rstrip("/")}/')
 
     if title is not None:
         page = re.sub(r"<title>.*?</title>", lambda _: f"<title>{html.escape(title)}</title>", page, count=1)

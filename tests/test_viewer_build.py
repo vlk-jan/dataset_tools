@@ -23,32 +23,18 @@ from dataset_tools.viewer import loaders, windows, wire
 # --------------------------------------------------------------------------
 
 
-def test_split_scene_document_extracts_every_blob():
-    doc = {
-        "model": {"terrain": {"heightData": "__b64__AAAA"}, "n": 1},
-        "states": {"version": 4, "bodies": {"a": {"bodyTransform": "__b64__BBBB"}}},
-    }
-    model, states, blobs = wire.split_scene_document(doc)
-    assert len(blobs) == 2
-    assert model["terrain"]["heightData"].startswith("/blob/")
-    assert states["bodies"]["a"]["bodyTransform"].startswith("/blob/")
-    # The viewer resolves a blob reference by its last path segment.
-    ids = {
-        int(model["terrain"]["heightData"].rsplit("/", 1)[-1]),
-        int(states["bodies"]["a"]["bodyTransform"].rsplit("/", 1)[-1]),
-    }
-    assert ids == {0, 1}
-
-
 def test_write_static_bundle_lays_out_the_files_the_front_end_fetches(tmp_path):
+    pytest.importorskip("simview")
     doc = {"model": {"x": "__b64__AAAA"}, "states": {"version": 4}}
     dest = tmp_path / "bundle"
     info = wire.write_static_bundle(doc, dest)
-    assert info["blobs"] == 1
+    assert info == {"blobs": 1, "bytes": 3}
     assert (dest / "model.json").is_file()
     assert (dest / "states.json").is_file()
     assert (dest / "blob" / "0").is_file()
-    assert json.loads((dest / "model.json").read_text())["x"] == "/blob/static/0"
+    assert json.loads((dest / "model.json").read_text())["x"] == "/blob/0"
+    # Moved into place whole: no staging directory is left beside it.
+    assert [p.name for p in tmp_path.iterdir()] == ["bundle"]
 
 
 def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
@@ -56,8 +42,9 @@ def test_render_viewer_page_substitutes_urls_and_injects_the_static_base():
     page = wire.render_viewer_page("/simview-static", "/api/data/k", "<div id='x'></div>")
     assert 'window.__simviewStaticBase = "/api/data/k"' in page
     assert "/simview-static/js/main.js" in page
-    assert '"/static/' not in page
-    assert '<base href="/">' in page
+    assert '"./static/' not in page
+    # SimView's modules resolve their own assets; the page needs no <base>.
+    assert "<base" not in page
     assert "{{" not in page
     assert "<div id='x'></div>" in page
 

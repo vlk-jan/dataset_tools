@@ -161,7 +161,7 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'viewer'", specifier = ">=10.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7" },
     { name = "rosbags", specifier = ">=0.10" },
-    { name = "simview", extras = ["authoring"], marker = "extra == 'viewer'", specifier = ">=6.0.1" },
+    { name = "simview", extras = ["authoring"], marker = "extra == 'viewer'", specifier = ">=6.1.0" },
     { name = "torch", marker = "sys_platform == 'linux' and extra == 'viewer'", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "sys_platform != 'linux' and extra == 'viewer'" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'viewer'", specifier = ">=0.27" },
@@ -866,7 +866,7 @@ wheels = [
 
 [[package]]
 name = "simview"
-version = "6.0.1"
+version = "6.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastapi" },
@@ -875,9 +875,9 @@ dependencies = [
     { name = "uvicorn" },
     { name = "uvloop", marker = "sys_platform != 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/ed/7b0c20160df3f0d99b281894def5cc5ff5f934c78036ca2f68fc22dc79e5/simview-6.0.1.tar.gz", hash = "sha256:682a4bddc7109e246eb1ea3bb9b637466533e46625ea8145f600782935c7ae74", size = 713513, upload-time = "2026-10-05T14:21:40.535Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/b6/cfbb1e4728c566b5a895205b0d01847b1cf618603377fd6397788c6aae95/simview-6.1.0.tar.gz", hash = "sha256:d6fcc2ec5b3ec4de5372341ee05b4584b875e7d433d87ecaea8dbe3f8ccdd3df", size = 722114, upload-time = "2026-10-06T13:37:38.392Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e0/3e/3e565c8174967ba58612a33e77c065b71f44b4aa2c6b8c580d90cffaf7cd/simview-6.0.1-py3-none-any.whl", hash = "sha256:5cb39096a560c6c1d3b4daca2b193291ecb1fdffe43b8e5473e7245f93c4dfa3", size = 687137, upload-time = "2026-10-05T14:21:38.733Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/f5/65b9ff5960f4c66cf5d0ea719c6e1d39fde4fdab25bbcd2b09f87af4f358/simview-6.1.0-py3-none-any.whl", hash = "sha256:90ce44d076d502c62de12033cbc9b25738fc21eb97b399dce2342a39f9b1c23d", size = 693941, upload-time = "2026-10-06T13:37:36.891Z" },
 ]
 
 [package.optional-dependencies]
@@ -920,13 +920,13 @@ resolution-markers = [
     "sys_platform != 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "sys_platform != 'linux'" },
-    { name = "fsspec", marker = "sys_platform != 'linux'" },
-    { name = "jinja2", marker = "sys_platform != 'linux'" },
-    { name = "networkx", marker = "sys_platform != 'linux'" },
-    { name = "setuptools", marker = "sys_platform != 'linux'" },
-    { name = "sympy", marker = "sys_platform != 'linux'" },
-    { name = "typing-extensions", marker = "sys_platform != 'linux'" },
+    { name = "filelock" },
+    { name = "fsspec" },
+    { name = "jinja2" },
+    { name = "networkx" },
+    { name = "setuptools" },
+    { name = "sympy" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/17/76/bb4770f56cf6d8971671dbcbb7493e5a6a15ad2825f4e359b02c27c38297/torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:c1f844f1c750e87df4b68bc3afbc0e2b0c7ef19d7b8f666e48bdcf6a0c4f0056", size = 127303200, upload-time = "2026-09-02T13:43:20.311Z" },
@@ -947,13 +947,13 @@ resolution-markers = [
     "sys_platform == 'linux'",
 ]
 dependencies = [
-    { name = "filelock", marker = "sys_platform == 'linux'" },
-    { name = "fsspec", marker = "sys_platform == 'linux'" },
-    { name = "jinja2", marker = "sys_platform == 'linux'" },
-    { name = "networkx", marker = "sys_platform == 'linux'" },
-    { name = "setuptools", marker = "sys_platform == 'linux'" },
-    { name = "sympy", marker = "sys_platform == 'linux'" },
-    { name = "typing-extensions", marker = "sys_platform == 'linux'" },
+    { name = "filelock" },
+    { name = "fsspec" },
+    { name = "jinja2" },
+    { name = "networkx" },
+    { name = "setuptools" },
+    { name = "sympy" },
+    { name = "typing-extensions" },
 ]
 wheels = [
     { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp312-cp312-linux_s390x.whl", hash = "sha256:07aefe1a437b6f1b41b0cba15e16583e2f43549ec9d062fcea8e7981a78e014a", upload-time = "2026-09-02T18:31:32Z" },

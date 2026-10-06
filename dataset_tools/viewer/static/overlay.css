@@ -340,7 +340,3 @@ body:not(.dt-collapsed) .sv-playback {
 /* The zoom dialog over the 3D view; its .btn and .muted come from zoom.css,
    the palette is the panel's (dark), via .dt-zoom in theme.css. */
 .dt-zoom { font: var(--fs-sm)/1.45 var(--sans); }
-
-/* A single frame's view ("Visualise this frame") has nothing to play and no
-   series to plot: SimView's playback bar and Analysis panel are dropped. */
-body:has(#dt-panel[data-kind="frame"]) :is(.sv-playback, .analysis-container) { display: none; }

@@ -490,22 +490,46 @@ def test_the_view_opens_with_the_robot_in_shot(client):
     the previous part, and `?frame=N` seeks into the middle of a traverse."""
     body = client.get("/viewer-static/simview_patch.js").text
     assert 'ROBOT_BODY = "robot"' in body
-    assert "export function centerOnRobot(app)" in body
-    # Camera and orbit target move by the same delta, so the angle and the
-    # distance the view was framed at survive the re-centring.
-    fn = body[body.index("export function centerOnRobot(app)") :]
-    fn = fn[: fn.index("\n}\n")]
-    assert "camera.position.set(" in fn and "controls.target.set(x, y, z);" in fn
-    assert "controls.update();" in fn
-    # It reads the body's world position the way SimView's own tracking does.
-    assert "app.batchManager.getBatchOffset(batch)" in fn
-    # Falsy until the robot has a resolved position, so the caller can retry.
-    assert "return false;" in fn
-
     overlay = client.get("/viewer-static/overlay.js").text
-    assert "if (centered || centerOnRobot(app)) {" in overlay
+    # SimView's own re-centring keeps the camera's angle and distance, and is
+    # false until the robot has a position, so the caller retries.
+    assert "if (centered || app.focusBody(ROBOT_BODY)) {" in overlay
     # Once, at load -- following it every frame is SimView's own trackBody.
-    assert overlay.count("centerOnRobot(app)") == 1
+    assert overlay.count("focusBody(") == 1
+
+
+def test_the_panel_follows_simviews_events_not_a_polling_loop(client):
+    overlay = client.get("/viewer-static/overlay.js").text
+    assert 'addEventListener("simview:frame"' in overlay
+    assert "getCurrentStateIndex()" in overlay
+    assert "requestAnimationFrame(tick)" not in overlay
+    assert "__debugSimView" not in overlay
+    patch = client.get("/viewer-static/simview_patch.js").text
+    assert '"simview:ready"' in patch
+
+
+def test_the_scene_declares_what_simview_opens_on(client):
+    """The ghost's look and SimView's opening state travel with the scene,
+    rather than being patched onto SimView's objects after it starts."""
+    opts = "40-160000-80-500000-0.1-height"
+    client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
+    model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
+    defaults = model["viewerDefaults"]
+    assert defaults["ui"] == {"pointCloudsVisible": False}
+    assert defaults["bodyStatesOpen"] is False
+    assert defaults["folders"]["Camera Options"] is True
+    assert "panels" not in defaults  # a segment plays
+    ghost = [b for b in model["bodies"] if b["name"] == "wheel_odom_ghost"]
+    if ghost:
+        assert ghost[0]["visible"] is False and ghost[0]["opacity"] == 0.55
+    patch = client.get("/viewer-static/simview_patch.js").text
+    assert "styleGhost" not in patch and "applyFolderDefaults" not in patch
+
+
+def test_a_single_frame_drops_the_playback_bar_and_analysis():
+    from dataset_tools.viewer.build import viewer_defaults
+
+    assert viewer_defaults(True)["panels"] == {"playback": False, "analysis": False}
 
 
 def test_the_aggregated_cloud_carries_no_per_frame_pose(client):

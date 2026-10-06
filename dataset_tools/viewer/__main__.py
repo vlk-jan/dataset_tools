@@ -88,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: Keep in step with pyproject.toml's simview requirement.
+SIMVIEW_MIN = (6, 1, 0)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -104,6 +108,20 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"error: the viewer's dependencies are not installed ({exc}).\n"
             'Install them with:  pip install "dataset_tools[viewer]"',
+            file=sys.stderr,
+        )
+        return 2
+
+    # An older SimView imports fine and fails only when a window is built (an
+    # authoring argument it does not know), once per window, in the page.
+    import simview
+
+    found = tuple(int(p) for p in simview.__version__.split(".")[:3] if p.isdigit())
+    if found < SIMVIEW_MIN:
+        print(
+            f"error: the viewer needs simview >= {'.'.join(map(str, SIMVIEW_MIN))}, "
+            f"this interpreter ({sys.executable}) has {simview.__version__}.\n"
+            'Upgrade it with:  pip install -U "simview[authoring]"',
             file=sys.stderr,
         )
         return 2

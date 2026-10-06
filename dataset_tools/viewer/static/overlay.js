@@ -5,18 +5,18 @@
  * height map, its validity mask and a raw cloud, none of which are. This shows
  * those next to the 3D view, on the frame the playhead is at.
  *
- * It modifies SimView not at all, on two stock affordances:
+ * It modifies SimView not at all, on its stock embedding affordances:
  *   1. `window.__simviewStaticBase` points its fetches at our bundle endpoints.
- *   2. `window.__debugSimView` is the running instance. We read its playhead
- *      every frame and never write it -- the one seek we ask for goes through
- *      `goToTime` (see `openInitialView`).
+ *   2. `window.simview` is the running instance, announced by `simview:ready`;
+ *      `simview:frame` says when the playhead lands on another state. Seeks go
+ *      through `goToTime` (see `openInitialView`).
  *
  * The server withholds SimView's entry module until the bundle is built (see
  * `_defer_main_script`), so this file loads it once its data is there.
  * Corrections that reach into SimView's objects live in `simview_patch.js`.
  */
 
-import { centerOnRobot, installSimviewPatches, waitForSimView } from "./simview_patch.js";
+import { ROBOT_BODY, installSimviewPatches, waitForSimView } from "./simview_patch.js";
 import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
 
 const cfg = window.__dtViewer || {};
@@ -57,6 +57,9 @@ let meta = null;
 let available = {};
 let lastFrame = -1;
 let lastUpdate = 0;
+/** The update a throttled `simview:frame` left pending, so the last frame of
+ *  a burst is still shown when no further event follows it. */
+let trailingUpdate = null;
 /** The handles returned by installSimviewPatches, once SimView is up. */
 let patches = null;
 /** meta.attitude once the window has one: absent without gravity_align.npy. */
@@ -95,29 +98,13 @@ function startSimView() {
   document.body.appendChild(script);
 }
 
-/** Nearest frame index in the window for a playback time (seconds). */
-function frameIndexForTime(t) {
-  const times = meta.times;
-  if (!times || times.length === 0) return 0;
-  let lo = 0;
-  let hi = times.length - 1;
-  if (t <= times[0]) return 0;
-  if (t >= times[hi]) return hi;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (times[mid] <= t) lo = mid;
-    else hi = mid;
-  }
-  return t - times[lo] <= times[hi] - t ? lo : hi;
-}
-
 // Bandwidth-adaptive per-frame tiles. Four images per frame, one request each,
 // served off contended storage: firing them every frame floods a slow link and
 // the panel lags playback until it drains ("it jumps to the current frame when
 // I pause"). At most ONE batch is in flight, and on finishing it jumps to the
 // latest wanted frame -- skipping intermediates, so the panel stays near-live
 // on a fast link and always lands on the frame you pause on. Frame numbers and
-// timestamps still update every tick, so the readout is never behind.
+// timestamps still update on every frame, so the readout is never behind.
 let tileWantFrame = null;
 let tileShownFrame = null;
 let tileInFlight = false;
@@ -199,14 +186,24 @@ function writeFrameToUrl(frame) {
 }
 
 function update(force) {
-  const app = window.__debugSimView;
+  const app = window.simview;
   if (!app || !app.animationController || !meta) return;
   const now = performance.now();
-  if (!force && now - lastUpdate < UPDATE_INTERVAL_MS) return;
+  const wait = UPDATE_INTERVAL_MS - (now - lastUpdate);
+  if (!force && wait > 0) {
+    if (trailingUpdate === null) {
+      trailingUpdate = setTimeout(() => {
+        trailingUpdate = null;
+        update(false);
+      }, wait);
+    }
+    return;
+  }
   lastUpdate = now;
 
-  const t = app.animationController.currentTime || 0;
-  const index = frameIndexForTime(t);
+  // SimView's states are this window's frames, one for one (build.py).
+  const index = app.animationController.getCurrentStateIndex();
+  if (index < 0 || index >= meta.frames.length) return;
   if (index === lastFrame && !force) return;
   lastFrame = index;
 
@@ -327,7 +324,7 @@ function syncLegendHighlight() {
 
 /** Seek the playhead to a frame of this window, if it holds it. */
 function seekToFrame(frame) {
-  const app = window.__debugSimView;
+  const app = window.simview;
   if (!app || !app.animationController || !meta || !meta.frames) return;
   const local = meta.frames.indexOf(frame);
   if (local < 0 || !meta.times || local >= meta.times.length) return;
@@ -624,15 +621,18 @@ async function setupNotes() {
 /**
  * Open the window where it should open: on the right frame, robot in shot.
  *
- * Both are the wrapper's to do -- SimView has no start-time URL parameter and
- * never frames the scene it loaded.
+ * Both are the wrapper's to do: SimView never frames the scene it loaded.
  *
  *   1. Seek via `goToTime` when reached from a frame's page (`?frame=N`).
  *      Assigning `currentTime` instead looks equivalent and is not: nothing
  *      reads that field until playback advances it, so the view stayed on the
  *      first frame until play was pressed.
- *   2. Centre the camera on the robot (`centerOnRobot`) -- a window does not
- *      always start it at the origin, the only place the stock camera looks.
+ *   2. Centre the camera on the robot with SimView's `focusBody` -- a window
+ *      does not always start it at the origin, the only place the stock
+ *      camera looks: a later part of a split segment carries on from the
+ *      previous part, and `?frame=N` seeks into the middle of a traverse.
+ *      It keeps the camera's angle and distance, and is false until the
+ *      robot has a resolved position, so it is retried.
  *
  * Failure here (no such frame, SimView slow) leaves the window at its start
  * under the stock camera: normal behaviour, never an error.
@@ -658,10 +658,7 @@ async function openInitialView() {
   const deadline = performance.now() + 60000;
   let centered = false;
   const attempt = () => {
-    // The camera can only be aimed once the robot has a resolved position,
-    // which the seek above (or SimView's own initial draw) is what produces.
-    // Keep waiting if the bodies are not built yet.
-    if (centered || centerOnRobot(app)) {
+    if (centered || app.focusBody(ROBOT_BODY)) {
       centered = true;
       // After centring: the carried camera is an offset from the robot.
       if (restoreCarriedView(app)) {
@@ -674,35 +671,15 @@ async function openInitialView() {
   attempt();
 }
 
-function tick() {
-  // Every branch below is wrapped so that a transient throw -- SimView briefly
-  // mid-rebuild, an unexpected store shape --
-  // cannot kill the rAF chain. Before this guard, a single exception anywhere
-  // in the loop left `requestAnimationFrame(tick)` unreached and the panel
-  // frozen on whatever frame it last showed until a full reload (the "side
-  // panel went static" report, 2026-09-02). The loop must outlive one bad frame.
-  try {
-    update(false);
-    syncLegendHighlight();
-  } catch (error) {
-    if (!tick._warned) { console.warn("panel update skipped a frame:", error); tick._warned = true; }
-  }
-  requestAnimationFrame(tick);
-}
-
 /**
  * A focused field in the panel owns the keyboard.
  *
- * SimView binds its shortcuts to `document` and `window` with no check on what
- * has focus: `PlaybackControls` (`keydownListener`) has none at all, so typing
- * a space into a note toggled playback and a left arrow stepped the playhead
- * instead of moving the caret; `Controls` checks `activeElement.tagName !==
- * "INPUT"`, which a textarea is not. Both listen in the bubble phase, so
- * stopping the event on our own panel is enough to keep it from reaching them,
- * and the field still gets it -- the target is reached first.
- *
- * This is not reaching into SimView at all, and "the thing you are typing into
- * gets the keystroke" stays right whatever upstream does.
+ * SimView's own shortcuts leave text fields alone since simview 6.1, but the
+ * orbit camera's arrow keys are bound to `window` with no such check, so an
+ * arrow pressed to move the caret in a note would also pan the view. It
+ * listens in the bubble phase, so stopping the event on our own panel is
+ * enough to keep it out, and the field still gets it -- the target is reached
+ * first.
  */
 /** Is this node something a person types into? Shared by the two key handlers. */
 function editable(node) {
@@ -804,7 +781,7 @@ function guiControllers(app) {
 }
 
 function saveCarriedView() {
-  const app = window.__debugSimView;
+  const app = window.simview;
   if (!app || !app.scene) return;
   try {
     const { camera, controls } = app.scene;
@@ -947,10 +924,16 @@ async function main() {
   setupNotes().catch((error) => console.warn("notes are unavailable:", error));
 
   els.build.classList.add("done");
+  // Before SimView exists: its first frame event must find the panel listening.
+  window.addEventListener("simview:frame", () => update(false));
+  // The colour mode changes through SimView's own dropdown (a bubbling
+  // "change") or a view link (the hash); nothing else sets it.
+  // Read on the next frame: SimView applies either after this hears of it.
+  const syncLegendSoon = () => requestAnimationFrame(syncLegendHighlight);
+  document.addEventListener("change", syncLegendSoon);
+  window.addEventListener("hashchange", syncLegendSoon);
   startSimView();
   openInitialView();
-  update(true);
-  requestAnimationFrame(tick);
 
   // Corrections to SimView's own UI can only be applied once it has built it.
   // A failure here must never take the panel down with it: the per-frame data

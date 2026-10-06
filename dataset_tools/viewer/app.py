@@ -271,12 +271,6 @@ def create_app(
         _CachedStatic(directory=simview_static, cache_control="public, max-age=31536000, immutable"),
         name="simview_static_versioned",
     )
-    # SimView's own document-relative asset paths (config.js: "static/textures/...").
-    app.mount(
-        "/static",
-        _CachedStatic(directory=simview_static, cache_control="no-cache"),
-        name="simview_static_root",
-    )
     threading.Thread(target=_warm_build_imports, name="warm-build-imports", daemon=True).start()
 
     # ------------------------------------------------------------------ pages

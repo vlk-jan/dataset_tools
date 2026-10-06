@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer pulls in
-[SimView](https://pypi.org/project/simview/) (`>=6.0.1`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=6.1.0`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. Torch is the heavy
 one, so the viewer lives in its own virtualenv next to the extraction one:
 
@@ -545,12 +545,12 @@ the reason to fix it from here rather than from the scene page. A saved range th
 touches the open window takes the note off this list — it belongs to the
 driving it names, not to the window it was typed in.
 
-While a field there has focus it owns the keyboard. SimView binds space, the
-arrows and `p` to `document` and `window` with no useful focus check —
-`PlaybackControls` has none at all, and `Controls` tests for an `INPUT`, which
-a textarea is not — so a space typed into a note used to toggle playback
-instead. Both listen in the bubble phase, so the panel stops key events coming
-from a field it holds before they get that far. Space is the one exception:
+While a field there has focus it owns the keyboard. SimView's own shortcuts
+leave text fields alone (since 6.1), but its orbit camera pans on the arrow
+keys from `window` with no such check, so an arrow moving the caret in a note
+would also move the view. It listens in the bubble phase, so the panel stops
+key events coming from a field it holds before they get that far. Space is the
+one exception:
 it is play/pause everywhere but inside a field one types text into, and it
 never re-activates whatever was clicked last (a toggle, a select, a legend's
 summary), which the browser would otherwise do to the focused control. The
@@ -718,11 +718,13 @@ scene into "points" (which has no robot to show).
 
 ### Working around SimView
 
-`dataset_tools/viewer/static/simview_patch.js` holds the corrections that need
-to reach into SimView's own objects rather than just its CSS: things only this
-dataset can know, such as which bodies are bookkeeping and what the ghost is.
-The stopgaps for SimView <= 4.2 bugs were removed with the move to SimView 5,
-which fixes them upstream.
+What SimView opens on is declared with the scene, in `build.py`: the ghost's
+colour, opacity and hidden start (`create_body`), and the point cloud off, the
+folders open or closed, Body states collapsed, and — for a single frame — no
+playback bar or Analysis panel (`viewer_defaults`, SimView's `viewerDefaults`).
+`dataset_tools/viewer/static/simview_patch.js` keeps what cannot be: the ready
+signal, the ghost switch, and fitting SimView's Analysis bar between its other
+two panels beside ours.
 
 The `lidar_cloud` body deliberately carries no per-frame trajectory: it is
 already accumulated in the window's frame, so a per-frame identity transform
@@ -738,9 +740,11 @@ then serves that scene through SimView's own documented static mode: setting
 `model.json` / `states.json` / `blob/N` files, which this app generates on demand
 and caches. The viewer page is SimView's own `index.html`, read from the
 installed package at request time (so it tracks whatever version is installed),
-with an overlay panel added around it. The panel follows playback by reading
-`window.__debugSimView` — SimView's own debug handle — and never writes to it,
-except through SimView's public GUI controllers for the view toggle.
+with an overlay panel added around it. The panel waits for SimView's
+`simview:ready` event, follows playback on its `simview:frame` events, and
+reaches the running instance as `window.simview`: `focusBody` to put the robot
+in shot, `goToTime` to seek, and SimView's GUI controllers to carry a view
+setup from one window to the next.
 
 ## Performance
 

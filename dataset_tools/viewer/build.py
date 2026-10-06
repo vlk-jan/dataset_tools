@@ -1278,6 +1278,34 @@ def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     )
 
 
+def viewer_defaults(single_frame: bool) -> dict:
+    """What SimView's controls open on, declared with the scene.
+
+    SimView's own defaults fit a physics scene, where the terrain's properties
+    are the subject. Here the terrain is scenery whose colour layers the
+    overlay's legend explains, and framing the run (track body, FOV) is what
+    people reach for; Body States is a readout to open on demand. The
+    aggregated cloud is a heavy overlay that would cover the terrain, so it is
+    off until SimView's own "Show Point Clouds" turns it on. All four folders
+    are named so a change in SimView's defaults does not change this view.
+
+    A single frame has nothing to play and no series to plot.
+    """
+    defaults = {
+        "ui": {"pointCloudsVisible": False},
+        "folders": {
+            "Body Options": True,
+            "Terrain Options": False,
+            "Camera Options": True,
+            "Scene Info": False,
+        },
+        "bodyStatesOpen": False,
+    }
+    if single_frame:
+        defaults["panels"] = {"playback": False, "analysis": False}
+    return defaults
+
+
 def build_scene(
     root: DatasetRoot,
     scene_id: str,
@@ -1362,7 +1390,13 @@ def build_scene(
     if access.K is not None:
         metadata["camera_intrinsics"] = np.asarray(access.K).round(3).tolist()
 
-    scene = SimulationScene(batch_size=1, scalar_names=scalar_names, dt=max(dt, 1e-3), metadata=metadata)
+    scene = SimulationScene(
+        batch_size=1,
+        scalar_names=scalar_names,
+        dt=max(dt, 1e-3),
+        metadata=metadata,
+        viewer_defaults=viewer_defaults(window.kind == "frame"),
+    )
 
     import torch
 
@@ -1384,7 +1418,19 @@ def build_scene(
     if ghost is not None:
         # A deliberately small, flat marker: it shows where wheel odometry thinks
         # the robot is, without reading as a second robot.
-        scene.create_body("wheel_odom_ghost", BodyShapeType.BOX, hx=0.2, hy=0.12, hz=0.03)
+        # Hidden until asked for by name (the panel's ghost switch): it can end
+        # up a hundred metres away, and unexplained it reads as a box drifting
+        # around the scene. Amber and see-through against the robot's grey.
+        scene.create_body(
+            "wheel_odom_ghost",
+            BodyShapeType.BOX,
+            hx=0.2,
+            hy=0.12,
+            hz=0.03,
+            color=(1.0, 0.702, 0.278),
+            opacity=0.55,
+            visible=False,
+        )
     if cloud is not None and len(cloud):
         values = cloud[:, 2] if opts.cloud_color == "height" else cloud[:, 3]
         colors = unit_colors(values)
