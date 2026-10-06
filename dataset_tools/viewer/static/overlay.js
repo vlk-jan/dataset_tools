@@ -772,24 +772,17 @@ function setupWindowNav() {
  */
 const CARRY_KEY = "dt.carriedView";
 
-function guiControllers(app) {
-  const ui = app.uiControls;
-  if (!ui || !ui.gui) return [];
-  // The "Scene Info" folder is per-window metadata shown as read-only fields.
-  const skip = new Set(ui.metadataFolder ? ui.metadataFolder.controllersRecursive() : []);
-  return ui.gui.controllersRecursive().filter((c) => !skip.has(c) && typeof c.getValue() !== "function");
-}
-
 function saveCarriedView() {
   const app = window.simview;
   if (!app || !app.scene) return;
   try {
-    const { camera, controls } = app.scene;
-    const anim = app.animationController;
+    // SimView's own view state: modes, toggles, point clouds, tracked body,
+    // colormap, speed. Minus the time (a new window starts at its start) and
+    // the absolute camera, which travels as an offset instead; the FOV stays.
+    const { time, camera, ...view } = app.getViewState();
     const state = {
-      gui: Object.fromEntries(guiControllers(app).map((c) => [c.property, c.getValue()])),
-      speed: anim ? anim.playbackSpeed : undefined,
-      offset: camera.position.clone().sub(controls.target).toArray(),
+      view: { ...view, camera: { fov: camera.fov } },
+      offset: camera.position.clone().sub(camera.target).toArray(),
       ghost: els.ghost ? els.ghost.checked : undefined,
     };
     sessionStorage.setItem(CARRY_KEY, JSON.stringify(state));
@@ -808,29 +801,16 @@ function restoreCarriedView(app) {
   }
   if (!state) return true;
   // The panel's own ghost switch is wired once the patches are in.
-  if (!app.uiControls || !app.uiControls.gui || !patches) return false;
+  if (!app.uiControls || !patches) return false;
   try {
     sessionStorage.removeItem(CARRY_KEY);
   } catch {
     /* read-once is a nicety: a stuck key only re-applies the same setup */
   }
   try {
-    // setValue runs each control's own onChange, so SimView's state follows.
-    // A control this window lacks, or an option it does not offer, is skipped.
-    for (const c of guiControllers(app)) {
-      if (!(c.property in (state.gui || {}))) continue;
-      const value = state.gui[c.property];
-      if (typeof value !== typeof c.getValue()) continue;
-      const select = c.domElement.querySelector("select");
-      if (select && ![...select.options].some((o) => o.textContent === String(value) || o.value === String(value))) continue;
-      if (value !== c.getValue()) c.setValue(value);
-    }
-    const anim = app.animationController;
-    if (anim && Number.isFinite(state.speed)) {
-      anim.setSpeed(state.speed);
-      const select = anim.playbackControls && anim.playbackControls.speedSelect;
-      if (select) select.value = String(state.speed);
-    }
+    // Through SimView's controls, so its panel shows what is applied; a body
+    // or colormap this window does not offer is skipped by SimView itself.
+    if (state.view) app.setViewState(state.view);
     if (Array.isArray(state.offset) && state.offset.length === 3) {
       const { camera, controls } = app.scene;
       camera.position.copy(controls.target).add(camera.position.clone().fromArray(state.offset));

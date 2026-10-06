@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 #: Keep in step with pyproject.toml's simview requirement.
-SIMVIEW_MIN = (6, 1, 0)
+SIMVIEW_MIN = (6, 1, 1)
 
 
 def main(argv: list[str] | None = None) -> int:

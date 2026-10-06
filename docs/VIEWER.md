@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer pulls in
-[SimView](https://pypi.org/project/simview/) (`>=6.1.0`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=6.1.1`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. Torch is the heavy
 one, so the viewer lives in its own virtualenv next to the extraction one:
 
@@ -743,8 +743,8 @@ installed package at request time (so it tracks whatever version is installed),
 with an overlay panel added around it. The panel waits for SimView's
 `simview:ready` event, follows playback on its `simview:frame` events, and
 reaches the running instance as `window.simview`: `focusBody` to put the robot
-in shot, `goToTime` to seek, and SimView's GUI controllers to carry a view
-setup from one window to the next.
+in shot, `goToTime` to seek, and `getViewState` / `setViewState` to carry a
+view setup from one window to the next.
 
 ## Performance
 
