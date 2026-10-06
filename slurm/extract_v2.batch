@@ -132,6 +132,22 @@ fi
 # this script uses, and publishes into $local_out/$scene, so the maps travel out
 # on the publish rsync below with everything else.
 DRIFT=${DRIFT:-$HOME/projects/DRIFT}
+
+# The Odin1 odometry onto the frame of its clouds (dataset_tools.odom_frame),
+# before the maps level the clouds with gravity_align.npy. The measurement is
+# ICP between clouds and needs open3d, which DRIFT's environment has and the
+# extraction image does not. A scene the measurement cannot settle (too little
+# driving) keeps its odometry as extracted and says so; its maps then carry the
+# few-tenths-of-a-degree tilt this step removes elsewhere.
+if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
+    echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
+    ( cd "$DRIFT" && source .env >/dev/null && export PYTHONPATH="$REPO" OMP_NUM_THREADS=8 &&
+      python3 -m dataset_tools.odom_frame measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" &&
+      python3 -m dataset_tools.odom_frame apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" \
+          --note "applied in extract_v2.batch" )
+    [ $? -eq 0 ] || echo "$scene: WARNING odom_frame not applied -- odometry and gravity_align are the Odin1's own"
+fi
+
 HM=$DRIFT/slurm/build_heightmaps_v2_beta.batch
 if [ -x "$HM" ] || [ -f "$HM" ]; then
     echo "[$(date '+%F %T')] $scene height maps"
