@@ -940,6 +940,7 @@ def test_a_scene_with_no_frames_has_no_frame_pages(tmp_path):
 def test_eviction_skips_a_builds_staging_directory(tmp_path):
     """wire.py stages a bundle in a dot-prefixed sibling that is renamed or
     removed under the eviction's feet; it must neither count nor trip on it."""
+    pytest.importorskip("simview")
     from dataset_tools.viewer.app import _evict_bundles
 
     old = tmp_path / "bundles" / "0000" / "seg000" / "a"
