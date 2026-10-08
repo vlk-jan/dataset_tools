@@ -110,6 +110,16 @@ def test_cloud_to_xyzi_uses_compressed_data_when_present(monkeypatch):
     np.testing.assert_allclose(out, points)
 
 
+def test_an_empty_compressed_cloud_decodes_to_no_points(monkeypatch):
+    """The shim reports 0 bytes for an empty cloud, the same as for a broken header; it is never asked."""
+    from dataset_tools import cloudini
+
+    msg = make_msg(np.zeros((0, 4), dtype=np.float32))
+    msg.compressed_data = b"whatever"
+    monkeypatch.setattr(cloudini, "decode", lambda blob: (_ for _ in ()).throw(ValueError("header")))
+    assert cloud_to_xyzi(msg).shape == (0, 4)
+
+
 def test_cloud_to_xyzi_organized_cloud_uses_width_times_height():
     rng = np.random.default_rng(5)
     points = rng.normal(size=(12, 4)).astype(np.float32)
@@ -217,6 +227,14 @@ def test_the_odin1_offset_time_is_seconds_relative_to_the_stamp():
     keep = valid_returns_mask(xyzi)
     assert keep.tolist() == [True, True, False, False]
     assert np.allclose(off[keep], [0.0, 0.034], atol=1e-6)
+
+
+def test_a_return_whose_offset_time_is_nan_is_dropped():
+    """Deskew would round NaN to the int64 minimum and put the point at the bag's first pose."""
+    msg = make_timed_msg(_pts(), [0.0, np.nan, 0.0, 0.067], "offset_time", FLOAT32)
+    xyzi, off = cloud_to_xyzit(msg, 1.0)
+    assert off is not None  # one NaN does not make the field implausible
+    assert valid_returns_mask(xyzi, off).tolist() == [True, False, False, False]
 
 
 def test_an_integer_relative_field_is_nanoseconds():

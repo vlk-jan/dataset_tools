@@ -507,6 +507,16 @@ class DatasetRoot:
         """
         if isinstance(relpaths, str):
             relpaths = (relpaths,)
+        keys = self.root_stamp(relpaths)
+        name = "+".join(relpaths)
+        cached = self._root_files.get(name)
+        if cached is None or cached[0] != keys:
+            cached = (keys, load())
+            self._root_files[name] = cached
+        return cached[1]
+
+    def root_stamp(self, relpaths: tuple[str, ...]) -> tuple:
+        """``(mtime_ns, size, inode)`` of each file under the root, ``None`` when absent."""
         keys = []
         for relpath in relpaths:
             try:
@@ -514,12 +524,7 @@ class DatasetRoot:
                 keys.append((st.st_mtime_ns, st.st_size, st.st_ino))
             except OSError:
                 keys.append(None)
-        name = "+".join(relpaths)
-        cached = self._root_files.get(name)
-        if cached is None or cached[0] != keys:
-            cached = (keys, load())
-            self._root_files[name] = cached
-        return cached[1]
+        return tuple(keys)
 
     @property
     def atlas_dir(self) -> Path:
@@ -662,9 +667,11 @@ class DatasetRoot:
             "root": str(self.path),
             "format": PROBE_CACHE_FORMAT,
             "saved": time.time(),
-            "scenes": {sid: p.to_json() for sid, p in self._probe_cache.items()},
+            # list(): a probe on another request thread may insert while this runs.
+            "scenes": {sid: p.to_json() for sid, p in list(self._probe_cache.items())},
         }
-        tmp = self._probe_cache_path.with_suffix(".tmp")
+        # pid: two viewers on one root must not write into each other's tmp file.
+        tmp = self._probe_cache_path.with_suffix(f".{os.getpid()}.tmp")
         try:
             tmp.write_text(json.dumps(payload))
             tmp.replace(self._probe_cache_path)
@@ -687,7 +694,7 @@ def clear_cache_dir(cache_dir: Path) -> tuple[int, int]:
     import shutil
 
     stem = Path(PROBE_CACHE_NAME).stem
-    targets = [cache_dir / PROBE_CACHE_NAME, cache_dir / f"{stem}.tmp", cache_dir / BUNDLE_DIR_NAME]
+    targets = [cache_dir / PROBE_CACHE_NAME, *cache_dir.glob(f"{stem}.*.tmp"), cache_dir / BUNDLE_DIR_NAME]
     files = freed = 0
     for target in targets:
         try:

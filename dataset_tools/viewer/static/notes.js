@@ -118,7 +118,7 @@ function setup(card) {
       }
       say("saving…");
       try {
-        await noteRequest(`${base}/${id}`, "PATCH", {
+        await noteRequest(`${base}/${encodeURIComponent(id)}`, "PATCH", {
           frames: [start, end],
           topic: topic.value,
           verdict: verdict.value,
@@ -141,7 +141,7 @@ function setup(card) {
     if (button.dataset.act === "delete") {
       if (!window.confirm("Delete this note?")) return;
       try {
-        await noteRequest(`${base}/${id}`, "DELETE");
+        await noteRequest(`${base}/${encodeURIComponent(id)}`, "DELETE");
         await rerender();
       } catch (error) {
         say(`Could not delete: ${error.message}`, true);

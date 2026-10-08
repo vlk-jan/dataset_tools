@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 from conftest import write_scene
 
+from dataset_tools.extract import cli
 from dataset_tools.extract.cli import _worker, build_parser, main, time_align_mode
 from dataset_tools.extract.scene_io import (
     SCENES_CSV,
@@ -38,6 +40,13 @@ def test_a_bad_time_align_value_is_refused_by_the_parser(tmp_path: Path, capsys)
     assert "'soon'" in capsys.readouterr().err
     assert time_align_mode(" Auto ") == "auto"
     assert time_align_mode("-0.69") == "-0.69"
+
+
+def test_a_keep_longer_than_the_stop_is_refused_by_the_parser(tmp_path: Path, capsys):
+    """Refused before the workers start, which clear the scene's outputs before they check."""
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path), str(tmp_path), "--trim_idle", "5", "10"])
+    assert exc.value.code == 2 and "--trim_idle" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------- bags
@@ -207,6 +216,20 @@ def test_main_reports_failures_with_nonzero_exit(tmp_path: Path, jobs: str):
     out = tmp_path / "out"
     assert main([str(tmp_path / "bags"), str(out), "--jobs", jobs]) == 1
     # ... and the index only lists scenes that actually finished.
+    assert (out / SCENES_CSV).read_text().splitlines() == ["scene,bag,start_time,frames"]
+
+
+def _dying_worker(bag_path, output_dir, idx, args):
+    os._exit(1)  # an OOM kill or a segfault in the decoder: the pool breaks, not an exception
+
+
+def test_a_worker_that_dies_is_a_failure_not_an_abort(tmp_path: Path, monkeypatch):
+    """A broken pool still reaches the summary and the index; every bag is accounted for."""
+    make_bag(tmp_path / "bags", "bag_a")
+    make_bag(tmp_path / "bags", "bag_b")
+    out = tmp_path / "out"
+    monkeypatch.setattr(cli, "_worker", _dying_worker)
+    assert main([str(tmp_path / "bags"), str(out), "--jobs", "2"]) == 1
     assert (out / SCENES_CSV).read_text().splitlines() == ["scene,bag,start_time,frames"]
 
 

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_tools.gt_io import read_trajectory, write_trajectory
+from dataset_tools.gt_io import _write_trajectory, read_trajectory
 from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix
 
 RECORD = "odom_frame.txt"
@@ -144,17 +144,23 @@ def corrected_gravity(gravity: np.ndarray, C: np.ndarray) -> np.ndarray:
     return out
 
 
-def _save_npy_atomically(dest: Path, arr: np.ndarray) -> None:
+def _write_tmp(dest: Path, write, mode: str = "wb") -> Path:
+    """``dest``'s content in a sibling temp file, fsynced; the caller ``os.replace``s it in."""
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-    with open(tmp, "wb") as fh:
-        np.save(fh, arr)
+    with open(tmp, mode) as fh:
+        write(fh)
         fh.flush()
         os.fsync(fh.fileno())
-    os.replace(tmp, dest)
+    return tmp
 
 
 def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
-    """Rotate the poses and levelling of ``scene_dir`` by ``fit["C"]``, once, atomically per file."""
+    """Rotate the poses and levelling of ``scene_dir`` by ``fit["C"]``, once.
+
+    All three files are built as temp files first, then :data:`RECORD` is written
+    and the temp files replace the originals in a row, so a crash never leaves a
+    half-rotated scene that a re-run would rotate again: the record refuses it.
+    """
     scene_dir = Path(scene_dir)
     if (scene_dir / RECORD).exists():
         raise RuntimeError(f"{scene_dir}: {RECORD} exists, the rotation is already applied")
@@ -167,9 +173,15 @@ def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
     ts, poses = read_trajectory(scene_dir / "odometry.txt")
     rel = np.load(scene_dir / "transforms.npy")
     gravity = np.load(scene_dir / "gravity_align.npy")
-    write_trajectory(scene_dir / "odometry.txt", ts, corrected(poses, C))
-    _save_npy_atomically(scene_dir / "transforms.npy", corrected(rel, C))
-    _save_npy_atomically(scene_dir / "gravity_align.npy", corrected_gravity(gravity, C))
+    tmp = {
+        "odometry.txt": _write_tmp(
+            scene_dir / "odometry.txt", lambda fh: _write_trajectory(fh, ts, corrected(poses, C)), "w"
+        ),
+        "transforms.npy": _write_tmp(scene_dir / "transforms.npy", lambda fh: np.save(fh, corrected(rel, C))),
+        "gravity_align.npy": _write_tmp(
+            scene_dir / "gravity_align.npy", lambda fh: np.save(fh, corrected_gravity(gravity, C))
+        ),
+    }
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")
     lines = [
         "# The odometry of this scene re-expressed at the frame of its clouds (dataset_tools.odom_frame).",
@@ -180,6 +192,8 @@ def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
         lines.append(f"# {note}")
     lines.append(json.dumps({"applied_utc": stamp, **fit}))
     (scene_dir / RECORD).write_text("\n".join(lines) + "\n")
+    for name in FILES:
+        os.replace(tmp[name], scene_dir / name)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -50,7 +50,7 @@ recordings (camera-limited), **~10 Hz** in October 2025 and February 2026.
 HELHEST/
 ├── 0000/ … 0042/                 one directory per scene
 │   ├── images/00000.png …        RGB frames, 1280×800, 8-bit BGR PNG
-│   ├── clouds/00000.npy …        LiDAR scans, float64 (N, 4): x y z [m] intensity, base frame (v2.3+: deskewed onto data_ts)
+│   ├── clouds/00000.npy …        LiDAR scans, float32 (N, 4): x y z [m] intensity, base frame (v2.3+: deskewed onto data_ts)
 │   ├── pcd_ts.txt                LiDAR timestamp per frame (unix s, UTC)
 │   ├── data_ts.txt               (camera + LiDAR stamp)/2 per frame
 │   ├── camera_intrinsics.txt     3×3 K

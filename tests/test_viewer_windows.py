@@ -166,6 +166,8 @@ def test_a_frame_window_key_round_trips():
     assert windows.parse_frame_window_key(windows.frame_window_key(42)) == 42
     assert windows.parse_frame_window_key("seg001") is None
     assert windows.parse_frame_window_key("framex") is None
+    assert windows.parse_frame_window_key("frame⑤") is None  # isdigit, yet not an int
+    assert windows.parse_frame_window_key("frame" + "9" * 5000) is None  # past int()'s digit limit
 
 
 def test_a_single_frame_window_takes_its_pose_from_the_segment_it_is_in():

@@ -323,7 +323,7 @@ def frame_indices_dir(path: Path, suffix: str) -> list[int]:
         if not name.endswith(suffix):
             continue
         stem = name[: -len(suffix)]
-        if stem.isdigit():
+        if stem.isascii() and stem.isdigit():  # "⑤".isdigit() is true; int() refuses it
             out.append(int(stem))
     out.sort()
     return out

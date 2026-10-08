@@ -387,11 +387,13 @@ function noteTools(item, note) {
   remove.addEventListener("click", async () => {
     if (!window.confirm(`Delete the note on ${note.label}?`)) return;
     try {
-      await noteRequest(`${cfg.notesUrl}/${note.id}`, "DELETE");
-      await loadNotes();
+      await noteRequest(`${cfg.notesUrl}/${encodeURIComponent(note.id)}`, "DELETE");
     } catch (error) {
       els.noteMsg.textContent = `could not delete: ${error.message}`;
+      return;
     }
+    els.noteMsg.textContent = "deleted";
+    await reloadNotes();
   });
   tools.append(edit, remove);
   return tools;
@@ -450,18 +452,19 @@ function noteEditor(note) {
     msg.textContent = "saving…";
     const [lo, hi] = rangeOf(from, to, note.frame_start, note.frame_end);
     try {
-      await noteRequest(`${cfg.notesUrl}/${note.id}`, "PATCH", {
+      await noteRequest(`${cfg.notesUrl}/${encodeURIComponent(note.id)}`, "PATCH", {
         frames: [lo, hi],
         topic: topic.value,
         text: body,
       });
-      // Reload the list (the note may have left this window); `msg` is about
-      // to be replaced, so confirm on the section's line.
-      els.noteMsg.textContent = `saved on ${rangeText(lo, hi)}`;
-      await loadNotes();
     } catch (error) {
       msg.textContent = `could not save: ${error.message}`;
+      return;
     }
+    // Reload the list (the note may have left this window); `msg` is about
+    // to be replaced, so confirm on the section's line.
+    els.noteMsg.textContent = `saved on ${rangeText(lo, hi)}`;
+    await reloadNotes();
   });
 
   wrap.append(row, text, actions);
@@ -479,11 +482,25 @@ function nowButton() {
   return button;
 }
 
+let notesTurn = 0;
+
+/** Fetch and render the list; a response overtaken by a newer request is dropped. */
 async function loadNotes() {
+  const turn = ++notesTurn;
   const response = await fetch(cfg.notesUrl, { cache: "no-store" });
   if (!response.ok) throw new Error(`${response.status}`);
   const data = await response.json();
+  if (turn !== notesTurn) return;
   renderNotes(data.notes || []);
+}
+
+/** After a write that went through: a failed reload is not a failed write. */
+async function reloadNotes() {
+  try {
+    await loadNotes();
+  } catch (error) {
+    els.noteMsg.textContent += ` (the list could not be refreshed: ${error.message})`;
+  }
 }
 
 /** Load the notes list and wire the compose form, if the root allows. */
@@ -516,12 +533,13 @@ async function setupNotes() {
     const frames = readNoteRange();
     try {
       await noteRequest(cfg.notesUrl, "POST", { frames, topic: els.noteTopic.value, text });
-      els.noteText.value = "";
-      els.noteMsg.textContent = `saved on ${rangeText(...frames)}`;
-      await loadNotes();
     } catch (error) {
       els.noteMsg.textContent = `could not save: ${error.message}`;
+      return;
     }
+    els.noteText.value = "";
+    els.noteMsg.textContent = `saved on ${rangeText(...frames)}`;
+    await reloadNotes();
   });
 }
 
@@ -603,7 +621,8 @@ function setupSpaceIsPlay() {
         if (type !== "keydown") return;
         event.stopPropagation();
         document.querySelector("button.sv-play")?.click();
-        event.target.blur?.();
+        // Not out of a modal: focus on <body> would hand the arrows to SimView.
+        if (!event.target.closest?.("dialog[open]")) event.target.blur?.();
       },
       true,
     );
@@ -657,8 +676,9 @@ function restoreCarriedView(app) {
     state = null;
   }
   if (!state) return true;
-  // The panel's own ghost switch is wired once the patches are in.
-  if (!app.uiControls || !patches) return false;
+  // The panel's own ghost switch is wired once the patches are in (null: not
+  // yet; false: they failed, so apply what does not need them and stop).
+  if (!app.uiControls || patches === null) return false;
   try {
     sessionStorage.removeItem(CARRY_KEY);
   } catch {
@@ -766,6 +786,7 @@ async function main() {
     setupViewToggles();
     syncLegendHighlight();
   } catch (error) {
+    patches = false;
     console.warn("SimView patches were not applied:", error);
   }
 }

@@ -138,8 +138,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "on", "off"),
         default="auto",
         help="Drop stretches where the GNSS/INS published a reset solution (e.g. after a roll-over), "
-        "and frames the pose stream does not cover. 'auto' enables it for absolute sources, not "
-        "wheel odometry. Recorded in gnss_guard.txt; holes read as 'fix_lost' in odometry_segments.txt",
+        "and frames the pose stream does not cover. 'auto' enables the full guard for Fixposition topics, "
+        "the coverage-only part for /odin1/odometry, nothing for wheel odometry. Recorded in gnss_guard.txt; "
+        "holes read as 'fix_lost' in odometry_segments.txt",
     )
     parser.add_argument(
         "--cam_time_offset",
@@ -195,8 +196,8 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=6,
         default=None,
         metavar=("X", "Y", "Z", "ROLL", "PITCH", "YAW"),
-        help="Manual lidar->base transform, used when TF does not connect the "
-        "lidar frame to the base frame (the case for the 2026-08 Odin1 bags)",
+        help="Manual lidar->base transform (metres; roll/pitch/yaw in RADIANS), used when TF does not connect "
+        "the lidar frame to the base frame (the case for the 2026-08 Odin1 bags)",
     )
     parser.add_argument(
         "--max_sync_dt",
@@ -255,7 +256,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.trim_idle and args.trim_idle[1] > args.trim_idle[0]:
+        # Refused here: inside a worker it would fire after the scene's outputs were cleared.
+        parser.error(
+            f"--trim_idle: keep {args.trim_idle[1]:g} s is longer than the {args.trim_idle[0]:g} s a stop may last"
+        )
     setup_logging(args.verbose)
 
     input_dir, output_dir = Path(args.input_dir), Path(args.output_dir)
@@ -314,9 +321,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if todo and args.jobs > 1:
         with ProcessPoolExecutor(max_workers=args.jobs) as executor:
-            futures = [executor.submit(_worker, bag, output_dir, idx, args) for idx, bag in todo]
+            futures = {executor.submit(_worker, bag, output_dir, idx, args): (idx, bag) for idx, bag in todo}
             for n, future in enumerate(as_completed(futures), 1):
-                results.append(future.result())
+                idx, bag = futures[future]
+                try:
+                    results.append(future.result())
+                except Exception as exc:  # noqa: BLE001 - a worker killed (OOM, segfault) breaks the pool
+                    LOG.error("worker for %s died: %s: %s", bag.name, type(exc).__name__, exc)
+                    results.append(SceneResult(index=idx, bag=bag.name, status=STATUS_FAILED, message=str(exc)))
                 LOG.info("%d/%d bags done (%s: %s)", n, len(todo), results[-1].bag, results[-1].status)
     else:
         for n, (idx, bag) in enumerate(todo, 1):

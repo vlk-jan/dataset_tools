@@ -47,10 +47,13 @@ def idle_frames(frame_ts: np.ndarray, odom_ts: np.ndarray, odom_T: np.ndarray) -
     if len(odom_ts) < 2:
         return np.zeros(len(frame_ts), bool)
     half = WINDOW_S / 2
-    i0 = np.clip(np.searchsorted(odom_ts, frame_ts - half), 0, len(odom_ts) - 1)
-    i1 = np.clip(np.searchsorted(odom_ts, frame_ts + half) - 1, 0, len(odom_ts) - 1)
+    # The samples just outside the window, so a window truncated at the odometry's end
+    # (or a hole) still spans its half: the inner samples fall short by one step, which
+    # left the last frame of every terminal stop non-idle.
+    i0 = np.clip(np.searchsorted(odom_ts, frame_ts - half, side="right") - 1, 0, len(odom_ts) - 1)
+    i1 = np.clip(np.searchsorted(odom_ts, frame_ts + half, side="left"), 0, len(odom_ts) - 1)
     dt = odom_ts[i1] - odom_ts[i0]
-    ok = (dt > 0.5 * WINDOW_S) & (frame_ts >= odom_ts[0]) & (frame_ts <= odom_ts[-1])
+    ok = (dt >= 0.5 * WINDOW_S) & (frame_ts >= odom_ts[0]) & (frame_ts <= odom_ts[-1])
     dist = np.linalg.norm(odom_T[i1, :3, 3] - odom_T[i0, :3, 3], axis=1)
     rel = np.einsum("nji,njk->nik", odom_T[i0, :3, :3], odom_T[i1, :3, :3])
     ang = np.degrees(np.arccos(np.clip((np.trace(rel, axis1=1, axis2=2) - 1) / 2, -1, 1)))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import sys
 from pathlib import Path
@@ -92,8 +93,19 @@ def build_parser() -> argparse.ArgumentParser:
 SIMVIEW_MIN = (6, 1, 1)
 
 
+def _is_loopback(host: str) -> bool:
+    """``localhost``, ``::1`` and any ``127.x.x.x``."""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host in LOOPBACK_HOSTS
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.cache_max_gb <= 0:
+        parser.error("--cache-max-gb must be above 0")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -128,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     # Loopback binds answer only to loopback Host names (DNS-rebinding guard).
-    loopback = args.host in LOOPBACK_HOSTS
+    loopback = _is_loopback(args.host)
     if not loopback and args.notes:
         logging.getLogger("dataset_tools.viewer").warning(
             "binding %s with notes on: anyone who can reach the port can write notes into the root "
@@ -144,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         notes=args.notes,
         author=args.author,
         clear_cache=args.clear_cache,
-        allowed_hosts=sorted(LOOPBACK_HOSTS) if loopback else None,
+        allowed_hosts=sorted({*LOOPBACK_HOSTS, args.host}) if loopback else None,
         prefetch=args.prefetch,
         cache_max_gb=args.cache_max_gb,
     )

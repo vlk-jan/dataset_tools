@@ -79,6 +79,8 @@ def main():
     summary = dict(
         poses_in=len(t),
         poses_out=st["poses_out"],
+        dropped_short=st["dropped_short"],
+        dropped_outside=st["dropped_outside"],
         segments_in=len(segs),
         segments_out=len(kept_segs),
         span_in_s=round(st["span_in"], 1),

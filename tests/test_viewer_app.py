@@ -927,3 +927,42 @@ def test_simviews_cache_stamp_follows_its_files_not_only_its_version(tmp_path):
     module.write_text("export {};")
     os.utime(module, ns=(1, 1))
     assert _static_fingerprint(tmp_path) != before
+
+
+def test_a_scene_with_no_frames_has_no_frame_pages(tmp_path):
+    root_path = make_root(tmp_path, frames=12)
+    (root_path / "0001").mkdir()  # listed and probed, holding nothing
+    client = viewer_client(root_path, tmp_path / "cache")
+    assert client.get("/scene/0001/frame/0").status_code == 404
+    assert client.get("/scene/0001/jump?index=3").status_code == 404
+
+
+def test_eviction_skips_a_builds_staging_directory(tmp_path):
+    """wire.py stages a bundle in a dot-prefixed sibling that is renamed or
+    removed under the eviction's feet; it must neither count nor trip on it."""
+    from dataset_tools.viewer.app import _evict_bundles
+
+    old = tmp_path / "bundles" / "0000" / "seg000" / "a"
+    old.mkdir(parents=True)
+    (old / "model.json").write_text("x" * 100)
+    staging = old.with_name(".b.XXXX")
+    staging.mkdir()
+    keep = old.with_name("b")
+    keep.mkdir()
+    (keep / "model.json").write_text("x" * 100)
+    _evict_bundles(tmp_path / "bundles", keep, max_bytes=150)
+    assert not old.exists() and keep.exists() and staging.exists()
+
+
+def test_a_bundle_key_with_a_nan_resolution_is_not_a_bundle(client):
+    """float("nan") survives np.clip and spells itself back as "nan"."""
+    assert client.get("/api/data/0000/seg000/40-160000-80-500000-nan-height/x/meta.json").status_code == 404
+
+
+def test_the_cli_treats_every_loopback_address_as_local_and_refuses_an_empty_cache(tmp_path):
+    from dataset_tools.viewer.__main__ import _is_loopback, main
+
+    assert all(_is_loopback(h) for h in ("127.0.0.1", "127.0.0.2", "::1", "localhost"))
+    assert not _is_loopback("0.0.0.0")
+    with pytest.raises(SystemExit):
+        main(["--cache-max-gb", "0", str(tmp_path)])

@@ -474,6 +474,25 @@ def test_overwrite_removes_what_an_earlier_run_left_behind(bags: Path, tmp_path:
     assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
 
 
+def test_a_regenerated_ground_truth_survives_a_bag_without_odometry(tmp_path: Path):
+    """--gt on with no odometry messages has nothing to write, so it must not delete what is there."""
+    write_bag(tmp_path / "bags" / "bag_a", odom_until=0)
+    out = tmp_path / "out"
+    scene = out / "0000"
+    scene.mkdir(parents=True)
+    (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration\n")
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on"]) == 0
+    assert scene_is_complete(scene)
+    assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+
+
+def test_a_png_that_cannot_be_written_fails_the_scene(bags: Path, tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cv2, "imwrite", lambda *a, **k: False)
+    out = tmp_path / "out"
+    assert main([str(bags), str(out), *COMMON, "--image_format", "png"]) == 1
+    assert not (out / "0000" / "source_bag.txt").exists()
+
+
 def test_header_stamp_read_from_cdr_matches_the_deserialised_one():
     msg = _image_msg(T0 + 0.123456789, 1)
     raw = TS.serialize_cdr(msg, "sensor_msgs/msg/CompressedImage")
@@ -808,6 +827,20 @@ def test_a_sweep_recorded_while_turning_is_deskewed_onto_the_frame_clock(tmp_pat
     recorded = np.load(raw / "0000" / "clouds" / f"{k:05d}.npy")
     assert np.linalg.norm(recorded[:, :3] - want, axis=1).max() > 0.25  # 3 deg over 52 ms at 6 m
     assert json.loads((raw / "0000" / "extract_meta.json").read_text())["frames"]["deskew"] == {"mode": "off"}
+
+
+def test_a_given_time_align_deskews_onto_the_corrected_clock(tmp_path: Path):
+    """The sweep lands at the instant data_ts.txt ends up holding, not at the stamped one
+    (0.03 s at 60 deg/s is 1.8 deg: 0.19 m at the wall)."""
+    rate = math.radians(60.0)
+    write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
+    out = tmp_path / "out"
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on", "--time_align", "0.03"]) == 0
+    scene = out / "0000"
+    frame_ts = np.loadtxt(scene / "data_ts.txt")
+    k = 7
+    cloud = np.load(scene / "clouds" / f"{k:05d}.npy")
+    assert np.abs(cloud[:, :3] - _wall_in_base(frame_ts[k], rate)).max() < 0.02
 
 
 def test_a_cloud_without_per_point_time_is_written_as_recorded(bags: Path, tmp_path: Path):

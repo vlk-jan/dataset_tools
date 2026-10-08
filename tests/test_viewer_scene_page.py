@@ -522,3 +522,17 @@ def test_the_window_tables_carry_the_attitude_verdict(client):
         # The fixture's ground truth is level and so is its IMU: a green 0.0°.
         assert "median tilt gap" in text
         assert 'class="chip yes"' in text and "0.0°" in text
+
+
+def test_the_scene_page_follows_a_root_level_report_without_a_scene_change(tmp_path):
+    """validation.csv is rewritten beside a running viewer; its card must not
+    wait for the scene directory's fingerprint to move."""
+    from dataset_tools.viewer.build import SceneAccess
+    from dataset_tools.viewer.scene_page import build_scene_page
+
+    root_path = make_root(tmp_path)
+    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
+    access = SceneAccess(root, "0000")
+    assert card_of(build_scene_page(root, access), "Validation") is None
+    (root_path / "validation.csv").write_text("scene,status,errors,warnings\n0000,WARN,0,2\n")
+    assert card_of(build_scene_page(root, access), "Validation") is not None

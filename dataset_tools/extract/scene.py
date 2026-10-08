@@ -32,6 +32,7 @@ from dataset_tools.extract.pointcloud import cloud_to_xyzit, header_stamp_from_c
 from dataset_tools.extract.scene_io import (
     DERIVED_DIRS,
     GNSS_GUARD_FILE,
+    GROUND_TRUTH_FILES,
     JOINT_NAMES_FILE,
     META_FILE,
     POSE_CHECK_FILE,
@@ -86,6 +87,16 @@ def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, ba
     if forced:
         LOG.warning("%s: the measured offset ran backwards faster than the clock; forced monotonic", bag)
     return shifted, profile
+
+
+def _given_shift(args) -> float:
+    """A constant ``--time_align``, known before anything is written; 0 for ``auto``/``off``.
+
+    ``auto`` is measured from the clouds this run writes, so it can only follow them:
+    deskew and the idle trim then run on the stamped clock, exact for the Odin1
+    odometry (same unit, same latency).
+    """
+    return 0.0 if args.time_align in ("auto", "off") else float(args.time_align)
 
 
 def _columns(rows) -> tuple[np.ndarray, np.ndarray]:
@@ -162,9 +173,14 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Extraction starts from scratch; the old clock decides whether derived products still hold.
     old_clock = _digest(scene_dir / "data_ts.txt")
-    clear_scene_outputs(scene_dir, ground_truth=_auto(args.gt, args.odom))
+    clear_scene_outputs(scene_dir, ground_truth=False)
 
     p1 = _collect(reader, conns, cam_conn, lidar_conn, args)
+    # The ground truth goes only once pass 1 shows this run will rewrite it: with no
+    # odometry in the bag a regenerated odometry.txt would be deleted and not replaced.
+    if _auto(args.gt, args.odom) and p1.odom:
+        for name in GROUND_TRUTH_FILES:
+            (scene_dir / name).unlink(missing_ok=True)
     selected = _select_frames(p1, args, bag)
     if isinstance(selected, str):
         result.status = STATUS_EMPTY
@@ -184,7 +200,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         p1,
         cam_ts,
         pcd_ts,
-        frame_ts,
+        frame_ts + _given_shift(args),  # deskew onto the clock the scene will carry
         tf_graph,
         T_lidar_to_base,
         scene_dir,
@@ -241,6 +257,7 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
 
     for conn, timestamp, raw in reader.messages(relevant_conns):
         recv = timestamp * 1e-9
+        msg = None  # stays None on the stamp-only path, so the hasattr checks below see no stale message
         if id(conn) in stamp_only and id(conn) in verified:
             t = header_stamp_from_cdr(raw)
             if t is None:
@@ -388,12 +405,14 @@ def _select_frames(p1: _Pass1, args, bag: str):
         else:
             LOG.info("%s: pose guard -- %s", bag, guard_verdict.summary(float(frame_ts[0])))
 
-    # --trim_idle, before any frame is written for the same reason.
+    # --trim_idle, before any frame is written for the same reason. On the clock the scene
+    # will carry where that is known (a constant --time_align), else as stamped.
     if getattr(args, "trim_idle", None) and p1.odom:
         max_s, keep_s = args.trim_idle
-        keep, idle = idle_trim.trim(frame_ts, sorted(p1.odom, key=lambda x: x[0]), max_s, keep_s)
-        p1.counts["idle_trim"] = idle.report(float(frame_ts[0]))
-        LOG.info("%s: idle trim -- %s", bag, idle_trim.describe(idle, float(frame_ts[0])))
+        clock = frame_ts + _given_shift(args)
+        keep, idle = idle_trim.trim(clock, sorted(p1.odom, key=lambda x: x[0]), max_s, keep_s)
+        p1.counts["idle_trim"] = idle.report(float(clock[0]))
+        LOG.info("%s: idle trim -- %s", bag, idle_trim.describe(idle, float(clock[0])))
         if not keep.all():
             valid_cam_ts, valid_pcd_ts, frame_ts = valid_cam_ts[keep], valid_pcd_ts[keep], frame_ts[keep]
     return valid_cam_ts, valid_pcd_ts, frame_ts, guard_verdict
@@ -423,8 +442,12 @@ def _write_small_streams(p1: _Pass1, scene_dir: Path, bag: str) -> None:
         arr = np.vstack(p1.gps_rows)
         np.save(scene_dir / "gps.npy", arr[np.argsort(arr[:, 0])])
         LOG.info("%s: %d GNSS fixes from '%s'", bag, len(p1.gps_rows), p1.gps_topic)
+    elif p1.gps_topic and p1.gps_topic not in p1.stamps:
+        LOG.info("%s: no messages on '%s' (topic absent from the bag); gps.npy not written", bag, p1.gps_topic)
     elif p1.gps_topic:
-        LOG.info("%s: no usable fixes on '%s'; gps.npy not written", bag, p1.gps_topic)
+        LOG.info(
+            "%s: no usable fix among %d on '%s'; gps.npy not written", bag, len(p1.stamps[p1.gps_topic]), p1.gps_topic
+        )
     else:
         LOG.info("%s: no %s topic in the bag; gps.npy not written", bag, GPS_MSGTYPE)
 
@@ -599,7 +622,8 @@ def _write_frames(
                 raise ValueError(f"image {img_idx} is {ext} where the scene so far is {image_ext}")
             image_path = scene_dir / "images" / f"{img_idx:05d}{ext}"
             if image_how == "png":
-                cv2.imwrite(str(image_path), cv_img)
+                if not cv2.imwrite(str(image_path), cv_img):
+                    raise ValueError(f"image {img_idx} could not be written to {image_path}")
             else:
                 # The camera's own bytes (decoded above only to validate).
                 image_path.write_bytes(np_arr.tobytes())
@@ -613,7 +637,7 @@ def _write_frames(
             pcd_idx = idx
             # Before T_lidar_to_base, never after -- see valid_returns_mask.
             xyzi, offsets = cloud_to_xyzit(msg, t)
-            keep = valid_returns_mask(xyzi)
+            keep = valid_returns_mask(xyzi, offsets)
             xyzi = xyzi[keep]
             pcd = np.hstack((xyzi[:, :3], np.ones((len(xyzi), 1), dtype=np.float32)))
             pcd = (pcd @ T_lidar_to_base.T.astype(np.float32))[:, :3]
@@ -805,7 +829,8 @@ def _tool() -> dict:
             return None
         return run.stdout.strip() if run.returncode == 0 else None
 
-    status = git("status", "--porcelain")
+    # --no-optional-locks: N workers at once must not race for index.lock.
+    status = git("--no-optional-locks", "status", "--porcelain")
     try:
         rosbags = version("rosbags")
     except PackageNotFoundError:

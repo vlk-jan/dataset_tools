@@ -85,8 +85,10 @@
   {% endwith %}
   </div>
 
-  {# Last on the page, as on the scene page. #}
-  {% with notes_scope = "segment", note_range = [page.frames[0], page.frames[1] - 1] %}
+  {# Last on the page, as on the scene page. No pre-fill for an empty range
+     (no data_ts): value="-1" under min="0" could never submit. #}
+  {% with notes_scope = "segment",
+          note_range = [page.frames[0], page.frames[1] - 1] if page.frames[1] > page.frames[0] else none %}
     {% include "_notes.html" %}
   {% endwith %}
 

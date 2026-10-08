@@ -46,6 +46,15 @@ def test_a_frame_clock_hole_splits_a_run():
     assert len(v.runs) == 1 and v.runs[0][0] > 59  # the first 50 s run is under 60 s, the second is cut
 
 
+def test_a_stop_that_runs_to_the_end_leaves_no_orphan_frame():
+    """The last frame's window is cut short by the odometry's end; it is still part of the stop."""
+    odom = _odom([(20, 1.0, 0), (100, 0, 0)])
+    ts = np.array([t for t, _ in odom]) - 0.013  # frames sit between odometry samples
+    keep, v = idle_trim.trim(ts, odom, 60, 10)
+    assert len(v.runs) == 1 and not keep[-1]
+    assert not keep[ts > 31].any()
+
+
 def test_keep_longer_than_max_is_refused():
     with pytest.raises(ValueError):
         idle_trim.trim(np.arange(10.0), _odom([(10, 0, 0)]), 5, 10)

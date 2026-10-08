@@ -45,6 +45,7 @@ def decode(compressed_data: bytes) -> bytes:
     lib = _get_lib()
     size = lib.cldn_shim_decoded_size(compressed_data, len(compressed_data))
     if size == 0:
+        # The shim says 0 for an empty cloud too; callers skip those (pointcloud._points).
         raise ValueError("cloudini: failed to decode header")
     out = ctypes.create_string_buffer(int(size))
     written = lib.cldn_shim_decode(compressed_data, len(compressed_data), out, size)

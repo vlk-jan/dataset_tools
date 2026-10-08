@@ -42,9 +42,12 @@ def fields_to_dtype(fields, point_step: int, big_endian: bool = False) -> np.dty
 
 def _points(msg) -> np.ndarray:
     """The message's point records, one structured row per element."""
-    data = cloudini.decode(bytes(msg.compressed_data)) if hasattr(msg, "compressed_data") else bytes(msg.data)
     dtype = fields_to_dtype(msg.fields, msg.point_step, msg.is_bigendian)
-    return np.frombuffer(data, dtype=dtype, count=msg.width * msg.height)
+    n = msg.width * msg.height
+    if n == 0:  # an empty cloud: nothing to decode (the shim reports 0 bytes for it, same as a failure)
+        return np.zeros(0, dtype=dtype)
+    data = cloudini.decode(bytes(msg.compressed_data)) if hasattr(msg, "compressed_data") else bytes(msg.data)
+    return np.frombuffer(data, dtype=dtype, count=n)
 
 
 def _xyzi(points: np.ndarray) -> np.ndarray:
@@ -101,10 +104,15 @@ def _plausible_offsets(off: np.ndarray) -> bool:
     return len(finite) > 0 and float(finite.min()) >= -MAX_SWEEP_S and float(finite.max()) <= MAX_SWEEP_S
 
 
-def valid_returns_mask(xyzi: np.ndarray) -> np.ndarray:
-    """Mask off missed shots in an organised cloud: NaN rows and exact (0, 0, 0).
+def valid_returns_mask(xyzi: np.ndarray, offsets: np.ndarray | None = None) -> np.ndarray:
+    """Mask off missed shots in an organised cloud: NaN rows, exact (0, 0, 0), and
+    given per-point ``offsets``, returns whose time is not finite (deskew would put
+    them at the pose of the bag's start).
 
     Apply BEFORE transforming to base_link, or the zeros become a dense fake
     object at the mount translation (as in HELHEST v1).
     """
-    return ~np.isnan(xyzi).any(axis=1) & np.any(xyzi[:, :3] != 0, axis=1)
+    keep = ~np.isnan(xyzi).any(axis=1) & np.any(xyzi[:, :3] != 0, axis=1)
+    if offsets is not None:
+        keep &= np.isfinite(offsets)
+    return keep

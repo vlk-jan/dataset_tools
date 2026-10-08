@@ -158,8 +158,13 @@
   let photoTurn = 0;
   // Resolves once the picture has loaded or failed.
   const loaded = () => new Promise((resolve) => {
-    img.addEventListener("load", resolve, { once: true });
-    img.addEventListener("error", resolve, { once: true });
+    const done = () => {
+      img.removeEventListener("load", done);
+      img.removeEventListener("error", done);
+      resolve();
+    };
+    img.addEventListener("load", done);
+    img.addEventListener("error", done);
   });
   const setPicture = (url) => {
     // The same source again fires no load event, and would hold up following.
@@ -209,7 +214,13 @@
     const url = src.dataset.grid;
     if (!url) return;
     const turn = ++gridTurn;
-    if (!grids.has(url)) grids.set(url, fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    if (!grids.has(url)) {
+      // A failure is not kept, so a retry can fetch again.
+      const fetched = fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      grids.set(url, fetched.then((g) => { if (!g) grids.delete(url); return g; }));
+      // ponytail: a few recent frames is plenty; a Map iterates oldest first.
+      while (grids.size > 8) grids.delete(grids.keys().next().value);
+    }
     const g = await grids.get(url);
     if (!dlg.open || turn !== gridTurn) return; // closed or moved on meanwhile
     if (!g) { grid = null; cell.hidden = true; read.textContent = "no cell values for this frame"; return; }

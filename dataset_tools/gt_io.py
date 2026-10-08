@@ -69,10 +69,14 @@ def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> N
     """Write through a temp file and ``os.replace`` it in, so concurrent readers never see a partial file."""
     dest = Path(dest)
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-    with open(tmp, "w") as fh:
-        writer(fh)
-        fh.flush()
-        os.fsync(fh.fileno())
+    try:
+        with open(tmp, "w") as fh:
+            writer(fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     os.replace(tmp, dest)
 
 

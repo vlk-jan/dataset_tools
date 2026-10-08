@@ -135,7 +135,8 @@ class BuildOptions:
             max_cloud_points=int(np.clip(self.max_cloud_points, 0, 1_500_000)),
             max_hm_frames=int(np.clip(self.max_hm_frames, 0, 400)),
             max_terrain_cells=int(np.clip(self.max_terrain_cells, 1000, 2_000_000)),
-            terrain_res=float(np.clip(self.terrain_res, 0.02, 2.0)),
+            # A NaN survives clip and would round-trip through cache_key.
+            terrain_res=float(np.clip(self.terrain_res, 0.02, 2.0)) if math.isfinite(self.terrain_res) else 0.1,
             cloud_color=self.cloud_color if self.cloud_color in ("height", "intensity") else "height",
         )
 
@@ -171,11 +172,12 @@ class SceneAccess:
     """Lazily-loaded, cached handle on one scene's small per-scene files (poses,
     timestamps, proprioception); clouds, images and height maps are read per frame."""
 
-    def __init__(self, root: DatasetRoot, scene_id: str) -> None:
+    def __init__(self, root: DatasetRoot, scene_id: str, probe: SceneProbe | None = None) -> None:
         self.root = root
         self.scene_id = scene_id
         self.dir = root.scene_dir(scene_id)
-        self.probe: SceneProbe = root.probe(scene_id)
+        # A caller that just probed passes it in; probing again re-walks the scene directory.
+        self.probe: SceneProbe = probe if probe is not None else root.probe(scene_id)
         self._cache: dict[str, object] = {}
 
     def cached(self, key: str, fn):
@@ -1038,17 +1040,27 @@ def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
     if not all(k in scalars for k in need):
         return None
     err = np.asarray(scalars["attitude_error_deg"], dtype=np.float64)
+    finite = err[np.isfinite(err)]
+    if not finite.size:
+        return None
+    # JSON has no NaN (a resample gap, an IMU dropout): null, as every other series.
+    median = float(np.median(finite))
     return {
-        "gt_roll": np.round(scalars["roll_deg_gt"], 2).tolist(),
-        "gt_pitch": np.round(scalars["pitch_deg_gt"], 2).tolist(),
-        "imu_roll": np.round(scalars["roll_deg_imu"], 2).tolist(),
-        "imu_pitch": np.round(scalars["pitch_deg_imu"], 2).tolist(),
-        "error": np.round(err, 2).tolist(),
-        "median_error": round(float(np.median(err)), 2),
-        "p95_error": round(float(np.percentile(err, 95)), 2),
+        "gt_roll": _json_floats(scalars["roll_deg_gt"]),
+        "gt_pitch": _json_floats(scalars["pitch_deg_gt"]),
+        "imu_roll": _json_floats(scalars["roll_deg_imu"]),
+        "imu_pitch": _json_floats(scalars["pitch_deg_imu"]),
+        "error": _json_floats(err),
+        "median_error": round(median, 2),
+        "p95_error": round(float(np.percentile(finite, 95)), 2),
         "bands": ATTITUDE_BANDS,
-        "band": attitude_band(float(np.median(err))),
+        "band": attitude_band(median),
     }
+
+
+def _json_floats(values, decimals: int = 2) -> list[float | None]:
+    """Rounded floats with non-finite values as None."""
+    return [round(float(v), decimals) if np.isfinite(v) else None for v in np.asarray(values, dtype=np.float64)]
 
 
 def wheel_angles(access: SceneAccess, times: np.ndarray) -> np.ndarray | None:

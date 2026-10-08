@@ -21,7 +21,7 @@
   <nav class="tabs">
     <a class="tab {{ 'active' if not topic }}" href="/notes">All topics</a>
     {% for t in topics %}
-    <a class="tab {{ 'active' if t == topic }}" href="/notes?topic={{ t }}">{{ t }}</a>
+    <a class="tab {{ 'active' if t == topic }}" href="/notes?topic={{ t|urlencode }}">{{ t }}</a>
     {% endfor %}
   </nav>
   {% endif %}

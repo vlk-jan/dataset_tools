@@ -183,7 +183,8 @@ def main(argv=None) -> int:
         d = np.linalg.norm(np.diff(o[:, 1:4], axis=0), axis=1)
         dt = np.diff(o[:, 0])
         # Same teleport gate as the extractor.
-        ok = (dt > 0) & (dt < 1.0) & (d / np.maximum(dt, 1e-6) < MAX_SPEED)
+        fast = (dt > 0) & (d / np.maximum(dt, 1e-6) >= MAX_SPEED)
+        ok = (dt > 0) & (dt < 1.0) & ~fast
         v = d[ok] / dt[ok]
         tilt = np.degrees(np.arccos(np.clip([quaternion_matrix(q)[2, 2] for q in o[:, 4:8]], -1, 1)))
         lvl = tilt < 60
@@ -191,7 +192,7 @@ def main(argv=None) -> int:
             poses=len(o),
             span_s=float(o[-1, 0] - o[0, 0]),
             path_m=float(d[ok].sum()),
-            teleports=int(((d / np.maximum(dt, 1e-6)) >= MAX_SPEED).sum()),
+            teleports=int(fast.sum()),
             v_p50=float(np.median(v)) if len(v) else None,
             v_p90=float(np.percentile(v, 90)) if len(v) else None,
             stationary_frac=float((v < 0.05).mean()) if len(v) else None,

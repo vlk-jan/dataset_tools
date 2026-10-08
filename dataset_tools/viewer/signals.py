@@ -8,6 +8,7 @@ arrays cached on the scene handle.
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import numpy as np
@@ -145,7 +146,8 @@ def time_ticks(duration: float, offset: float = 0.0) -> list[dict[str, Any]]:
     """
     if duration <= 0:
         return []
-    step = next((s for s in TICK_STEPS if duration / s <= MAX_TICKS), TICK_STEPS[-1])
+    # Past the table (one bogus stamp can span years) the step grows in whole hours: still MAX_TICKS.
+    step = next((s for s in TICK_STEPS if duration / s <= MAX_TICKS), math.ceil(duration / MAX_TICKS / 3600) * 3600)
     minutes = offset + duration >= 60
     out = []
     t = np.ceil(offset / step - 1e-9) * step

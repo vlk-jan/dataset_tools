@@ -244,3 +244,19 @@ def test_a_segment_without_fixes_says_nothing_about_gnss(tmp_path):
     position, seg = segment_page.find(access, 0)
     card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
     assert value_of(card, "GNSS track") is None
+
+
+def test_a_segment_without_frame_times_does_not_prefill_an_impossible_range(tmp_path):
+    """No timestamp file: the synthetic clock misses the segment table, so the
+    frame range is empty. The compose form must then not carry a range that
+    could never submit (value="-1" under min="0", or past max)."""
+    import re
+
+    from helpers_viewer import make_root, viewer_client
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=12)
+    (root_path / "0000" / "data_ts.txt").unlink()
+    (root_path / "0000" / "pcd_ts.txt").unlink()
+    r = viewer_client(root_path, tmp_path / "cache").get("/scene/0000/segment/0")
+    assert r.status_code == 200
+    assert re.search(r'name="frame_(start|end)"[^>]*value=', r.text) is None

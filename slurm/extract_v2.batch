@@ -61,8 +61,32 @@ rc=$?
 echo "[$(date '+%F %T')] $scene extract rc=$rc"
 [ -e "$local_out/$scene/source_bag.txt" ] || { echo "$scene: no scene produced"; exit 11; }
 
+# Height maps are built in this task so they always match this run's clouds and
+# gravity_align.npy. DRIFT owns the generator; its batch takes the root as $1 and
+# the scene from SLURM_ARRAY_TASK_ID, writing into $local_out/$scene.
+DRIFT=${DRIFT:-$HOME/projects/DRIFT}
+
+# Odometry onto the cloud frame (dataset_tools.odom_frame) before the height maps.
+# Needs open3d from DRIFT's venv, run inside the image: its wheel needs a newer
+# glibc than the cpu nodes have. A scene it cannot measure keeps its odometry;
+# a measured fit that fails to apply fails the scene (apply is crash-safe, so
+# that is a real error, not a half-written scene to publish).
+O3D_PY=${O3D_PY:-$DRIFT/.venv/bin/python}
+if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
+    echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
+    of() { singularity exec $BINDS --bind "$HOME" "$SIF" env PYTHONPATH="$REPO" OMP_NUM_THREADS=8 "$O3D_PY" -m dataset_tools.odom_frame "$@"; }
+    if of measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json"; then
+        of apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" --note "applied in extract_v2.batch"
+        arc=$?
+        [ $arc -eq 0 ] || { echo "$scene: ODOM_FRAME APPLY FAILED (rc=$arc) -- not published"; exit 15; }
+    else
+        echo "$scene: WARNING odom_frame not measured -- odometry and gravity_align are the Odin1's own"
+    fi
+fi
+
 mkdir -p "$OUT/.validation"
-# A scene failing validation is not published unless FORCE_PUBLISH=1.
+# Validated after odom_frame, on the files that get published. A scene failing
+# validation is not published unless FORCE_PUBLISH=1.
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$local_out/$scene" --csv "$SCRATCH/validation.csv"
 vrc=$?
@@ -72,23 +96,6 @@ if [ $vrc -ne 0 ]; then
         exit 14
     fi
     echo "$scene: validation failed (rc=$vrc), published anyway (FORCE_PUBLISH=1)"
-fi
-
-# Height maps are built in this task so they always match this run's clouds and
-# gravity_align.npy. DRIFT owns the generator; its batch takes the root as $1 and
-# the scene from SLURM_ARRAY_TASK_ID, writing into $local_out/$scene.
-DRIFT=${DRIFT:-$HOME/projects/DRIFT}
-
-# Odometry onto the cloud frame (dataset_tools.odom_frame) before the height maps.
-# Needs open3d from DRIFT's venv, run inside the image: its wheel needs a newer
-# glibc than the cpu nodes have. A scene it cannot settle keeps its odometry.
-O3D_PY=${O3D_PY:-$DRIFT/.venv/bin/python}
-if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
-    echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
-    of() { singularity exec $BINDS --bind "$HOME" "$SIF" env PYTHONPATH="$REPO" OMP_NUM_THREADS=8 "$O3D_PY" -m dataset_tools.odom_frame "$@"; }
-    of measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" &&
-        of apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" --note "applied in extract_v2.batch"
-    [ $? -eq 0 ] || echo "$scene: WARNING odom_frame not applied -- odometry and gravity_align are the Odin1's own"
 fi
 
 HM=$DRIFT/slurm/build_heightmaps_v2_beta.batch

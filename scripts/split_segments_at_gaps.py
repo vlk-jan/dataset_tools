@@ -71,13 +71,18 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
     stats = dict(segments_in=len(segs), poses_in=len(t), **st, **seams, segments_out=len(rows))
 
     if not check:
-        if src_traj == scene / "odometry.txt":
+        if src_traj == scene / "odometry.txt" and not regen.is_symlink():
             regen.mkdir(exist_ok=True)
+            for name in (BACKUP_TRAJ, BACKUP_SEGS):
+                # A derived root links its parent's regen/ files: unlink, don't write through.
+                if (regen / name).is_symlink():
+                    (regen / name).unlink()
             shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)
             shutil.copy2(scene / "odometry_segments.txt", regen / BACKUP_SEGS)
         write_trajectory(scene / "odometry.txt", out_t, out_T)
         write_segments(scene / "odometry_segments.txt", rows)
-        record_written(scene, BACKUP_TRAJ)
+        if not regen.is_symlink():
+            record_written(scene, BACKUP_TRAJ)
     return stats
 
 
@@ -97,7 +102,7 @@ def main() -> int:
     scenes = a.scenes or [p.name for p in scene_dirs(a.root)]
     tot: dict[str, float] = {}
     print(
-        f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s}"
+        f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s} {'outside':>7s}"
     )
     for sc in scenes:
         s = split_scene(a.root / sc, a.max_gap, a.max_err, a.min_poses, a.check, a.force)
@@ -106,12 +111,12 @@ def main() -> int:
         print(
             f"{sc:5s} {s['segments_in']:3d}->{s['segments_out']:<4d} {s['poses_in']:6d}->{s['poses_out']:<6d} "
             f"{s['span_in']:6.0f}->{s['span_out']:<7.0f} {s['seams_wheel_gap']:5d} {s['seams_gap']:4d} "
-            f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d}"
+            f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d} {s['dropped_outside']:7d}"
         )
     print(
         f"TOTAL {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} {int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} "
         f"{tot['span_in']:6.0f}->{tot['span_out']:<7.0f} {int(tot['seams_wheel_gap']):5d} {int(tot['seams_gap']):4d} "
-        f"{tot['hole_s']:7.0f} {tot['ref_m_in_holes']:6.0f} {int(tot['dropped_short']):5d}"
+        f"{tot['hole_s']:7.0f} {tot['ref_m_in_holes']:6.0f} {int(tot['dropped_short']):5d} {int(tot['dropped_outside']):7d}"
         + ("  (check only, nothing written)" if a.check else "")
     )
     return 0

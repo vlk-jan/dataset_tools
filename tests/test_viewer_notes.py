@@ -353,3 +353,27 @@ def test_notes_are_the_last_box_on_the_scene_and_segment_pages(client):
         body = client.get(url).text
         main = body[: body.index("</main>")]
         assert main.index(last_before) < main.index('id="notes"')
+
+
+def test_a_write_never_replaces_a_notes_file_it_could_not_read(tmp_path):
+    """The other half of degrading to no notes: a file that reads as nothing
+    must not be saved over, or every note in the scene is gone."""
+    root_path = make_root(tmp_path, frames=12)
+    (root_path / "notes").mkdir()
+    broken = root_path / "notes" / "0000.json"
+    broken.write_text("{not json at all")
+    _, client = _notes_client(tmp_path, root_path=root_path)
+    refused = client.post("/api/scene/0000/notes", json={"frames": [0, 1], "text": "x"})
+    assert refused.status_code == 500 and "0000.json" in refused.json()["detail"]
+    assert broken.read_text() == "{not json at all"
+    assert client.get("/api/scene/0000/notes").json()["notes"] == []
+    # Only a missing file is an empty one.
+    broken.unlink()
+    assert client.post("/api/scene/0000/notes", json={"frames": [0, 1], "text": "x"}).status_code == 201
+    # json reads 1e999 as inf, and int(inf) is an OverflowError, not a ValueError.
+    raw = client.post(
+        "/api/scene/0000/notes",
+        content=b'{"frames": [1e999, 2], "text": "x"}',
+        headers={"content-type": "application/json"},
+    )
+    assert raw.status_code == 400

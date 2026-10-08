@@ -12,6 +12,7 @@ from rosbags.highlevel import AnyReader
 from rosbags.rosbag2 import Writer
 
 from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
+from dataset_tools.transforms import MIN_VALID_STAMP
 
 
 def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> int:
@@ -34,34 +35,39 @@ def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> in
     messages = []
 
     print(f"Reading messages from {input_path}...")
-    with AnyReader([input_path]) as reader:
-        typestore = reader.typestore
+    with AnyReader([input_path]) as reader, Writer(output_path, version=8) as writer:
+        # Connections first, so a schema nothing can define fails before the bag is loaded;
+        # the source's definition, hash, QoS and format carry over (/tf_static stays latched).
+        conns = {}
+        for c in reader.connections:
+            if (c.topic, c.msgtype) in conns:
+                continue
+            kw = dict(serialization_format=c.ext.serialization_format, offered_qos_profiles=c.ext.offered_qos_profiles)
+            if c.msgdef.data and c.digest:
+                kw.update(msgdef=c.msgdef.data, rihs01=c.digest)
+            else:
+                kw["typestore"] = reader.typestore
+            conns[c.topic, c.msgtype] = writer.add_connection(c.topic, c.msgtype, **kw)
 
         for connection, timestamp, rawdata in reader.messages():
+            # Readers order by the bag timestamp, so the header stamp is written there.
+            # An unset stamp (zero or boot clock) keeps the receive time, as the extractor does.
+            t = timestamp
             try:
                 msg = reader.deserialize(rawdata, connection.msgtype)
-                if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
-                    t = msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
-                else:
-                    t = timestamp
-            except Exception:
-                t = timestamp
-
+                stamp = msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
+                if stamp >= MIN_VALID_STAMP * 10**9:
+                    t = stamp
+            except Exception:  # noqa: BLE001  (no header, or undecodable: receive time)
+                pass
             messages.append((t, connection.topic, connection.msgtype, rawdata))
 
-    print(f"Loaded {len(messages)} messages. Sorting...")
-    messages.sort(key=lambda x: x[0])
+        print(f"Loaded {len(messages)} messages. Sorting...")
+        messages.sort(key=lambda x: x[0])
 
-    print(f"Writing sorted messages to {output_path}...")
-
-    with Writer(output_path, version=8) as writer:
-        topic_to_conn = {}
-
+        print(f"Writing sorted messages to {output_path}...")
         for t, topic, msgtype, rawdata in messages:
-            if topic not in topic_to_conn:
-                topic_to_conn[topic] = writer.add_connection(topic, msgtype, typestore=typestore)
-
-            writer.write(topic_to_conn[topic], t, rawdata)
+            writer.write(conns[topic, msgtype], t, rawdata)
 
     print(f"Successfully wrote sorted bag to: {output_path}")
     return len(messages)

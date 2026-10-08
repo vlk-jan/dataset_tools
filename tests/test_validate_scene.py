@@ -430,3 +430,21 @@ def test_the_keyframe_lists_are_checked_against_the_manifest_s_hold_out(tmp_path
     assert any(m.severity == vs.ERROR and "held-out scene(s) 0001" in m.text for m in msgs)
     assert any("not on disk: 0007" in m.text for m in msgs)
     assert any("does not hold out: 0000" in m.text for m in msgs)
+
+
+def test_duplicate_segment_numbers_are_an_error(scene: Path):
+    _write_gt(scene, [(100.0, 101.9, 20, "gap"), (110.0, 110.9, 10, "end_of_run")])
+    (scene / "odometry_segments.txt").write_text(
+        "# h\n1 100.000000 101.900000 20 gap\n1 110.000000 110.900000 10 end_of_run\n"
+    )
+    report = vs.validate_scene(scene)
+    assert any("not unique" in e for e in report.errors)
+
+
+def test_a_repeated_stamp_does_not_inflate_the_max_speed(scene: Path):
+    ts = np.loadtxt(scene / "data_ts.txt")
+    ts[2] = ts[1]  # 0.2 m over dt = 0 is not 200 km/s
+    np.savetxt(scene / "data_ts.txt", ts)
+    report = vs.validate_scene(scene)
+    assert not any("m/s" in w for w in report.warnings)
+    assert report.stats["max_speed_mps"] == pytest.approx(2.0)

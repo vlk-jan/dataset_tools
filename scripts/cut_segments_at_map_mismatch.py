@@ -152,7 +152,7 @@ def main() -> int:
         scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off, use_backups) for sc in scenes])
     report, tot = {}, {}
     print(
-        f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s}"
+        f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s} {'outside':>7s}"
     )
     for sc, n_win, hits in scanned:
         st = cut_scene(a.root / sc, hits, a.horizon, a.margin, a.min_poses, a.check, use_backups)
@@ -164,13 +164,14 @@ def main() -> int:
         print(
             f"{sc:5s} {n_win:7d} {len(hits):7d} {st['segments_in']:3d}->{st['segments_out']:<4d} "
             f"{st['poses_in']:6d}->{st['poses_out']:<6d} {st['span_in']:6.0f}->{st['span_out']:<7.0f} "
-            f"{st['cut_s']:6.0f} {st['dropped_short']:5d}",
+            f"{st['cut_s']:6.0f} {st['dropped_short']:5d} {st['dropped_outside']:7d}",
             flush=True,
         )
     print(
         f"TOTAL {int(tot['windows']):7d} {int(tot['flagged']):7d} {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} "
         f"{int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} {tot['span_in']:6.0f}->{tot['span_out']:<7.0f} "
-        f"{tot['cut_s']:6.0f} {int(tot['dropped_short']):5d}" + ("  (check only, nothing written)" if a.check else "")
+        f"{tot['cut_s']:6.0f} {int(tot['dropped_short']):5d} {int(tot['dropped_outside']):7d}"
+        + ("  (check only, nothing written)" if a.check else "")
     )
     if a.report:
         with open(a.report, "w") as fh:

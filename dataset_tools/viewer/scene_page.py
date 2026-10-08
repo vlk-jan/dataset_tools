@@ -42,6 +42,7 @@ from .index_page import (
 from .loaders import read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS_BY_KEY, DatasetRoot, _npy_shape
 from .signals import _speed, signal_charts
+from .splits import DECLARED_FILES
 from .windows import describe_marks, describe_reason
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
@@ -819,7 +820,9 @@ _STATE_WORD = {"yes": "present", "partial": "partial", "no": "missing", "optiona
 
 def frame_gaps(names: list[str], n_frames: int) -> list[tuple[int, int]]:
     """The runs of frame indices ``[first, last]`` with no file among ``names`` (``00123.npz``)."""
-    have = np.array([int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isdigit()], dtype=int)
+    have = np.array(
+        [int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isascii() and stem.isdigit()], dtype=int
+    )
     missing = np.ones(n_frames, dtype=np.int8)
     missing[have[have < n_frames]] = 0
     # Where "missing" switches on and off: each run's first index, then one past its last.
@@ -943,8 +946,21 @@ def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+#: Root-level files the scene page shows beside the scene's own: a change to one
+#: must show without waiting for the scene directory's fingerprint to move.
+PAGE_ROOT_FILES = (
+    "atlas/atlas.json",
+    "validation.csv",
+    "validation.json",
+    "disk_usage.json",
+    "splits.json",
+    *DECLARED_FILES,
+)
+
+
 def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
-    """Thumbnails and the cards, cached on the scene handle.
+    """Thumbnails and the cards, cached on the scene handle until one of
+    :data:`PAGE_ROOT_FILES` changes.
 
     Cached: small-array reads on network storage add up.
     """
@@ -973,7 +989,11 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             "signals": scene_signals(access),
         }
 
-    return access.cached("scene_page", work)
+    stamp = root.root_stamp(PAGE_ROOT_FILES)
+    hit = access._cache.get("scene_page")
+    if hit is None or hit[0] != stamp:
+        hit = access._cache["scene_page"] = (stamp, work())
+    return hit[1]
 
 
 def scene_signals(access: SceneAccess) -> dict[str, Any] | None:

@@ -103,3 +103,16 @@ def test_a_pass_notices_when_someone_else_rewrote_its_output(tmp_path):
     assert not gt_io.changed_since_written(scene, "backup.txt")
     gt_io.write_segments(scene / "odometry_segments.txt", [gt_io.SegmentRow(1, 1.0, 2.0, 2, "gap")])
     assert gt_io.changed_since_written(scene, "backup.txt")
+
+
+def test_a_failed_write_leaves_no_temp_file_and_the_old_file_intact(tmp_path):
+    dest = tmp_path / "odometry.txt"
+    dest.write_text("old\n")
+
+    def boom(_fh):
+        raise RuntimeError("writer died")
+
+    with pytest.raises(RuntimeError, match="writer died"):
+        gt_io._replace_atomically(dest, boom)
+    assert dest.read_text() == "old\n"
+    assert [p.name for p in tmp_path.iterdir()] == ["odometry.txt"]

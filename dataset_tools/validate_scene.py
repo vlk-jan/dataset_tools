@@ -440,9 +440,12 @@ def check_odometry(
     if ts is None or len(ts) != len(positions) or not np.isfinite(ts).all():
         return
     dt = np.diff(ts)
-    speed = steps / np.maximum(dt, 1e-6)
+    moving = dt > 0  # a repeated stamp is no speed at all
+    if not moving.any():
+        return
+    speed = steps[moving] / dt[moving]
     report.stats["max_speed_mps"] = float(np.max(speed))
-    n_fast = int(np.sum((dt > 0) & (speed > max_speed)))
+    n_fast = int(np.sum(speed > max_speed))
     if n_fast:
         report.add(
             WARNING,
@@ -516,6 +519,8 @@ def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6)
         report.add(WARNING, "GT_EMPTY", "odometry_segments.txt: no segments")
         return
     report.stats["gt_segments"] = len(rows)
+    if len({r.index for r in rows}) != len(rows):
+        report.add(ERROR, "GT_SEG_DUP", "odometry_segments.txt: segment numbers are not unique")
     ordered = sorted(rows, key=lambda r: r.start_ts)
     for prev, cur in zip(ordered, ordered[1:], strict=False):
         if cur.start_ts < prev.end_ts - atol:
@@ -702,7 +707,7 @@ def validate_scene(
     check_clouds(report, clouds, n_sample)
     if n_sample:
         check_cloud_sizes(report, clouds)
-    check_derived(report, scene_dir, counts.get("images"))
+    check_derived(report, scene_dir, counts.get("images", counts.get("data_ts.txt")))
     if transforms is not None:
         check_odometry(report, transforms, max_jump, timestamps.get("data_ts.txt"))
     if gravity is not None:

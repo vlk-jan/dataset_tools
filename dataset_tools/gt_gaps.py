@@ -165,12 +165,15 @@ def cut_segments(
 
     ``mark(ts, Ts)`` returns :func:`split_runs`' ``(seam, tags, bad)``;
     ``retag(reason, cut)`` names a kept run. Returns the kept poses, their rows,
-    and ``span_in``/``span_out``/``poses_out``/``dropped_short`` stats.
+    and ``span_in``/``span_out``/``poses_out``/``dropped_short``/``dropped_outside``
+    stats (``dropped_outside``: poses no input segment covers).
     """
     kept_ts, kept_T, rows = [], [], []
     st = dict(span_in=0.0, span_out=0.0, poses_out=0, dropped_short=0)
+    covered = np.zeros(len(t), bool)
     for seg in segs:
         idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
+        covered[idx] = True
         if len(idx) == 0:
             continue
         ts, Ts = t[idx], T[idx]
@@ -186,6 +189,7 @@ def cut_segments(
             rows.append(SegmentRow(len(rows), run_t[0], run_t[-1], len(run_t), retag(seg.reason, cut)))
             st["span_out"] += run_t[-1] - run_t[0]
             st["poses_out"] += len(run_t)
+    st["dropped_outside"] = int((~covered).sum())
     out_t = np.concatenate(kept_ts) if kept_ts else t[:0]
     out_T = np.concatenate(kept_T) if kept_T else T[:0]
     return out_t, out_T, rows, st

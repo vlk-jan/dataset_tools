@@ -366,7 +366,8 @@ def parse_frame_window_key(key: str) -> int | None:
     if not key.startswith(FRAME_KEY_PREFIX):
         return None
     tail = key[len(FRAME_KEY_PREFIX) :]
-    return int(tail) if tail.isdigit() else None
+    # ASCII only: "⑤".isdigit() is true and int() refuses it; the length cap keeps int() cheap.
+    return int(tail) if tail.isascii() and tail.isdigit() and len(tail) <= 12 else None
 
 
 def segment_of_frame(frame_ts: np.ndarray | None, segments: list[Segment], index: int) -> Segment | None:

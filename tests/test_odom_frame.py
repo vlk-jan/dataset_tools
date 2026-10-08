@@ -1,5 +1,6 @@
 import json
 import math
+import os
 
 import numpy as np
 import pytest
@@ -64,3 +65,27 @@ def test_apply_refuses_a_large_rotation(tmp_path):
     d = _scene(tmp_path, _world())
     with pytest.raises(RuntimeError, match="not a calibration residual"):
         odom_frame.apply(d, {"C": euler_matrix(0, math.radians(5), 0)[:3, :3].tolist()})
+
+
+def test_a_crash_mid_apply_still_blocks_a_rerun(tmp_path, monkeypatch):
+    """The record lands before the files are swapped in, so a half-written scene
+    refuses a second apply instead of rotating odometry.txt twice."""
+    d = _scene(tmp_path, _world())
+    fit = {"C": euler_matrix(0, math.radians(0.5), 0)[:3, :3].tolist()}
+    transforms_before = (d / "transforms.npy").read_bytes()
+    real_replace, calls = os.replace, []
+
+    def flaky(src, dst):
+        calls.append(dst)
+        if len(calls) == 2:
+            raise OSError("disk gone")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", flaky)
+    with pytest.raises(OSError, match="disk gone"):
+        odom_frame.apply(d, fit)
+    monkeypatch.undo()
+    assert (d / odom_frame.RECORD).exists()
+    assert (d / "transforms.npy").read_bytes() == transforms_before
+    with pytest.raises(RuntimeError, match="already applied"):
+        odom_frame.apply(d, fit)

@@ -450,3 +450,16 @@ def test_there_is_no_window_verdict_without_gravity_alignment_or_ground_truth(tm
     assert _window_attitude_of(make_root(tmp_path, frames=12, with_gravity=False)) is None
     (tmp_path / "raw").mkdir()
     assert _window_attitude_of(make_root(tmp_path / "raw", frames=12, segments=False), "raw") is None
+
+
+def test_the_attitude_comparison_has_no_nan_for_the_browser_to_choke_on():
+    """meta.json is parsed by the browser, whose JSON has no NaN."""
+    from dataset_tools.viewer import build
+
+    keys = ("roll_deg_gt", "pitch_deg_gt", "roll_deg_imu", "pitch_deg_imu", "attitude_error_deg")
+    scalars = {k: np.full(5, 1.0) for k in keys}
+    scalars["roll_deg_imu"][2] = scalars["attitude_error_deg"][2] = np.nan  # a resample gap
+    out = build.attitude_vs_imu(scalars)
+    assert out["imu_roll"][2] is None and out["error"][2] is None and out["median_error"] == 1.0
+    json.dumps(out, allow_nan=False)
+    assert build.attitude_vs_imu({k: np.full(3, np.nan) for k in keys}) is None

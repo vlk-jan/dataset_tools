@@ -36,6 +36,16 @@ class NotesUnavailable(RuntimeError):
     """Notes cannot be written here (disabled, or nowhere writable to put them)."""
 
 
+class NotesUnreadable(OSError):
+    """A notes file exists but cannot be read as notes, so a write must not replace it.
+
+    An ``OSError`` so the app's "could not save" path reports it.
+    """
+
+    def __init__(self, path: Path, why: str) -> None:
+        super().__init__(f"notes file {path} {why}; fix it or move it aside before writing")
+
+
 @dataclass
 class Note:
     """One note: a frame range of one scene, a topic and what was seen there.
@@ -109,7 +119,7 @@ def _note_from_json(entry: dict) -> Note | None:
         else:
             start = int(entry["frame_start"])
             end = int(entry["frame_end"])
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):  # json reads 1e999 as inf
         return None
     if start > end:
         start, end = end, start
@@ -227,10 +237,12 @@ class NoteStore:
 
     # -- reading -----------------------------------------------------------
 
-    def list(self, scene_id: str) -> list[Note]:
+    def list(self, scene_id: str, strict: bool = False) -> list[Note]:
         """Every note on a scene, in frame order. [] when there are none.
 
-        A malformed file logs a warning and reads as no notes.
+        A malformed file logs a warning and reads as no notes. With ``strict``
+        (every write path) it raises :class:`NotesUnreadable` instead, so a
+        write never replaces notes it could not read; only a missing file is empty.
         """
         if not self.enabled:
             return []
@@ -240,19 +252,25 @@ class NoteStore:
             return []
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
-                logger.warning("notes file %s is implausibly large; ignoring it", path)
-                return []
+                raise NotesUnreadable(path, "is implausibly large")
             with open(path, encoding="utf-8", errors="replace") as fh:
                 data = json.load(fh)
         except FileNotFoundError:
             return []
         except (OSError, json.JSONDecodeError) as exc:
+            if strict:
+                raise NotesUnreadable(path, f"is unreadable ({exc})") from exc
             logger.warning("cannot read notes for scene %s: %s", scene_id, exc)
             return []
         entries = data.get("notes") if isinstance(data, dict) else data
         if not isinstance(entries, list):
+            if strict:
+                raise NotesUnreadable(path, "holds no list of notes")
             return []
-        notes = [n for n in (_note_from_json(e) for e in entries if isinstance(e, dict)) if n]
+        parsed = [_note_from_json(e) if isinstance(e, dict) else None for e in entries]
+        if strict and None in parsed:
+            raise NotesUnreadable(path, "has entries this viewer cannot read")
+        notes = [n for n in parsed if n]
         notes.sort(key=lambda n: (n.frame_start, n.frame_end))
         return notes
 
@@ -346,7 +364,7 @@ class NoteStore:
             raise ValueError("a note needs some text")
         verdict = _clean_verdict(verdict)
         start, end = _clamp_range(frame_start, frame_end, n_frames)
-        notes = self.list(scene_id)
+        notes = self.list(scene_id, strict=True)
         taken = {n.id for n in notes}
         note = Note(
             id=_fresh_id(taken),
@@ -378,7 +396,7 @@ class NoteStore:
         Only the fields passed change; ``created`` and ``author`` never do.
         """
         self._require_writable()
-        notes = self.list(scene_id)
+        notes = self.list(scene_id, strict=True)
         for note in notes:
             if note.id != note_id:
                 continue
@@ -401,7 +419,7 @@ class NoteStore:
 
     def delete(self, scene_id: str, note_id: str) -> bool:
         self._require_writable()
-        notes = self.list(scene_id)
+        notes = self.list(scene_id, strict=True)
         kept = [n for n in notes if n.id != note_id]
         if len(kept) == len(notes):
             return False
@@ -419,7 +437,7 @@ def _clamp_range(start: int, end: int, n_frames: int | None) -> tuple[int, int]:
     """A usable inclusive frame range: ordered, non-negative, inside the scene."""
     try:
         start, end = int(start), int(end)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise ValueError("frame range must be two integers") from None
     if start > end:
         start, end = end, start

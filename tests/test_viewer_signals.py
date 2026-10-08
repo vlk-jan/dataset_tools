@@ -88,3 +88,8 @@ def test_the_time_axis_ticks_at_round_times_on_the_clock_it_reads():
     assert abs(ticks[0]["pct"] - 3 / 30 * 100) < 1e-9
     assert [t["label"] for t in signals.time_ticks(12.0)] == ["0 s", "2 s", "4 s", "6 s", "8 s", "10 s", "12 s"]
     assert signals.time_ticks(12.0)[-1]["edge"] == "r"
+
+
+def test_a_bogus_stamp_does_not_flood_the_time_axis():
+    ticks = signals.time_ticks(3.0e8)  # one stamp a decade off
+    assert 1 < len(ticks) <= signals.MAX_TICKS + 1

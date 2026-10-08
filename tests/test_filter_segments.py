@@ -149,3 +149,50 @@ def test_a_dense_stream_is_never_cut_by_the_gap_rules(tmp_path):
     filter_segments.main()
 
     assert [s[4] for s in _segments(out / "odometry_segments.txt")] == ["filtered:end_of_run"]
+
+
+def test_poses_no_segment_covers_are_counted(tmp_path):
+    """poses_in == poses_out + dropped_short + dropped_outside, so nothing vanishes silently."""
+    ts = np.arange(0, 20, 0.1)
+    xs = ts * 1.0
+
+    regen, out = tmp_path / "regen", tmp_path / "out"
+    regen.mkdir()
+    _write_traj(regen / "odometry.txt", ts, xs)
+    _write_traj(tmp_path / "odom_ref.txt", ts, xs)
+    with open(regen / "odometry_segments.txt", "w") as f:
+        f.write("# segment start_ts end_ts n_poses reason\n")
+        f.write(f"0 {ts[50]:.6f} {ts[-1]:.6f} {len(ts) - 50} end_of_run\n")  # the first 5 s belong to no segment
+
+    sys.argv = ["filter_segments.py", str(regen), str(tmp_path / "odom_ref.txt"), str(out)]
+    filter_segments.main()
+
+    stats = dict(line.split("=") for line in (regen / "filter_stats.txt").read_text().split())
+    assert stats["dropped_outside"] == "50"
+    assert int(stats["poses_in"]) == int(stats["poses_out"]) + int(stats["dropped_short"]) + int(
+        stats["dropped_outside"]
+    )
+
+
+def test_split_segments_at_gaps_never_writes_through_a_linked_regen(tmp_path):
+    """A derived root links its parent's regen/: the backup and the digest must not land there."""
+    _spec2 = importlib.util.spec_from_file_location(
+        "split_segments_at_gaps", REPO_ROOT / "scripts" / "split_segments_at_gaps.py"
+    )
+    split_at_gaps = importlib.util.module_from_spec(_spec2)
+    _spec2.loader.exec_module(split_at_gaps)
+
+    ts = np.concatenate([np.arange(0, 10, 0.1), np.arange(13, 23, 0.1)])  # a 3 s hole
+    parent_regen, scene = tmp_path / "parent" / "regen", tmp_path / "derived" / "0000"
+    parent_regen.mkdir(parents=True)
+    scene.mkdir(parents=True)
+    (scene / "regen").symlink_to(parent_regen)
+    _write_traj(scene / "odometry.txt", ts, ts * 1.0)
+    with open(scene / "odometry_segments.txt", "w") as f:
+        f.write("# segment start_ts end_ts n_poses reason\n")
+        f.write(f"1 {ts[0]:.6f} {ts[-1]:.6f} {len(ts)} end_of_run\n")
+
+    stats = split_at_gaps.split_scene(scene, max_gap=1.0, max_err=1.0, min_poses=20, check=False)
+
+    assert stats["segments_out"] == 2 and len(_segments(scene / "odometry_segments.txt")) == 2
+    assert list(parent_regen.iterdir()) == []

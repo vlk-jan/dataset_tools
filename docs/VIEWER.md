@@ -55,9 +55,10 @@ every scene, have windows built (which costs CPU and cache disk) and, with
 notes on, write into `<root>/notes/`. It is meant to run on the machine you sit
 at, or on a cluster node reached over an SSH tunnel (`slurm/viewer.batch` and
 `scripts/viewer_connect.sh` do exactly that), and the default bind of
-`127.0.0.1` keeps it there. A loopback bind also answers only to the `Host`
-names `127.0.0.1` and `localhost`, so a web page elsewhere cannot reach it
-through a hostname it arranged to resolve to your machine.
+`127.0.0.1` keeps it there. A loopback bind (`localhost`, `::1`, any
+`127.x.x.x`) also answers only to the `Host` names `127.0.0.1`, `localhost` and
+the address it was bound to, so a web page elsewhere cannot reach it through a
+hostname it arranged to resolve to your machine.
 
 `--host 0.0.0.0` hands the viewer to everyone on the network. Do that only on
 a network you would let write to the root, or pass `--no-notes` so nothing can
@@ -526,7 +527,10 @@ that means, which is deliberately not `windows.Window`'s convention, where
 
 The file is a person's to edit. A malformed entry drops out and the rest of the
 scene's notes still load; a topic the UI does not offer is kept verbatim,
-exactly as an unrecognised segment `reason` tag is.
+exactly as an unrecognised segment `reason` tag is. Writing is stricter: a file
+the viewer cannot read in full (bad JSON, an entry it cannot parse) refuses
+every add, edit and delete on that scene with a `500` naming the file, rather
+than replacing it with what it managed to read.
 
 **Where they are written from.** The 3D view's panel, because that is where a
 bad stretch is actually noticed — scrubbing a segment and watching the ground

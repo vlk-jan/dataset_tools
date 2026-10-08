@@ -135,8 +135,9 @@ class ViewerState:
     def access(self, scene_id: str) -> SceneAccess:
         """A cached (LRU) per-scene handle, renewed when the scene directory changed."""
         cached = self._access.pop(scene_id, None)
-        if cached is None or self.root.probe(scene_id) is not cached.probe:
-            cached = SceneAccess(self.root, scene_id)
+        probe = self.root.probe(scene_id)
+        if cached is None or probe is not cached.probe:
+            cached = SceneAccess(self.root, scene_id, probe)
         self._access[scene_id] = cached
         while len(self._access) > CACHE_SCENES:
             self._access.popitem(last=False)
@@ -245,7 +246,7 @@ def create_app(
         if not match:
             return await call_next(request)
         try:
-            fingerprint = scene_fingerprint(root.path / match.group(1))
+            fingerprint = await run_in_threadpool(scene_fingerprint, root.path / match.group(1))
         except OSError:
             return await call_next(request)  # unknown scene: the route says so
         try:
@@ -363,7 +364,7 @@ def create_app(
         tab: str = Query("windows", pattern="^(windows|frames)$"),
         page: int = Query(0, ge=0),
     ):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
         card_page = await run_in_threadpool(build_scene_page, root, access)
         # Only on its own tab: it may list a directory.
@@ -398,7 +399,7 @@ def create_app(
         page: int = Query(0, ge=0),
     ):
         """One ground-truth segment, by its number in ``odometry_segments.txt``."""
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         found = await run_in_threadpool(find_segment, access, segment_index)
         if found is None:
             raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
@@ -428,15 +429,14 @@ def create_app(
     @app.get("/scene/{scene_id}/jump")
     async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
         """The frames tab's jump box: clamp to the scene and go to that frame."""
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         last = max(0, access.probe.n_frames - 1)
         return RedirectResponse(f"/scene/{scene_id}/frame/{min(index, last)}", status_code=303)
 
     @app.get("/scene/{scene_id}/frame/{index}", response_class=HTMLResponse)
     async def frame_page(request: Request, scene_id: str, index: int):
-        access = _access_or_404(state, scene_id)
-        n_frames = access.probe.n_frames
-        if index < 0 or (n_frames and index >= n_frames):
+        access = await _access_or_404(state, scene_id)
+        if index < 0 or index >= access.probe.n_frames:
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
         details = await run_in_threadpool(_frame_details, access, index, state.max_frames, state.max_seconds)
         # None past the end of data_ts.txt: no window to offer.
@@ -465,7 +465,7 @@ def create_app(
 
     @app.get("/view/{scene_id}/{window_key}", response_class=HTMLResponse)
     async def viewer_page(request: Request, scene_id: str, window_key: str):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
         if window is None:
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
@@ -542,7 +542,7 @@ def create_app(
         ``segment`` highlights one segment over the scene as ``context``;
         ``frame`` adds a marker.
         """
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         payload = await run_in_threadpool(_gps_payload, access, segment, frame, max_points)
         if payload is None:
             raise HTTPException(404, f"scene {scene_id} has no gps.npy")
@@ -550,7 +550,7 @@ def create_app(
 
     @app.get("/api/scene/{scene_id}/frame/{index}/image.jpg")
     async def api_frame_image(scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         path = access.frame_path("images", index)
         data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
         if data is None:
@@ -563,7 +563,7 @@ def create_app(
 
         404 without ``T_cam_to_base.txt`` and ``K``, or without the image or cloud.
         """
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         if not _overlay_possible(access):
             raise HTTPException(404, f"scene {scene_id} has no camera calibration to project with")
 
@@ -596,7 +596,7 @@ def create_app(
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
         """One index thumbnail: the curated atlas file if any, else a live frame."""
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         if slot not in THUMB_SLOTS:
             raise HTTPException(404, f"no thumbnail slot {slot!r}")
         stored = root.atlas_thumb(scene_id, slot)
@@ -622,25 +622,25 @@ def create_app(
     # ``size``: tile pixel size; click-to-zoom asks for a bigger one.
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         load = functools.partial(load_npz_key, key="height_map")
         return await _npz_png(access, index, "height_maps", load, render.render_height_map, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         load = functools.partial(load_npz_key, key="validity")
         return await _npz_png(access, index, "height_masks", load, render.render_validity, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
     async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         return await _npz_png(access, index, "driven_similarity", read_driven_similarity, _render_driven, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/grid.json")
     async def api_frame_grid(scene_id: str, index: int):
         """The frame's BEV layers as numbers, for the zoomed tile's probe."""
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         grid = await run_in_threadpool(_frame_grid, access, index)
         if grid is None:
             raise HTTPException(404, f"no BEV grid for frame {index}")
@@ -648,7 +648,7 @@ def create_app(
 
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         path = access.frame_path("clouds", index)
 
         def work():
@@ -707,7 +707,7 @@ def create_app(
 
     @app.get("/api/scene/{scene_id}/notes")
     async def api_notes(scene_id: str):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return {
             "scene": scene_id,
@@ -719,7 +719,7 @@ def create_app(
 
     @app.post("/api/scene/{scene_id}/notes", status_code=201)
     async def api_add_note(scene_id: str, payload: dict = Body(...)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         note = await _notes_write(
             state,
             scene_id,
@@ -736,7 +736,7 @@ def create_app(
 
     @app.patch("/api/scene/{scene_id}/notes/{note_id}")
     async def api_edit_note(scene_id: str, note_id: str, payload: dict = Body(...)):
-        access = _access_or_404(state, scene_id)
+        access = await _access_or_404(state, scene_id)
         note = await _notes_write(
             state,
             scene_id,
@@ -755,7 +755,7 @@ def create_app(
 
     @app.delete("/api/scene/{scene_id}/notes/{note_id}")
     async def api_delete_note(scene_id: str, note_id: str):
-        _access_or_404(state, scene_id)
+        await _access_or_404(state, scene_id)
         removed = await _notes_write(state, scene_id, notes_store.delete, scene_id, note_id)
         if not removed:
             raise HTTPException(404, f"scene {scene_id} has no note {note_id!r}")
@@ -815,7 +815,7 @@ def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int, int
         if not isinstance(frames, list | tuple) or len(frames) != 2:
             raise ValueError(frames)
         return int(frames[0]), int(frames[1])
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # json reads 1e999 as inf
         raise HTTPException(400, "a note needs a frame range: frames [first, last]") from None
 
 
@@ -851,9 +851,10 @@ def _bundle_path(state: ViewerState, scene_id: str, window_key: str, opts_key: s
     return state.bundle_dir / scene_id / window_key / opts_key
 
 
-def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
+async def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
+    """The scene handle, probed in a worker thread: a stale probe re-walks the scene directory."""
     try:
-        return state.access(scene_id)
+        return await run_in_threadpool(state.access, scene_id)
     except KeyError:
         raise HTTPException(404, f"unknown scene {scene_id!r}") from None
 
@@ -948,7 +949,7 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
     """Return the on-disk bundle for a window, building it if necessary (one
     lock per bundle key, so concurrent fetches share one build)."""
     dest = _bundle_path(state, scene_id, window_key, opts_key)
-    access = _access_or_404(state, scene_id)
+    access = await _access_or_404(state, scene_id)
     window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
     data = access.probe.fingerprint
     if _bundle_is_current(dest, window, data, state.meta_memo):
@@ -969,8 +970,12 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
             meta["build"]["seconds"] = round(time.time() - started, 2)
             meta["build"]["bundle"] = info
             meta["build"]["data"] = data
-            (dest / "meta.json").write_text(json.dumps(meta))
-            _evict_bundles(state.bundle_dir, dest, state.cache_max_bytes)
+            # The browser's JSON parser rejects a bare NaN: better to fail here, in the log.
+            (dest / "meta.json").write_text(json.dumps(meta, allow_nan=False))
+            try:
+                _evict_bundles(state.bundle_dir, dest, state.cache_max_bytes)
+            except Exception:  # noqa: BLE001 - housekeeping must not fail the build it follows
+                logger.exception("cache eviction failed")
             logger.info(
                 "built %s/%s in %.1fs (%d blobs, %.1f MB)",
                 scene_id,
@@ -994,10 +999,17 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 def _evict_bundles(bundle_dir: Path, keep: Path, max_bytes: float) -> None:
     """Delete the oldest built windows until the cache is under ``max_bytes``;
     ``keep`` (the one just built) is never removed."""
-    bundles = [d for d in bundle_dir.glob("*/*/*") if d.is_dir()]
-    sizes = {d: sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) for d in bundles}
+    ages, sizes = {}, {}
+    for d in bundle_dir.glob("*/*/*"):
+        if d.name.startswith(".") or not d.is_dir():
+            continue  # a build's staging dir (wire.py mkdtemp), renamed or removed any moment
+        try:
+            ages[d] = d.stat().st_mtime
+            sizes[d] = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        except OSError:
+            continue  # gone while we looked: nothing to free
     total = sum(sizes.values())
-    for d in sorted(bundles, key=lambda d: d.stat().st_mtime):
+    for d in sorted(ages, key=ages.get):
         if total <= max_bytes:
             break
         if d == keep:

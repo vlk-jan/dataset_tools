@@ -162,3 +162,14 @@ def test_files_added_inside_a_scene_reach_the_probe_even_across_a_restart(tmp_pa
     after = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")  # reads the persisted cache
     assert after.counts["height_maps"] == before.counts["height_maps"] - 1
     assert after.fingerprint != before.fingerprint
+
+
+def test_clear_cache_removes_another_viewers_probe_tmp_file(tmp_path):
+    """The tmp name carries a pid, so two viewers on one root do not clobber each other's."""
+    root_path = make_root(tmp_path)
+    cache = tmp_path / "cache"
+    probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
+    stale = cache / f"probe_cache.{os.getpid() + 1}.tmp"
+    stale.write_text("{}")
+    probe.clear_cache_dir(cache)
+    assert not stale.exists() and not (cache / "probe_cache.json").exists()
