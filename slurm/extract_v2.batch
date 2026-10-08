@@ -131,16 +131,18 @@ DRIFT=${DRIFT:-$HOME/projects/DRIFT}
 
 # The Odin1 odometry onto the frame of its clouds (dataset_tools.odom_frame),
 # before the maps level the clouds with gravity_align.npy. The measurement is
-# ICP between clouds and needs open3d, which DRIFT's environment has and the
-# extraction image does not. A scene the measurement cannot settle (too little
-# driving) keeps its odometry as extracted and says so; its maps then carry the
+# ICP between clouds and needs open3d: DRIFT's environment has it, but its
+# wheel needs glibc 2.29 and the cpu nodes are older, so it runs inside the
+# extraction image (2026-10-08: run on the host it failed in all seven tasks of
+# array 11766786). A scene the measurement cannot settle (too little driving)
+# keeps its odometry as extracted and says so; its maps then carry the
 # few-tenths-of-a-degree tilt this step removes elsewhere.
+O3D_PY=${O3D_PY:-$DRIFT/.venv/bin/python}
 if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
     echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
-    ( cd "$DRIFT" && source .env >/dev/null && export PYTHONPATH="$REPO" OMP_NUM_THREADS=8 &&
-      python3 -m dataset_tools.odom_frame measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" &&
-      python3 -m dataset_tools.odom_frame apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" \
-          --note "applied in extract_v2.batch" )
+    of() { singularity exec $BINDS --bind "$HOME" "$SIF" env PYTHONPATH="$REPO" OMP_NUM_THREADS=8 "$O3D_PY" -m dataset_tools.odom_frame "$@"; }
+    of measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" &&
+        of apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" --note "applied in extract_v2.batch"
     [ $? -eq 0 ] || echo "$scene: WARNING odom_frame not applied -- odometry and gravity_align are the Odin1's own"
 fi
 
