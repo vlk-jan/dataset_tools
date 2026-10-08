@@ -1,6 +1,7 @@
 /*
  * Wrapper-side corrections to SimView, through `window.simview`, its events and
- * DOM. What the scene can declare itself is set in build.py instead.
+ * DOM; overlay.js applies them. What the scene can declare itself is set in
+ * build.py instead.
  */
 
 /** The wheel-odometry pose marker (see build.py's `_ghost_track`). */
@@ -24,36 +25,13 @@ export function waitForSimView(timeoutMs = 120000) {
     return Promise.race([ready, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** Apply every patch and return the handles the overlay drives them with. */
-export function installSimviewPatches(app) {
-    // A layout nicety: one that throws must not cost the overlay its handles.
-    try {
-        fitAnalysisBar(app);
-    } catch (error) {
-        console.warn("SimView patch fitAnalysisBar not applied:", error);
-    }
-
-    // The ghost is built hidden (build.py); the panel's switch shows it.
-    const ghost = app.bodies.get(GHOST_BODY);
-
-    function setGhostVisible(on) {
-        if (ghost) ghost.group.visible = !!on;
-    }
-
-    return {
-        setGhostVisible,
-        hasGhost: !!ghost,
-        terrainColorMode: () => app.uiState.terrainColorMode,
-    };
-}
-
 /**
  * Pin SimView's Analysis bar between the Body states window and the controls.
  * Measured rather than constant: panel sizes change between simview versions.
  */
 const ANALYSIS_GAP = 10;
 
-function fitAnalysisBar(app) {
+export function fitAnalysisBar(app) {
     const bar = document.querySelector(".analysis-container");
     const left = app.bodyStateWindow && app.bodyStateWindow.window;
     const right = document.querySelector(".lil-gui.root");

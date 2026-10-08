@@ -74,3 +74,22 @@
   {%- else %}<span class="muted">-</span>{% endif %}
 </td>
 {%- endmacro %}
+
+{# A note's head row: range, topic, verdict, author; the call block adds the
+   tools on the right. `named` leads with the scene (the all-notes page). #}
+{% macro note_head(n, scene_id, named=false) -%}
+<div class="notehead">
+  {% if n.orphan %}
+  <strong class="warn" title="no scene {{ scene_id }} in this root: the note file outlived the scene it was written on">{{ scene_id }}</strong>
+  {% else %}
+  {% if named %}<a href="/scene/{{ scene_id }}"><strong>{{ scene_id }}</strong></a>{% endif %}
+  <a class="chip" href="/scene/{{ scene_id }}/frame/{{ n.frame_start }}"
+     title="open the first frame of this range">{{ n.label }}</a>
+  {% endif %}
+  <span class="chip topic">{{ n.topic }}</span>
+  {% if n.verdict %}<span class="chip verdict-{{ n.verdict }}" title="the reviewer's decision about this range">{{ n.verdict }}</span>{% endif %}
+  <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
+    {%- if n.updated %} &middot; edited{% endif %}</span>
+  {{ caller() }}
+</div>
+{%- endmacro %}

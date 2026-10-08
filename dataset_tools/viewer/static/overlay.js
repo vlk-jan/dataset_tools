@@ -6,8 +6,8 @@
  * this file loads it. Patches into SimView's objects live in simview_patch.js.
  */
 
-import { ROBOT_BODY, installSimviewPatches, waitForSimView } from "./simview_patch.js";
-import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
+import { GHOST_BODY, ROBOT_BODY, fitAnalysisBar, waitForSimView } from "./simview_patch.js";
+import { keepOption, noteRequest } from "./notes_ui.js";
 
 const cfg = window.__dtViewer || {};
 
@@ -35,10 +35,6 @@ const els = {
   noteList: document.getElementById("dt-notelist"),
   noteCount: document.getElementById("dt-notes-count"),
   noteForm: document.getElementById("dt-noteform"),
-  noteFrom: document.getElementById("dt-note-from"),
-  noteTo: document.getElementById("dt-note-to"),
-  noteTopic: document.getElementById("dt-note-topic"),
-  noteText: document.getElementById("dt-note-text"),
   noteMsg: document.getElementById("dt-note-msg"),
   tiles: Array.from(document.querySelectorAll(".dt-tile")),
 };
@@ -46,11 +42,8 @@ const els = {
 let meta = null;
 let available = {};
 let lastFrame = -1;
-let lastUpdate = 0;
-/** Pending trailing update, so the last frame of a burst is still shown. */
-let trailingUpdate = null;
-/** The handles returned by installSimviewPatches, once SimView is up. */
-let patches = null;
+/** SimView once the panel is wired to it; false if that failed. */
+let sv = null;
 /** meta.attitude once the window has one: absent without gravity_align.npy. */
 let attitude = null;
 
@@ -58,18 +51,10 @@ let attitude = null;
 const legendRows = new Map();
 let lastColorMode = null;
 
-/** Minimum ms between panel updates: playback outruns the image fetches. */
-const UPDATE_INTERVAL_MS = 110;
-
 function fail(message) {
   els.build.classList.add("failed");
   els.build.classList.remove("done");
   els.buildMsg.textContent = message;
-}
-
-/** Fetch the window's metadata, which also triggers the (cached) build. */
-async function loadMeta() {
-  return (await noteRequest(cfg.metaUrl, "GET")).json();
 }
 
 /** Load SimView's own entry point, now that its data exists. */
@@ -163,18 +148,6 @@ function writeFrameToUrl(frame) {
 function update(force) {
   const app = window.simview;
   if (!app || !app.animationController || !meta) return;
-  const now = performance.now();
-  const wait = UPDATE_INTERVAL_MS - (now - lastUpdate);
-  if (!force && wait > 0) {
-    if (trailingUpdate === null) {
-      trailingUpdate = setTimeout(() => {
-        trailingUpdate = null;
-        update(false);
-      }, wait);
-    }
-    return;
-  }
-  lastUpdate = now;
 
   // SimView's states are this window's frames, one for one (build.py).
   const index = app.animationController.getCurrentStateIndex();
@@ -236,11 +209,11 @@ function showAttitude(index) {
     `${attitude.gt_pitch[index].toFixed(1)}\u00b0 GT / ${attitude.imu_pitch[index].toFixed(1)}\u00b0 IMU`;
 }
 
-/* Wire the ghost toggle to SimView, once it exists. */
-function setupViewToggles() {
-  if (!patches) return;
-  if (patches.hasGhost) els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
-  els.view.hidden = !patches.hasGhost;
+/* Wire the ghost toggle to SimView. The ghost is built hidden (build.py). */
+function setupViewToggles(app) {
+  const ghost = app.bodies.get(GHOST_BODY);
+  if (ghost) els.ghost.addEventListener("change", () => { ghost.group.visible = els.ghost.checked; });
+  els.view.hidden = !ghost;
 }
 
 /* Terrain colour-mode legend: SimView lists the modes by bare name, the
@@ -266,8 +239,8 @@ function setupLegend() {
 
 /** Highlight whichever colour mode SimView is currently drawing. */
 function syncLegendHighlight() {
-  if (!patches || legendRows.size === 0) return;
-  const mode = patches.terrainColorMode();
+  if (!sv || legendRows.size === 0) return;
+  const mode = sv.uiState.terrainColorMode;
   if (mode === lastColorMode) return;
   lastColorMode = mode;
   els.legendNow.textContent = mode || "";
@@ -301,11 +274,6 @@ function rangeOf(fromEl, toEl, fallbackLo, fallbackHi) {
   return [Math.max(0, lo), Math.max(0, hi)];
 }
 
-/** The compose form's range, falling back to the window's own edges. */
-function readNoteRange() {
-  return rangeOf(els.noteFrom, els.noteTo, cfg.frameStart, cfg.frameEnd);
-}
-
 function rangeText(lo, hi) {
   return lo === hi ? `frame ${lo}` : `frames ${lo}-${hi}`;
 }
@@ -317,15 +285,15 @@ function frameShowingNow() {
   return frame === undefined ? null : frame;
 }
 
-/** Wire a `now` button to one end of a range; both ends are written back ordered. */
-function wireNowButton(button, field, fromEl, toEl, fallbackLo, fallbackHi) {
-  button.addEventListener("click", () => {
+/** Wire a note form's `now` buttons to its range ends; both are written back ordered. */
+function wireNowButtons(form, fallbackLo, fallbackHi) {
+  const { from, to } = form.elements;
+  form.addEventListener("click", (event) => {
+    const button = event.target.closest(".dt-nowbtn");
     const frame = frameShowingNow();
-    if (frame === null) return;
-    field.value = frame;
-    const [lo, hi] = rangeOf(fromEl, toEl, fallbackLo, fallbackHi);
-    fromEl.value = lo;
-    toEl.value = hi;
+    if (!button || frame === null) return;
+    form.elements[button.dataset.act].value = frame;
+    [from.value, to.value] = rangeOf(from, to, fallbackLo, fallbackHi);
   });
 }
 
@@ -400,50 +368,26 @@ function noteTools(item, note) {
 }
 
 function noteToolButton(glyph, className, label) {
-  const button = makeButton(glyph, `dt-notebtn ${className}`);
-  button.title = label;
+  const button = document.createElement("button");
+  Object.assign(button, { type: "button", className: `dt-notebtn ${className}`, textContent: glyph, title: label });
   button.setAttribute("aria-label", label);
   return button;
 }
 
-/** In-place editor shaped like the compose form; blank ends keep the note's own. */
+/** The server-rendered editor (#dt-noteedit), filled; blank ends keep the note's own. */
 function noteEditor(note) {
-  const wrap = document.createElement("div");
-  wrap.className = "dt-note dt-noteediting";
-
-  const row = document.createElement("div");
-  row.className = "dt-noterange";
-  const from = rangeField(note.frame_start, "first frame of the range");
-  const to = rangeField(note.frame_end, "last frame of the range");
-  const fromField = document.createElement("label");
-  fromField.className = "dt-rangefield";
-  const fromNow = nowButton();
-  fromField.append("from ", from, fromNow);
-  const toField = document.createElement("label");
-  toField.className = "dt-rangefield";
-  const toNow = nowButton();
-  toField.append("to ", to, toNow);
-  wireNowButton(fromNow, from, from, to, note.frame_start, note.frame_end);
-  wireNowButton(toNow, to, from, to, note.frame_start, note.frame_end);
-
-  const topic = topicSelect((cfg.notes || {}).topics || [], note.topic);
-  row.append(fromField, toField, topic);
-
-  const text = document.createElement("textarea");
-  text.rows = 2;
+  const form = document.getElementById("dt-noteedit").content.firstElementChild.cloneNode(true);
+  const { from, to, topic, text } = form.elements;
+  from.value = note.frame_start;
+  to.value = note.frame_end;
+  keepOption(topic, note.topic);
   text.value = note.text;
-  text.setAttribute("aria-label", "note text");
+  wireNowButtons(form, note.frame_start, note.frame_end);
+  const msg = form.querySelector(".dt-hint");
 
-  const actions = document.createElement("div");
-  actions.className = "dt-noteactions";
-  const msg = document.createElement("span");
-  msg.className = "dt-hint";
-  const save = makeButton("Save", "dt-rangebtn dt-save");
-  const cancel = makeButton("Cancel", "dt-rangebtn");
-  actions.append(msg, save, cancel);
-
-  cancel.addEventListener("click", () => wrap.replaceWith(renderNote(note)));
-  save.addEventListener("click", async () => {
+  form.querySelector('[data-act="cancel"]').addEventListener("click", () => form.replaceWith(renderNote(note)));
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
     const body = text.value.trim();
     if (!body) {
       msg.textContent = "a note needs some text";
@@ -466,20 +410,7 @@ function noteEditor(note) {
     els.noteMsg.textContent = `saved on ${rangeText(lo, hi)}`;
     await reloadNotes();
   });
-
-  wrap.append(row, text, actions);
-  return wrap;
-}
-
-function rangeField(value, label) {
-  // Upper bound borrowed from the compose form, which the server renders.
-  return frameField(value, label, els.noteFrom && els.noteFrom.max);
-}
-
-function nowButton() {
-  const button = makeButton("now", "dt-nowbtn");
-  button.title = "Set this end to the frame showing now";
-  return button;
+  return form;
 }
 
 let notesTurn = 0;
@@ -487,9 +418,7 @@ let notesTurn = 0;
 /** Fetch and render the list; a response overtaken by a newer request is dropped. */
 async function loadNotes() {
   const turn = ++notesTurn;
-  const response = await fetch(cfg.notesUrl, { cache: "no-store" });
-  if (!response.ok) throw new Error(`${response.status}`);
-  const data = await response.json();
+  const data = await (await noteRequest(cfg.notesUrl, "GET")).json();
   if (turn !== notesTurn) return;
   renderNotes(data.notes || []);
 }
@@ -517,27 +446,26 @@ async function setupNotes() {
 
   if (!status.writable) return;
 
-  for (const button of els.noteForm.querySelectorAll(".dt-nowbtn[data-act]")) {
-    const field = button.dataset.act === "from" ? els.noteFrom : els.noteTo;
-    wireNowButton(button, field, els.noteFrom, els.noteTo, cfg.frameStart, cfg.frameEnd);
-  }
+  const compose = els.noteForm.elements;
+  wireNowButtons(els.noteForm, cfg.frameStart, cfg.frameEnd);
 
   els.noteForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const text = els.noteText.value.trim();
+    const text = compose.text.value.trim();
     if (!text) {
       els.noteMsg.textContent = "A note needs some text.";
       return;
     }
     els.noteMsg.textContent = "saving…";
-    const frames = readNoteRange();
+    // Blank ends fall back to the window's own edges.
+    const frames = rangeOf(compose.from, compose.to, cfg.frameStart, cfg.frameEnd);
     try {
-      await noteRequest(cfg.notesUrl, "POST", { frames, topic: els.noteTopic.value, text });
+      await noteRequest(cfg.notesUrl, "POST", { frames, topic: compose.topic.value, text });
     } catch (error) {
       els.noteMsg.textContent = `could not save: ${error.message}`;
       return;
     }
-    els.noteText.value = "";
+    compose.text.value = "";
     els.noteMsg.textContent = `saved on ${rangeText(...frames)}`;
     await reloadNotes();
   });
@@ -676,9 +604,9 @@ function restoreCarriedView(app) {
     state = null;
   }
   if (!state) return true;
-  // The panel's own ghost switch is wired once the patches are in (null: not
-  // yet; false: they failed, so apply what does not need them and stop).
-  if (!app.uiControls || patches === null) return false;
+  // The panel's own ghost switch is wired once `sv` is set (null: not yet;
+  // false: wiring failed, so apply what does not need it and stop).
+  if (!app.uiControls || sv === null) return false;
   try {
     sessionStorage.removeItem(CARRY_KEY);
   } catch {
@@ -727,7 +655,8 @@ function setupPanel() {
 async function main() {
   setupPanel();
   try {
-    meta = await loadMeta();
+    // Also triggers the window's (cached) build.
+    meta = await (await noteRequest(cfg.metaUrl, "GET")).json();
   } catch (error) {
     fail(`Could not build this window: ${error.message}`);
     return;
@@ -780,14 +709,20 @@ async function main() {
   startSimView();
   openInitialView();
 
-  // Patches need SimView's UI built; a failure must not take the panel down.
+  // Needs SimView's UI built; a failure must not take the panel down.
   try {
-    patches = installSimviewPatches(await waitForSimView());
-    setupViewToggles();
+    const app = await waitForSimView();
+    try {
+      fitAnalysisBar(app);
+    } catch (error) {
+      console.warn("SimView's Analysis bar was not fitted:", error);
+    }
+    setupViewToggles(app);
+    sv = app;
     syncLegendHighlight();
   } catch (error) {
-    patches = false;
-    console.warn("SimView patches were not applied:", error);
+    sv = false;
+    console.warn("the panel was not wired to SimView:", error);
   }
 }
 

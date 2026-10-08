@@ -189,7 +189,6 @@ def write_splits(
     note: str | None = None,
     root: str | None = None,
     dataset_version: str | None = None,
-    labels: dict | None = None,
     windows: dict | None = None,
 ) -> Path:
     """The root-level ``splits.json`` as DRIFT's ``dump_split.py`` writes it.
@@ -209,8 +208,6 @@ def write_splits(
         data["root"] = root
     if dataset_version is not None:
         data["dataset_version"] = dataset_version
-    if labels is not None:
-        data["labels_per_scene"] = dict(labels)
     if windows is not None:
         data["windows_per_scene"] = {k: dict(v) for k, v in windows.items()}
     path = root_path / "splits.json"

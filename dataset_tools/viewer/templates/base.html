@@ -7,17 +7,33 @@
 <link rel="icon" href="/viewer-static/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/viewer-static/style.css">
 <script src="/viewer-static/theme.js"></script>
+{# Pages set map_on / signals_on / notes_on for the scripts they need. #}
+{% if map_on %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
 {% block head %}{% endblock %}
 </head>
 <body{% block body_class %}{% endblock %}>
 <a class="skip" href="#main">Skip to content</a>
 <header>
 {% block header %}{% endblock %}
+<button type="button" class="theme-toggle" title="Switch between the light and dark theme" aria-label="Toggle dark/light theme">
+  <svg class="sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+  <svg class="moon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+</button>
 </header>
 <main id="main">
 {% if data_problem %}<p class="databanner" role="alert">{{ data_problem }}</p>{% endif %}
 {% block main %}{% endblock %}
 </main>
 {% block scripts %}{% endblock %}
+{# notes.js imports swap.js anyway; the tabs and pagers use it too. #}
+{% if notes_on %}
+<script type="module" src="/viewer-static/notes.js"></script>
+<script type="module" src="/viewer-static/swap.js"></script>
+{% endif %}
+{% if signals_on %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
+{% if map_on %}
+<script src="/viewer-static/vendor/leaflet.js"></script>
+<script type="module" src="/viewer-static/map.js"></script>
+{% endif %}
 </body>
 </html>

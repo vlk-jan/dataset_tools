@@ -1,51 +1,27 @@
-/* Palette tokens: Catppuccin Latte (light, default) and Mocha (dark, set by
-   theme.js). The 3D view's panel and zoom are always dark, over SimView. */
+/* Palette tokens: Catppuccin Latte (light) and Mocha (dark), picked by
+   color-scheme: the OS unless theme.js sets data-theme. The 3D view's panel
+   and zoom are always dark, over SimView. light-dark() in a custom property
+   resolves where it is used, so the washes below follow the element's scheme. */
 :root {
-  color-scheme: light;
-  --bg: #e6e9ef;        /* mantle */
-  --panel: #eff1f5;     /* base */
-  --panel-2: #dce0e8;   /* crust */
-  --line: #bcc0cc;      /* surface1 */
-  --line-2: #acb0be;    /* surface2 */
-  --fg: #4c4f69;        /* text */
-  --fg-2: #5c5f77;      /* subtext1 */
-  --muted: #6c6f85;     /* subtext0 */
-  --faint: #8c8fa1;     /* overlay1 */
-  --accent: #1e66f5;    /* blue */
-  --ok: #40a02b;
-  --warn: #fe640b;      /* peach, as the web page's warning colour */
-  --caution: #df8e1d;   /* yellow */
-  --bad: #d20f39;
-  /* Train/val: deliberately not status colours, a split is not a verdict. */
-  --val: #8839ef;
-  --train: #209fb5;
-  /* Timeline groove; image backdrop. */
-  --track: #ccd0da;     /* surface0 */
-  --shade: #dce0e8;     /* crust */
-}
-:root[data-theme="dark"], #dt-panel, .dt-build, .dt-zoom {
-  color-scheme: dark;
-  --bg: #181825;        /* mantle */
-  --panel: #1e1e2e;     /* base */
-  --panel-2: #313244;   /* surface0 */
-  --line: #45475a;      /* surface1 */
-  --line-2: #585b70;    /* surface2 */
-  --fg: #cdd6f4;
-  --fg-2: #bac2de;
-  --muted: #a6adc8;
-  --faint: #7f849c;
-  --accent: #89b4fa;
-  --ok: #a6e3a1;
-  --warn: #fab387;
-  --caution: #f9e2af;
-  --bad: #f38ba8;
-  --val: #cba6f7;
-  --train: #74c7ec;
-  --track: #313244;
-  --shade: #11111b;     /* crust */
-}
-/* Derived washes, declared wherever the hues are redefined so they recompute. */
-:root, #dt-panel, .dt-build, .dt-zoom {
+  color-scheme: light dark;
+  --bg: light-dark(#e6e9ef, #181825);
+  --panel: light-dark(#eff1f5, #1e1e2e);
+  --panel-2: light-dark(#dce0e8, #313244);
+  --line: light-dark(#bcc0cc, #45475a);
+  --line-2: light-dark(#acb0be, #585b70);
+  --fg: light-dark(#4c4f69, #cdd6f4);
+  --fg-2: light-dark(#5c5f77, #bac2de);
+  --muted: light-dark(#6c6f85, #a6adc8);
+  --faint: light-dark(#8c8fa1, #7f849c);
+  --accent: light-dark(#1e66f5, #89b4fa);
+  --ok: light-dark(#40a02b, #a6e3a1);
+  --warn: light-dark(#fe640b, #fab387);
+  --caution: light-dark(#df8e1d, #f9e2af);
+  --bad: light-dark(#d20f39, #f38ba8);
+  --val: light-dark(#8839ef, #cba6f7);
+  --train: light-dark(#209fb5, #74c7ec);
+  --track: light-dark(#ccd0da, #313244);
+  --shade: light-dark(#dce0e8, #11111b);
   --ok-soft: color-mix(in srgb, var(--ok) 18%, var(--panel));
   --train-soft: color-mix(in srgb, var(--train) 18%, var(--panel));
   --accent-soft: color-mix(in srgb, var(--accent) 22%, var(--panel));
@@ -54,6 +30,8 @@
   --bad-line: color-mix(in srgb, var(--bad) 45%, var(--panel));
   --accent-line: color-mix(in srgb, var(--accent) 55%, var(--panel));
 }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"], #dt-panel, .dt-build, .dt-zoom { color-scheme: dark; }
 
 /* Type and spacing. */
 :root {
@@ -79,7 +57,8 @@
   --sp-8: 64px;
 }
 
-/* The toggle theme.js puts at the end of a page's header. */
+/* The theme toggle at the end of a page's header (base.html): it shows the
+   theme a click switches to. Drawn, not typed: ☀/☾ are missing from many fonts. */
 .theme-toggle {
   margin-left: auto; align-self: center;
   width: 32px; height: 32px; padding: 0; border-radius: 6px; cursor: pointer;
@@ -88,3 +67,4 @@
 }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-theme="dark"] .theme-toggle .moon, :root:not([data-theme="dark"]) .theme-toggle .sun { display: none; }

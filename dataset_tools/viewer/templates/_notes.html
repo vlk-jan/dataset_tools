@@ -1,12 +1,31 @@
 {# Reviewer-notes card (scene, segment, frame pages), always rendered.
    `notes` to show, `notes_scope` what they're about, `note_range` pre-fills
    the compose form. #}
+{% import "_macros.html" as ui %}
 {% set scope = notes_scope | default("scene") %}
-  <div class="card notes" id="notes"
-       data-scene="{{ scene_id }}"
-       data-frames="{{ probe.n_frames }}"
-       data-topics="{{ notes_status.topics | join(',') }}"
-       data-verdicts="{{ (notes_status.verdicts or []) | join(',') }}">
+{# The range, topic and verdict fields, for the compose form and the editor. #}
+{% macro note_fields(range=none) -%}
+        <label>frames
+          <input type="number" name="frame_start" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" required
+                 {% if range %}value="{{ range[0] }}"{% endif %}></label>
+        <label>to
+          <input type="number" name="frame_end" min="0" max="{{ probe.n_frames - 1 }}"
+                 inputmode="numeric" required
+                 {% if range %}value="{{ range[1] }}"{% endif %}></label>
+        <label>topic
+          <select name="topic">
+            {% for t in notes_status.topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+        </label>
+        <label title="what should happen to this range, if you have decided">verdict
+          <select name="verdict">
+            <option value="">none</option>
+            {% for v in notes_status.verdicts or [] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+          </select>
+        </label>
+{%- endmacro %}
+  <div class="card notes" id="notes" data-scene="{{ scene_id }}">
     <header>
       <h2>Notes</h2>
       <span class="scount">{{ notes | length }}</span>
@@ -27,20 +46,14 @@
       {# Stored values for the inline editor, not the rendered label. #}
       <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
           data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}" data-verdict="{{ n.verdict }}">
-        <div class="notehead">
-          <a class="chip" href="/scene/{{ scene_id }}/frame/{{ n.frame_start }}"
-             title="open the first frame of this range">{{ n.label }}</a>
-          <span class="chip topic">{{ n.topic }}</span>
-          {% if n.verdict %}<span class="chip verdict-{{ n.verdict }}" title="the reviewer's decision about this range">{{ n.verdict }}</span>{% endif %}
-          <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
-            {%- if n.updated %} &middot; edited{% endif %}</span>
+        {% call ui.note_head(n, scene_id) %}
           {% if notes_status.writable %}
           <span class="notetools">
             <button type="button" class="linkbtn" data-act="edit">edit</button>
             <button type="button" class="linkbtn" data-act="delete">delete</button>
           </span>
           {% endif %}
-        </div>
+        {% endcall %}
         <p class="notetext">{{ n.text }}</p>
       </li>
       {% endfor %}
@@ -57,31 +70,24 @@
     <form class="noteform" id="noteform">
       <div class="noterow">
         {# Pre-filled on a segment page; empty on the scene page. #}
-        <label>frames
-          <input type="number" name="frame_start" min="0" max="{{ probe.n_frames - 1 }}"
-                 inputmode="numeric" required
-                 {% if note_range %}value="{{ note_range[0] }}"{% endif %}></label>
-        <label>to
-          <input type="number" name="frame_end" min="0" max="{{ probe.n_frames - 1 }}"
-                 inputmode="numeric" required
-                 {% if note_range %}value="{{ note_range[1] }}"{% endif %}></label>
-        <label>topic
-          <select name="topic">
-            {% for t in notes_status.topics %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-          </select>
-        </label>
-        <label title="what should happen to this range, if you have decided">verdict
-          <select name="verdict">
-            <option value="">none</option>
-            {% for v in notes_status.verdicts or [] %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-          </select>
-        </label>
+        {{ note_fields(note_range) }}
         <button class="btn primary" type="submit">Save note</button>
       </div>
       <textarea name="text" rows="2" required
                 placeholder="What did you see? e.g. GT jumps sideways at 1250 and never recovers."></textarea>
       <p class="notemsg" hidden></p>
     </form>
+    {# A note's inline editor, cloned and filled by notes.js. #}
+    <template id="noteedit">
+      <form class="noteedit">
+        <div class="noterow">{{ note_fields() }}</div>
+        <textarea name="text" rows="3" required aria-label="note text"></textarea>
+        <div class="noteeditactions">
+          <button class="btn primary" type="submit">Save</button>
+          <button class="btn" type="button" data-act="cancel">Cancel</button>
+        </div>
+      </form>
+    </template>
     <p class="cardnote">
       Saved to <code>{{ notes_status.dir }}</code>, one file per scene. Both
       frame numbers are included in the range. You can also write a note while

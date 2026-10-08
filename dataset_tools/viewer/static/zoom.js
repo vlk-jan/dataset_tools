@@ -1,7 +1,79 @@
 // Click-to-zoom dialog for `.zoomable` pictures. `data-zoom` names a larger
 // render; `data-grid` makes it a cell probe (hover reads, click pins, arrows
 // walk). The camera photo magnifies instead: wheel, drag, double click.
+// Also the frame page's "Cloud on image" button, which shares setPhoto.
 (() => {
+  // Swap an image's source, letting go of the object URL it had; resolves once decoded or failed.
+  const setSrc = (img, src) => {
+    if (img.src.startsWith("blob:") && img.src !== src) URL.revokeObjectURL(img.src);
+    img.src = src;
+    return img.decode().catch(() => {});
+  };
+  // Fill a .depthlegend, or hide it when there is no range to state.
+  const showLegend = (legend, range) => {
+    if (!legend) return;
+    legend.hidden = !range;
+    if (!range) return;
+    // The far end is the 98th percentile, hence "+".
+    legend.querySelector("[data-near]").textContent = `${range[0].toFixed(1)} m`;
+    legend.querySelector("[data-far]").textContent = `${range[1].toFixed(1)} m+`;
+  };
+  // Cloud-on-image picture plus its depth range, from the X-Depth-Range header
+  // (fetched, since an <img> can't read headers).
+  const loadCloud = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${r.status} for ${url}`);
+    const range = (r.headers.get("X-Depth-Range") || "").split(" ").map(Number);
+    return {
+      src: URL.createObjectURL(await r.blob()),
+      range: range.length === 2 && range.every(Number.isFinite) ? range : null,
+    };
+  };
+  // Show `cloud` with its legend, else `plain`; the newest call per image wins.
+  // Resolves true / false for which one is showing, undefined when overtaken.
+  const turns = new WeakMap();
+  const bump = (img) => {
+    const turn = (turns.get(img) ?? 0) + 1;
+    turns.set(img, turn);
+    return () => turns.get(img) !== turn;
+  };
+  const setPhoto = async (img, legend, plain, cloud) => {
+    const stale = bump(img);
+    if (cloud) {
+      try {
+        const overlay = await loadCloud(cloud);
+        if (stale()) return URL.revokeObjectURL(overlay.src);
+        showLegend(legend, overlay.range);
+        await setSrc(img, overlay.src);
+        return true;
+      } catch {}
+    }
+    if (stale()) return;
+    showLegend(legend, null);
+    await setSrc(img, plain);
+    return false;
+  };
+
+  // The frame page's toggle. Off on every page load: it is a check to make on
+  // purpose, and the overlay is only fetched once it is asked for.
+  const pageCloud = document.getElementById("cloudtoggle");
+  const bigframe = document.getElementById("bigframe");
+  if (pageCloud && bigframe) {
+    const cap = document.getElementById("cloudcap");
+    const pageLegend = bigframe.parentElement.querySelector(".depthlegend");
+    const mark = (on) => {
+      bigframe.alt = bigframe.alt.replace(/, lidar cloud.*$/, "") + (on ? ", lidar cloud projected into the camera image" : "");
+      pageCloud.setAttribute("aria-pressed", on);
+      cap.hidden = !on;
+    };
+    pageCloud.addEventListener("click", async () => {
+      const on = pageCloud.getAttribute("aria-pressed") !== "true";
+      mark(on);
+      const shown = await setPhoto(bigframe, pageLegend, bigframe.dataset.plain, on ? pageCloud.dataset.cloud : null);
+      if (on && shown === false) mark(false);
+    });
+  }
+
   const dlg = document.getElementById("zoom");
   if (!dlg) return;
   const img = dlg.querySelector(".zoomstage img");
@@ -143,49 +215,24 @@
   // Cloud toggle: on the frame page it presses the page's own button; on the
   // 3D view (no page button) the dialog keeps the choice and uses data-cloud.
   const zoomCloud = document.getElementById("zoomcloud");
-  const pageCloud = document.getElementById("cloudtoggle");
-  const bigframe = document.getElementById("bigframe");
-  // The photo at full width: raise or add w=.
-  const fullSize = (url) =>
-    /[?&]w=\d+/.test(url) ? url.replace(/([?&]w=)\d+/, "$11920") : `${url}${url.includes("?") ? "&" : "?"}w=1920`;
+  // The photo at full width.
+  const fullSize = (url) => {
+    const u = new URL(url, location.href);
+    u.searchParams.set("w", "1920");
+    return u.href;
+  };
   let ownCloud = false;
   const cloudOn = () => (pageCloud ? pageCloud.getAttribute("aria-pressed") === "true" : ownCloud);
   let current = null;
-  // Plain or cloud photo plus depth legend (depthlegend.js); newest request wins.
   const legend = dlg.querySelector(".depthlegend");
   const plainOf = (src) => fullSize(src.dataset.plain ?? src.src);
   const cloudOf = (src) => (pageCloud ? fullSize(pageCloud.dataset.cloud) : src.dataset.cloud);
-  let photoTurn = 0;
-  // Resolves once the picture has loaded or failed.
-  const loaded = () => new Promise((resolve) => {
-    const done = () => {
-      img.removeEventListener("load", done);
-      img.removeEventListener("error", done);
-      resolve();
-    };
-    img.addEventListener("load", done);
-    img.addEventListener("error", done);
-  });
-  const setPicture = (url) => {
-    // The same source again fires no load event, and would hold up following.
-    if (new URL(url, location.href).href === img.src) return Promise.resolve();
-    const done = loaded();
-    dtDepth.setSrc(img, url);
-    return done;
-  };
-  const showPhoto = async (src) => {
-    const turn = ++photoTurn;
-    if (cloudOn() && cloudOf(src)) {
-      try {
-        const overlay = await dtDepth.load(cloudOf(src));
-        if (turn !== photoTurn) return URL.revokeObjectURL(overlay.src);
-        dtDepth.show(legend, overlay.range);
-        return setPicture(overlay.src);
-      } catch {}
-    }
-    if (turn !== photoTurn) return;
-    dtDepth.show(legend, null);
-    return setPicture(plainOf(src));
+  const showPhoto = (src) => setPhoto(img, legend, plainOf(src), cloudOn() ? cloudOf(src) : null);
+  // A bird's-eye render: no legend, and a photo still loading must not land on it.
+  const setRender = (url) => {
+    bump(img);
+    showLegend(legend, null);
+    return setSrc(img, url);
   };
   zoomCloud?.addEventListener("click", () => {
     if (pageCloud) {
@@ -245,10 +292,9 @@
         title.textContent = src.alt.replace(/, lidar cloud.*$/, "");
         img.alt = src.alt;
         if (src.dataset.zoom) {
-          photoTurn += 1;
           if (src.dataset.grid) grids.clear(); // one frame's grid at a time, not the whole run
           loadGrid(src);
-          await setPicture(src.dataset.zoom);
+          await setRender(src.dataset.zoom);
         } else {
           if (zoomCloud) zoomCloud.hidden = !pageCloud && !src.dataset.cloud;
           await showPhoto(src);
@@ -278,11 +324,7 @@
     current = src;
     shownKey = keyOf(src);
     if (photo) showPhoto(src);
-    else {
-      photoTurn += 1; // a photo still loading must not land on this picture
-      dtDepth.setSrc(img, src.dataset.zoom);
-      dtDepth.show(legend, null);
-    }
+    else setRender(src.dataset.zoom);
     if (zoomCloud) {
       zoomCloud.hidden = !photo || (!pageCloud && !src.dataset.cloud);
       zoomCloud.setAttribute("aria-pressed", String(cloudOn()));

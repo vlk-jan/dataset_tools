@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}Notes - dataset viewer{% endblock %}
 {% block header %}
   <h1><a href="/">Dataset viewer</a> / notes</h1>
@@ -32,21 +33,11 @@
     <ul class="notelist">
       {% for n in group.notes %}
       <li>
-        <div class="notehead">
-          {% if n.orphan %}
-          <strong class="warn" title="no scene {{ n.scene }} in this root: the note file outlived the scene it was written on">{{ n.scene }}</strong>
-          {% else %}
-          <a href="/scene/{{ n.scene }}"><strong>{{ n.scene }}</strong></a>
-          <a class="chip" href="/scene/{{ n.scene }}/frame/{{ n.frame_start }}"
-             title="open the first frame of this range">{{ n.label }}</a>
-          {% endif %}
-          <span class="chip topic">{{ n.topic }}</span>
-          <span class="muted">{{ n.author }}{% if n.created %} &middot; {{ n.created[:10] }}{% endif %}
-            {%- if n.updated %} &middot; edited{% endif %}</span>
+        {% call ui.note_head(n, n.scene, named=true) %}
           {% if n.view_url %}
           <a class="btn notetools" href="{{ n.view_url }}" title="the 3D view of the window holding this stretch, opened on its first frame">Open 3D</a>
           {% endif %}
-        </div>
+        {% endcall %}
         <p class="notetext">{{ n.text }}</p>
       </li>
       {% endfor %}

@@ -51,7 +51,7 @@ def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
     view = client.get("/view/0000/seg000").text
     assert '<form class="dt-noteform" id="dt-noteform">' in view
     assert '<option value="odometry">odometry</option>' in view
-    assert re.search(r'id="dt-note-from" min="0" max="11" value="\d+"', view)
+    assert re.search(r'name="from" min="0" max="11" value="\d+"', view)
     assert "Saved to " in view
 
     edited = client.patch(f"/api/scene/0000/notes/{note['id']}", json={"text": "and never recovers"})
@@ -153,7 +153,7 @@ def test_the_frame_page_shows_the_notes_whose_range_holds_the_frame(tmp_path):
 
 def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
     """The editor reads range and topic from data attributes, not the rendered label,
-    and its topic list comes from the card, compose form or not."""
+    into a server-rendered copy of the compose fields."""
     _, client = _notes_client(tmp_path)
     client.post(
         "/api/scene/0000/notes",
@@ -162,7 +162,8 @@ def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
     page = client.get("/scene/0000").text
     assert 'data-frame-start="3"' in page and 'data-frame-end="7"' in page
     assert 'data-topic="camera"' in page
-    assert 'data-topics="odometry,camera,event,other"' in page
+    editor = page[page.index('<template id="noteedit">') :]
+    assert '<option value="other">other</option>' in editor and 'name="verdict"' in editor
 
 
 def test_the_view_page_hands_the_overlay_its_notes_endpoint_and_range(client):
@@ -178,9 +179,10 @@ def test_the_overlay_range_ends_are_typeable_fields(client):
     """Pinning an end to the playhead is the quick path, not the only one: a
     range read off a plot or a previous note has to be typeable."""
     page = client.get("/view/0000/seg000").text
-    assert 'id="dt-note-from"' in page and 'id="dt-note-to"' in page
+    assert 'name="from"' in page and 'name="to"' in page
     assert page.count('type="number"') >= 2
-    assert page.count('class="dt-nowbtn"') == 2
+    # The compose form's two, and the editor template's.
+    assert page.count('class="dt-nowbtn"') == 4
 
 
 def test_a_read_only_root_still_reads_its_notes_but_refuses_new_ones(tmp_path):

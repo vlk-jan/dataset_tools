@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 {% import "_macros.html" as ui %}
 {% block title %}Scene {{ scene_id }} segment {{ seg.index }} - dataset viewer{% endblock %}
-{% block head %}
-{% if page.map %}<link rel="stylesheet" href="/viewer-static/vendor/leaflet.css">{% endif %}
-{% endblock %}
+{% set map_on, signals_on, notes_on = page.map, page.signals, true %}
 {% block header %}
   <h1><a href="/">Dataset viewer</a> / <a href="/scene/{{ scene_id }}">scene {{ scene_id }}</a>
     / segment {{ seg.index }}</h1>
@@ -92,13 +90,4 @@
     {% include "_notes.html" %}
   {% endwith %}
 
-{% endblock %}
-{% block scripts %}
-<script type="module" src="/viewer-static/notes.js"></script>
-<script type="module" src="/viewer-static/swap.js"></script>
-{% if page.signals %}<script type="module" src="/viewer-static/charts.js"></script>{% endif %}
-{% if page.map %}
-<script src="/viewer-static/vendor/leaflet.js"></script>
-<script type="module" src="/viewer-static/map.js"></script>
-{% endif %}
 {% endblock %}

@@ -2,7 +2,7 @@
 
 /** JSON API request; throws with the server's `detail` when there is one. */
 export async function noteRequest(url, method, body) {
-  const init = { method, headers: { "Content-Type": "application/json" } };
+  const init = { method, cache: "no-store", headers: { "Content-Type": "application/json" } };
   if (body !== undefined) init.body = JSON.stringify(body);
   const response = await fetch(url, init);
   if (!response.ok) {
@@ -16,37 +16,8 @@ export async function noteRequest(url, method, body) {
   return response;
 }
 
-/** Topic picker; an unknown current topic is kept as an option, not rewritten. */
-export function topicSelect(topics, current) {
-  const select = document.createElement("select");
-  const names = topics.slice();
-  if (current && !names.includes(current)) names.unshift(current);
-  for (const name of names) {
-    const option = document.createElement("option");
-    option.value = option.textContent = name;
-    option.selected = name === current;
-    select.append(option);
-  }
-  select.setAttribute("aria-label", "topic");
-  return select;
-}
-
-/** One frame-number field of an editor's range; `max` is the last frame, if known. */
-export function frameField(value, label, max) {
-  const input = document.createElement("input");
-  input.type = "number";
-  input.min = "0";
-  if (max != null && max !== "") input.max = String(max);
-  input.inputMode = "numeric";
-  input.value = String(value);
-  input.setAttribute("aria-label", label);
-  return input;
-}
-
-export function makeButton(text, className) {
-  const el = document.createElement("button");
-  el.type = "button";
-  el.className = className;
-  el.textContent = text;
-  return el;
+/** Select `value`; one the picker doesn't offer is kept as an option, not rewritten. */
+export function keepOption(select, value) {
+  if (![...select.options].some((o) => o.value === value)) select.add(new Option(value, value), 0);
+  select.value = value;
 }

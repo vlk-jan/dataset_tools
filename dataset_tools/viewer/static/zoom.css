@@ -40,7 +40,7 @@ button.btn { font: inherit; cursor: pointer; }
 /* width 0 + min-width 100% and a fixed min-height, so the readout never
    resizes the dialog as the pointer moves. */
 .zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
-/* Depth legend (depthlegend.js) over the picture box's corner, so it stays put
+/* Depth legend (zoom.js) over the picture box's corner, so it stays put
    while zooming. Turbo ramp, as render.LUTS. */
 .photobox { position: relative; }
 .depthlegend {

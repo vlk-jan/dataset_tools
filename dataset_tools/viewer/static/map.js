@@ -31,14 +31,6 @@ function marker(latlng, cls, title) {
   });
 }
 
-/** Whether a bounding box is large enough to fit a view to. */
-function hasExtent(bounds) {
-  if (!bounds) return false;
-  const [[s, w], [n, e]] = bounds;
-  const mid = ((s + n) / 2) * (Math.PI / 180);
-  return Math.hypot((n - s) * 111320, (e - w) * 111320 * Math.cos(mid)) > STANDING_STILL_M;
-}
-
 async function draw(el) {
   let data;
   try {
@@ -89,15 +81,14 @@ async function draw(el) {
   }
 
   const focus = track.length ? track : context;
-  if (hasExtent(data.bounds)) {
+  const box = data.bounds && L.latLngBounds(data.bounds);
+  if (box && box.getSouthWest().distanceTo(box.getNorthEast()) > STANDING_STILL_M) {
     /* Fit a stretch inside a scene less tightly, so the backdrop stays useful. */
     const maxZoom = context.length ? 17 : MAX_TILE_ZOOM;
-    map.fitBounds(L.latLngBounds(data.bounds), { padding: [24, 24], maxZoom });
+    map.fitBounds(box, { padding: [24, 24], maxZoom });
   } else if (focus.length) {
     map.setView(data.marker || focus[0], STANDING_STILL_ZOOM);
   }
-  /* Never past the tile server's deepest zoom. */
-  if (map.getZoom() > MAX_TILE_ZOOM) map.setZoom(MAX_TILE_ZOOM);
 }
 
 document.querySelectorAll("[data-map]").forEach(draw);
