@@ -1,32 +1,18 @@
 #!/usr/bin/env python3
 """Post-hoc filter for a regenerated, segmented odometry.txt.
 
-The divergence detector cannot judge the first seconds after a FAST-LIO
-restart, so degenerate stretches leave short segments whose poses are wrong
-but were never flagged. This pass checks every segment after the fact against
-the robot's live /odom over short windows, drops the poses that disagree,
-splits the remainder into runs, keeps runs long enough to matter and
-re-anchors each run at its first pose.
-
-The window test cannot see a HOLE -- FAST-LIO publishing nothing for seconds to
-minutes while the robot drives on -- because no window closes inside it. So
-every consecutive pose pair is also judged as a gap (``dataset_tools.gt_gaps``):
-the run is cut where the live odometry travelled more than --max-err further
-across the gap than the GT pose moved (tag ``wheel_gap``), or where the gap is
-longer than --max-gap regardless (tag ``gap``).
+Checks each segment against the robot's live /odom over short windows, drops the
+poses that disagree, and re-anchors each remaining run at its first pose. Pose
+gaps are also cut (``dataset_tools.gt_gaps``): where /odom moved more than
+--max-err further than the GT (``wheel_gap``), or the gap exceeds --max-gap (``gap``).
 
     filter_segments.py <regen_dir> <odom_ref.txt> <out_dir> [--window 2.0]
                        [--max-err 1.0] [--min-poses 20] [--max-gap 1.0]
 
 Reads  <regen_dir>/odometry.txt and odometry_segments.txt (run_scene.sh output)
 Writes <out_dir>/odometry.txt            filtered runs, each anchored at identity
-       <out_dir>/odometry_segments.txt   "segment start_ts end_ts n_poses reason",
-                                         the reason naming why that run ENDED:
-                                         the input segment's tag for the run
-                                         that reaches its end, `odom_mismatch`
-                                         for a run this filter cut short
-       <regen_dir>/filter_stats.txt      key=value summary (the pre-filter
-                                         trajectory already lives in regen_dir)
+       <out_dir>/odometry_segments.txt   "segment start_ts end_ts n_poses reason" (why the run ended)
+       <regen_dir>/filter_stats.txt      key=value summary
 Prints one FILTER line: poses_in poses_out segments_in segments_out span_in span_out
 """
 
@@ -84,11 +70,7 @@ def main():
             hole_s += ts[k + 1] - ts[k]
         return seam, tags, bad_poses(ts, Ts, rt, rT, a.window, a.max_err)
 
-    # The input tag says why the input segment ENDED, so only the run that
-    # reaches that end inherits it; every earlier run ends where this filter
-    # cut it, which is a different reason and its own tag. Without the
-    # distinction a segment could read "the recording ended" 97 s before the
-    # recording ended (scene 0000, seg 7).
+    # Only the run reaching the input segment's end inherits its tag; earlier runs get the cut's.
     out_t, out_T, kept_segs, st = cut_segments(
         t, T, segs, mark, lambda reason, cut: f"filtered:{reason if cut is None else cut}", a.min_poses
     )

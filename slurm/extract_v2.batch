@@ -8,71 +8,33 @@
 #SBATCH --partition=cpu
 #SBATCH --output=slurm/slurm_out/v2_%A_%a.out
 #
-# HELHEST v2 (new rig: Odin1 + Fixposition) extraction, ONE BAG PER ARRAY TASK,
-# through to the height maps -- a finished scene leaves this script, not a scene
-# that still needs a second job run over it. 16 CPUs because of that last stage:
-# the extraction itself is --jobs 1 and IO-bound, the map build is not.
-#
-# Staged entirely on node-local NVMe so the shared NFS is touched only for the
-# sif, the repo, and one final rsync of the finished scene. No FAST-LIO stage,
-# unlike the v1 regeneration: the new rig ships its own
-# ground truth (/odin1/odometry, checked against /fixposition/odometry_enu), so
-# no --lidar_extrinsic is needed - the Odin mount extrinsic is in tf_static from
-# 2026-09-02 onwards (docs/NEW_RIG_READINESS.md §4).
-#
-# Nothing about timing is set here. The Odin1 stamps at publish rather than at
-# capture, so its headers are late by its own pipeline latency - ~0.69 s, and
-# not even constant within one bag - and the extractor measures that against
-# the clouds it has just written and takes it off the frame clock itself
-# (--time_align auto, the default). Each scene carries the measurement it was
-# corrected by in time_align.txt. Background: docs/NEW_RIG_READINESS.md §6,
-# "The Odin1 stamps late".
-#
-# Nothing about the GNSS is set here either. When the Fixposition loses its fix
-# - which is what rolling the robot over does - it keeps publishing odometry at
-# full rate, filled with a position hundreds of metres away held perfectly
-# still, and nothing in the recording flags it. --gnss_guard auto finds those
-# stretches and removes them, along with the frames they leave without a pose,
-# so a scene may come out shorter than its bag. The same stage drops frames the
-# pose stream never covered - before it starts, after it ends, or inside a hole
-# too wide to interpolate across - which would otherwise be exported carrying
-# the nearest sample: a stationary pose under a moving image. Recorded per scene
-# in gnss_guard.txt; the holes read as 'fix_lost' in odometry_segments.txt.
+# HELHEST v2 (Odin1 + Fixposition) extraction, one bag per array task, through
+# to the height maps. Staged on node-local NVMe; NFS is touched only for the sif,
+# the repo and the final rsync. Timing (--time_align auto) and the GNSS guard
+# (--gnss_guard auto) are the extractor's defaults; see docs/NEW_RIG_READINESS.md.
 #
 #   sbatch --array=0-8%4  slurm/extract_v2.batch [out_root]     # 26-09-02
 #   sbatch --array=9-16%4 slurm/extract_v2.batch [out_root]     # 26-09-08
 #   CSV=docs/v2_0_bags.csv sbatch --array=0-N%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_0
 #
-# Array index = row number in the bag list ($CSV, docs/v2_bags.csv by default;
-# 0-based) = scene number. A scene whose <out_root>/<scene>/source_bag.txt
-# exists exits immediately, so re-submitting resumes. %4 limits concurrent fetches - subtdata sustains
-# ~50 MB/s aggregate; more jobs only starve each other.
-#
-# FORCE=1 re-extracts a scene that is already complete (--overwrite). Height
-# maps are rebuilt in the same task, from the clouds and the gravity_align.npy
-# this run just wrote, so a re-extraction can no longer leave a scene whose maps
-# belong to the run before it.
+# Array index = 0-based row of $CSV (docs/v2_bags.csv by default) = scene number.
+# A scene with source_bag.txt is skipped, so re-submitting resumes. %4: subtdata
+# sustains ~50 MB/s aggregate. FORCE=1 re-extracts (--overwrite):
 #
 #   FORCE=1 sbatch --array=0-16%4 slurm/extract_v2.batch
-#
-# Which bags a list leaves out, and why, is docs/V2_0_SELECTION.md's business.
 set -uo pipefail
 
 OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
-# Submit from the repository root (see slurm/README.md): slurm runs a copy of
-# this file from its spool, so the checkout is found through the submit
-# directory rather than through $0, and --output above is relative to it too.
+# Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-# The bag list is what makes a root: row = scene number. v2 beta was built
-# from docs/v2_bags.csv; a root with a different selection passes its own.
 CSV=${CSV:-$REPO/docs/v2_bags.csv}
 
 read_row
 scene=$(echo "$row" | cut -d, -f1)
 FORCE=${FORCE:-0}
 if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
-    # Complete, but from which bag? A changed bag list puts another bag here.
+    # Refuse if a changed bag list now puts another bag at this index.
     held=$(cat "$OUT/$scene/source_bag.txt")
     if [ "$held" = "$(basename "$bagdir")" ]; then
         echo "$scene already complete"; exit 0
@@ -100,8 +62,7 @@ echo "[$(date '+%F %T')] $scene extract rc=$rc"
 [ -e "$local_out/$scene/source_bag.txt" ] || { echo "$scene: no scene produced"; exit 11; }
 
 mkdir -p "$OUT/.validation"
-# A scene that fails validation is not published over the root's copy;
-# FORCE_PUBLISH=1 publishes it anyway (and says so).
+# A scene failing validation is not published unless FORCE_PUBLISH=1.
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$local_out/$scene" --csv "$SCRATCH/validation.csv"
 vrc=$?
@@ -113,30 +74,14 @@ if [ $vrc -ne 0 ]; then
     echo "$scene: validation failed (rc=$vrc), published anyway (FORCE_PUBLISH=1)"
 fi
 
-# Height maps + validity masks, in this task, against the clouds and the
-# gravity_align.npy this task just wrote. They used to be a separate submission
-# in DRIFT, which meant every re-extraction left a root whose maps belonged to
-# the run before it -- maps are clouds rotated by gravity_align.npy, so a change
-# in timing or in which frames exist silently invalidates them.
-#
-# DRIFT still owns the generator: it defines the map format, the parameters
-# every published map was built with, and the known-answer gate that refuses to
-# run if it cannot reproduce existing maps from existing clouds. So this calls
-# DRIFT's own batch as a plain script rather than restating its settings here --
-# there is one definition of what a height map is, and it is not in this repo.
-# It takes the root as $1 and the scene from SLURM_ARRAY_TASK_ID, the same index
-# this script uses, and publishes into $local_out/$scene, so the maps travel out
-# on the publish rsync below with everything else.
+# Height maps are built in this task so they always match this run's clouds and
+# gravity_align.npy. DRIFT owns the generator; its batch takes the root as $1 and
+# the scene from SLURM_ARRAY_TASK_ID, writing into $local_out/$scene.
 DRIFT=${DRIFT:-$HOME/projects/DRIFT}
 
-# The Odin1 odometry onto the frame of its clouds (dataset_tools.odom_frame),
-# before the maps level the clouds with gravity_align.npy. The measurement is
-# ICP between clouds and needs open3d: DRIFT's environment has it, but its
-# wheel needs glibc 2.29 and the cpu nodes are older, so it runs inside the
-# extraction image (2026-10-08: run on the host it failed in all seven tasks of
-# array 11766786). A scene the measurement cannot settle (too little driving)
-# keeps its odometry as extracted and says so; its maps then carry the
-# few-tenths-of-a-degree tilt this step removes elsewhere.
+# Odometry onto the cloud frame (dataset_tools.odom_frame) before the height maps.
+# Needs open3d from DRIFT's venv, run inside the image: its wheel needs a newer
+# glibc than the cpu nodes have. A scene it cannot settle keeps its odometry.
 O3D_PY=${O3D_PY:-$DRIFT/.venv/bin/python}
 if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
     echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
@@ -160,10 +105,7 @@ fi
 
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene ($(du -sh "$local_out/$scene" | cut -f1))"
 mkdir -p "$OUT"
-# --delete, because the node-local scene is the whole truth about this scene.
-# The pose guard can remove frames (dataset_tools.gnss_guard), so a re-extraction
-# may produce FEWER frames than the run before it; merging would leave the tail
-# of the old run behind, under indices that now mean different moments.
+# --delete: a re-extraction may have fewer frames; stale tail frames must go.
 rsync -a --delete "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 12; }
 cp -f "$SCRATCH/validation.csv" "$OUT/.validation/$scene.csv" 2>/dev/null
 echo "[$(date '+%F %T')] $scene finished rc=$rc"

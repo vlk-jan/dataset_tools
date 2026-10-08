@@ -1,11 +1,6 @@
-/**
- * The pieces the two notes editors share: the scene page's card (notes.js)
- * and the 3D view's panel (overlay.js).
- */
+/** Shared by the notes editors in notes.js and overlay.js. */
 
-/** One request to the viewer's JSON API (a note mutation, the 3D view's
- *  meta.json). Throws carrying the server's own reason, which is the
- *  useful half of a refusal ("this root is not writable", not "403"). */
+/** JSON API request; throws with the server's `detail` when there is one. */
 export async function noteRequest(url, method, body) {
   const init = { method, headers: { "Content-Type": "application/json" } };
   if (body !== undefined) init.body = JSON.stringify(body);
@@ -21,14 +16,7 @@ export async function noteRequest(url, method, body) {
   return response;
 }
 
-/**
- * The topic picker, opened on the note's own topic.
- *
- * A topic the server no longer offers is kept as an option rather than
- * silently rewritten to the first one in the list -- the store renders an
- * unknown topic verbatim (notes.TOPICS), and an edit to a note's text should
- * not quietly retag it.
- */
+/** Topic picker; an unknown current topic is kept as an option, not rewritten. */
 export function topicSelect(topics, current) {
   const select = document.createElement("select");
   const names = topics.slice();

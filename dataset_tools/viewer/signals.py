@@ -1,21 +1,8 @@
-"""The time series a scene or segment page plots: what the robot did, over time.
+"""Time-series charts for a scene or segment page, on one shared time axis.
 
-The cards above a page reduce every array to a mean and a max; the 3D view
-plots them, but only per window and only once a window is built. This is the
-reading in between -- the whole scene (or segment) on one shared time axis, so
-a slope, a stall, a wheel that stopped tracking its command, a receiver that
-lost its fix or a burst of dropped frames can be *found* before anything is
-opened. Hovering reads every chart at one instant; a click opens that frame.
-
-Each chart is resampled onto the same ``BINS`` columns spanning ``[t0, t1]``:
-the mean of the samples in a column, or where a column holds none, the value
-interpolated between the samples either side -- unless those sit more than
-``MAX_GAP`` apart, which is a hole in the recording and is drawn as one. One
-chart per unit: two measures never share a y-axis.
-
-The reading budget is the pages': small per-scene arrays already cached on the
-scene handle, never clouds, images or height maps. Nothing is rig-specific;
-wheel speeds and efforts stay in the file's own units.
+Each chart is resampled onto ``BINS`` columns (column mean, else interpolated
+unless the gap exceeds ``MAX_GAP``). One chart per unit. Reads only the small
+arrays cached on the scene handle.
 """
 
 from __future__ import annotations
@@ -172,19 +159,14 @@ def time_ticks(duration: float, offset: float = 0.0) -> list[dict[str, Any]]:
 
 
 def _speed(ts: np.ndarray, xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Speed between consecutive positions (any number of columns), at their midpoints; sub-millisecond steps are dropped."""
+    """Speed between consecutive positions, at their midpoints; sub-ms steps dropped."""
     dt = np.diff(ts)
     ok = dt > 1e-3
     return (ts[1:][ok] + ts[:-1][ok]) / 2, np.linalg.norm(np.diff(xy, axis=0), axis=1)[ok] / dt[ok]
 
 
 def _gt_speed(access: SceneAccess, t0: float, t1: float) -> tuple[np.ndarray, np.ndarray] | None:
-    """Ground-truth ground speed, differentiated inside each segment only.
-
-    Speed is a difference of two poses, so it is meaningful within a segment
-    whatever that segment was anchored to -- and meaningless across a boundary,
-    so no step is ever taken between two segments.
-    """
+    """Ground-truth speed, differentiated inside each segment, never across a boundary."""
     odom = access.odometry
     if odom is None:
         return None
@@ -224,11 +206,8 @@ def signal_charts(
 ) -> dict[str, Any] | None:
     """Every chart the scene can offer over ``[t0, t1]``, or None if none.
 
-    Returns the charts plus, per column, the frame nearest its centre -- what a
-    click opens -- and (with ``shade``) the ground-truth segments to shade
-    behind them, as percentages of the width. ``offset`` is where ``t0`` sits on
-    the clock the time axis is labelled in (s): 0 when the charts start where
-    that clock does, the frame's distance into the scene on a frame page.
+    Also returns the frame nearest each column (what a click opens) and, with
+    ``shade``, segment spans in % of the width. ``offset`` labels ``t0`` on the axis (s).
     """
     if not (np.isfinite(t0) and np.isfinite(t1)) or t1 <= t0:
         return None
@@ -257,10 +236,7 @@ def signal_charts(
     if js is not None and np.ndim(js) == 2 and js.shape[1] >= 10:
         sp = access.joint_setpoints
         has_sp = sp is not None and np.ndim(sp) == 2 and sp.shape[1] >= 7
-        # One chart per wheel, on one shared y-range so the three read against each other.
-        # Each in its wheel's colour from the effort chart below (left s1, rear s2,
-        # right s3), so a wheel is one colour on every chart; measured and
-        # commanded are told apart by the dash, as the note says.
+        # One chart per wheel on a shared y-range, each in its effort-chart colour.
         per_wheel = [
             [{"label": "measured", "cls": f"s{k + 1}", "values": resample(js[:, 0], js[:, 4 + k], t0, t1)}]
             + (

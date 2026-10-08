@@ -1,17 +1,8 @@
-"""Serving a built scene to the SimView front-end without running SimView's server.
+"""Serving a built scene to SimView's front-end in its static mode.
 
-SimView's front-end normally fetches ``/model``, ``/states`` and ``/blob/...``
-from its own app, rooted at ``/`` and so unmountable under a prefix. But it has
-a documented static mode: with ``window.__simviewStaticBase`` set, every fetch
-goes to ``{base}/model.json``, ``{base}/states.json`` and ``{base}/blob/{id}``
-(SimView.js ``loadData`` / ``fetchBlobs``) -- the mode its own GitHub Pages demo
-uses. SimView writes those flat files itself
-(``simview.columnar.write_static_bundle``); this module builds the document in
-memory and moves the bundle into place atomically.
-
-Standalone blob files are not just size: the viewer range-requests them to
-window long trajectories, and files on disk get byte-range support from
-Starlette for free.
+With ``window.__simviewStaticBase`` set, the front-end fetches
+``{base}/model.json``, ``{base}/states.json`` and ``{base}/blob/{id}``, which
+Starlette serves with byte-range support.
 """
 
 from __future__ import annotations
@@ -27,12 +18,8 @@ logger = logging.getLogger("dataset_tools.viewer.wire")
 def scene_document(scene) -> dict:
     """The saved-scene document for a built :class:`SimulationScene`, in memory.
 
-    What ``scene.save(path)`` would write, without the detour through a file.
-    The important part is ``columnarize_states``: ``add_trajectory`` leaves
-    ``scene.states`` as one dict per frame with a small blob per body, so
-    splitting that yields thousands of tiny blobs and as many requests. The
-    columnar layout packs each body's whole trajectory into one blob -- tens
-    per scene, and the layout windowed range-fetching relies on.
+    What ``scene.save(path)`` would write. States are columnarised: one blob
+    per body instead of thousands of per-frame ones, which range-fetching relies on.
     """
     from simview.columnar import columnarize_states, inline_blob
 
@@ -50,11 +37,8 @@ def scene_document(scene) -> dict:
 def write_static_bundle(doc: dict, dest: Path) -> dict:
     """Write ``model.json``, ``states.json`` and ``blob/N`` under ``dest``.
 
-    The layout is SimView's own (``simview.columnar.write_static_bundle``,
-    which decodes every inline ``__b64__`` payload into ``blob/N``). What this
-    adds is the atomic move: the bundle is written to a sibling temporary
-    directory and moved into place, so a reader never sees a half-written
-    bundle and two concurrent builds of the same window cannot interleave.
+    SimView's own layout, written to a sibling temp dir and moved into place so
+    readers never see a half-written bundle and concurrent builds cannot interleave.
     """
     import os
     import shutil
@@ -88,21 +72,14 @@ def render_viewer_page(
 ) -> str:
     """Render SimView's own ``index.html`` against our asset and data URLs.
 
-    The template ships inside the installed ``simview`` package and is read at
-    request time rather than copied, so the page always matches whatever
-    SimView version is installed -- including its import map and whichever
-    third-party libraries that version vendors. Only two things are added: the
-    ``__simviewStaticBase`` declaration (before the module script runs, which
-    is what the front-end requires) and our own overlay markup.
+    Read from the installed package at request time so it always matches that
+    SimView version; adds ``__simviewStaticBase`` (before the module script) and our markup.
     """
     from importlib.resources import files
 
     template = (files("simview") / "templates" / "index.html").read_text()
 
-    # SimView refers to its assets page-relatively ("./static/..."), which
-    # from /view/<scene>/<window> would resolve under /view/<scene>/; point
-    # them at our versioned mount instead. Anything SimView loads from inside
-    # its modules resolves against the module's own URL, so needs nothing.
+    # Page-relative "./static/" would resolve under /view/<scene>/; point it at our mount.
     page = template.replace('"./static/', f'"{static_prefix.rstrip("/")}/')
 
     if title is not None:

@@ -15,11 +15,7 @@ from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
 
 
 def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> int:
-    """Sort ROS2 bag messages by timestamp.
-
-    Every message is held in memory until the last one has been read, so the
-    machine needs RAM for the whole bag; the tool is meant for the odd
-    recording whose order is wrong, not for a pipeline.
+    """Sort ROS2 bag messages by header timestamp (whole bag held in memory).
 
     Args:
         input_path: Path to the input bag (directory or mcap file).
@@ -42,35 +38,29 @@ def sort_bag(input_path: Path, output_path: Path, overwrite: bool = False) -> in
         typestore = reader.typestore
 
         for connection, timestamp, rawdata in reader.messages():
-            # Deserialization is needed to check for header timestamps
             try:
                 msg = reader.deserialize(rawdata, connection.msgtype)
-                # Prefer header timestamp if present (nanoseconds)
                 if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
                     t = msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec
                 else:
                     t = timestamp
             except Exception:
-                # Fallback to bag timestamp if deserialization fails
                 t = timestamp
 
             messages.append((t, connection.topic, connection.msgtype, rawdata))
 
     print(f"Loaded {len(messages)} messages. Sorting...")
-    # Sort by the determined timestamp
     messages.sort(key=lambda x: x[0])
 
     print(f"Writing sorted messages to {output_path}...")
 
     with Writer(output_path, version=8) as writer:
-        # Create connections in the new bag
         topic_to_conn = {}
 
         for t, topic, msgtype, rawdata in messages:
             if topic not in topic_to_conn:
                 topic_to_conn[topic] = writer.add_connection(topic, msgtype, typestore=typestore)
 
-            # Write the raw data directly to avoid unnecessary re-serialization
             writer.write(topic_to_conn[topic], t, rawdata)
 
     print(f"Successfully wrote sorted bag to: {output_path}")

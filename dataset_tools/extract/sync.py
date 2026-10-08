@@ -26,17 +26,9 @@ def interpolate_poses(
 ) -> tuple[np.ndarray, int]:
     """Pose at each query time: linear in translation, SLERP in rotation.
 
-    Nearest-neighbour lookup onto a 10 Hz stream quantises every frame by up to
-    half a sample period -- 50 ms, which is 5 cm at 1 m/s. Interpolating removes
-    that, but only where interpolating means something. The nearest sample is
-    used instead when the query is outside the sample range, when the bracketing
-    samples are more than ``max_gap`` apart, or when the bracket implies a speed
-    above ``max_speed`` -- a GNSS teleport, where blending the two sides would
-    fabricate a pose the robot never held. ``max_speed`` matches the gate
-    :func:`~dataset_tools.extract.ground_truth.write_ground_truth` breaks segments on, so the two agree about which
-    steps are real motion.
-
-    Returns the poses and how many of them were interpolated rather than copied.
+    Falls back to the nearest sample outside the range, across gaps over
+    ``max_gap``, or across a bracket faster than ``max_speed`` (a teleport).
+    Returns the poses and how many were interpolated.
     """
     query = np.asarray(query_ts, dtype=float)
     ts = np.asarray(sample_ts, dtype=float)
@@ -59,15 +51,7 @@ def interpolate_poses(
 def sync_timestamps(
     cam_timestamps: Sequence[float], lidar_timestamps: Sequence[float]
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Mutual nearest-neighbour match between camera and lidar timestamps.
-
-    Both inputs are sorted first (bags may contain out-of-order messages). A
-    pair is kept only if each stamp is the other's nearest neighbour, which
-    drops frames that have no counterpart. Uses ``searchsorted``, so memory
-    stays O(n) instead of the O(n*m) full distance matrix.
-
-    Returns the matched (camera, lidar) timestamps, in chronological order.
-    """
+    """Mutual nearest-neighbour match of (sorted) camera and lidar stamps, chronological."""
     cam_ts = np.sort(np.asarray(cam_timestamps, dtype=float))
     pcd_ts = np.sort(np.asarray(lidar_timestamps, dtype=float))
     if len(cam_ts) == 0 or len(pcd_ts) == 0:

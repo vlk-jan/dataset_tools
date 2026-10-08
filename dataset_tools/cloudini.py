@@ -1,6 +1,5 @@
-"""ctypes wrapper for libcloudini_shim.so -- decodes cloudini-compressed point
-clouds (point_cloud_interfaces/msg/CompressedPointCloud2, as produced by the
-Odin1 unit on HELHEST). Build the shim with cloudini_shim/build_shim.sh."""
+"""ctypes wrapper for libcloudini_shim.so, decoding the Odin1's cloudini-compressed
+CompressedPointCloud2. Build the shim with cloudini_shim/build_shim.sh."""
 
 import ctypes
 import functools
@@ -19,11 +18,7 @@ def _get_lib():
     try:
         lib = ctypes.CDLL(str(_LIB_PATH))
     except OSError as exc:
-        # Almost always an ABI floor, not a missing file: the .so records
-        # the glibc of its build machine and refuses to load on anything
-        # older. The committed binary was built on Ubuntu 22.04 (glibc
-        # 2.35) and needs GLIBC_2.32 / GLIBCXX_3.4.30; a host on an older
-        # glibc (2.28, say) cannot load it and has to rebuild.
+        # Usually a glibc floor: the committed binary (Ubuntu 22.04) needs GLIBC_2.32 / GLIBCXX_3.4.30.
         raise RuntimeError(
             f"could not load {_LIB_PATH}: {exc}\n"
             "If this mentions a GLIBC/GLIBCXX version, the shim was built "

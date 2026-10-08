@@ -41,9 +41,7 @@ def save_intrinsics(reader, conns, cam_topic: str, scene_dir: Path) -> bool:
     for _, _, raw in reader.messages([conn]):
         msg = reader.deserialize(raw, conn.msgtype)
         np.savetxt(scene_dir / "camera_intrinsics.txt", np.array(msg.k).reshape(3, 3))
-        # The full CameraInfo: v1 scenes kept only K and lost the distortion
-        # coefficients, so anything that needs undistortion has to go back to the
-        # bags. Write everything, in ROS camera_info_manager YAML layout.
+        # The full CameraInfo too (v1 kept only K and lost the distortion).
         write_camera_info_yaml(msg, scene_dir / "camera_info.yaml")
         return True
     LOG.warning("camera_info topic %s carries no messages", conn.topic)
@@ -76,9 +74,7 @@ def write_camera_info_yaml(msg, path: Path) -> None:
 def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> bool:
     """Write T_cam_to_base.txt: p_base = T @ p_cam_optical, from the static TF.
 
-    v1 scenes instead carry a hand-entered ``T_cam_to_lidar.txt`` expressed in
-    the RAW lidar frame; the two conventions differ by the lidar mount X and
-    (empirically) 4.5 cm of x, so the file is named by its target frame.
+    (v1's hand-entered ``T_cam_to_lidar.txt`` uses the raw lidar frame instead.)
     """
     if not cam_frame:
         return False

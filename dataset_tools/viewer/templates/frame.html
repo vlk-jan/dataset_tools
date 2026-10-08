@@ -48,10 +48,8 @@
         </div>
         {% endif %}
         </div>
-        {# The calibration check: this frame's cloud on this frame's picture,
-           swapped in over the same image by the button. Only where the scene
-           has T_cam_to_base.txt and K and the frame has both files --
-           otherwise no button, rather than a broken image. #}
+        {# Calibration check: this frame's cloud on its image, only where the
+           extrinsic, K and both files exist. #}
         {% if details.overlay %}
         <figcaption class="muted" id="cloudcap" hidden>
           Every lidar return of this frame projected through
@@ -71,15 +69,13 @@
              ("height_maps", "heightmap.png", "Height map"),
              ("height_masks", "validity.png", "Validity mask"),
              ("driven_similarity", "driven.png", "Driven & drivable")) %}
-        {# The driven tile is a DRIFT product most roots lack: a scene without the
-           directory shows no tile at all, so such a root looks exactly as before. #}
+        {# DRIFT product most roots lack: no tile without the directory. #}
         {% if kind != "driven_similarity" or probe.present.get(kind) %}
         <figure class="tile">
           <figcaption>{{ label }}
           </figcaption>
           {% if details.present.get(kind) %}
-          {# Click for a bigger copy; the three height-map grids zoom into a
-             probe that reads the cell under the pointer (grid.json). #}
+          {# Click to zoom; height-map grids open the cell probe (grid.json). #}
           <img class="zoomable" src="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}"
                data-zoom="/api/scene/{{ scene_id }}/frame/{{ index }}/{{ endpoint }}?size={{ 768 if kind == 'clouds' else 1024 }}"
                {% if kind != "clouds" %}data-grid="/api/scene/{{ scene_id }}/frame/{{ index }}/grid.json"{% endif %}
@@ -93,8 +89,7 @@
         {% endfor %}
       </div>
 
-      {# The scene's signals over the seconds around this frame; the accent line
-         is this frame. A click on a chart opens the frame under the pointer. #}
+      {# Signals around this frame; the accent line is this frame. #}
       {% if signals %}
       <div class="framesignals" style="--now: {{ '%.3f'|format(signals.now) }}%">
         {% include "_signals.html" %}
@@ -212,8 +207,7 @@
         {% endif %}
       </div>
 
-      {# Where the robot was standing when this frame was taken -- only on a
-         scene that carries gps.npy. #}
+      {# Only on a scene with gps.npy. #}
       {% if map %}{% include "_map.html" %}{% endif %}
       {% with notes_scope = "frame", note_range = [index, index] %}
         {% include "_notes.html" %}

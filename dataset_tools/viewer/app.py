@@ -1,23 +1,8 @@
 """The viewer's web application.
 
-Three groups of routes:
-
-``/``, ``/scene/{id}``, ``/view/{id}/{window}``
-    Server-rendered pages: the scene index, one scene's detail, and the 3D
-    viewer wrapper. The wrapper is SimView's own page (read from the installed
-    package at request time) plus an overlay panel of our own.
-
-``/api/data/{scene}/{window}/...``
-    The static-mode bundle the SimView front-end fetches: ``model.json``,
-    ``states.json`` and ``blob/{n}``. Built on demand, cached on disk, served
-    with byte-range support so the front-end can window long trajectories.
-
-``/api/scene/{id}/frame/{n}/...``
-    Per-frame artefacts for the side panel -- camera image, BEV height map,
-    validity mask, cloud top-down -- rendered one frame at a time.
-
-Every dataset read happens in a worker thread: the root is usually on contended
-network storage, and a slow read must not block the event loop serving the page.
+Pages (``/``, ``/scene/{id}``, ``/view/{id}/{window}``), the on-demand SimView
+bundle (``/api/data/...``) and per-frame renders (``/api/scene/{id}/frame/...``).
+Dataset reads run in worker threads: the root is usually on network storage.
 """
 
 from __future__ import annotations
@@ -103,15 +88,10 @@ logger = logging.getLogger("dataset_tools.viewer.app")
 HERE = Path(__file__).parent
 #: Pixel size of a frame-page BEV tile; the page's zoom asks for up to 1536.
 TILE_SIZE = 384
-#: Per-frame renders and thumbnails: kept by the browser, but asked about every
-#: time (``no-cache``), and answered with a 304 while the scene's fingerprint,
-#: the atlas and the viewer's code are what the ETag says. Their URLs name only
-#: a scene number and a frame index, which a re-extraction or a renumbering
-#: points at other pictures -- a lifetime of any length shows the old ones.
+#: Per-frame renders and thumbnails: revalidated by ETag every time, since their
+#: URLs survive a re-extraction that changes the pictures.
 SCENE_ASSET_RE = re.compile(r"^/api/scene/(\d+)/(frame/\d+/[a-z]+\.(jpg|png|json)|thumb/[a-z]+\.jpg)$")
-#: The shapes a window key (``windows.py``) and a build-options key
-#: (``BuildOptions.cache_key``) can take. Both are URL segments that end up in
-#: a cache *path*, so anything else is refused before a path is formed.
+#: Allowed window and build-options keys: both end up in a cache path.
 WINDOW_KEY_RE = re.compile(r"^(seg\d+(\.\d+)?|raw(\.\d+)?|frame\d+)$")
 OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 #: Scene handles kept at once, least recently used dropped first.
@@ -121,14 +101,8 @@ DEFAULT_CACHE_MAX_GB = 5.0
 
 
 def _warm_build_imports() -> None:
-    """Import SimView's authoring API and torch ahead of the first build.
-
-    ``build_scene`` imports them lazily so that ``import dataset_tools.viewer``
-    stays cheap, but the first window anyone opens after the viewer starts then
-    paid about a second for the torch import inside the request. Done here on
-    a background thread, that second is spent while the index is being looked
-    at instead.
-    """
+    """Import SimView's authoring API and torch in the background, so the first
+    build doesn't pay ~1 s for them."""
     try:
         import simview.scene  # noqa: F401
         import simview.state  # noqa: F401
@@ -155,21 +129,11 @@ class ViewerState:
         self._locks: dict[str, asyncio.Lock] = {}
         self.bundle_dir = root.cache_dir / BUNDLE_DIR_NAME
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
-        #: What each bundle's meta.json said, keyed by its path and mtime: every
-        #: blob of a window asks whether the bundle is current, and parsing a
-        #: 0.7 MB meta.json each time blocked the event loop for ~0.3 s a window.
+        #: Parsed meta.json per bundle path, keyed by mtime: re-parsing per blob was slow.
         self.meta_memo: dict[Path, tuple[int, tuple]] = {}
 
     def access(self, scene_id: str) -> SceneAccess:
-        """A cached per-scene handle. Bounded so a long session browsing many
-        scenes does not accumulate every scene's arrays in memory.
-
-        Dropped when the scene directory has changed since the handle was
-        made: a scene still being written gains height maps and a timestamp
-        file while it is looked at, and a handle from before that would keep
-        serving the old frame list. ``root.probe`` is one ``stat`` while the
-        mtime holds, so the check costs nothing on a finished root.
-        """
+        """A cached (LRU) per-scene handle, renewed when the scene directory changed."""
         cached = self._access.pop(scene_id, None)
         if cached is None or self.root.probe(scene_id) is not cached.probe:
             cached = SceneAccess(self.root, scene_id)
@@ -197,22 +161,13 @@ def create_app(
 ) -> FastAPI:
     """The viewer as an ASGI app.
 
-    ``allowed_hosts`` restricts the ``Host`` header the server answers to. The
-    server has no authentication -- notes are writes -- so a viewer bound to
-    the loopback interface passes the loopback names here, which stops a page
-    on another site from reaching it through a hostname that resolves to
-    127.0.0.1 (DNS rebinding). ``None`` answers every host.
-
-    ``prefetch`` starts building the window after the one just opened, so
-    paging through a scene with ``[`` / ``]`` does not wait on a build; off
-    for a root on storage slow enough that an unasked build competes with the
-    one being looked at.
+    ``allowed_hosts`` restricts the ``Host`` header (DNS-rebinding guard for an
+    unauthenticated server); ``None`` answers every host. ``prefetch`` builds
+    the next window after the one just opened.
     """
     root = DatasetRoot(root_path, cache_dir=Path(cache_dir) if cache_dir else None, clear_cache=clear_cache)
     state = ViewerState(root, max_frames=max_frames, max_seconds=max_seconds, cache_max_bytes=cache_max_gb * 1e9)
-    # Resolved once: the pages report where notes go and why they cannot be
-    # written when they cannot, and probing that per request would put a write
-    # on the hot path of an otherwise read-only server.
+    # Resolved once: probing writability per request would put a write on the hot path.
     notes_store = NoteStore(
         root.path,
         notes_dir=Path(notes_dir) if notes_dir else None,
@@ -233,9 +188,7 @@ def create_app(
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException):
-        """A page for a person, JSON for everything else: a mistyped scene or
-        frame number used to answer a browser with ``{"detail": ...}`` and no
-        way back to the index."""
+        """An HTML error page for browsers, JSON for everything else."""
         if request.url.path.startswith("/api/") or "text/html" not in request.headers.get("accept", ""):
             return await http_exception_handler(request, exc)
         return templates.TemplateResponse(
@@ -247,24 +200,16 @@ def create_app(
 
     app.mount(
         "/viewer-static",
-        # Only SimView's entry point carries a cache-bust; with no
-        # Cache-Control a browser keeps OLD modules after an upgrade.
-        # ``no-cache`` keeps the file cached but forces a conditional request:
-        # a cheap 304, or the upgrade picked up at once.
+        # ``no-cache``: always revalidate, so an upgrade is picked up at once.
         _CachedStatic(directory=str(HERE / "static"), cache_control="no-cache"),
         name="viewer_static",
     )
 
     simview_static = str(files("simview") / "static")
     simview_ver = simview.__version__
-    # The entry point and every ES module it imports resolve under a stamped
-    # path, so a change to SimView changes every module's URL at once and the
-    # browser cannot run a stale mix of old and new modules: the file at a URL
-    # never changes, so it is cached forever. This is what render_viewer_page
-    # points at. The stamp is the version *and* a fingerprint of the files: an
-    # editable install changes them without changing the version, and a
-    # version-only stamp left browsers on a year-cached module that imported
-    # what the new page no longer mapped ("chroma", simview dfc3294).
+    # SimView's modules live under a stamped, immutable path so the browser never
+    # mixes old and new ones. The stamp includes a file fingerprint because an
+    # editable install changes files without changing the version.
     simview_stamp = f"{simview_ver}-{_static_fingerprint(Path(simview_static))}"
     app.mount(
         f"/simview-static/{simview_stamp}",
@@ -275,16 +220,9 @@ def create_app(
 
     # ------------------------------------------------------------------ pages
 
-    # Cache-immunity stamp, folded into every /api/data URL: bundle content
-    # can change under an unchanged URL when the viewer code changes, and a
-    # browser that cached the old response (with any freshness lifetime) would
-    # mix stale trajectory blobs with fresh model.json. A new stamp on every
-    # code change makes previously cached entries unaddressable.
+    # Stamp in every /api/data URL, from the mtimes of every module whose output
+    # ends up in a bundle: a code change makes old browser-cached responses unaddressable.
     _h = hashlib.sha1()
-    # Every module whose output ends up inside a bundle, not just the three
-    # that write it: a change to how windows are cut (windows.py), how poses
-    # are interpolated (loaders.py) or how cloud colours are chosen (render.py)
-    # changes the bytes at an unchanged URL just as surely as build.py does.
     for _f in (
         "build.py",
         "wire.py",
@@ -301,13 +239,8 @@ def create_app(
 
     @app.middleware("http")
     async def revalidate_scene_assets(request: Request, call_next):
-        """ETag + ``no-cache`` on every per-frame render and thumbnail (``SCENE_ASSET_RE``).
-
-        The tag is computed before anything is rendered, from what the picture
-        depends on: the scene's fingerprint, the atlas (curated thumbnails), the
-        viewer's code and the URL with its query. A browser that has the bytes
-        gets a 304 and no render at all.
-        """
+        """ETag + ``no-cache`` on per-frame renders and thumbnails (``SCENE_ASSET_RE``),
+        computed before rendering from scene fingerprint, atlas, code stamp and URL."""
         match = SCENE_ASSET_RE.match(request.url.path)
         if not match:
             return await call_next(request)
@@ -354,12 +287,7 @@ def create_app(
 
     @app.get("/notes", response_class=HTMLResponse)
     async def notes_index(request: Request, topic: str | None = Query(None, max_length=32)):
-        """Every note in the root on one page, grouped by topic.
-
-        Notes are written one scene at a time, from wherever a bad stretch was
-        noticed; this is where they are read back as a list of what is wrong
-        with the root. With notes off the page still answers, saying so.
-        """
+        """Every note in the root on one page, grouped by topic."""
         page = await run_in_threadpool(_notes_index, state, notes_store, topic)
         return templates.TemplateResponse(request=request, name="notes.html", context=page)
 
@@ -382,12 +310,8 @@ def create_app(
         sort: str = Query("scene", pattern="^(scene|att|rate|duration)$"),
         split: str = Query("", pattern=f"^({'|'.join(SPLIT_ORDER)})?$"),
     ):
-        """Every ground-truth window of the root in one table.
-
-        The GT-versus-IMU verdict means reading each scene's odometry and
-        gravity, so the rows are kept for as long as no scene's fingerprint
-        moves; notes are read fresh every time.
-        """
+        """Every ground-truth window of the root in one table. Rows are cached
+        until a scene fingerprint moves; notes are read fresh."""
 
         def work() -> list[dict]:
             ids = root.scene_ids(refresh=True)
@@ -441,11 +365,8 @@ def create_app(
     ):
         access = _access_or_404(state, scene_id)
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
-        # The thumbnails and the cards. Cached on the scene handle, so
-        # switching tabs does not re-read this scene's small arrays.
         card_page = await run_in_threadpool(build_scene_page, root, access)
-        # The frame strip is only assembled when it is the tab being shown: it
-        # is the one part of this page that may list a directory.
+        # Only on its own tab: it may list a directory.
         frames = await run_in_threadpool(_frame_page, access, page) if tab == "frames" else None
         scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return templates.TemplateResponse(
@@ -464,11 +385,7 @@ def create_app(
                 "notes": scene_notes,
                 "notes_status": notes_store.status(),
                 "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
-                # Which windows a note lands in, so the table says where the
-                # flagged stretches are without anyone reading every note.
                 "notes_per_window": _notes_per_window(scene_notes, windows),
-                # How far each window's ground truth has wandered from the
-                # IMU, so the segments worth opening are told apart here.
                 "attitude_per_window": await run_in_threadpool(attitude_per_window, access, windows),
             },
         )
@@ -480,12 +397,7 @@ def create_app(
         segment_index: int,
         page: int = Query(0, ge=0),
     ):
-        """One ground-truth segment: what it is, what happened inside it, where.
-
-        Addressed by the number in ``odometry_segments.txt`` -- the same number
-        the window keys carry -- so a link from a window, from a frame or from
-        another segment all resolve the same way.
-        """
+        """One ground-truth segment, by its number in ``odometry_segments.txt``."""
         access = _access_or_404(state, scene_id)
         found = await run_in_threadpool(find_segment, access, segment_index)
         if found is None:
@@ -505,8 +417,7 @@ def create_app(
                 "probe": access.probe,
                 "page": detail,
                 "frames": frames,
-                # Only the notes that touch this segment; the card says so and
-                # links to the scene page, which has all of them.
+                # Only the notes that touch this segment.
                 "notes": [n for n in scene_notes if n.overlaps(lo, hi)],
                 "notes_status": notes_store.status(),
                 "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
@@ -528,12 +439,9 @@ def create_app(
         if index < 0 or (n_frames and index >= n_frames):
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
         details = await run_in_threadpool(_frame_details, access, index, state.max_frames, state.max_seconds)
-        # A frame past the end of data_ts.txt has no clock to sit on, so there
-        # is no single-frame window to build for it; offering the button anyway
-        # led straight to a 500.
+        # None past the end of data_ts.txt: no window to offer.
         single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames, state.max_seconds)
-        # Where this frame was, when the recording says: the scene's track with
-        # a marker on it. None without gps.npy, and the page then has no map.
+        # None without gps.npy.
         frame_map = await run_in_threadpool(map_card, access, None, index)
         scene_notes = await run_in_threadpool(notes_store.list, scene_id)
         return templates.TemplateResponse(
@@ -564,12 +472,10 @@ def create_app(
 
         opts = _options_from_query(request.query_params)
         bundle_key = f"{scene_id}/{window_key}/{opts.cache_key()}"
-        # The windows either side of this one, so the panel can page through a
-        # scene's segments without going back to the scene page each time.
+        # Neighbours, for paging through the scene from the panel.
         windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
         prev_window, next_window = neighbour_windows(windows, window)
-        # ?frame=N -- arrived here from that frame's page, so open the playhead
-        # on it instead of at the start of the window.
+        # ?frame=N opens the playhead on that frame.
         try:
             initial_frame = int(request.query_params["frame"])
         except (KeyError, TypeError, ValueError):
@@ -579,16 +485,10 @@ def create_app(
             window=window,
             prev_window=prev_window,
             next_window=next_window,
-            # Build options are carried across, so paging to the next segment
-            # keeps the cloud/terrain settings the current view was opened
-            # with; ?frame= is not -- it names a frame of *this* window.
+            # Build options carry over when paging; ?frame= does not.
             view_query=_view_query(request.query_params),
             probe=access.probe,
-            # Whether the camera tile's zoom can project the cloud onto it.
             cloud_on_image=_overlay_possible(access),
-            # How many segments the scene has, so the panel can title the view
-            # "Segment 3/17" rather than leaving "3 of how many?" to a trip
-            # back to the scene page.
             n_segments=len(access.segments),
             scene_url=f"/scene/{scene_id}",
             notes=notes_store.status(),
@@ -605,8 +505,7 @@ def create_app(
                 "frameEnd": window.frame_end - 1,
             }
         )
-        # json.dumps leaves "<" alone, and a "</script>" inside any value (the
-        # notes status carries an OS error string) would end the block early.
+        # Escape "<" so a "</script>" in any value can't end the block.
         config = config.replace("<", "\\u003c")
         head = (
             '<link rel="icon" href="/viewer-static/favicon.svg" type="image/svg+xml">'
@@ -622,15 +521,10 @@ def create_app(
             head,
             f"Scene {scene_id} {window_key} - 3D view",
         )
-        # Defer SimView's own entry point: it fetches the scene the instant it
-        # runs, and the bundle may still be building. The overlay controller
-        # re-inserts this exact script once the build reports ready.
+        # Defer SimView's entry point until the overlay reports the bundle built.
         page = _defer_main_script(page)
         if prefetch and next_window is not None:
-            # The window ] pages to, built now rather than when asked for. It
-            # takes the same per-bundle lock a request would, so a reader who
-            # pages before it is done joins the build instead of starting a
-            # second one; and it never surfaces an error -- nobody asked.
+            # Prebuild the next window under the same per-bundle lock; errors are swallowed.
             asyncio.ensure_future(_prefetch(state, scene_id, next_window.key, opts.cache_key()))
         return HTMLResponse(page)
 
@@ -643,12 +537,10 @@ def create_app(
         frame: int | None = Query(None, ge=0),
         max_points: int = Query(2000, ge=2, le=20000),
     ):
-        """This scene's GNSS track, thinned for drawing.
+        """This scene's GNSS track, thinned for drawing; 404 without ``gps.npy``.
 
-        ``segment`` highlights one segment's stretch (the whole scene comes
-        back as ``context`` behind it); ``frame`` adds a marker where that
-        frame was. A scene without ``gps.npy`` is a 404, not an empty track:
-        the page then draws no map at all rather than an empty one.
+        ``segment`` highlights one segment over the scene as ``context``;
+        ``frame`` adds a marker.
         """
         access = _access_or_404(state, scene_id)
         payload = await run_in_threadpool(_gps_payload, access, segment, frame, max_points)
@@ -669,10 +561,7 @@ def create_app(
     async def api_frame_overlay(scene_id: str, index: int, w: int = Query(1280, ge=64, le=1920)):
         """The frame's cloud projected into its image: a check on the extrinsic.
 
-        404 rather than a bare picture when the scene cannot support it -- no
-        ``T_cam_to_base.txt`` (a v1 root's ``T_cam_to_lidar.txt`` is in the
-        lidar frame and would draw the cloud in the wrong place), no ``K``, or
-        no image or cloud for this frame.
+        404 without ``T_cam_to_base.txt`` and ``K``, or without the image or cloud.
         """
         access = _access_or_404(state, scene_id)
         if not _overlay_possible(access):
@@ -700,20 +589,13 @@ def create_app(
         if data is None or isinstance(data, Path):
             return _absent_or_unreadable(data, f"image and cloud to overlay for frame {index}")
         jpeg, span = data
-        # The depth the colours run over, for the legend the page draws on top.
+        # Depth range of the colours, for the page's legend.
         headers = {"X-Depth-Range": f"{span[0]:.2f} {span[1]:.2f}"} if span else {}
         return Response(jpeg, media_type="image/jpeg", headers=headers)
 
     @app.get("/api/scene/{scene_id}/thumb/{slot}.jpg")
     async def api_scene_thumb(scene_id: str, slot: str):
-        """One index thumbnail: the curated file if the root has one, else a live frame.
-
-        The two cases are deliberately the same URL. A root with an ``atlas/``
-        serves a stored, immutable JPEG (43 scenes x 3 of them land in one page
-        load, so they must be cacheable forever and never re-encoded); a root
-        without one renders the frame at the same fraction of the scene. The
-        index does not have to know which kind of root it is showing.
-        """
+        """One index thumbnail: the curated atlas file if any, else a live frame."""
         access = _access_or_404(state, scene_id)
         if slot not in THUMB_SLOTS:
             raise HTTPException(404, f"no thumbnail slot {slot!r}")
@@ -724,8 +606,6 @@ def create_app(
         n_frames = access.probe.n_frames
         if not n_frames or not access.probe.has("images"):
             raise HTTPException(404, f"scene {scene_id} has no images to thumbnail")
-        # The same resolver the index and the scene page use, so a curated index
-        # with no file behind it still renders the frame it names.
         index = thumb_index(root.atlas_scene(scene_id), slot, n_frames)
 
         def work():
@@ -739,8 +619,7 @@ def create_app(
             raise HTTPException(404, f"no image to thumbnail for scene {scene_id}")
         return Response(data, media_type="image/jpeg")
 
-    # ``size`` is the tile's pixel size: the frame page's tiles ask for the
-    # default, its click-to-zoom asks for a bigger copy of the same picture.
+    # ``size``: tile pixel size; click-to-zoom asks for a bigger one.
     @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
     async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
@@ -770,7 +649,6 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = _access_or_404(state, scene_id)
-
         path = access.frame_path("clouds", index)
 
         def work():
@@ -786,18 +664,11 @@ def create_app(
 
     # ------------------------------------------------------------------ notes
 
-    # Deliberately NOT under /api/data/: a bundle URL carries a content stamp
-    # and its meta.json is cached on disk per window, so a note folded in there
-    # would either be invisible until the next code change or force every
-    # window it touches to rebuild. Notes are their own resource, fetched
-    # uncached, and nothing about them can invalidate a built window.
+    # Not under /api/data/: notes must not be cached with, or invalidate, bundles.
 
     @app.get("/api/notes.csv")
     async def api_notes_csv():
-        """Every note in the root as one table, for whatever applies the
-        verdicts: frame range and the same range as frame times
-        (``data_ts.txt``), so a consumer needs neither the viewer nor the
-        scene's clock to cut a ``drop`` stretch out."""
+        """Every note in the root as CSV, with frame ranges also as ``data_ts.txt`` times."""
 
         def work() -> str:
             out = io.StringIO()
@@ -911,12 +782,8 @@ def create_app(
         path = bundle / "blob" / blob_id
         if not path.is_file():
             raise HTTPException(404, f"no blob {blob_id}")
-        # FileResponse handles Range itself, which is what lets the SimView
-        # front-end window a long trajectory instead of loading it whole.
-        # no-cache (NOT max-age): the bundle URL stays the same when a code
-        # change rebuilds its content, so the browser must revalidate against
-        # the ETag/Last-Modified rather than serve a stale blob for a day --
-        # a stale blob mixed with a fresh model.json mangles the robot.
+        # FileResponse handles Range. no-cache: a rebuild can keep the URL, and a
+        # stale blob with a fresh model.json mangles the robot.
         return FileResponse(
             path,
             media_type="application/octet-stream",
@@ -939,12 +806,8 @@ def create_app(
 
 
 def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int, int] | None:
-    """The inclusive ``{"frames": [a, b]}`` range a note request names -- the
-    stored form, and the only one the pages send.
-
-    An edit may leave the range out (``required=False``) and gets None: the
-    note keeps the range it has.
-    """
+    """The inclusive ``{"frames": [a, b]}`` range of a note request; None when
+    absent and not ``required`` (an edit keeping its range)."""
     frames = payload.get("frames")
     if frames is None and not required:
         return None
@@ -957,12 +820,8 @@ def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int, int
 
 
 async def _notes_write(state: ViewerState, scene_id: str, fn, *args, **kwargs):
-    """Run one note mutation under the scene's lock, in a worker thread.
-
-    Serialised per scene because every write replaces the whole file: two
-    concurrent adds without the lock would each save their own read of it, and
-    the second would drop the first.
-    """
+    """Run one note mutation in a worker thread under the scene's lock (every
+    write replaces the whole file)."""
     async with state.lock(f"notes:{scene_id}"):
         try:
             return await run_in_threadpool(fn, *args, **kwargs)
@@ -975,23 +834,15 @@ async def _notes_write(state: ViewerState, scene_id: str, fn, *args, **kwargs):
 
 
 def _notes_per_window(notes: list, windows: list) -> dict[str, list]:
-    """Which notes touch each window, keyed by window key.
-
-    A note is a range of frames and a window is a range of frames; a note that
-    spans a segment boundary legitimately shows up under both windows, since
-    both are stretches you would want warned about when you open them.
-    """
+    """Which notes overlap each window, keyed by window key."""
     return {w.key: [n for n in notes if n.overlaps(w.frame_start, w.frame_end)] for w in windows}
 
 
 def _bundle_path(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
     """The on-disk bundle directory for a request, after checking its parts.
 
-    The options key has to be the one ``BuildOptions.cache_key`` would write
-    for the options it names -- so ``..`` is refused before it becomes a path,
-    and so is every spelling of the same options but the canonical one, which
-    is what keeps a request from minting a fresh build (and a fresh directory)
-    per variant of an otherwise identical key.
+    The options key must be canonical (``BuildOptions.cache_key``), which refuses
+    ``..`` and stops variant spellings from minting fresh builds.
     """
     if not scene_id.isdigit() or not WINDOW_KEY_RE.match(window_key) or not OPTS_KEY_RE.match(opts_key):
         raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
@@ -1008,13 +859,8 @@ def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
 
 
 def _defer_main_script(page: str) -> str:
-    """Replace SimView's module entry point with a marker our controller uses.
-
-    SimView's ``main.js`` calls ``SimView.run()`` as soon as it is parsed, which
-    would fire the data fetches before the bundle exists. Removing the tag and
-    recording its URL lets the overlay insert it after the build is ready --
-    the front-end itself is untouched and runs exactly as it normally does.
-    """
+    """Replace SimView's ``main.js`` tag with its URL, for the overlay to insert
+    once the bundle is built (it fetches data as soon as it runs)."""
     match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
     if not match:
         logger.warning("could not find simview's main.js script tag; loading it inline")
@@ -1043,11 +889,7 @@ def _options_from_query(params) -> BuildOptions:
 
 
 def _view_query(params) -> str:
-    """This view's query string, minus ``frame``, ready to append to a URL.
-
-    Empty when nothing is left to carry, so the common link has no trailing
-    "?" on it.
-    """
+    """This view's query string minus ``frame``, as ``?...`` or empty."""
     kept = [(k, v) for k, v in params.multi_items() if k != "frame"]
     return f"?{urlencode(kept)}" if kept else ""
 
@@ -1068,29 +910,11 @@ def _options_from_key(opts_key: str) -> BuildOptions:
 def _bundle_is_current(
     dest: Path, window: Window | None, data: str = "", memo: dict[Path, tuple[int, tuple]] | None = None
 ) -> bool:
-    """Is this cached bundle complete, built by today's code, and still this
-    window?
+    """Is this cached bundle complete and still valid?
 
-    The cache is keyed by what was asked for (scene, window, build options),
-    none of which changes when the builder does -- so a bundle written before a
-    viewer upgrade would keep being served, with whatever fields its
-    ``meta.json`` happened to have at the time. The payload carries its own
-    version (``build.META_VERSION``); anything older is rebuilt rather than
-    served. Rebuilding a window costs a couple of seconds, once.
-
-    A window *key* outlives its frame range, which is the other way a cached
-    bundle goes stale: ``seg000.0`` is the first part of segment 0 however many
-    parts there are, so a cache filled under one ``--max-seconds`` holds an
-    entry that a run with another would otherwise serve for a different stretch
-    of the scene. So the range is checked against the window as it is cut now,
-    and ``window=None`` -- a key this scene no longer offers, such as a part of
-    a segment that is no longer split that far -- is never current: there is
-    nothing left for that bundle to be a build of.
-
-    The third way is the data itself: a re-extraction, a regenerated
-    odometry.txt or new height maps leave the key and the frame range alone.
-    ``data`` is the scene's fingerprint (``probe.scene_fingerprint``) now; the
-    bundle records the one it was built from.
+    It must match ``META_VERSION``, the window's current frame range (a key can
+    change range, e.g. with ``--max-seconds``; ``window=None`` is never current)
+    and ``data``, the scene's fingerprint now.
     """
     if window is None:
         return False
@@ -1121,12 +945,8 @@ def _bundle_is_current(
 
 
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
-    """Return the on-disk bundle for a window, building it if necessary.
-
-    One lock per bundle key: several browser fetches for the same window arrive
-    together (model, states, then every blob), and without it they would each
-    kick off their own build of the same thing.
-    """
+    """Return the on-disk bundle for a window, building it if necessary (one
+    lock per bundle key, so concurrent fetches share one build)."""
     dest = _bundle_path(state, scene_id, window_key, opts_key)
     access = _access_or_404(state, scene_id)
     window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
@@ -1166,19 +986,14 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         except Exception as exc:  # noqa: BLE001 - logged in full, named to the browser
-            # The traceback goes to the log; the browser gets the exception's
-            # type, not its text, which tends to carry file paths.
+            # Only the type to the browser: the message may carry file paths.
             logger.exception("build failed for %s/%s", scene_id, window_key)
             raise HTTPException(500, f"build failed ({type(exc).__name__}); see the viewer's log") from exc
 
 
 def _evict_bundles(bundle_dir: Path, keep: Path, max_bytes: float) -> None:
-    """Delete the oldest built windows until the cache is under ``max_bytes``.
-
-    Every distinct set of build options is its own bundle (up to ~75 MB), so
-    without a ceiling the cache only grows. Oldest by build time; ``keep``, the
-    one just built, never goes.
-    """
+    """Delete the oldest built windows until the cache is under ``max_bytes``;
+    ``keep`` (the one just built) is never removed."""
     bundles = [d for d in bundle_dir.glob("*/*/*") if d.is_dir()]
     sizes = {d: sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) for d in bundles}
     total = sum(sizes.values())
@@ -1221,13 +1036,9 @@ def _render_driven(sidecar: dict[str, Any], size: int) -> bytes:
 
 
 def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
-    """Every BEV layer of one frame, flattened, for the probe on a zoomed tile.
-
-    The layers keep the files' own ``[row=x forward, col=y left]`` layout,
-    row-major; the page flips them the way the tiles are drawn. A layer whose
-    shape disagrees with the height map's is left out rather than misread, and
-    NaN goes out as null (JSON has no NaN). None when the frame has no layer.
-    """
+    """Every BEV layer of one frame, flattened row-major in the files'
+    ``[row=x forward, col=y left]`` layout, NaN as null; None without layers.
+    Layers whose shape disagrees with the first are dropped."""
     layers: dict[str, np.ndarray] = {}
     out: dict[str, Any] = {"res": HM_RES, "x0": HM_EXTENT[0], "validity_labels": VALIDITY_LABELS}
     hm = (
@@ -1266,12 +1077,8 @@ def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
 
 
 def _overlay_possible(access: SceneAccess) -> bool:
-    """Can this scene's clouds be drawn on its images at all?
-
-    Needs ``K`` and ``T_cam_to_base.txt`` specifically: ``access.T_cam`` falls
-    back to a v1 root's ``T_cam_to_lidar.txt``, which is the camera in the raw
-    lidar frame, not the base frame the clouds are in.
-    """
+    """Can this scene's clouds be drawn on its images? Needs ``K`` and
+    ``T_cam_to_base.txt`` (v1's ``T_cam_to_lidar.txt`` is in the wrong frame)."""
     p = access.probe
     if not (p.has("images") and p.has("clouds") and p.has("camera_intrinsics") and p.has("T_cam_to_base")):
         return False
@@ -1279,11 +1086,7 @@ def _overlay_possible(access: SceneAccess) -> bool:
 
 
 def _static_fingerprint(root: Path) -> str:
-    """A short hash of every file's path, size and mtime under ``root``.
-
-    Read once at startup: it changes whenever a file does, which is all a
-    cache-busting URL needs, without hashing the contents.
-    """
+    """A short hash of every file's path, size and mtime under ``root``."""
     h = hashlib.sha1()
     for path in sorted(root.rglob("*")):
         if path.is_file():
@@ -1309,18 +1112,14 @@ def _unreadable_tile() -> bytes:
 
 
 def _absent_or_unreadable(path: Path | None, what: str) -> Response:
-    """The answer when nothing could be drawn: 404 for a file the scene does
-    not have, 422 -- with a red tile, which the page shows as it is -- for one
-    it has but that will not load. The two looked the same, and the second is
-    exactly what reviewing a dataset is for."""
+    """404 for a missing file; 422 with a red tile for one that exists but won't load."""
     if path is not None and path.is_file():
         logger.warning("%s: %s exists but cannot be read", what, path)
         return Response(_unreadable_tile(), status_code=422, media_type="image/png")
     raise HTTPException(404, f"no {what}")
 
 
-#: Fixes drawn for the *context* track -- the whole scene behind a highlighted
-#: stretch. Thinner than the highlight: it is there for shape, not for detail.
+#: Fixes drawn for the faint whole-scene context track behind a highlighted stretch.
 GPS_CONTEXT_POINTS = 800
 
 
@@ -1330,14 +1129,8 @@ def _gps_payload(
     frame_index: int | None,
     max_points: int,
 ) -> dict[str, Any] | None:
-    """What the map draws for one scene: the track, its bounds, a marker, the context.
-
-    Read straight from ``gps.npy`` and thinned here rather than in the browser,
-    so a 16-minute scene ships tens of kilobytes instead of ten thousand pairs
-    of doubles. Deliberately its own endpoint and never folded into a window
-    bundle: bundles are cached per window under a content stamp, and a track
-    belongs to the scene, not to a view of it.
-    """
+    """What the map draws for one scene: the track (thinned server-side), its
+    bounds, a marker and the context."""
     gps = access.gps
     if not geo.is_track(gps):
         return None
@@ -1359,33 +1152,22 @@ def _gps_payload(
         "points": geo.points(geo.decimate(track, max_points)),
         "bounds": geo.bounds(track),
         "marker": marker,
-        # The rest of the scene, faint, behind a highlighted stretch -- so a
-        # segment is seen where in the outing it happened, not just on its own.
         "context": (
             geo.points(geo.decimate(gps, GPS_CONTEXT_POINTS)) if track is not gps and len(gps) > len(track) else None
         ),
     }
 
 
-#: Thumbnails per page of the frame browser. One HTTP request each, lazily,
-#: so this is a bound on concurrent image renders rather than on bytes read.
+#: Thumbnails per page of the frame browser (one lazy request each).
 FRAMES_PER_PAGE = 100
 
 
 def _frame_indices(access: SceneAccess, frame_range: tuple[int, int] | None = None) -> list[int]:
-    """Every frame index this scene can show, in order.
+    """Every frame index this scene can show, in order, optionally within the
+    half-open ``frame_range``.
 
-    Normally just ``range(n_frames)``. Only when the per-frame directory is
-    known to be incomplete is it listed, so the common case costs nothing.
-
-    A present-but-empty directory says nothing about which frames exist, so it
-    is skipped rather than accepted as the answer -- otherwise a scene whose
-    ``images/`` had been created but not yet filled fell back to
-    ``range(n_frames)`` and offered a page of tiles that all 404.
-
-    ``frame_range`` narrows the result to a half-open range of frames, which is
-    how the segment page shows a strip of its own frames rather than the
-    scene's.
+    ``range(n_frames)`` unless a non-empty per-frame directory is incomplete,
+    in which case it is listed.
     """
     probe = access.probe
     indices = list(range(probe.n_frames))
@@ -1402,16 +1184,10 @@ def _frame_indices(access: SceneAccess, frame_range: tuple[int, int] | None = No
 
 
 def _page_of(indices: list[int], index: int) -> int:
-    """Which page of a frame strip over ``indices`` holds ``index`` (0 when empty).
-
-    Not ``index // FRAMES_PER_PAGE``: on a scene with a sparse per-frame
-    directory the strip pages through the frames that *exist*, so a frame's
-    page is its position in that list, not its own number.
-    """
+    """Which page of a frame strip over ``indices`` holds ``index`` (0 when empty);
+    by position, since a sparse strip pages through the frames that exist."""
     if not indices:
         return 0
-    # The list is sorted, so the position is a search -- and for the usual
-    # dense scene (0..n-1) that search lands on `index` itself.
     position = min(bisect.bisect_left(indices, index), len(indices) - 1)
     return position // FRAMES_PER_PAGE
 
@@ -1439,8 +1215,7 @@ def _frame_page(access: SceneAccess, page: int, frame_range: tuple[int, int] | N
             }
             for i in shown
         ],
-        # A window of pages around the current one, so a 200-page scene does
-        # not render 200 links.
+        # Links to nearby pages only.
         "page_links": sorted({0, n_pages - 1, *range(max(0, page - 3), min(n_pages, page + 4))}),
     }
 
@@ -1448,20 +1223,12 @@ def _frame_page(access: SceneAccess, page: int, frame_range: tuple[int, int] | N
 def _frame_details(
     access: SceneAccess, index: int, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS
 ) -> dict[str, Any]:
-    """Everything the per-frame page states about one frame.
-
-    Cheap by construction: two timestamp lookups in arrays already in memory,
-    one ``.npy`` header read for the cloud's point count, and ``is_file`` for
-    the per-frame artefacts. No cloud, image or height map is decoded here --
-    those are separate requests the browser makes for itself.
-    """
+    """Everything the per-frame page states about one frame. Cheap: no cloud,
+    image or height map is decoded here."""
     probe = access.probe
     details: dict[str, Any] = {
         "index": index,
         "n_frames": probe.n_frames,
-        # Which page of the frame browser this frame sits on, so "back to the
-        # frame strip" lands where the frame actually is even on a scene whose
-        # per-frame directory is sparse.
         "strip_page": _page_of(_frame_indices(access), index),
     }
 
@@ -1483,10 +1250,7 @@ def _frame_details(
     details["overlay"] = present["images"] and present["clouds"] and _overlay_possible(access)
 
     if present["driven_similarity"]:
-        # The one per-frame array this page does decode: a 128x128 bool and a
-        # float16 of the same size, a few kilobytes, and the caption under the
-        # tile has to say how many cells the wheels touched and how many more
-        # the trust gate admits.
+        # Small (a few kB); the caption needs its cell counts.
         sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
         if sidecar is not None:
             driven, threshold = sidecar["driven"], sidecar["threshold"]
@@ -1518,8 +1282,7 @@ def _frame_details(
             "reason": seg.reason,
             "duration": round(seg.duration, 2),
             "n_poses": seg.n_poses,
-            # Clamped: a frame within the boundary slack sits a few ms before the
-            # segment's first pose, and "-0.0 s into the segment" reads as a bug.
+            # Clamped: a frame in the boundary slack can sit just before the first pose.
             "t_into_segment": max(
                 0.0,
                 round(float(details.get("timestamp", seg.start_ts)) - seg.start_ts, 2),
@@ -1550,17 +1313,12 @@ def _frame_details(
 #: How much of the recording either side of a frame its signal charts cover (s).
 FRAME_SIGNAL_SECONDS = 15.0
 
-#: The span a frame's speed and turn rate are differenced over, either side (s):
-#: a few 10 Hz poses, so one noisy pose does not make the number.
+#: Half-span (s) a frame's speed and turn rate are differenced over.
 FRAME_MOTION_HALF = 0.25
 
 
 def _frame_signals(access: SceneAccess, t: float | None) -> dict[str, Any] | None:
-    """The scene's signal charts over the seconds around one frame, and where it sits.
-
-    ``now`` is the frame's position across the charts in percent; the span is
-    clipped to the recording, so near either end the frame is off centre.
-    """
+    """The scene's signal charts around one frame; ``now`` is its position in percent."""
     ts = access.frame_ts
     if t is None or ts is None or len(ts) < 2:
         return None
@@ -1575,10 +1333,8 @@ def _frame_signals(access: SceneAccess, t: float | None) -> dict[str, Any] | Non
 def _frame_motion(access: SceneAccess, index: int, t: float, seg) -> dict[str, Any]:
     """How the robot was moving at one frame, and what the GNSS said there.
 
-    Ground-truth speed and turn rate are differenced across the poses within
-    :data:`FRAME_MOTION_HALF` of the frame and never outside its own segment
-    (two segments share no anchor); the robot's own odometry across the frames
-    either side. Each number is left out where its source has nothing there.
+    GT speed and turn rate stay within the frame's segment (segments share no
+    anchor); missing sources leave their numbers out.
     """
     out: dict[str, Any] = {}
     odom = access.odometry
@@ -1616,22 +1372,14 @@ def _frame_motion(access: SceneAccess, index: int, t: float, seg) -> dict[str, A
 
 
 def _window_of_frame(access: SceneAccess, index: int, max_frames: int, max_seconds: float) -> Window | None:
-    """The enumerated window a frame sits in: a ground-truth one if there is
-    one, otherwise the whole-scene fallback. This is the "show me the motion
-    around this frame" link, as opposed to the static single-frame view."""
+    """The enumerated window a frame sits in, preferring a ground-truth one."""
     containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
     return next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
 
 
 def _notes_index(state: ViewerState, notes_store: NoteStore, topic: str | None) -> dict[str, Any]:
     """Every note in the root, grouped by topic, for the ``/notes`` page.
-
-    Each note carries the links the page draws: its scene, its first frame and
-    the window holding that frame opened on it. A notes file for a scene the
-    root does not have is listed and said to be orphaned rather than dropped --
-    the note is a person's work, and a scene renumbered out from under it is
-    exactly the case worth seeing.
-    """
+    Notes for scenes the root lacks are kept and marked orphaned."""
     by_scene = notes_store.list_all()
     known = set(state.root.scene_ids(refresh=True))
     rows: list[dict[str, Any]] = []

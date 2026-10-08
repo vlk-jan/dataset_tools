@@ -3,34 +3,11 @@
 
     make_atlas.py <root> [--check] [--materialize] [--size]
 
-The atlas is what the viewer's index renders: a masthead, per-scene prose, and
-a stat grid. Only the prose is editorial. Everything else -- frames, duration,
-poses, segments, coverage, path length, the timeline spans -- is a *rendered
-number*, and rendered numbers go stale: HELHEST v1.3 shipped with ``atlas/``
-symlinked to v1.2's and quietly showed v1.2's odometry under a v1.2 title.
-
-So the split is:
-
-``atlas/curation.json``   hand-edited. Title, kicker, intro, root note, footer,
-                          the scene groupings, one description per scene, and
-                          the frame index behind each thumbnail. Nothing here
-                          can be derived from the files.
-``atlas/atlas.json``      generated. The curated half copied through, plus every
-                          number computed from this root, plus the dataset
-                          version it was generated against (the viewer says so
-                          on the page when that stops matching manifest.json).
-
-Numbers come from the same code the pages use -- ``SceneProbe`` for counts and
-spans, ``scene_page.path_and_motion`` for the path length -- so the atlas and
-the page it feeds cannot disagree. The rest comes from ``<scene>/regen/``
-(the extraction's own provenance) and, for the 2 s window error, from that
-scene's ``regen/odom_ref.txt``: the robot's live /odom, which is bag-derived and
-so independent of any later refinement of the ground truth.
-
-Run it after anything that changes a scene's odometry, frames or clouds:
-
-    scripts/make_atlas.py /data/HELHEST_v1_3
-    scripts/make_atlas.py /data/HELHEST_v1_3 --check   # CI/pre-release
+``atlas/curation.json`` is hand-edited prose (titles, groups, descriptions,
+thumbnail frames); ``atlas/atlas.json`` is generated: that prose plus every
+number computed from this root, using the same code the viewer pages use, so
+the two cannot disagree. Rerun after anything changes a scene's odometry,
+frames or clouds; ``--check`` reports staleness without writing.
 """
 
 from __future__ import annotations
@@ -62,14 +39,11 @@ from dataset_tools.viewer.index_page import (
 from dataset_tools.viewer.probe import DatasetRoot, SceneProbe
 from dataset_tools.viewer.scene_page import path_and_motion
 
-HERE = Path(__file__).resolve().parent
-
 logger = logging.getLogger("make_atlas")
 
 ATLAS_SCHEMA = "dataset_tools.viewer/atlas@2"
 
-#: What the live thumbnail endpoint renders (``app.api_scene_thumb``), so a root
-#: with stored thumbnails and one without show the same picture at the same size.
+#: Same as the live thumbnail endpoint (``app.api_scene_thumb``).
 THUMB_WIDTH = 384
 THUMB_QUALITY = 80
 
@@ -111,9 +85,7 @@ def count_rows(path: Path) -> int | None:
 def read_validation(path: Path) -> dict[str, str]:
     """The scene's row of ``regen/validation.csv``.
 
-    Only cloud- and frame-derived columns are used from it: its pose-derived
-    ones (``path_len_m``, ``max_step_m``, ``tilt_*``) describe whichever
-    odometry run wrote the file, which is not necessarily this root's.
+    Only its cloud/frame columns are trusted: the pose ones may come from another odometry run.
     """
     try:
         with open(path, newline="") as fh:
@@ -158,11 +130,8 @@ def windows(t, T, rt, rT, segs, w):
 def window_errors(access: SceneAccess) -> tuple[float, float] | None:
     """``(median, p95)`` of the 2 s window error against the live /odom, in m.
 
-    How far this scene's ground truth and the robot's own odometry disagree
-    about where it went over two seconds, measured only inside a segment (never
-    across one, they share no frame). ``regen/odom_ref.txt`` is the reference at
-    ~100 Hz; ``transforms.npy`` would be the same signal at frame rate, too
-    coarse to resolve a 2 s window against a 0.1 m metric.
+    Only within segments. ``regen/odom_ref.txt`` (~100 Hz) is the reference;
+    frame-rate ``transforms.npy`` is too coarse for a 2 s window.
     """
     ref_path = access.dir / "regen" / "odom_ref.txt"
     odom = access.odometry
@@ -186,11 +155,7 @@ def window_errors(access: SceneAccess) -> tuple[float, float] | None:
 
 
 def sampled_points(access: SceneAccess) -> int | None:
-    """Mean points per cloud from a handful of ``.npy`` headers.
-
-    The fallback for a root whose ``regen/validation.csv`` is missing: headers
-    only, so it costs one small read per sampled frame and no cloud data.
-    """
+    """Mean points per cloud from a few ``.npy`` headers (no ``validation.csv`` fallback)."""
     probe = access.probe
     if not probe.has("clouds") or not probe.n_frames:
         return None
@@ -267,11 +232,9 @@ def scene_entry(
     if points:
         entry["pts_mean"] = points
 
-    # Every ground-truth statistic below is clipped to the frame window. The
-    # Odin comes up later than the Fixposition in several 2026-09 bags -- 141 s
-    # later in scene 0000 -- so the odometry file legitimately covers time that
-    # has no image and no cloud. Counting it made "with GT" exceed the scene
-    # duration, which cannot be true of a subset.
+    # GT stats are clipped to the frame window: odometry can start well before
+    # the first frame (Odin boots after the Fixposition), and "with GT" must not
+    # exceed the scene duration.
     win = frame_window(probe)
     segments = access.segments
     odom = access.odometry
@@ -325,12 +288,7 @@ def scene_entry(
 
 
 def curated_thumbs(curated: dict, probe: SceneProbe) -> dict[str, int]:
-    """``{slot: frame index}`` for a scene, curated indexes or the fractions.
-
-    Written out even when no JPEG is stored: the endpoint renders that exact
-    frame live, so the index is the thumbnail's definition and the file is only
-    a cache of it.
-    """
+    """``{slot: frame index}``; the index defines the thumbnail, the JPEG only caches it."""
     if not probe.has("images") or not probe.n_frames:
         return {}
     return {slot: thumb_index(curated, slot, probe.n_frames) for slot in THUMB_SLOTS}
@@ -346,11 +304,9 @@ def group_range(scenes: list[str]) -> str:
 
 
 def totals(entries: dict[str, dict], size_gb: float | None, previous: list | None = None) -> list[dict[str, Any]]:
-    """The masthead tiles, summed over the scenes this root actually has.
+    """The masthead tiles, summed over this root's scenes.
 
-    The size tile is the exception: walking a 300 GB root on network storage is
-    the one expensive thing here, so it is computed only under ``--size`` and
-    otherwise carried over from the atlas being replaced.
+    Size is slow to compute, so only under ``--size``; otherwise carried over from ``previous``.
     """
     values = list(entries.values())
     frames = sum(e.get("frames") or 0 for e in values)
@@ -358,8 +314,7 @@ def totals(entries: dict[str, dict], size_gb: float | None, previous: list | Non
     segments = sum(e.get("segments") or 0 for e in values)
     poses = sum(e.get("poses") or 0 for e in values)
     path_m = sum(e.get("path_m") or 0.0 for e in values)
-    # Frame-weighted, not the mean of the per-scene fractions: a 4000-frame
-    # scene with no ground truth must count for more than a 200-frame one.
+    # Frame-weighted, not the mean of per-scene fractions.
     weighted = sum((e.get("cov") or 0.0) * (e.get("frames") or 0) for e in values)
 
     out = [
@@ -436,10 +391,7 @@ def write_thumbs(
 ) -> tuple[int, int]:
     """Render this scene's thumbnails. Returns ``(written, skipped)``.
 
-    A thumbnail is rewritten only when the frame it should show changed, the
-    stored file is a different width, or there is no file: the frames are
-    1280x800 PNGs and re-encoding all 129 of them on every run is the cost this
-    cache exists to avoid.
+    Skips a thumbnail whose frame and width are unchanged since the last run.
     """
     old = previous.get("thumbs") if isinstance(previous.get("thumbs"), dict) else {}
     written = skipped = 0
@@ -486,11 +438,7 @@ def read_json(path: Path) -> dict:
 
 
 def read_bags(path: Path | None) -> dict[str, dict]:
-    """``{scene: {session, bag_gb}}`` from a bag list CSV, if given.
-
-    Recording provenance lives with the extraction tools, not in the root, so
-    without the file these two fields are simply left out of the atlas.
-    """
+    """``{scene: {session, bag_gb}}`` from a bag list CSV; empty without one."""
     if not path or not path.is_file():
         return {}
     out: dict[str, dict] = {}
@@ -602,9 +550,7 @@ def summarise(entry: dict) -> str:
 def diff_atlas(new: dict, old: dict, only: list[str] | None = None) -> list[str]:
     """Human-readable differences, root keys first then per scene.
 
-    ``only`` limits it to some scenes, for a ``--check --scenes`` spot check:
-    the root half is skipped then, since totals summed over three scenes say
-    nothing about an atlas covering forty-three.
+    ``only`` limits it to those scenes and skips the root keys (totals would differ).
     """
     out: list[str] = []
     skip = {"generated", "scenes", "source", "note"}
@@ -628,14 +574,7 @@ def write_json(path: Path, data: dict) -> None:
 
 
 def resolve_thumbs_dir(atlas_dir: Path, materialize: bool) -> None:
-    """The same refusal one level down, for a real ``atlas/`` with linked ``thumbs/``.
-
-    HELHEST v1.5 was assembled that way: its own ``atlas/`` holding a
-    ``thumbs`` link into v1.4's, so a thumbnail rewritten here would land in
-    v1.4. ``--materialize`` copies the files across rather than dropping them:
-    the frames behind them are shared too, so they are still right, and
-    `write_thumbs` only re-renders the ones that are not.
-    """
+    """The same refusal for a linked ``atlas/thumbs/``; ``--materialize`` copies the files across."""
     thumbs = atlas_dir / "thumbs"
     if not thumbs.is_symlink():
         return
@@ -655,12 +594,7 @@ def resolve_thumbs_dir(atlas_dir: Path, materialize: bool) -> None:
 
 
 def resolve_atlas_dir(root: DatasetRoot, materialize: bool) -> None:
-    """Refuse to write through a symlinked ``atlas/``; ``--materialize`` breaks it.
-
-    A root assembled by symlinking an earlier release (v1.3 does exactly that)
-    points ``atlas/`` at the other root's directory, so generating in place would
-    overwrite the older release's atlas with numbers from this one.
-    """
+    """Refuse to write through a symlinked ``atlas/`` (it is another release's); ``--materialize`` breaks it."""
     atlas_dir = root.atlas_dir
     if not atlas_dir.is_symlink():
         resolve_thumbs_dir(atlas_dir, materialize)

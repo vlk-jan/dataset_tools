@@ -59,13 +59,9 @@ LOG = logging.getLogger("helhest.extract")
 
 
 def align_frame_clock(scene_dir: Path, frame_ts: np.ndarray, odom_data, args, bag: str):
-    """Take the sensor unit's capture-to-publish latency off the frame clock.
+    """Take the sensor's capture-to-publish latency off the frame clock (``--time_align``).
 
-    ``--time_align auto`` measures it against the clouds just written (see
-    :mod:`dataset_tools.time_align`); a number applies that constant instead,
-    for a rig already characterised or a scene too poor in geometry to measure;
-    ``off`` leaves the stamps alone. Returns the corrected clock and the profile
-    to record, or ``(frame_ts, None)`` when nothing was applied.
+    Returns the corrected clock and the profile to record, or ``(frame_ts, None)``.
     """
     mode = args.time_align
     if mode == "off":
@@ -99,8 +95,7 @@ def _columns(rows) -> tuple[np.ndarray, np.ndarray]:
 
 @dataclass
 class _Pass1:
-    """What the first pass over the bag collects: the stamps of the bulky
-    streams, and the small streams whole."""
+    """Pass 1 output: stamps of the bulky streams, the small streams whole."""
 
     gps_topic: str | None
     cam_ts: list = field(default_factory=list)
@@ -151,15 +146,11 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
         result.status = STATUS_EMPTY
         result.message = f"missing topic(s): {', '.join(missing)}"
         return result
-    # Pass 2 hands the payload to cv2.imdecode, which cannot read a raw
-    # sensor_msgs/Image; said here, once, instead of as an OpenCV assertion on
-    # the first frame.
+    # Pass 2 uses cv2.imdecode, which cannot read a raw sensor_msgs/Image.
     if cam_conn.msgtype not in IMAGE_MSGTYPES:
         raise ValueError(f"--cam {args.cam} is {cam_conn.msgtype}; expected one of {', '.join(IMAGE_MSGTYPES)}")
 
-    # The two 'auto' modes are decided by the odometry topic, which is worth a
-    # line in the log: a rig this tool has not met gets neither ground truth
-    # nor the pose guard, and would otherwise not be told why.
+    # The 'auto' modes depend on the odometry topic; log the decision.
     if args.gt == "auto" or args.gnss_guard == "auto":
         LOG.info(
             "%s: from --odom %s: ground truth %s, GNSS guard %s",
@@ -169,9 +160,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
             "on" if _auto(args.gnss_guard, args.odom) else "off (--gnss_guard on to force)",
         )
 
-    # A scene is extracted from scratch every time, so whatever an earlier run
-    # left behind must go first (see clear_scene_outputs). Its frame clock is
-    # remembered, to tell whether the per-frame products built on it still hold.
+    # Extraction starts from scratch; the old clock decides whether derived products still hold.
     old_clock = _digest(scene_dir / "data_ts.txt")
     clear_scene_outputs(scene_dir, ground_truth=_auto(args.gt, args.odom))
 
@@ -216,14 +205,9 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
 def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
     """Pass 1: every stamp of the camera and the lidar, and the small streams whole."""
-    # Added to the camera stamp in both passes, in one expression, so the two
-    # produce bit-identical floats and pass 2's set lookups hit. This is the
-    # camera's stamping against the LIDAR's, and nothing else: the offset both
-    # of them share against the pose clock is a latency, not a stamp error, and
-    # is measured after the clouds exist (see --time_align).
+    # Camera-vs-lidar stamp offset, added identically in both passes so pass 2's lookups hit exactly.
     shift_cam = args.cam_time_offset
-    # Found by message type rather than by name, so the same run works on both
-    # rig generations; None when the bag carries no fix at all.
+    # Found by message type, so both rig generations work; None without a fix topic.
     p1 = _Pass1(gps_topic=pick_gps_topic(reader.connections, args.gps))
 
     relevant_conns = [
@@ -242,17 +226,12 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
     # Deduplicate (e.g. when --odom and --imu are the same topic)
     relevant_conns = list({id(c): c for c in relevant_conns if c is not None}.values())
 
-    # Images and clouds are the bulk of the bag and this pass needs only their
-    # stamps, which are read out of the raw bytes (header_stamp_from_cdr). The
-    # shortcut is checked against a full decode of each connection's first
-    # message and dropped for that connection if the two disagree.
+    # Image/cloud stamps are read from raw bytes, verified against a full decode of the first message.
     stamp_only = {id(cam_conn), id(lidar_conn)}
     verified = p1.verified
 
     def stamp(msg, recv: float, topic: str) -> float:
-        # The header stamp, or the bag's receive time for a message without one
-        # -- in seconds, as pass 2 computes it -- counting the headers whose
-        # stamp was never set (transforms.MIN_VALID_STAMP).
+        # Header stamp, else receive time; unset header stamps are counted.
         t = header_stamp(msg, None)
         if t is None:
             if hasattr(msg, "header"):
@@ -277,8 +256,7 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
         if conn.topic != "/tf_static":
             p1.stamps[conn.topic].append(t)
 
-        # The gyro and the check stream may double as --imu or --odom, so they
-        # are taken here, before the chain below claims the message.
+        # Taken before the elif chain: these may double as --imu or --odom.
         if conn.topic == args.deskew_imu and hasattr(msg, "angular_velocity"):
             w = msg.angular_velocity
             p1.gyro.append((t, w.x, w.y, w.z))
@@ -292,7 +270,6 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
         elif conn.topic == args.lidar:
             p1.lidar_ts.append(t)
         elif conn.topic in (args.odom, args.imu):
-            # The same topic may serve as both odometry and orientation source
             if conn.topic == args.odom:
                 p1.odom_child_frame = msg.child_frame_id
                 p1.odom.append((t, pose_to_matrix(msg.pose.pose)))
@@ -328,21 +305,17 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
                 p1.gps_rows.append(row)
         elif conn.topic == "/tf_static":
             p1.tf_msgs.extend(msg.transforms)
-    # A bag may hold out-of-order messages; everything below samples these
-    # streams by stamp, so they are put in time order once, here.
+    # Bags may hold out-of-order messages.
     for rows in (p1.odom, p1.imu, p1.check_odom):
         rows.sort(key=lambda x: x[0])
     return p1
 
 
 def _joint_row(p1: _Pass1, topic: str, t: float, msg):
-    """One joint_states / joint_setpoints row, its columns in ``p1.joint_names`` order.
+    """One joint row in ``p1.joint_names`` order (the first message's).
 
-    The order is the first message's, and is written to joint_names.txt. A later
-    message naming its joints in another order is reordered; one naming other
-    joints, or carrying a column of the wrong length, is skipped and counted. A
-    column a message leaves empty (some drivers never fill effort) becomes NaN
-    rather than a short row that would make the whole array fail to stack.
+    Other joint sets or wrong-length columns are skipped and counted; an empty
+    column (some drivers never fill effort) becomes NaN.
     """
     names = list(msg.name) or [f"joint{i}" for i in range(len(msg.position))]
     if p1.joint_names is None:
@@ -368,11 +341,9 @@ def _joint_row(p1: _Pass1, topic: str, t: float, msg):
 def _select_frames(p1: _Pass1, args, bag: str):
     """Which camera/lidar pairs become frames: ``(cam_ts, pcd_ts, frame_ts,
     guard_verdict)``, or why the scene is empty, as a string."""
-    # Sync timestamps (mutual nearest neighbour)
     valid_cam_ts, valid_pcd_ts = sync_timestamps(p1.cam_ts, p1.lidar_ts)
     p1.counts.update(camera_messages=len(p1.cam_ts), lidar_messages=len(p1.lidar_ts), pairs=len(valid_cam_ts))
-    # Mutual nearest neighbours can still be far apart: across a camera stall,
-    # the image either side pairs with whichever sweep is left.
+    # Mutual nearest neighbours can still be far apart across a camera stall.
     close = np.abs(valid_cam_ts - valid_pcd_ts) <= args.max_sync_dt
     p1.counts["pairs_over_max_sync_dt"] = int(np.count_nonzero(~close))
     if not close.all():
@@ -393,40 +364,20 @@ def _select_frames(p1: _Pass1, args, bag: str):
         )
         return f"no synced pairs ({len(p1.cam_ts)} cam, {len(p1.lidar_ts)} lidar)"
 
-    # One clock per frame. transforms.npy and gravity_align.npy used to be
-    # sampled at the camera and the lidar stamps respectively, while data_ts.txt
-    # was their midpoint -- three clocks behind one frame index, which is not
-    # what a consumer reading "frame k" from all three expects.
-    #
-    # This is the clock as the sensors stamped it. Where the unit stamps at
-    # publish rather than at capture it is late by the pipeline's latency, which
-    # is measured and taken off below, once there are clouds to measure with.
+    # One clock per frame, as stamped; publish latency is taken off later (--time_align).
     frame_ts = (valid_cam_ts + valid_pcd_ts) / 2
 
-    # Whatever the GNSS/INS fabricated goes now, before a single image or cloud
-    # is written, so the frames that survive are exactly the frames the dataset
-    # can put a pose on and the indices below stay contiguous. The poses are
-    # still the receiver's own output here, not yet re-expressed at the base
-    # frame: a fabricated stretch is a property of what the receiver published,
-    # and moving it down a lever arm only lets a fast rotation masquerade as a
-    # jump. The same stage drops frames the pose stream never covered at all,
-    # before it starts, after it ends or inside a hole too wide to interpolate
-    # across: those would be exported carrying the nearest sample, which is a
-    # fabricated pose with a different author. See dataset_tools.gnss_guard.
+    # Drop fabricated or uncovered poses before any frame is written, so indices stay
+    # contiguous. Runs on the receiver's own frame: a lever arm would turn rotation into jumps.
     guard_verdict = None
     if _auto(args.gnss_guard, args.odom) and p1.odom:
         if args.gnss_guard == "on" or "fixposition" in args.odom:
-            # The full guard: asked for, or a Fixposition, whose reset solutions it knows.
-            # The stamps of the fixes that carried a position. The gaps in them are
-            # when the receiver had no solution, whether it said so by publishing
-            # null island (gps_row drops those) or by publishing nothing at all.
-            # A rig with a fix topic but not one usable fix is an empty list, not
-            # None: the receiver never had a solution, which is evidence too.
+            # Full guard. Gaps in fix stamps are no-solution periods; a fix topic
+            # with no usable fix is [] (evidence), not None.
             fix_ts = [float(r[0]) for r in p1.gps_rows] if p1.gps_topic else None
             p1.odom, keep, guard_verdict = gnss_guard.guard(p1.odom, frame_ts, fix_ts)
         else:
-            # The Odin1 odometry fabricates nothing; it relocalises in jumps,
-            # which the segment gate turns into breaks. Only coverage applies.
+            # Odin1 fabricates nothing (it jumps, handled by the segment gate): coverage only.
             p1.odom, keep, guard_verdict = gnss_guard.coverage_guard(p1.odom, frame_ts)
         if not guard_verdict.clean:
             LOG.warning("%s: %s", bag, guard_verdict.summary(float(frame_ts[0])))
@@ -437,8 +388,7 @@ def _select_frames(p1: _Pass1, args, bag: str):
         else:
             LOG.info("%s: pose guard -- %s", bag, guard_verdict.summary(float(frame_ts[0])))
 
-    # Long stops cut to their start (--trim_idle), here for the same reason as
-    # the guard: before any frame is written, so the indices stay contiguous.
+    # --trim_idle, before any frame is written for the same reason.
     if getattr(args, "trim_idle", None) and p1.odom:
         max_s, keep_s = args.trim_idle
         keep, idle = idle_trim.trim(frame_ts, sorted(p1.odom, key=lambda x: x[0]), max_s, keep_s)
@@ -468,8 +418,7 @@ def _write_small_streams(p1: _Pass1, scene_dir: Path, bag: str) -> None:
     for topic, n in sorted(p1.unset_stamps.items()):
         LOG.warning("%s: %d messages on %s carry no wall-clock stamp; their receive time is used", bag, n, topic)
 
-    # GPS is an optional extra, not part of the scene contract: a bag without a
-    # fix is a scene without gps.npy, exactly as one without /cmd_vel is.
+    # GPS is optional, like /cmd_vel.
     if p1.gps_rows:
         arr = np.vstack(p1.gps_rows)
         np.save(scene_dir / "gps.npy", arr[np.argsort(arr[:, 0])])
@@ -481,9 +430,9 @@ def _write_small_streams(p1: _Pass1, scene_dir: Path, bag: str) -> None:
 
 
 def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: str):
-    """The static TF tree (pinned where the pins apply), the lidar mount, and
-    the pose and orientation streams re-expressed at the base frame (in place
-    on ``p1``). Returns ``(tf_graph, T_lidar_to_base)``."""
+    """Build the (pinned) TF tree and re-express ``p1``'s streams at the base frame in place.
+
+    Returns ``(tf_graph, T_lidar_to_base)``."""
     tf_graph = build_tf_graph(p1.tf_msgs)
     if args.tf_pins == "on":
         pinned = tf_pins.apply(tf_graph)
@@ -517,8 +466,7 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             )
             T_lidar_to_base = np.eye(4)
 
-    # Odom poses track the odometry child frame (e.g. FP_POI for Fixposition);
-    # re-express them as poses of the base frame when TF allows it.
+    # Odom poses track the child frame (e.g. FP_POI); re-express at the base frame.
     child = p1.odom_child_frame
     T_child_to_base = get_transform(tf_graph, child, args.base_frame) if child else None
     if T_child_to_base is not None and not np.allclose(T_child_to_base, np.eye(4)):
@@ -532,8 +480,7 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             f"no TF path from odom child '{child}' to '{args.base_frame}': poses stay those of '{child}'",
         )
 
-    # Re-express the orientation source at the base frame too, so gravity
-    # alignment reflects the base tilt rather than the sensor mounting.
+    # So gravity alignment is the base's tilt, not the sensor mounting's.
     imu_frame = p1.imu_frame
     T_imu_to_base = get_transform(tf_graph, imu_frame, args.base_frame) if imu_frame else None
     if T_imu_to_base is not None and not np.allclose(T_imu_to_base, np.eye(4)):
@@ -548,9 +495,7 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             "gravity_align.npy is the sensor's tilt, not the base's",
         )
 
-    # The gyro that refines the rotation inside a sweep needs its axes in the
-    # base frame; without a path it is not used, and the sweeps fall back to
-    # the pose track's slerp -- a loss of precision, not of correctness.
+    # Without a gyro->base path, deskew falls back to the pose track's slerp.
     if p1.gyro:
         T_gyro = get_transform(tf_graph, p1.gyro_frame, args.base_frame) if p1.gyro_frame else None
         if T_gyro is None:
@@ -564,8 +509,7 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
         else:
             p1.gyro_rot = T_gyro[:3, :3]
 
-    # The check stream is compared at the base frame too, or the lever arm
-    # between the two sensors would read as disagreement.
+    # Compare at the base frame, or the lever arm reads as disagreement.
     child = p1.check_child
     T_check = get_transform(tf_graph, child, args.base_frame) if child else None
     if T_check is not None and not np.allclose(T_check, np.eye(4)):
@@ -601,22 +545,14 @@ def _write_frames(
     args,
     bag: str,
 ) -> None:
-    """Pass 2: the image and the cloud of every frame, under its chronological index.
-
-    Each cloud is written in the base frame and, where the sweep carries
-    per-point times and the pose stream covers it, moved onto the frame's own
-    instant ``frame_ts[k]`` (see :mod:`dataset_tools.extract.deskew`).
-    """
-    # The poses are at the base frame by now (_resolve_frames), which is the
-    # frame the clouds are about to be written in -- the one deskewing needs.
+    """Pass 2: write each frame's image and base-frame cloud, deskewed onto ``frame_ts[k]`` where possible."""
     track = time_align.PoseTrack.build(*_columns(p1.odom)) if args.deskew != "off" and len(p1.odom) >= 2 else None
     gyro = deskew.GyroTrack.build(p1.gyro, p1.gyro_rot) if track is not None and p1.gyro else None
     sweeps = Counter()
     span = 0.0
     shift_cam = args.cam_time_offset
     verified = p1.verified
-    # Each synchronised stamp and its chronological frame index; a stamp is
-    # taken out once written, so a duplicated message is not a second frame.
+    # Stamp -> frame index; popped once written, so duplicates are ignored.
     pending = {
         args.cam: {ts: i for i, ts in enumerate(valid_cam_ts)},
         args.lidar: {ts: i for i, ts in enumerate(valid_pcd_ts)},
@@ -627,9 +563,7 @@ def _write_frames(
     image_ext = None  # one format per scene, and per root: decided by the first frame
 
     for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
-        # Same stamp arithmetic as pass 1, so the lookups below hit exactly --
-        # including the fallback to the bag's own timestamp for a message type
-        # without a header.
+        # Same stamp arithmetic as pass 1, so the lookups hit exactly.
         is_cam = conn.topic == args.cam
         shift = shift_cam if is_cam else 0.0
         msg = None
@@ -649,9 +583,7 @@ def _write_frames(
             np_arr = np.frombuffer(msg.data, np.uint8)
             cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             if cv_img is None:
-                # A frame nothing can be written for leaves a hole in an
-                # index-aligned scene, so the scene fails -- but with the frame
-                # named, not with an OpenCV assertion from cv2.imwrite.
+                # A missing frame would break index alignment: fail, naming the frame.
                 raise ValueError(f"image {img_idx} (stamp {t:.6f}, {len(np_arr)} bytes) could not be decoded")
             ext = image_extension(np_arr, image_how, img_idx)
             if image_ext is None:
@@ -669,11 +601,9 @@ def _write_frames(
             if image_how == "png":
                 cv2.imwrite(str(image_path), cv_img)
             else:
-                # The camera's own bytes. Decoded above all the same, because a
-                # frame that cannot be read is better found here than in a loader.
+                # The camera's own bytes (decoded above only to validate).
                 image_path.write_bytes(np_arr.tobytes())
 
-            # Extract Intrinsics once
             if not intrinsics_saved:
                 save_intrinsics(reader, conns, args.cam, scene_dir)
                 save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
@@ -706,8 +636,7 @@ def _write_frames(
 
 
 def _report_deskew(p1: _Pass1, track, sweeps: Counter, span: float, clouds: int, args, bag: str) -> None:
-    """One line in the log and one entry in extract_meta.json about what the
-    sweeps were moved by -- or why they were not."""
+    """Log and record in extract_meta.json how the sweeps were deskewed, or why not."""
     if args.deskew == "off":
         p1.counts["deskew"] = {"mode": "off"}
         return
@@ -741,22 +670,14 @@ def _report_deskew(p1: _Pass1, track, sweeps: Counter, span: float, clouds: int,
 
 
 def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_verdict, args, bag: str):
-    """Everything sampled onto the frame clock once the clouds exist: the
-    corrected clock itself, the guard's report, ground truth, transforms and
-    gravity. Returns the corrected frame clock."""
-    # The frame clock, corrected now that there are clouds to measure against.
-    # The lidar's own clock takes the same correction -- it is the same unit's
-    # latency, and pcd_ts.txt has to stay comparable with data_ts.txt -- so the
-    # camera/lidar offset within a frame survives it untouched. Everything
-    # sampled onto the clock below follows from here.
+    """Correct the frame clock, then write everything sampled onto it. Returns the corrected clock."""
+    # pcd_ts takes the same correction (same unit's latency), keeping it comparable to data_ts.
     corrected, align = align_frame_clock(scene_dir, frame_ts, p1.odom, args, bag)
     applied = corrected - frame_ts
     frame_ts = corrected
     pcd_ts = valid_pcd_ts + applied
 
-    # The guard kept frames within FRAME_PAD of a pose, because the clock was
-    # not corrected yet. Now it is: a frame that still has no pose bracketing it
-    # would be handed a copy of the nearest one (interpolate_poses), so it goes.
+    # The guard padded by FRAME_PAD before correction; now drop frames without a bracketing pose.
     if guard_verdict is not None and p1.odom:
         keep = gnss_guard.frame_support(frame_ts, [t for t, _ in p1.odom], pad=0.0)
         if not keep.all():
@@ -779,7 +700,6 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     if guard_verdict is not None:
         gnss_guard.write_report(scene_dir / GNSS_GUARD_FILE, guard_verdict, float(frame_ts[0]))
 
-    # Process Odom Transforms (relative to first frame)
     if _auto(args.gt, args.odom) and p1.odom:
         if write_ground_truth(p1.odom, scene_dir, spans=guard_verdict.spans if guard_verdict else None):
             LOG.info("%s: ground truth written (odometry.txt + segments)", bag)
@@ -787,7 +707,6 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
             LOG.warning("%s: too few odometry samples for ground truth", bag)
 
     if p1.odom:
-        # The odometry interpolated onto the frame clock, relative to frame 0.
         matched, n_interp = interpolate_poses(frame_ts, *_columns(p1.odom))
         LOG.info(
             "%s: transforms.npy -- %d/%d interpolated, %d fell back to the nearest pose (gap or teleport)",
@@ -806,8 +725,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
             args.odom,
         )
 
-    # The odometry this scene is built on, checked against the other stream the
-    # rig records (--check_odom): where the two disagree, and by how much.
+    # --check_odom: compare against the rig's other pose stream.
     if p1.odom and p1.check_odom:
         result = pose_check.compare(*_columns(p1.odom), *_columns(p1.check_odom), gnss_guard.MAX_SPEED)
         pose_check.write_report(scene_dir / POSE_CHECK_FILE, result, args.odom, args.check_odom)
@@ -824,9 +742,8 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
         for w in result.get("warnings", []):
             LOG.warning("%s: pose check -- %s", bag, w)
 
-    # Process gravity alignment
     if p1.imu:
-        # The orientation interpolated onto the frame clock; yaw is dropped.
+        # Orientation on the frame clock, yaw dropped.
         oriented, _ = interpolate_poses(frame_ts, *_columns(p1.imu))
         gravity_aligns = np.empty((len(frame_ts), 3, 3))
         for k, M in enumerate(oriented):
@@ -843,11 +760,9 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
 
 
 def _drop_frames(scene_dir: Path, keep: np.ndarray) -> None:
-    """Delete the frames ``keep`` rejects from images/ and clouds/ and renumber
-    the rest, so frame k is again the k-th file of each.
+    """Delete rejected frames from images/ and clouds/ and renumber the rest.
 
-    Ascending order makes the renames safe: a frame only ever moves down, onto
-    an index whose own file has already moved or gone.
+    Ascending order keeps renames safe: files only move down onto freed indices.
     """
     for sub in ("images", "clouds"):
         files = {int(p.stem): p for p in (scene_dir / sub).iterdir()}
@@ -868,11 +783,7 @@ def _digest(path: Path) -> str | None:
 
 
 def _set_aside_stale(scene_dir: Path, old_clock: str | None, bag: str) -> None:
-    """Move the per-frame products of an earlier run aside when the frame clock changed.
-
-    They are indexed by frame, so once the frames are different moments they
-    describe the wrong ones -- silently. Unchanged clock, same frames: they stay.
-    """
+    """Move an earlier run's per-frame products aside if the frame clock changed."""
     present = [d for d in DERIVED_DIRS if (scene_dir / d).is_dir()]
     if not present or old_clock == _digest(scene_dir / "data_ts.txt"):
         return
@@ -923,12 +834,7 @@ def _coverage(ts, t0: float, max_gap: float = 1.0, max_listed: int = 100) -> dic
 
 
 def _write_meta(scene_dir: Path, reader, bag_path: Path, p1: _Pass1, guard_verdict, frames: int, args) -> None:
-    """extract_meta.json: the run, the bag, and what the run made of it.
-
-    ``streams`` gives each topic the run read its coverage and its holes over a
-    second, in seconds since the bag began -- the first place to look when a
-    scene has a hole, to see which sensor went quiet.
-    """
+    """extract_meta.json: the run, the bag, and per-topic coverage/gaps (seconds since bag start)."""
     t0 = reader.start_time * 1e-9
     topics: dict = {}
     for c in reader.connections:

@@ -112,8 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    # An older SimView imports fine and fails only when a window is built (an
-    # authoring argument it does not know), once per window, in the page.
+    # An older SimView imports fine and would only fail per window build.
     import simview
 
     found = tuple(int(p) for p in simview.__version__.split(".")[:3] if p.isdigit())
@@ -128,9 +127,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    # A loopback bind is the private case, and answers only to loopback names,
-    # so a hostname another site controls cannot be pointed at it. Any other
-    # bind is the operator's decision to share it, and is said so once.
+    # Loopback binds answer only to loopback Host names (DNS-rebinding guard).
     loopback = args.host in LOOPBACK_HOSTS
     if not loopback and args.notes:
         logging.getLogger("dataset_tools.viewer").warning(

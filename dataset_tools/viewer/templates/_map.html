@@ -1,16 +1,11 @@
-{# One map card, shared by the scene, segment and frame pages.
-
-   `map` is the dict a *_page module built (scene_page.map_card): a few stats
-   read from gps.npy, and the endpoint the track itself is fetched from. The
-   card is only ever included when that dict exists, so there is no such thing
-   as an empty map: a scene without GNSS renders no map markup at all. #}
+{# Map card (scene, segment, frame pages); `map` from scene_page.map_card.
+   Only included when the scene has GNSS. #}
 {% import "_macros.html" as ui %}
 <div class="card map">
   {{ ui.card_head(map.title, map.badge, map.badge_class, map.badge_title) }}
   {% if map.stats %}{{ ui.stats(map.stats) }}{% endif %}
 
-  {# The track is fetched, not inlined: the server thins it to a drawable
-     number of points, and the page renders before it arrives. #}
+  {# Fetched, not inlined: the server thins it. #}
   <div class="mapbox" data-map data-src="{{ map.src }}"></div>
   <p class="mapnote warn" hidden></p>
   {% if map.note %}<p class="cardnote">{{ map.note }}</p>{% endif %}

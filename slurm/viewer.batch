@@ -14,39 +14,19 @@
 #   sbatch slurm/viewer.batch [dataset_root]
 #   scripts/viewer_connect.sh          # from the laptop, opens the tunnel
 #
-# The node's sshd runs pam_slurm_adopt: you may ssh to a node only while you
-# have a job on it, which is exactly what this job provides. So the tunnel is
-#
-#   ssh -J login3.rci.cvut.cz -L 8080:127.0.0.1:<port> <node>
-#
-# and the forward's endpoint is resolved on the node, inside the ssh channel --
-# nothing has to be reachable between login3 and the node by plain TCP. This
-# works on any cpu* or amd* partition; the default names both, so the job
-# starts on whichever has a node free. Pick by walltime: cpufast 4 h, cpu 1 d,
-# cpulong 3 d, cpuextralong 42 d. Override on the command line, e.g.
-# `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`.
-#
-# The viewer binds 127.0.0.1 deliberately: the cluster network is shared, and
-# the tunnel does not need the port exposed on it.
+# Partition walltimes: cpufast 4 h, cpu 1 d, cpulong 3 d, cpuextralong 42 d,
+# e.g. `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`. The viewer binds
+# 127.0.0.1 only: the cluster network is shared and the tunnel doesn't need it.
 set -uo pipefail
 
-# Submit from the repository root (see slurm/README.md): slurm runs a copy of
-# this file from its spool, so the checkout is found through the submit
-# directory rather than through $0, and --output above is relative to it too.
+# Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 [ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 ROOT=${1:-/mnt/personal/$USER/HELHEST_v1_3}
 VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 
-# Built windows are cached per (scene, window, options), so a cache that
-# outlives the job means each window is built once and every later session
-# opens it instantly. Keep it off $HOME (quota) and off node-local disk (which
-# is wiped between jobs). VIEWER_CACHE overrides the base directory.
-#
-# One subdirectory per dataset under it, named after the root's last component
-# -- viewer_cache/HELHEST_v1_3, viewer_cache/HELHEST_v2_beta, ... Neither the
-# probe cache nor the bundle names are keyed by root, so two datasets sharing
-# one directory would read each other's entries.
+# Persistent cache, off $HOME (quota) and node-local disk (wiped). One subdir per
+# root: cache entries aren't keyed by root, so datasets must not share one.
 CACHE_BASE=${VIEWER_CACHE:-/mnt/personal/$USER/viewer_cache}
 CACHE="$CACHE_BASE/$(basename "$ROOT")"
 
@@ -55,8 +35,7 @@ CACHE="$CACHE_BASE/$(basename "$ROOT")"
     cd $REPO && uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e '.[viewer]'"; exit 1; }
 mkdir -p "$CACHE" || { echo "cannot write cache dir $CACHE"; exit 1; }
 
-# Several viewers can share a node, so take the first free port rather than a
-# fixed one. Start from a job-derived offset to keep concurrent jobs apart.
+# First free port from a job-derived offset; several viewers can share a node.
 port_taken() { (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null; }
 PORT=""
 base=$((8080 + SLURM_JOB_ID % 100))
@@ -65,9 +44,7 @@ for p in $(seq "$base" $((base + 99))); do
 done
 [ -n "$PORT" ] || { echo "no free port in $base-$((base + 99))"; exit 1; }
 
-# scripts/viewer_connect.sh reads this; the .out below says the same thing.
-# Not `exec` below, and the trap covers TERM: scancel and the walltime both
-# arrive as a signal, and an exec'd viewer would leave the file behind.
+# Read by scripts/viewer_connect.sh. No `exec` below, so the trap removes it on scancel.
 CONN="$REPO/slurm/slurm_out/viewer_${SLURM_JOB_ID}.conn"
 echo "$(hostname -s) $PORT" > "$CONN"
 trap 'rm -f "$CONN"' EXIT TERM INT

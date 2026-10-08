@@ -1,12 +1,6 @@
 """Viewer: the per-segment page (dataset_tools.viewer.segment_page).
 
-A segment is the unit the ground truth is anchored in, so the page is checked
-the way the segment is defined: its frames are the ones its windows carry, its
-numbers stop at its own boundaries, and it is addressed by the number in
-``odometry_segments.txt`` rather than by its position in the file.
-
-Every test builds a synthetic dataset root (``helpers_viewer``); the end-to-end
-HTTP tests skip cleanly when the viewer extra is not installed.
+Segments are addressed by their number in ``odometry_segments.txt``, not position.
 """
 
 from __future__ import annotations

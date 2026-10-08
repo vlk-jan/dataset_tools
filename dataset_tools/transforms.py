@@ -65,17 +65,13 @@ def pose_to_matrix(pose) -> np.ndarray:
     return T
 
 
-#: Seconds. A header stamp before this (2001-09-09) was never set from a wall
-#: clock: zero, or time since boot from a driver that publishes before its clock
-#: is synced. The robot's /joint_states open with 51 such rows in HELHEST v2.1
-#: scene 0000, stamped 0.12 s; sorted by time, they sit 55 years before the rest.
+#: Seconds (2001-09-09). Earlier header stamps were never set from a wall clock
+#: (zero, or time since boot).
 MIN_VALID_STAMP = 1e9
 
 
 def header_stamp(msg, fallback: float) -> float:
-    """``header.stamp`` of a deserialised message in seconds, or ``fallback``
-    when the message has no header or its stamp was never set (see
-    :data:`MIN_VALID_STAMP`)."""
+    """``header.stamp`` in seconds, or ``fallback`` when absent or unset."""
     if hasattr(msg, "header") and hasattr(msg.header, "stamp"):
         t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if t >= MIN_VALID_STAMP:
@@ -164,15 +160,10 @@ def quat_slerp(q0: np.ndarray, q1: np.ndarray, t: np.ndarray) -> np.ndarray:
 def interpolate_poses(
     src_ts: np.ndarray, src_poses: np.ndarray, query_ts: np.ndarray, tol: float = 0.0
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Interpolate a pose track at arbitrary times.
+    """Interpolate a pose track at arbitrary times (lerp + slerp).
 
-    Translation is linear, rotation is slerp. Returns
-    ``(positions (M, 3), quaternions (M, 4), valid (M,) bool)``; ``valid`` is
-    False for query times outside ``[src_ts[0], src_ts[-1]]`` (those entries
-    hold the clamped endpoint pose so callers can still render something, but
-    must not treat them as ground truth). ``tol`` widens that span: the pose and
-    frame clocks are unrelated, so a frame a few ms outside it is still on the
-    track, not off it.
+    Returns ``(positions (M, 3), quaternions (M, 4), valid (M,))``; outside
+    ``[src_ts[0] - tol, src_ts[-1] + tol]`` the pose is clamped and ``valid`` False.
     """
     query_ts = np.asarray(query_ts, dtype=np.float64)
     valid = (query_ts >= src_ts[0] - tol) & (query_ts <= src_ts[-1] + tol)

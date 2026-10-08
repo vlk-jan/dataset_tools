@@ -183,13 +183,8 @@ def test_a_span_covers_the_samples_that_are_fabricated_and_no_more():
 
 
 def test_a_robot_that_is_simply_stuck_keeps_its_frames():
-    """Scene 0009: the position is bit-identical for seconds at a time while
-    the driver commands 1.3 m/s into a robot that will not move. The fix is
-    continuous, the covariance is the scene's best, and the GNSS latitude and
-    longitude are just as still as the odometry. Nothing was fabricated -- a
-    Fixposition quantises to a micrometre, so a stopped robot publishes the
-    same number, and a freeze with no jump and no admitted outage is not
-    evidence of anything."""
+    """Scene 0009: a stuck robot publishes bit-identical positions; a freeze with no
+    jump and no outage is not fabrication."""
     parked = [(1030.0 + i / 10.0, pose(30.0)) for i in range(30)]  # 3 s, bit-identical
     odom = drive(300) + parked + drive(300, t0=1033.0, x0=30.0)
     kept, keep, verdict = gg.guard(odom, np.arange(1000.0, 1063.0, 0.08))
@@ -207,10 +202,8 @@ def test_the_same_freeze_is_removed_once_a_jump_agrees_with_it():
 
 
 def test_a_lone_jump_inside_an_outage_is_removed():
-    """Scene 0014 left a 3.29 m step at 53 m/s standing: nothing froze and no
-    second jump fenced it, so neither of the other rules saw it. What it sits
-    inside is a 12.7 s hole in the fix stream -- and that hole is a silence,
-    not null island, so it has to be read off the good fixes around it."""
+    """Scene 0014: a 3.29 m step inside a 12.7 s silent fix gap is caught from the
+    good fixes around it."""
     odom = drive(400) + [(1040.0 + i / 10.0, pose(43.3 + 0.1 * i)) for i in range(120)]
     fixes = np.r_[np.arange(1000.0, 1039.0, 0.1), np.arange(1051.8, 1053.0, 0.1)]
     frame_ts = np.arange(1000.0, 1053.0, 0.08)
@@ -228,9 +221,7 @@ def test_an_outage_with_no_jump_in_it_is_still_left_alone():
 
 
 def test_a_scene_that_never_had_a_fix_is_removed_whole():
-    """robotour_merged_2026_09_28-16_52_16: the origin, held for the whole bag,
-    and null island on every fix -- no outage between fixes, because there are
-    no fixes. The empty fix list is the receiver's admission."""
+    """Origin held all bag, null island on every fix: no good fixes means no GNSS."""
     odom = reset(1470, 1000.0, at=(0.0, 0.0, 0.0))
     kept, keep, verdict = gg.guard(odom, np.arange(1000.0, 1147.0, 0.07), [])
     assert not kept and not keep.any()

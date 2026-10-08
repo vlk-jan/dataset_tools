@@ -1,21 +1,8 @@
 """What a scene page states about one scene, above the tabs.
 
-Cards -- what was recorded, what ground truth is inside it, how the camera was
-calibrated, what the robot reported, what the extractor and the validator did --
-from the directory probe, the curated ``atlas.json`` entry if there is one, and a
-few per-scene arrays read only here.
-Where the scene's bytes go sits beside the file inventory when the root has a
-``disk_usage.json``; the sizes in the inventory come from the same entry.
-
-The reading budget is deliberate: everything is either already in memory or in
-a file bounded by the recording length (the proprioception arrays, cached on
-the scene handle and shared with the signal charts; ``camera_info.yaml``).
-Clouds, images and height maps are never opened, and ``odometry.txt`` only when
-no curated path length exists and the file is small.
-
-Nothing here is rig-specific -- wheel speeds stay in the file's own rad/s,
-never divided through a wheel radius that belongs to one robot. Each card
-degrades alone, and one left with nothing to say is dropped, not shown empty.
+Cards from the probe, the optional ``atlas.json`` entry and small per-scene
+arrays; clouds, images and height maps are never opened, ``odometry.txt`` only
+when small. Each card degrades alone and is dropped when empty.
 """
 
 from __future__ import annotations
@@ -62,22 +49,16 @@ logger = logging.getLogger("dataset_tools.viewer.scene_page")
 #: A card with fewer entries than this is not worth a panel of its own.
 MIN_CARD_STATS = 2
 
-#: A timeline block narrower than this fraction of the scene cannot be hit with
-#: a pointer, so a very short segment is drawn -- and clicked -- at this width
-#: rather than at its own. It overstates nothing else: the tooltip and the
-#: segment page both carry the real duration.
+#: Minimum timeline block width (fraction of the scene), so short segments stay clickable.
 MIN_MARK_FRAC = 0.006
 
-#: A wheel counts as turning above this angular speed (rad/s) -- fast enough to
-#: separate driving from a robot sitting still with noise on the encoders.
+#: A wheel counts as turning above this angular speed (rad/s), above encoder noise.
 TURNING_RAD_S = 0.1
 
-#: ``odometry.txt`` is parsed to fill in a path length only when it is at most
-#: this large. A curated root supplies the number and never gets here.
+#: Max ``odometry.txt`` size (bytes) parsed for a path length when the atlas has none.
 ODOMETRY_READ_LIMIT = 8_000_000
 
-#: A frame counts as moving above this speed (m/s), matching the atlas's own
-#: ``moving_frac`` definition closely enough to stand in for it.
+#: A frame counts as moving above this speed (m/s), as in the atlas's ``moving_frac``.
 MOVING_M_S = 0.1
 
 
@@ -100,8 +81,7 @@ def utc_stamp(ts: float | None) -> tuple[str, str] | None:
 def _sampled_cloud_points(access: SceneAccess) -> tuple[int, int] | None:
     """``(points, frame)`` from one cloud's ``.npy`` header, or None.
 
-    One header read, no cloud data: enough to say how dense a scan is on a root
-    that has no curated ``pts_mean``.
+    Stands in for a curated ``pts_mean``.
     """
     if not access.probe.has("clouds") or not access.probe.n_frames:
         return None
@@ -165,14 +145,8 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
 def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | None = None) -> tuple[float, float] | None:
     """``(path metres, moving fraction)`` from this scene's own odometry.
 
-    Only ever called when the atlas did not supply the numbers. Distances are
-    accumulated **inside** a segment and never across one: consecutive segments
-    are separately anchored, so the jump between them is not motion.
-
-    ``bounds`` overrides the segment list with explicit ``(start, end)`` pairs.
-    The caller uses it to clip to the frame window: ground truth recorded before
-    the camera and lidar came up is real odometry, but it is not distance this
-    dataset covers, and counting it makes the total disagree with the frames.
+    Accumulated inside segments, never across one. ``bounds`` overrides the
+    segment list with explicit ``(start, end)`` pairs.
     """
     odom = small_odometry(access)
     if odom is None:
@@ -197,9 +171,7 @@ def path_and_motion(access: SceneAccess, bounds: list[tuple[float, float]] | Non
 
 
 def small_odometry(access: SceneAccess) -> tuple[np.ndarray, np.ndarray] | None:
-    """``access.odometry``, but only when ``odometry.txt`` is at most
-    :data:`ODOMETRY_READ_LIMIT`: it is parsed text, and a summary card is not
-    worth a full parse of a scene with hundreds of thousands of poses."""
+    """``access.odometry``, only when ``odometry.txt`` is at most :data:`ODOMETRY_READ_LIMIT`."""
     try:
         if (access.dir / "odometry.txt").stat().st_size > ODOMETRY_READ_LIMIT:
             return None
@@ -224,8 +196,7 @@ def poses_between(
 def path_motion(ts: np.ndarray, poses: np.ndarray) -> tuple[float, np.ndarray]:
     """``(path metres, speed per step)`` along one stretch of poses.
 
-    The path sums every 3-D step; the speeds are :func:`signals._speed`'s, so a
-    card and the speed chart cannot disagree about how fast the robot went.
+    Speeds are :func:`signals._speed`'s, so cards and charts agree.
     """
     xyz = poses[:, :3, 3]
     return float(np.linalg.norm(np.diff(xyz, axis=0), axis=1).sum()), _speed(ts, xyz)[1]
@@ -234,14 +205,8 @@ def path_motion(ts: np.ndarray, poses: np.ndarray) -> tuple[float, np.ndarray]:
 def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
     """One clickable block per ground-truth segment, in scene-time fractions.
 
-    Built from the segment file rather than from the probe's flat span pairs,
-    because a block is only worth clicking if it knows *which* segment it is:
-    the number carried here is the one in ``odometry_segments.txt``, which is
-    what the segment page resolves and what the window keys already name.
-
-    Empty when the scene has no readable segments or no time span to scale them
-    against; the timeline then falls back to the plain spans, which is all a
-    curated-only scene ever had.
+    Carries each segment's file number. Empty without segments or a time span;
+    the timeline then falls back to plain spans.
     """
     p, segments = access.probe, access.segments
     if not segments or p.start_ts is None or not p.duration or p.duration <= 0:
@@ -252,10 +217,7 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
         lo = min(1.0, max(0.0, (seg.start_ts - base) / span))
         hi = min(1.0, max(0.0, (seg.end_ts - base) / span))
         width = min(max(hi - lo, MIN_MARK_FRAC), 1.0 - lo)
-        # Why a segment *ended* is not what a reader wants off a hover: it is a
-        # property of the boundary, it is the same sentence on block after
-        # block, and the segment page states it anyway. Where the poses came
-        # from stays -- that is what makes an amber block different.
+        # The hover names where filled poses came from, not why the segment ended.
         described = describe_reason(seg.reason)
         why = described.split("; ends because", 1)[0] if described.startswith("filled") else ""
         title = f"segment {seg.index} - {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses"
@@ -275,19 +237,15 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
 def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
     """Where trustworthy poses exist inside the scene, and how good they are.
 
-    The segment file is read live and preferred over the curated copy: the file
-    is the truth, and a scene may have been re-filtered since the atlas was
-    written. Only what cannot be recomputed cheaply -- the disagreement
-    percentiles against the robot's own odometry, the divergence flag count,
-    the previous root's coverage -- is taken from the atlas.
+    The live segment file is preferred over the atlas; only what is expensive
+    to recompute comes from the atlas.
     """
     p = access.probe
     segments = access.segments
     stats: list[dict[str, Any]] = []
     notes: list[str] = []
 
-    # The same source the index badge uses, so one scene does not carry two
-    # different coverage numbers on two pages of the same viewer.
+    # Same source as the index badge.
     coverage = a.get("cov", p.segment_coverage)
 
     if segments:
@@ -303,16 +261,12 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         )
         poses = sum(s.n_poses for s in segments)
         if poses:
-            # Only when the curated count is of the *same* poses: a scene whose
-            # gaps were filled from another root has more poses in its segments
-            # than this root's own run produced, and "of N raw" would be a lie.
+            # "of N raw" only when N >= poses (filled scenes have more than their own run).
             raw = a.get("poses_unf") or a.get("poses_raw")
             sub = f"of {fmt_count(raw)} raw" if raw and raw >= poses else None
             stats.append(stat("poses", fmt_count(poses), sub))
         reasons = sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])
-        # A filled stretch is not a reason a segment *ended*; it is where its
-        # poses came from, and the fill note below says so. Mixing the two read
-        # as "segments end because filled by replaying the bag".
+        # Fills are not end reasons; the fill note covers them.
         ends = [(describe_reason(r), n) for r, n in reasons]
         ends = [(d, n) for d, n in ends if d and not d.startswith("filled")]
         if ends:
@@ -346,13 +300,8 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
     spans, fill = segment_timeline(p, a)
     marks = timeline_marks(access)
     if fill:
-        # Say which fill this root actually holds rather than naming one: v1.3's
-        # holes were filled by replaying their bags, v1.2's from v1.1, and a
-        # root can carry both.
+        # Name the fill sources this root holds, then count the marks.
         filled = [s for s in segments if "fill" in (s.reason or "").lower()]
-        # The fill sentence, then what was done to the poses afterwards as a
-        # count -- a scene whose fills were refined one at a time would
-        # otherwise read the same sentence twice, once per tail.
         sources = sorted({describe_reason((s.reason or "").split("+")[0]) for s in filled})
         mark_counts = Counter(m for s in filled for m in describe_marks(s.reason or "", brief=True))
         detail = "; ".join(sources) if sources else "filled from another root through the same quality gate"
@@ -371,10 +320,6 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             {
                 "spans": spans,
                 "fill": fill,
-                # One block per segment, each knowing which segment it is. The
-                # flat spans above stay: they are what a scene with no readable
-                # segment file (a curated-only root) has to be drawn from, and
-                # they are what the index card draws.
                 "marks": marks,
                 "label": fmt_duration(p.duration or a.get("dur_s")),
             }
@@ -407,8 +352,7 @@ def calibration_card(access: SceneAccess, info: dict | None) -> dict[str, Any] |
     if width and height:
         model = (info or {}).get("distortion_model")
         coeffs = (info or {}).get("distortion_coefficients") or []
-        # An all-zero coefficient vector is not the same fact as no vector at
-        # all: the camera declared a model and then reported no distortion.
+        # All-zero coefficients differ from none: say so.
         described = f"{len(coeffs)} coeff{'' if any(coeffs) else ', all zero'}" if coeffs else None
         sub = " · ".join(x for x in (model, described) if x)
         stats.append(stat("image", f"{width} × {height}", sub or "px"))
@@ -530,10 +474,8 @@ def _report_lines(access: SceneAccess, name: str) -> tuple[list[str], list[str]]
 def _time_align_stats(access: SceneAccess) -> list[dict[str, Any]]:
     """What ``time_align.txt`` says the frame clock was moved by.
 
-    Its second comment line is ``time_align.Profile.summary`` -- "no correction
-    (why)" or "<shape> from K/N windows (note)" -- and its rows are the windows
-    measured, ``t delta gain depth``. A constant given on the command line has
-    a summary and no rows.
+    Second comment line is ``time_align.Profile.summary``; rows are
+    ``t delta gain depth`` per window (none for a constant offset).
     """
     comments, rows = _report_lines(access, "time_align.txt")
     summary = comments[1].lstrip("# ").strip() if len(comments) > 1 else ""
@@ -580,9 +522,7 @@ def _gnss_guard_stats(access: SceneAccess) -> tuple[list[dict[str, Any]], str | 
 def _tf_pins_stats(access: SceneAccess) -> list[dict[str, Any]]:
     """How far each pinned transform sat from what the bag itself published.
 
-    Rows come in pin/bag pairs per edge; the numbers are recomputed from the
-    rows through ``tf_pins.Record`` rather than read off the report's own
-    comment, so the card and the extractor cannot disagree about a distance.
+    Recomputed from the pin/bag rows through ``tf_pins.Record``.
     """
     from .. import tf_pins
 
@@ -611,9 +551,7 @@ def _tf_pins_stats(access: SceneAccess) -> list[dict[str, Any]]:
 def extraction_card(access: SceneAccess) -> dict[str, Any] | None:
     """What the extractor did to the recording on its way to a scene.
 
-    Three report files, each optional, each read on its own: a malformed one
-    costs the card its part and a warning, never the page. ``None`` when the
-    scene carries none of them (a root extracted before they existed).
+    Three optional reports; a malformed one costs only its part. ``None`` without any.
     """
     p = access.probe
     stats: list[dict[str, Any]] = []
@@ -658,9 +596,7 @@ def extraction_card(access: SceneAccess) -> dict[str, Any] | None:
 def validation_card(access: SceneAccess) -> dict[str, Any] | None:
     """What ``helhest-validate`` made of the scene; None without a report row.
 
-    The report is ``<root>/validation.csv``, which carries the status, the
-    numbers and counts of findings -- never the messages, which only the
-    validator's own output has. The card says so instead of pretending.
+    Messages come from ``validation.json`` when present; the CSV holds only counts.
     """
     row = access.root.validation_scene(access.scene_id)
     mark = validation_mark(row)
@@ -705,8 +641,7 @@ SEVERITY_ORDER = {"ERROR": 0, "WARN": 1, "INFO": 2}
 
 
 def _validation_findings(access: SceneAccess, messages: list[dict]) -> dict[str, Any]:
-    """The validator's messages as a list, and those with a place in time as
-    marks on a timeline that open the frame where they start."""
+    """The validator's messages, plus timeline marks for those with a time."""
     ts = access.frame_ts
     duration = float(ts[-1] - ts[0]) if ts is not None and len(ts) > 1 else 0.0
 
@@ -751,19 +686,8 @@ def _gps_src(scene_id: str, segment, frame: int | None) -> str:
 def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dict[str, Any] | None:
     """Where on the Earth this was recorded -- ``None`` when nothing says.
 
-    A scene with no ``gps.npy`` gets no card, and the template then renders no
-    map, no grid and no Leaflet at all: a root from a rig without GNSS looks
-    exactly as it did before any of this existed.
-
-    ``segment`` narrows the numbers (not just the drawn track) to one segment's
-    time span, which is what makes the same card honest on the segment page.
-    ``frame`` marks where one frame was, for the frame page; the numbers then
-    still describe the whole track the marker sits on.
-
-    The fixes are the receiver's own position -- on the new rig the fusion
-    point, a few tens of centimetres from ``base_link``, well inside its own
-    sigma -- and they are not ground truth: the poses in ``odometry.txt`` are
-    anchored per segment and say nothing about the Earth.
+    ``segment`` narrows the track and numbers to its span; ``frame`` adds a
+    marker. GNSS is not ground truth.
     """
     gps = access.gps
     if not geo.is_track(gps):
@@ -777,7 +701,7 @@ def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dic
         ts = access.frame_ts
         here = geo.locate(gps, float(ts[frame])) if ts is not None and 0 <= frame < len(ts) else None
         stats.append(
-            stat("this frame", f"{here[0]:.6f}, {here[1]:.6f}" if here else "-", "latitude, longitude")
+            stat("this frame", f"{here[0]:.6f}, {here[1]:.6f}", "latitude, longitude")
             if here
             else stat("this frame", "-", "no fix within a second of it")
         )
@@ -816,10 +740,7 @@ def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dic
 def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
     """The same three frames the index card shows, at the top of the scene page.
 
-    Same endpoint and same resolver as the index, so a scene looks the same in
-    both places; here each one also links to the frame it was cut from. The link
-    and the picture come from one ``thumb_index`` call: a curated thumbnail cut
-    at some other frame than the default fraction still captions itself right.
+    Same endpoint and ``thumb_index`` as the index; each links to its frame.
     """
     p = access.probe
     stored = thumb_slots(a)
@@ -915,8 +836,7 @@ def _gap_text(gaps: list[tuple[int, int]], shown: int = 6) -> str:
 def _coverage(access: SceneAccess, art: Any, count: int) -> dict[str, Any] | None:
     """Where a per-frame directory has no file: a bar of the gaps and a line naming them.
 
-    One listing of the directory, only for one that is short of frames; the
-    page is cached, so it is paid once per scene.
+    Lists the directory; only called for partial ones.
     """
     n = access.probe.n_frames
     try:
@@ -925,8 +845,7 @@ def _coverage(access: SceneAccess, art: Any, count: int) -> dict[str, Any] | Non
         return None
     if not gaps:
         return None
-    # A lone missing frame is far under a pixel wide; the mark keeps a minimum
-    # width in CSS, and runs a pixel apart are drawn as one.
+    # Merge runs closer than ~a pixel; CSS gives marks a minimum width.
     marks: list[list[float]] = []
     for a, b in gaps:
         left, right = a / n * 100, (b + 1) / n * 100
@@ -944,10 +863,7 @@ def _coverage(access: SceneAccess, art: Any, count: int) -> dict[str, Any] | Non
 def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
     """The file inventory in group order, each entry carrying what it is and what it is for.
 
-    Everything a reader needs about one artefact is assembled here, so the page
-    can open it in place with no extra request: whether the scene has it (by
-    ``SceneProbe.state``, the rule the index page colours by too), how much of
-    it, and where it is.
+    State is ``SceneProbe.state``, as on the index page.
     """
     p = access.probe
     sizes = file_sizes(access)
@@ -1030,8 +946,7 @@ def file_summary(entries: list[dict[str, Any]]) -> dict[str, Any]:
 def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
     """Thumbnails and the cards, cached on the scene handle.
 
-    Cached because a page view costs a few megabytes of small-array reads on
-    network storage, and switching tabs on the same scene must not pay it twice.
+    Cached: small-array reads on network storage add up.
     """
 
     def work() -> dict[str, Any]:
@@ -1048,22 +963,13 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
         return {
             "hero": hero_thumbs(access, a),
             "cards": [c for c in cards if c],
-            # Which side of the train/val split this scene is on. The same mark
-            # the index card is rimmed with, from the same function, so the two
-            # pages cannot disagree about a held-out scene.
             "split": split_mark(root, access.scene_id),
-            # Not one of the cards: it sits beside the file inventory, and it is
-            # absent -- not empty -- on a scene without GNSS.
+            # map and disk are None (not empty) without gps.npy / disk_usage.json.
             "map": map_card(access),
-            # Between the inventory and the map, likewise absent on a root
-            # with no disk_usage.json.
             "disk": disk_card(access),
-            # The inventory strip: one entry per artefact the viewer knows,
-            # present or not, each with the prose the page opens under it.
             "files": (files := file_entries(access)),
             "file_groups": file_groups(files),
             "files_summary": file_summary(files),
-            # The same arrays over time, on the frame clock's own span.
             "signals": scene_signals(access),
         }
 

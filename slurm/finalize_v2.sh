@@ -1,13 +1,7 @@
 #!/bin/bash
-# Dataset-root bookkeeping after slurm/extract_v2.batch: rebuild scenes.csv
-# from the published scenes (extract_v2 runs one bag per task, so no single run
-# ever sees them all), validate the whole root, and regenerate the atlas.
-#
-# The atlas has to be last and it has to be here rather than by hand: every
-# number on the index page is rendered from the root, and the pose guard can
-# change a scene's frame count, so an atlas from before a re-extraction shows
-# the previous run's figures under the current title. v1.3 already shipped once
-# with a stale atlas.
+# Root bookkeeping after slurm/extract_v2.batch: rebuild scenes.csv, declare the
+# image format, validate the root, and regenerate the atlas (last, so its numbers
+# match the current scenes).
 #
 #   slurm/finalize_v2.sh [out_root] [bag_list.csv]
 set -uo pipefail
@@ -24,9 +18,7 @@ print(merge_scenes_csv(Path('$OUT')))
 "
 column -s, -t "$OUT/scenes.csv"
 
-# What the images are, declared where a consumer looks for it (manifest.json ->
-# images.extension) before anything validates against it. Fails on a root whose
-# scenes do not agree, which is the state a partial re-extraction leaves.
+# Writes manifest.json images.extension; fails if scenes disagree (partial re-extraction).
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.image_format "$OUT" \
     || echo "IMAGE FORMAT: the scenes of $OUT do not hold one format -- see above"
 
@@ -34,8 +26,7 @@ singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$OUT" --csv "$OUT/validation.csv"
 vrc=$?
 
-# --bags: the v1 list numbers its scenes the same way, so it has to be this
-# release's list or every card gets a v1 bag size and session.
+# --bags must be this release's list: v1's numbers its scenes the same way.
 singularity exec $BINDS "$SIF" "$PY" "$REPO/scripts/make_atlas.py" "$OUT" --bags "$BAGS" \
     || echo "atlas generation reported problems"
 

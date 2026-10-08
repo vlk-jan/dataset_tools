@@ -14,11 +14,9 @@
 {% endblock %}
 {% block main %}
 
-  {# Curated content carries rendered numbers, so an atlas copied from an
-     earlier release is wrong in a way nothing else on the page reveals. #}
+  {# An atlas from an earlier release carries stale numbers. #}
   {% if atlas_warning %}<p class="stale">{{ atlas_warning }}</p>{% endif %}
-  {# Scene ids are only meaningful inside one tree, so a split exported against
-     another one mislabels scenes with nothing else on the page to reveal it. #}
+  {# A split exported against another tree mislabels scenes. #}
   {% if split_warning %}<p class="stale">{{ split_warning }}</p>{% endif %}
 
   <div class="masthead">
@@ -64,8 +62,7 @@
     </div>
     {% endif %}
 
-    {# The curated note already names the root and says what matters about it;
-       only when there is none do we assemble one from the manifest. #}
+    {# Assembled from the manifest only when there is no curated note. #}
     <p class="note">
       {%- if atlas and atlas.root_note %}{{ atlas.root_note }}
       {%- else %}Root <code>{{ root.path }}</code>
@@ -76,10 +73,8 @@
     </p>
   </div>
 
-  {# What the card bands mean, and the filter over them. Only on a root that
-     declares a split, and counted over the scenes this root actually has rather
-     than over the file's own lists. The filter is plain links (`/?split=val`),
-     applied by the server, so a filtered index can be linked and reloaded. #}
+  {# Split legend and filter, only on a root with a split; plain links
+     (`/?split=val`) so a filtered index is linkable. #}
   {% if split_panel %}
   {% set sp = split_panel %}
   <div class="splitpanel" id="splits">
@@ -129,8 +124,6 @@
   </div>
   {% endif %}
 
-  {# A root with nothing the viewer recognises as a scene would otherwise be a
-     masthead over nothing, with no word about why. #}
   {% if not groups %}
   <section>
     <p class="stale">No scenes found under <code>{{ root.path }}</code>. A scene is a directory
@@ -151,8 +144,7 @@
     <div class="scenes">
     {% for row in group.rows %}
       {% set p = row.probe %}
-      {# The band says which side of the train/val split the scene is on; a
-         root with no splits.json adds none and the card looks as it always did. #}
+      {# Train/val band, only on a root with splits.json. #}
       <article class="scene{% if row.split %} split{% endif %}" id="s{{ p.scene_id }}">
         {% if row.split %}
         <div class="splitband {{ row.split.which }}" title="{{ row.split.title }}">{{ row.split.which }}</div>
@@ -192,8 +184,7 @@
           {{ ui.stats(row.stats) }}
 
           <div class="chips">
-            {# driven_similarity is a DRIFT product most roots lack: shown only where it exists,
-               so a root without it looks exactly as it always did. #}
+            {# driven_similarity: shown only where it exists. #}
             {# Coloured by SceneProbe.state, the same rule as the scene page's file card. #}
             {% for key in ("images", "clouds", "height_maps", "height_masks", "driven_similarity") %}
               {% set st = p.state(key) %}

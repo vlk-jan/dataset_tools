@@ -1,14 +1,7 @@
 """What the scene index shows, assembled once per page render.
 
-Two halves, not to be confused. *Probed*: listing a scene directory and reading
-its timestamp and segment files, so it exists for any root, from any rig.
-*Curated*: prose, groupings into outings, numbers that took a full pass over the
-raw bags -- optional, from ``atlas/atlas.json`` beside the data.
-
-They merge into one row shape here so the template need not ask which root it
-is looking at; without the curated half a row is simply shorter. Nothing reads
-a cloud, an image or a height map -- the probe is cached and the atlas is one
-small JSON read.
+Merges *probed* facts (any root) with optional *curated* ones from
+``atlas/atlas.json`` into one row shape. Never reads clouds, images or height maps.
 """
 
 from __future__ import annotations
@@ -20,10 +13,7 @@ from urllib.parse import urlencode
 from .probe import DatasetRoot, SceneProbe
 from .splits import SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
 
-#: Thumbnail slots and where in a scene they sample it when the atlas does not
-#: say. A curated root names the frame each slot was cut from, so the picture,
-#: its caption and the frame it links to are one number; these fractions are the
-#: fallback for a root with no atlas at all.
+#: Thumbnail slots and their fallback position in a scene when the atlas names no frame.
 THUMB_SLOTS: tuple[str, ...] = ("a", "b", "c")
 THUMB_FRACTIONS: dict[str, float] = {"a": 0.1, "b": 0.5, "c": 0.9}
 
@@ -31,8 +21,7 @@ THUMB_FRACTIONS: dict[str, float] = {"a": 0.1, "b": 0.5, "c": 0.9}
 COVERAGE_HIGH = 0.85
 COVERAGE_MID = 0.5
 
-#: Modalities the disk bar gives a colour of their own, in the order of the
-#: palette slots (style.css ``.dk-*``); any other directory counts as "other".
+#: Modalities with their own disk-bar colour (style.css ``.dk-*``); the rest are "other".
 DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "driven_similarity", "other")
 
 
@@ -95,9 +84,7 @@ def fmt_disk_rate(nbytes: float, seconds: float | None) -> str | None:
 def content_bytes(entry: dict) -> int:
     """A ``disk_usage.json`` scene or modality entry's size, linked bytes included.
 
-    A root built from links into another (v2.4 into v2.3) stores almost nothing
-    itself, but its scenes still hold everything they link to; showing only the
-    own ``bytes`` would read a fully linked scene as empty.
+    A root linked into another stores almost nothing itself; count what it links to.
     """
     return int(entry.get("bytes") or 0) + int(entry.get("linked_bytes") or 0)
 
@@ -127,8 +114,7 @@ def _curated_stats(a: dict) -> list[dict[str, Any]]:
     if a.get("pts_mean"):
         stats.append(stat("points / cloud", fmt_count(a["pts_mean"])))
     if a.get("poses") is not None:
-        # "of N raw" only when N counts the same poses: a scene whose gaps were
-        # filled from another root has more of them than its own run produced.
+        # "of N raw" only when N >= poses (filled scenes have more than their own run).
         raw = a.get("poses_unf") or a.get("poses_raw")
         keep = raw and raw >= a["poses"]
         stats.append(stat("poses", fmt_count(a["poses"]), f"of {fmt_count(raw)} raw" if keep else None))
@@ -173,17 +159,11 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
 def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> tuple[list, list]:
     """``(normal spans, filled spans)`` for a scene's ground-truth timeline.
 
-    Both halves come from ONE source. The live segment file wins whenever it
-    produced any span at all, because that file is the truth and the atlas may
-    predate a re-filtering; but "the live file has no filled segments" is an
-    answer, not a hole, so it must not fall through to the atlas's list. Mixing
-    them drew an amber "filled from v1.1" band at atlas coordinates over live
-    spans -- a scene whose fills had since been dropped still claimed them, on
-    the index card, on the scene page's timeline and in its prose.
+    Both halves come from ONE source: the live segment file if it has any span
+    (the atlas may be stale), else the atlas. Never mix the two.
     """
     if probe.segment_spans:
-        # `fill_spans` is a subset of `segment_spans`, so the plain half has to
-        # have it taken out or every filled stretch is drawn twice.
+        # `fill_spans` is a subset of `segment_spans`; removed below.
         spans, fill = list(probe.segment_spans), list(probe.fill_spans)
     else:
         fill = [list(s) for s in (atlas_entry.get("fill_spans") or [])]
@@ -194,10 +174,7 @@ def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> tuple[list, list]:
 def thumb_slots(atlas_entry: dict) -> list[str]:
     """The slots the atlas curates for a scene, in slot order.
 
-    Two spellings are accepted: ``{"a": 196}`` names the frame each slot was cut
-    from (what ``scripts/make_atlas.py`` writes), and a bare ``["a", "b", "c"]``
-    is the older form that only claimed a file exists -- there the frame falls
-    back to the fraction, which is what those files were cut at anyway.
+    ``{"a": 196}`` (slot -> frame) or the older bare ``["a", "b", "c"]``.
     """
     raw = atlas_entry.get("thumbs")
     keys = raw.keys() if isinstance(raw, dict) else (raw or ())
@@ -207,8 +184,7 @@ def thumb_slots(atlas_entry: dict) -> list[str]:
 def thumb_index(atlas_entry: dict, slot: str, n_frames: int) -> int:
     """The frame one thumbnail slot shows: the curated index, else the fraction.
 
-    One function for the picture, its caption and its link, so a curated
-    thumbnail cannot be captioned with a frame it was not cut from.
+    Shared by the picture, its caption and its link.
     """
     raw = atlas_entry.get("thumbs")
     index = raw.get(slot) if isinstance(raw, dict) else None
@@ -220,9 +196,7 @@ def thumb_index(atlas_entry: dict, slot: str, n_frames: int) -> int:
 def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[str, str]]:
     """Three thumbnail URLs for a scene, stored ones preferred.
 
-    Both cases go through the same endpoint: it serves the curated file when the
-    root has one and renders a live frame when it does not, so the template does
-    not branch and a root that later grows an ``atlas/`` needs no template change.
+    One endpoint serves the curated file or renders a live frame.
     """
     stored = thumb_slots(atlas_entry)
     slots = stored or (list(THUMB_SLOTS) if probe.has("images") and probe.n_frames else [])
@@ -238,12 +212,8 @@ def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[st
 def split_mark(root: DatasetRoot, scene_id: str) -> dict[str, str] | None:
     """The train/val mark for one scene, or ``None`` when the root declares none.
 
-    One function for the index card's band and the scene-page tag, so a scene
-    cannot be banded as held out on the index and tagged as training on its own
-    page. The
-    tooltip names the fold and the tree, because a scene id only means something
-    inside one tree and the badge is the only place a reader of the scene page
-    would find out which fold put it there.
+    Shared by the index card and the scene page so they cannot disagree; the
+    tooltip names the fold and dataset version.
     """
     splits = root.splits()
     which = splits.of(scene_id)
@@ -261,10 +231,7 @@ def split_mark(root: DatasetRoot, scene_id: str) -> dict[str, str] | None:
 def validation_mark(row: dict[str, str]) -> dict[str, str] | None:
     """The chip a scene's ``validation.csv`` row earns, or ``None`` without one.
 
-    One function for the index chip and the scene page's badge, so a scene
-    cannot pass on one page and fail on the other. The tooltip carries the
-    numbers the row has, since the file holds counts of findings and not
-    their text -- for the messages, run ``helhest-validate`` on the scene.
+    Shared by the index chip and the scene page's badge.
     """
     if not row.get("status"):
         return None
@@ -304,8 +271,7 @@ def _count(value: Any) -> int:
 def validation_totals(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """One masthead cell: how the scenes the index shows fared, or ``None``.
 
-    Counted over the index's rows, as the disk and split panels are: the file
-    may name scenes this root no longer has, or miss ones added since.
+    Counted over the index's rows, since the file may lag the root.
     """
     if root.validation() is None:
         return None
@@ -384,13 +350,9 @@ def build_index(
 ) -> dict[str, Any]:
     """Everything the index template needs, curated half included when present.
 
-    ``status`` keeps only the scenes ``validation.csv`` gives that status
-    (``STATUS_FILTERS``); the totals then describe the scenes shown.
-    ``notes`` is every scene's notes (``NoteStore.list_all``): each card then
-    says how many it has and what verdicts they carry, and ``verdict`` keeps
-    only the scenes with a note of that verdict. ``split`` keeps only the
-    cards on that side of the train/val split; unlike ``status`` it leaves the
-    totals and the split panel counting every scene.
+    Filters: ``status`` (``STATUS_FILTERS``; totals follow it), ``verdict`` (scenes
+    with a note of that verdict, from ``notes``), ``split`` (cards only; totals and
+    the split panel still count every scene).
     """
     atlas = root.atlas() or {}
     rows = [build_row(root, p) for p in probes]
@@ -423,8 +385,7 @@ def build_index(
                 "rows": members,
             }
         )
-    # Anything the atlas did not mention still gets shown -- a scene added to a
-    # root after the atlas was written must not vanish from the index.
+    # Scenes the atlas does not mention still get shown.
     rest = [r for r in rows if r["probe"].scene_id not in taken]
     if rest:
         groups.append(
@@ -449,7 +410,6 @@ def build_index(
                 shown = [r for r in group["rows"] if (r["split"] or {}).get("which") == split]
                 group["shown"] = f"{len(shown)} of {len(group['rows'])} shown"
                 group["rows"] = shown
-            # A group with nothing left in it would be a heading over empty space.
             groups = [g for g in groups if g["rows"]]
 
     totals = list(atlas.get("totals") or _derived_totals(rows))
@@ -466,15 +426,9 @@ def build_index(
         "atlas": atlas or None,
         "atlas_warning": atlas_warning(root, atlas),
         "totals": totals,
-        # Where the bytes go, as one bar under the totals; None without a
-        # disk_usage.json, and the masthead is as it always was.
+        # Each None when the root lacks the file behind it.
         "disk_panel": disk,
-        # The split panel under the masthead: what the card bands mean, and the
-        # filter over them. Absent -- not empty -- on a root with no splits.json,
-        # so the index of an unsplit root gains nothing at all.
         "split_panel": panel,
-        # Links that show only the scenes validation.csv passed, warned on or
-        # failed; None on a root that was never validated.
         "status_filter": status_filter,
         "split_warning": split_warning(root.splits(), root.path, [r["probe"].scene_id for r in rows], root.manifest()),
     }
@@ -483,10 +437,7 @@ def build_index(
 def disk_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """The root's bytes by modality, summed over the scenes the index shows.
 
-    Summed here rather than read from the file's own totals, for the reason
-    `split_panel` counts rows: the file can lag the root (a scene extracted
-    after the last scan) or name scenes it no longer has, and the scenes it
-    has not measured are listed instead of silently left out of the sum.
+    Summed over rows since the file can lag the root; unmeasured scenes are listed.
     """
     ids = [r["probe"].scene_id for r in rows]
     scanned = {s: root.disk_usage_scene(s) for s in ids}
@@ -506,9 +457,10 @@ def disk_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] 
 
 
 def disk_parts(entries: Any) -> list[dict[str, Any]]:
-    """The disk bar's slices, largest first, summed over ``disk_usage.json``
-    scene entries, linked bytes included. One function for the index's bar and a scene page's, so a
-    modality has the same colour and name on both."""
+    """The disk bar's slices, largest first, linked bytes included.
+
+    Shared by the index and scene page so a modality looks the same on both.
+    """
     by_mod: Counter[str] = Counter()
     for entry in entries:
         for name, m in (entry.get("modalities") or {}).items():
@@ -532,10 +484,7 @@ def disk_parts(entries: Any) -> list[dict[str, Any]]:
 def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     """What the card bands mean and the filter over them, for this root's scenes.
 
-    Counted over `rows` rather than over the file's own lists because the file
-    may name scenes this root does not have (it is written once and carried
-    between root versions), and a panel that claims ten held-out scenes where
-    the index shows eight is worse than no panel.
+    Counted over `rows`: the file may name scenes this root does not have.
     """
     splits = root.splits()
     if not splits:
@@ -551,11 +500,9 @@ def split_panel(root: DatasetRoot, rows: list[dict[str, Any]]) -> dict[str, Any]
         "note": splits.note,
         "source": splits.source,
         "total": len(rows),
-        # Named unit, never a bare percentage: the same fold is a different
-        # share of the frames, the labels and the training windows.
+        # Shares differ by unit, so the unit is always named.
         "unit": "frames" if fractions else None,
-        # "parts", not "items": Jinja resolves `panel.items` to dict.items and
-        # the template would iterate the bound method instead of the list.
+        # Not "items": Jinja would resolve `panel.items` to dict.items.
         "parts": [
             {
                 "which": which,
@@ -576,10 +523,7 @@ def split_measures(
 ) -> list[dict[str, Any]]:
     """How big each side of the split is, in every unit the root can count.
 
-    One row per unit -- scenes, frames, recorded time, keyframes, proprio
-    labels, training windows -- with a cell per side and the total over every
-    scene shown. A unit the root does not carry (no keyframes.lst, no label
-    counts) is left out rather than shown as zeros.
+    One row per unit with a cell per side and a total; units the root lacks are omitted.
     """
     keyframes = root.keyframe_counts()
     units: list[tuple[str, Any, Any]] = [
@@ -615,11 +559,8 @@ def split_measures(
 def atlas_warning(root: DatasetRoot, atlas: dict) -> str | None:
     """Why this root's atlas should not be believed, if there is a reason.
 
-    A curated atlas carries rendered numbers, not just prose, so one copied from
-    an earlier release describes that release: HELHEST v1.3 shipped with its
-    ``atlas/`` symlinked to v1.2's and the index quietly showed v1.2's poses,
-    segments and coverage under a v1.2 title. The generator stamps the dataset
-    version it was run against; a mismatch says so on the page instead.
+    An atlas copied from another release carries that release's numbers; its
+    stamped ``dataset_version`` is compared with the manifest's.
     """
     if not atlas:
         return None

@@ -60,12 +60,8 @@
 <td class="num">{{ "%.1f s"|format(w.duration) }}</td>
 {%- endmacro %}
 
-{# A window table's GT poses and GT attitude cells. How densely the segment
-   behind the window is anchored: one pose every two seconds is interpolated
-   onto the frame clock exactly like a 10 Hz one and looks no different in the
-   3D view, but the trajectory between its poses is a straight guess. The
-   attitude is the ground truth's against the IMU, the check the 3D view's
-   panel carries, computed the same way before any window is built. #}
+{# A window table's GT poses and GT attitude (vs IMU) cells. Sparse GT is
+   interpolated, so pose density says how much is a straight-line guess. #}
 {% macro gt_cells(w, att) -%}
 <td class="num">
   {%- if w.pose_rate %}{{ w.n_poses }}

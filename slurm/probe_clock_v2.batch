@@ -8,10 +8,7 @@
 #SBATCH --partition=cpu
 #SBATCH --output=slurm/slurm_out/skew_%A_%a.out
 #
-# scripts/probe_clock_skew.py over a v2 bag: what each publisher's clock was
-# doing against the recorder's, and when it moved. Same fetch-to-node-local
-# shape as extract_v2.batch, and the same array indexing (row of
-# docs/v2_bags.csv = scene number), so
+# scripts/probe_clock_skew.py over one v2 bag; array index = row of docs/v2_bags.csv.
 #
 #   sbatch --array=0 slurm/probe_clock_v2.batch          # just scene 0000
 #   sbatch --array=0-16%4 slurm/probe_clock_v2.batch     # the whole rig
@@ -20,9 +17,7 @@
 set -uo pipefail
 
 OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta/.clock_skew}
-# Submit from the repository root (see slurm/README.md): slurm runs a copy of
-# this file from its spool, so the checkout is found through the submit
-# directory rather than through $0, and --output above is relative to it too.
+# Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
 CSV=${CSV:-$REPO/docs/v2_bags.csv}

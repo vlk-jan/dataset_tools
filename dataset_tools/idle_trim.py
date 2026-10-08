@@ -1,17 +1,10 @@
 """Long stops cut down to their start (``--trim_idle MAX_S KEEP_S``).
 
-A robot standing still records the same view at 14 Hz: a three-minute stop is
-2,600 frames of one scene, which a training sampler draws as often as 2,600
-frames of driving. The 2026-10-07 Stromovka bags stand for 74 % of one bag
-(four stops of 97-222 s) and end another with 215 s on the asphalt.
-
-A frame is *idle* when, over a :data:`WINDOW_S` window centred on it, the
-odometry moved less than :data:`SPEED_MPS` and turned less than
-:data:`TURN_DPS` -- turning on the spot is driving. A run of idle frames longer
-than ``max_s`` keeps its first ``keep_s`` and loses the rest. The odometry is
-not touched (``odometry.txt`` still covers the stop); only frames go, before
-any image or cloud is written, so indices stay contiguous and the stop reads as
-a frame-clock hole.
+A stopped robot records the same view at 14 Hz, over-weighting it in training.
+A frame is *idle* when, over :data:`WINDOW_S` centred on it, the odometry moved
+slower than :data:`SPEED_MPS` and turned slower than :data:`TURN_DPS`. Idle runs
+longer than ``max_s`` keep their first ``keep_s``; only frames go (before any is
+written), never odometry.
 """
 
 from __future__ import annotations

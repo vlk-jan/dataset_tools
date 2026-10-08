@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Every publisher's clock against the recorder's, straight out of a bag.
 
-A rosbag2 message carries two times: the ``header.stamp`` its publisher wrote,
-and the time the recorder received it. Their difference is transport latency
-plus however far apart the two clocks are, so a publisher whose clock steps
-shows up as a step in that difference at the moment it happens -- no
-estimation, no geometry, nothing to interpret.
-
-This is the direct reading of what ``scripts/measure_time_offset.py`` can only
-infer from the data. Use it to find out *when* a sensor's clock moved, and use
-that to decide whether one offset per bag is a fair model of the recording.
+Receive time minus ``header.stamp`` is latency plus clock offset, so a publisher's
+clock step shows up directly as a step in it. The direct counterpart of what
+``measure_time_offset.py`` infers from the data.
 
     scripts/probe_clock_skew.py <bag> --bin 5 --csv skew.csv
 """
@@ -27,8 +21,7 @@ from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
 from dataset_tools.extract.pointcloud import header_stamp_from_cdr
 from dataset_tools.transforms import header_stamp
 
-#: Topics worth probing on the 2026-09 rig: the sensor unit, the pose source,
-#: and the robot's own controller, which is the recorder's own clock domain.
+#: 2026-09 rig: sensor unit, pose source, and the controller (the recorder's clock).
 DEFAULT_TOPICS = (
     "/odin1/image/compressed",
     "/odin1/cloud_filtered/cloudini",

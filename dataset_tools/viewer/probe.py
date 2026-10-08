@@ -1,14 +1,8 @@
 """Probing a dataset root: what scenes exist, and what each scene actually has.
 
-Nothing here assumes a particular sensor rig. A scene is any ``NNNN``-shaped
-subdirectory; every file below is *optional* except that a scene needs at least
-one of ``images/`` or ``clouds/`` to be worth listing. The probe is deliberately
-cheap -- directory listings, line counts and ``.npy`` headers only, never a
-cloud or an image -- because dataset roots live on contended network storage.
-
-Results are cached on disk, keyed by the scene's fingerprint (the directory
-and every entry directly in it: see :func:`scene_fingerprint`), so the index
-page costs one listing per scene per session at most.
+A scene is any all-digit subdirectory; every file in it is optional. Probing is
+cheap (listings, line counts, ``.npy`` headers) for network storage, and cached
+on disk keyed by :func:`scene_fingerprint`.
 """
 
 from __future__ import annotations
@@ -31,20 +25,15 @@ from .splits import DECLARED_FILES, NO_SPLITS, SceneSplits, read_splits
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
-#: Bumped whenever ``SceneProbe`` gains or changes a field, so a cache written
-#: by an older viewer is discarded rather than read back with holes in it.
+#: Bump whenever ``SceneProbe``'s fields change, so older caches are discarded.
 PROBE_CACHE_FORMAT = 5
 
 
 def scene_fingerprint(scene_dir: Path) -> str:
     """A digest that moves whenever anything a page shows from this scene does.
 
-    The directory itself (its inode: a scene swapped for another under the same
-    number) and every entry directly in it -- a per-frame directory's mtime
-    moves when a file is added, removed or renamed in it, a file's mtime and
-    size when it is rewritten in place. About thirty ``stat`` calls. What it
-    cannot see is a per-frame file rewritten in place under the same name,
-    which no tool here does. Raises ``OSError`` when the scene is gone.
+    Stats the directory and every entry directly in it (not per-frame files
+    rewritten in place). Raises ``OSError`` when the scene is gone.
     """
     st = scene_dir.stat()
     h = hashlib.sha1(f"{st.st_ino}:{st.st_mtime_ns}".encode())
@@ -109,10 +98,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
 )
 # fmt: on
 
-#: What each artefact is *for*, one paragraph per file, shown when its entry on
-#: a scene page is opened. Kept out of the table above so that stays one
-#: readable line per file; keyed by ``Artefact.key``, and a key with nothing
-#: written for it simply shows its one-line shape instead.
+#: What each artefact is *for*, shown on the scene page; keyed by ``Artefact.key``.
 ARTEFACT_PURPOSE: dict[str, str] = {
     "images": (
         "One camera frame per synced frame, numbered by frame index. The viewer shows them as the "
@@ -241,10 +227,7 @@ ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 #: Directories whose file count is worth knowing on the index page.
 COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
 
-#: Artefacts a complete scene may well not have: a DRIFT product, the older
-#: extrinsic, cmd_vel (autonomy only, none when teleoperated), and the
-#: extractor's reports that are only written when their step
-#: ran. Their absence is shown, but not as something missing.
+#: Artefacts a complete scene may lack; their absence is not shown as missing.
 OPTIONAL_ARTEFACTS = frozenset(
     {"driven_similarity", "T_cam_to_lidar", "cmd_vel", "time_align", "gnss_guard", "tf_pins"}
 )
@@ -264,12 +247,9 @@ class SceneProbe:
     n_segments: int = 0
     segment_reasons: dict[str, int] = field(default_factory=dict)
     segment_coverage: float | None = None
-    #: Each segment as a ``[start, end]`` pair of fractions of the scene's own
-    #: time span -- enough to draw a timeline without re-reading the file.
+    #: Each segment as ``[start, end]`` fractions of the scene's time span.
     segment_spans: list[list[float]] = field(default_factory=list)
-    #: The subset of those spans whose segment reason marks *borrowed* ground
-    #: truth (any reason containing "fill"). Drawn differently, because such a
-    #: stretch did not come out of this root's own odometry run.
+    #: The subset of spans with borrowed ground truth (reason contains "fill").
     fill_spans: list[list[float]] = field(default_factory=list)
     bag: str | None = None
     warnings: list[str] = field(default_factory=list)
@@ -284,12 +264,7 @@ class SceneProbe:
         return bool(self.present.get(key))
 
     def state(self, key: str) -> str:
-        """How the scene holds one artefact -- the one rule every page colours its chips by.
-
-        ``yes``; ``partial``, a per-frame directory with fewer files than the
-        scene has frames; ``no``, absent; or ``optional``, absent where that is
-        normal (``OPTIONAL_ARTEFACTS``).
-        """
+        """``yes``, ``partial`` (fewer files than frames), ``no`` or ``optional`` (absent but normal)."""
         if not self.has(key):
             return "optional" if key in OPTIONAL_ARTEFACTS else "no"
         if key in COUNTED_DIRS and self.n_frames and self.counts.get(key, 0) < self.n_frames:
@@ -303,11 +278,7 @@ class SceneProbe:
 
 
 def _npy_shape(path: Path) -> tuple[int, ...] | None:
-    """Shape of an ``.npy`` without transferring its data.
-
-    ``mmap_mode="r"`` reads the header and maps the rest lazily, so this costs
-    one small read even for a multi-hundred-megabyte array on network storage.
-    """
+    """Shape of an ``.npy`` from its header only (memory-mapped)."""
     try:
         return tuple(np.load(path, mmap_mode="r").shape)
     except Exception:  # noqa: BLE001 - any unreadable array is just "unknown"
@@ -420,8 +391,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
 def _first_last_float(path: Path) -> tuple[float, float] | None:
     """First and last parseable float in a text file, without reading it all.
 
-    Blank and ``#`` lines are skipped at both ends, as ``loaders.read_timestamps``
-    skips them, so a header comment does not cost a scene its duration.
+    Blank and ``#`` lines are skipped, as in ``loaders.read_timestamps``.
     """
 
     def data_lines(chunk: bytes) -> list[str]:
@@ -485,16 +455,14 @@ class DatasetRoot:
         #: Root-level files, each with the (mtime_ns, size, inode) it was read at.
         self._root_files: dict[str, tuple[tuple[int, int, int] | None, object]] = {}
         self._scene_ids: list[str] | None = None
-        #: Set by every fresh probe, cleared by every save: what makes
-        #: ``probe_all`` able to write the cache once instead of once a scene.
+        #: Set by a fresh probe, cleared by a save.
         self._probe_dirty = False
         self._load_probe_cache()
 
     # -- scene discovery ---------------------------------------------------
 
     def scene_ids(self, refresh: bool = False) -> list[str]:
-        """All scene directories, by name. A scene is any directory whose name
-        is all digits (``0000``); this is what makes the viewer rig-agnostic."""
+        """All scene directories (all-digit names), sorted."""
         if self._scene_ids is None or refresh:
             try:
                 names = [n for n in os.listdir(self.path) if n.isdigit() and (self.path / n).is_dir()]
@@ -505,8 +473,7 @@ class DatasetRoot:
         return self._scene_ids
 
     def scene_dir(self, scene_id: str) -> Path:
-        # A scene that appeared after the list was taken -- an array job still
-        # writing the root -- is looked for once more before being refused.
+        # Re-list once for a scene that appeared after the list was taken.
         known = scene_id.isdigit() and (scene_id in self.scene_ids() or scene_id in self.scene_ids(refresh=True))
         if not known:
             raise KeyError(f"unknown scene {scene_id!r}")
@@ -518,16 +485,7 @@ class DatasetRoot:
         return _read_json(self.path / "manifest.json")
 
     def splits(self) -> SceneSplits:
-        """``splits.json``, else the root's own declaration (manifest ``held_out``
-        and ``keyframes_train.lst``): which scenes are held out from training.
-
-        Re-read when any of those files changes: they are a handful of scene
-        ids and only change when someone re-decides the split. A root that
-        declares nothing gets `NO_SPLITS`, and every page renders as it always
-        did -- the viewer has no opinion of its own about which scenes are
-        validation data, because that is a modelling decision and not something
-        a directory listing can answer.
-        """
+        """The root's train/val split (`read_splits`), re-read when its files change."""
         return self._root_file(("splits.json", *DECLARED_FILES), lambda: read_splits(self.path) or NO_SPLITS)
 
     def keyframe_counts(self) -> dict[str, int]:
@@ -545,9 +503,7 @@ class DatasetRoot:
     def _root_file(self, relpaths: str | tuple[str, ...], load):
         """``load()``, re-run only when one of ``relpaths`` (under the root) changed.
 
-        These files are small and change by hand or by a tool run beside the
-        viewer -- ``helhest-validate`` rewriting validation.csv, an atlas being
-        regenerated -- so a stat per use replaces reading them once per process.
+        These small files can be rewritten beside a running viewer.
         """
         if isinstance(relpaths, str):
             relpaths = (relpaths,)
@@ -572,20 +528,14 @@ class DatasetRoot:
     def atlas(self) -> dict | None:
         """``atlas/atlas.json``: curated per-scene content, or ``None``.
 
-        Everything in it is editorial -- prose descriptions, groupings, numbers
-        that took a full pass over the bags to produce -- so it is *stored* next
-        to the data rather than derived. It is entirely optional: a root without
-        an ``atlas/`` directory (a fresh extraction from a different rig, say)
-        still renders, just without the curated half. Re-read when it changes;
-        the file is small and only changes when someone regenerates it.
+        Optional and editorial; re-read when it changes.
         """
         return self._root_file("atlas/atlas.json", lambda: _read_json(self.atlas_dir / "atlas.json"))
 
     def disk_usage(self) -> dict | None:
         """``disk_usage.json``: bytes per scene and modality, or ``None``.
 
-        Written by ``helhest-disk-usage``, because measuring it walks every
-        file in the root. Re-read when it changes, like the atlas.
+        Written by ``helhest-disk-usage``; re-read when it changes.
         """
         return self._root_file("disk_usage.json", lambda: _read_json(self.path / "disk_usage.json"))
 
@@ -596,10 +546,8 @@ class DatasetRoot:
     def validation(self) -> dict[str, dict[str, str]] | None:
         """``validation.csv``, the report ``helhest-validate --csv`` writes, by scene.
 
-        ``slurm/finalize_v2.sh`` leaves it at the root. It carries a status
-        and the numbers per scene and *counts* of errors and warnings, not
-        their text -- the messages are in validation.json. Re-read when it
-        changes, like the atlas; ``None`` when absent or unreadable.
+        Status, numbers and error/warning *counts* (messages are in validation.json).
+        ``None`` when absent or unreadable.
         """
         return self._root_file("validation.csv", self._read_validation)
 
@@ -615,9 +563,7 @@ class DatasetRoot:
         return (self.validation() or {}).get(scene_id, {})
 
     def validation_messages(self, scene_id: str) -> list[dict] | None:
-        """This scene's findings from ``validation.json`` (``helhest-validate
-        --json``): code, severity, text and, where they have one, ``t0``/``t1``
-        in seconds from the first frame. ``None`` when the root has no such file."""
+        """This scene's findings from ``validation.json``, or ``None`` without the file."""
         doc = self._root_file("validation.json", lambda: _read_json(self.path / "validation.json"))
         if not isinstance(doc, dict):
             return None
@@ -632,14 +578,8 @@ class DatasetRoot:
     def atlas_thumb(self, scene_id: str, slot: str) -> Path | None:
         """Path of a stored thumbnail, or ``None`` if this root has no such file.
 
-        ``slot`` is one short token (``a``/``b``/``c``); it is checked against
-        the manifest in ``atlas.json`` rather than pasted into a path, so a
-        request cannot walk out of the atlas directory. The manifest is either
-        ``{"a": <frame index>}`` or the older bare ``["a", "b", "c"]``; only
-        membership matters here, and both spell it the same way. The file the
-        atlas names has to lie under ``atlas/`` too: the atlas is data, and a
-        root someone downloaded must not be able to point the viewer at a file
-        outside itself.
+        ``slot`` must be listed in ``atlas.json``, and the resolved file must lie
+        under ``atlas/``, so neither a request nor the atlas can escape it.
         """
         entry = self.atlas_scene(scene_id)
         thumbs = entry.get("thumbs") or ()
@@ -689,18 +629,7 @@ class DatasetRoot:
         return probe
 
     def probe_all(self) -> list[SceneProbe]:
-        """Probe every scene, writing the cache at most once.
-
-        Saving inside the loop rewrote the whole (growing) cache file once per
-        scene, so the first index render of a 43-scene root serialised it 43
-        times -- quadratic in the number of scenes, for one file that only has
-        to be right at the end.
-
-        The scene list is always re-read: one listing of the root, so a scene
-        an array job finished after the viewer started shows up on the next
-        index render rather than after a restart. Each scene's probe still
-        stands while its fingerprint does.
-        """
+        """Probe every scene (re-listing the root), writing the cache once."""
         probes = [self.probe(sid, persist=False) for sid in self.scene_ids(refresh=True)]
         self.save_probe_cache()
         return probes
@@ -717,8 +646,6 @@ class DatasetRoot:
         except (OSError, json.JSONDecodeError):
             return
         if data.get("root") != str(self.path) or data.get("format") != PROBE_CACHE_FORMAT:
-            # A cache written before a field existed would load with that field
-            # silently defaulted; re-probe instead of showing a blank timeline.
             return
         for sid, raw in (data.get("scenes") or {}).items():
             raw.pop("missing", None)
@@ -746,9 +673,8 @@ class DatasetRoot:
             logger.debug("cannot persist probe cache: %s", exc)
 
 
-#: Everything the viewer writes under a cache directory -- and so everything
-#: :func:`clear_cache_dir` removes. ``--cache-dir`` can point anywhere, so
-#: clearing names what it deletes instead of emptying the directory.
+#: Everything the viewer writes under a cache dir; :func:`clear_cache_dir` removes
+#: only these, since ``--cache-dir`` can point anywhere.
 PROBE_CACHE_NAME = "probe_cache.json"
 BUNDLE_DIR_NAME = "bundles"
 
@@ -756,8 +682,7 @@ BUNDLE_DIR_NAME = "bundles"
 def clear_cache_dir(cache_dir: Path) -> tuple[int, int]:
     """Delete the viewer's own files under ``cache_dir``, leaving the rest.
 
-    Returns how many files went and how many bytes that freed, so a caller can
-    say so.
+    Returns ``(files, bytes)`` removed.
     """
     import shutil
 

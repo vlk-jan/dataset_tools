@@ -12,8 +12,7 @@
 {% endblock %}
 {% block main %}
 
-  {# Paging between segments in scene order, so a scene can be read segment by
-     segment without going back to its window table each time. #}
+  {# Paging between segments in scene order. #}
   <nav class="segnav">
     {% if page.prev %}
     <a class="btn" href="/scene/{{ scene_id }}/segment/{{ page.prev.index }}">&larr; segment {{ page.prev.index }}</a>
@@ -29,8 +28,7 @@
   {{ ui.hero(page.hero) }}
   {% endif %}
 
-  {# The facts on the left, where the segment happened on the right. Without
-     gps.npy there is no map and the cards simply take the full width. #}
+  {# Facts left, map right (if gps.npy). #}
   {% if page.map %}<div class="pair"><div>{% endif %}
     {% for card in page.cards %}
     <div class="card">

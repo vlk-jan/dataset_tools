@@ -7,8 +7,7 @@
 {% endblock %}
 {% block header %}
   <h1><a href="/">Dataset viewer</a> / scene {{ scene_id }}
-    {# Jump to another scene; scenes only, a frame list here would drown it.
-       A native popover: a click outside or Escape closes it. #}
+    {# Jump to another scene (native popover). #}
     <button type="button" class="scene-jump" popovertarget="scene-jump-list" title="other scenes" aria-label="other scenes"></button>
     <ul class="scene-jump-list" id="scene-jump-list" popover>
       {% for sid in scene_ids %}
@@ -20,31 +19,23 @@
   <span class="split-tag {{ page.split.which }}" title="{{ page.split.title }}">{{ page.split.which }}</span>
   {% endif %}
   {% if atlas and atlas.description %}<span class="muted">{{ atlas.description }}</span>{% endif %}
-  {# The first window in the table: segments come first, in order, part one of
-     a split segment before the rest; the whole-scene fallback only when there
-     is no segment at all. #}
+  {# The first window: first segment, else the whole-scene fallback. #}
   {% if windows %}<a class="btn primary open3d" href="/view/{{ scene_id }}/{{ windows[0].key }}">Open 3D</a>{% endif %}
 {% endblock %}
 {% block main %}
 
-  {# The same three frames the index card shows, sampled at 10 / 50 / 90 % of
-     the scene -- stored thumbnails on a curated root, live renders otherwise;
-     here each one also opens the frame it was cut from. #}
+  {# The index card's three frames (10 / 50 / 90 %), each linking to its frame. #}
   {% if page.hero %}
   {{ ui.hero(page.hero, '/scene/' ~ scene_id) }}
   {% endif %}
 
-  {# Four cards, each dropped rather than shown empty when the scene has
-     nothing to fill it: what was recorded, what ground truth exists inside it,
-     how the camera was calibrated, what the robot reported about itself. #}
+  {# Info cards, each dropped when the scene has nothing to fill it. #}
   <div class="grid cards">
     {% for card in page.cards %}
     <div class="card">
       {{ ui.card_head(card.title, card.badge, card.badge_class, card.badge_title) }}
 
-      {# Where ground truth exists inside the scene. When the segment file could
-         be read every block is one segment and opens it; a curated-only scene
-         has flat spans that name no segment, and those stay plain marks. #}
+      {# GT spans; each links to its segment when the segment file was read. #}
       {% if card.timeline %}
       <div class="bar">
         <div class="track" title="{{ card.timeline.title or 'where ground truth exists inside the scene' }}">
@@ -89,18 +80,11 @@
     {% endfor %}
   </div>
 
-  {# The file inventory -- with what those files weigh folded under it, on a
-     root with a disk_usage.json -- and the map (only on a scene that carries
-     gps.npy) beside it, half and half.
-     Without the map the wrapper does not exist, so the inventory is the
-     full-width strip it has always been. #}
+  {# File inventory (with disk usage) beside the map, if the scene has GNSS. #}
   {% if page.map %}<div class="pair withmap">{% endif %}
 
-  {# Every entry opens: what the file holds, how much of it this scene has and
-     what the dataset does with it, shown in place under the strip. Coloured by
-     SceneProbe.state, the rule the index page uses too. Without JavaScript the
-     chips are buttons that do nothing and every panel stays where it is --
-     readable, in order, at the bottom of the card. #}
+  {# Chips open a panel per file (files.js), coloured by SceneProbe.state;
+     without JS every panel stays expanded below. #}
   {% set fs = page.files_summary %}
   <div class="card files">
     {{ ui.card_head("Files", fs.badge, fs.badge_class, fs.present ~ " of " ~ fs.total ~ " entries on disk") }}
@@ -164,10 +148,7 @@
 
   {% if page.signals %}{% with signals = page.signals %}{% include "_signals.html" %}{% endwith %}{% endif %}
 
-  {# The tabs and the frame strip's pager swap this region in place (swap.js):
-     a click fetches the same page with the new query and replaces only what is
-     inside here, so the cards above and the scroll position stay where they
-     are. Without JavaScript the links are what they always were. #}
+  {# Swapped in place by swap.js; plain links without JS. #}
   <div id="tabpanel" data-swap>
   <nav class="tabs">
     <a class="tab {{ 'active' if tab == 'windows' else '' }}"{% if tab == 'windows' %} aria-current="page"{% endif %} href="/scene/{{ scene_id }}?tab=windows">

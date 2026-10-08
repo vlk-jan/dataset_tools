@@ -1,8 +1,7 @@
 """Web visualizer for extracted HELHEST-style dataset roots.
 
-The viewer is driven entirely by the *file structure* of a dataset root, not by
-any particular sensor rig: every per-scene file is probed and the UI degrades to
-whatever is actually on disk (see :mod:`dataset_tools.viewer.probe`).
+Driven by the files on disk, not by a sensor rig: the UI shows whatever
+:mod:`dataset_tools.viewer.probe` finds.
 
 Run it with::
 

@@ -1,12 +1,7 @@
-/* The click-to-zoom dialog (zoom.js), on the frame page and over the 3D view:
-   one picture as big as the window allows, and on the height-map grids a
-   probe -- the outlined cell and its values below. Tokens come from theme.css,
-   which both pages' stylesheets import. */
-/* The two classes the dialog shares with the pages around it, here because
-   this is the one stylesheet both pages load. */
+/* The click-to-zoom dialog (zoom.js), loaded by both page stylesheets, so the
+   shared .muted / .btn / [hidden] rules live here too. */
 .muted { color: var(--muted); }
-/* An author display rule outranks the browser's own [hidden]; this keeps the
-   attribute meaning what it says on every element either page hides. */
+/* Author display rules would otherwise override [hidden]. */
 [hidden] { display: none !important; }
 .btn {
   display: inline-block; padding: 5px var(--sp-3); border-radius: 6px;
@@ -30,8 +25,7 @@ button.btn { font: inherit; cursor: pointer; }
 .zoomstage img { display: block; max-width: 92vw; max-height: calc(96vh - 170px); border-radius: 4px; }
 /* The BEV tiles are square: fill the window rather than stop at the render's size. */
 .zoomstage img.bev { width: min(calc(96vh - 170px), 92vw); height: auto; image-rendering: pixelated; cursor: crosshair; }
-/* The camera image magnifies inside its own box (zoom.js): the frame stays put
-   and the picture moves under it. */
+/* The photo magnifies inside its own box. */
 .zoomstage.photo { overflow: hidden; }
 /* No readout under a photo, so it may take the room the probe's lines need. */
 .zoomstage.photo img { max-height: calc(96vh - 80px); transform-origin: 0 0; touch-action: none; }
@@ -43,15 +37,11 @@ button.btn { font: inherit; cursor: pointer; }
   outline: 2px solid #fff; box-shadow: 0 0 0 3px rgb(0 0 0 / 0.7);
 }
 .zoomcell.pinned { outline-color: var(--accent); }
-/* width 0 + min-width 100%: the readout takes the width the picture gives the
-   dialog and wraps inside it, rather than widening the dialog as its lines
-   grow and shrink under the pointer -- which shook the picture. Room for four
-   lines, so wrapping does not move it vertically either. */
+/* width 0 + min-width 100% and a fixed min-height, so the readout never
+   resizes the dialog as the pointer moves. */
 .zoomread { display: block; white-space: pre-wrap; font: var(--fs-base)/1.5 var(--mono); margin-top: var(--sp-2); min-height: 6em; width: 0; min-width: 100%; }
-/* The cloud overlay's depth legend (depthlegend.js), over the bottom-left
-   corner of the picture's box -- the frame page's photo and the zoom stage --
-   and not inside the picture, so zooming and panning leave it where it is.
-   The ramp is turbo, sampled from render.LUTS as the dots are painted. */
+/* Depth legend (depthlegend.js) over the picture box's corner, so it stays put
+   while zooming. Turbo ramp, as render.LUTS. */
 .photobox { position: relative; }
 .depthlegend {
   position: absolute; left: 8px; bottom: 8px; z-index: 1; pointer-events: none;

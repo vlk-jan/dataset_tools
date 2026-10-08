@@ -3,44 +3,18 @@
 
     helhest-disk-usage <root> [scene ...] [--all]
 
-Without scene ids it scans only the scenes the file does not have yet, so a
-grown root costs one scan of the new scenes; name scenes to rescan them, or
-``--all`` for everything. A file written under an older schema is rescanned
-whole. ``helhest-extract`` calls `update` for the scenes it just wrote. Scenes whose directory is gone are dropped. Keys a
-person added by hand to a scene entry (a ``note``, say) survive a rescan; the
-measured keys are overwritten. Totals are recomputed on every run.
+Scans only scenes the file lacks, unless named or ``--all`` (or the schema
+changed). Hand-added keys in a scene entry survive a rescan. Each scene
+subdirectory is a modality; top-level files count as ``other``. Content reached
+through symlinks is counted apart as ``linked_bytes``/``linked_files``; dangling
+links as ``broken_links``. Sizes are apparent bytes; the file is written atomically.
 
-Every subdirectory of a scene is one modality (``images``, ``clouds``, ...);
-files at the scene's top level count as ``other``, and each of them is also
-listed by name under ``files``. Sizes are apparent bytes.
-
-A root may be built from symbolic links into another root (HELHEST v1.3 into
-v1.2, v2.1 into v2.0). What a link leads to is not this root's disk usage, but
-it is this root's content, so the two are counted apart: ``bytes`` and
-``files`` are what the root stores itself, ``linked_bytes`` and
-``linked_files`` what it reaches through a link -- a linked directory, a linked
-file, or a link inside a directory of its own. ``frames`` counts both, because
-a linked frame is a frame. A link whose target is gone is counted under
-``broken_links`` and nowhere else.
-
-Layout, flat so a chart reads it without reshaping:
-
-    {"schema": 3, "root": "HELHEST_v2_0", "generated": "<iso>", "unit": "bytes",
-     "modalities": ["images", "clouds", ...],            # largest first, own + linked
-     "totals": {"bytes": .., "files": .., "linked_bytes": .., "linked_files": ..,
-                "broken_links": .., "frames": .., "span_s": ..,
-                "modalities": {"images": {"bytes": .., "files": ..}, ...}},
-     "scenes": {"0000": {"bytes": .., "linked_bytes": .., "broken_links": ..,
-                         "frames": .., "span_s": .., "scanned": "<iso>",
-                         "modalities": {"images": {"bytes": .., "files": ..}, ...},
-                         "files": {"odometry.txt": <bytes>, ...},
-                         "linked_files": {"gps.npy": {"bytes": .., "link": "<target>"}}}}}
-
-A modality that reaches anything through a link carries ``linked_bytes`` and
-``linked_files`` beside ``bytes`` and ``files``, and ``link`` with the target
-when the directory itself is the link; one that does not has the two keys only.
-
-Reads the scenes only; writes the one file, atomically.
+    {"schema": 3, "root": .., "generated": "<iso>", "unit": "bytes",
+     "modalities": [...],  # largest first
+     "totals": {"bytes", "files", "linked_bytes", "linked_files", "broken_links",
+                "frames", "span_s", "modalities": {name: {"bytes", "files"}}},
+     "scenes": {"0000": {"bytes", "linked_bytes", "broken_links", "frames", "span_s",
+                         "scanned", "modalities", "files", "linked_files"}}}
 """
 
 import argparse
@@ -63,12 +37,7 @@ def now():
 
 
 def dir_usage(path, linked=False):
-    """What is under ``path``: own and linked regular files, and broken links.
-
-    ``linked`` says ``path`` was itself reached through a link, so everything
-    under it is linked. Directory links are followed; one that leads back into
-    a directory already visited is not, so a cycle ends.
-    """
+    """Own and linked regular files under ``path``, and broken links (cycles skipped)."""
     use = {"bytes": 0, "files": 0, "linked_bytes": 0, "linked_files": 0, "broken_links": 0}
     seen = {os.path.realpath(path)}
     stack = [(path, linked)]

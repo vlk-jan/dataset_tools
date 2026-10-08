@@ -1,9 +1,4 @@
-"""Interpolating the pose stream onto the frame clock.
-
-Nearest-neighbour lookup onto a 10 Hz stream quantises every frame by up to
-50 ms; these cover the interpolation that replaced it, and the three cases where
-interpolating would invent a pose and the nearest sample is used instead.
-"""
+"""Interpolating the pose stream onto the frame clock, and the cases that fall back to nearest."""
 
 import math
 

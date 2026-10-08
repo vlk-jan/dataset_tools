@@ -1,18 +1,8 @@
-"""Reading and writing the ground-truth odometry files, in one place.
+"""Reading and writing the ground-truth odometry files (HELHEST v1.2 contract).
 
-Two text files make up a scene's ground truth (the HELHEST v1.2 contract):
-
-``odometry.txt``
-    One pose per line: ``timestamp`` followed by a row-major 4x4 matrix, 17
-    columns.
-``odometry_segments.txt``
-    ``segment start_ts end_ts n_poses reason`` per line. Poses from different
-    segments share no reference frame -- each segment is re-anchored to the
-    identity at its own first pose -- so a reader must never interpolate across
-    a segment boundary.
-
-The extractor, the validator, the viewer and the post-processing scripts all
-go through these functions, so the format is spelled out exactly once.
+``odometry.txt``: ``timestamp`` + row-major 4x4 pose, 17 columns per line.
+``odometry_segments.txt``: ``segment start_ts end_ts n_poses reason``. Each
+segment is anchored at its own first pose; never interpolate across segments.
 """
 
 from __future__ import annotations
@@ -33,12 +23,8 @@ LOG = logging.getLogger("helhest.gt_io")
 GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
 SEGMENTS_HEADER = "# segment start_ts end_ts n_poses reason"
 
-#: Number of the first segment in a freshly written table. Segments are
-#: counted the way a reader counts them -- "segment 3 of 4" should be the
-#: third, not the last -- so tables this module writes are numbered from one.
-#: Reading stays faithful to whatever the file says: roots written before
-#: this (HELHEST v1.2 through v1.5) are numbered from zero, and a segment is
-#: addressed everywhere by the number in its own file, never by its position.
+#: First segment number in written tables. Older roots (v1.2-v1.5) start at zero;
+#: segments are always addressed by their number in the file, not their position.
 FIRST_SEGMENT = 1
 
 
@@ -80,14 +66,7 @@ def read_trajectory(path: Path | str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> None:
-    """Write through a temp file in the same directory and ``os.replace`` it in.
-
-    A root that is being read by a training job at the time of an in-place edit
-    must never expose a half-written file: a DataLoader worker that opened
-    ``odometry.txt`` mid-truncate on 2026-09-09 got zero bytes and killed a
-    nine-epoch arm. ``os.replace`` is atomic on POSIX, so a reader sees the old
-    file or the new one, never a partial.
-    """
+    """Write through a temp file and ``os.replace`` it in, so concurrent readers never see a partial file."""
     dest = Path(dest)
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     with open(tmp, "w") as fh:
@@ -98,11 +77,7 @@ def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> N
 
 
 def write_trajectory(dest: Path | str, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
-    """Write header + one line per pose, atomically.
-
-    ``ts`` and ``poses`` must be the same length: a mismatch is a caller's bug,
-    and a file silently short of its poses would only be found downstream.
-    """
+    """Write header + one line per pose, atomically; lengths must match."""
     ts, poses = list(ts), list(poses)
     if len(ts) != len(poses):
         raise ValueError(f"{len(ts)} timestamps for {len(poses)} poses")
@@ -150,12 +125,7 @@ def parse_segment_line(line: str) -> SegmentRow | None:
 
 
 def read_segments(path: Path | str) -> list[SegmentRow]:
-    """Every parseable row, in file order. Raises ``OSError`` if unreadable.
-
-    A line that is neither a comment nor a row is skipped with a warning
-    rather than silently: a hand-edited table with a typo should not read as
-    a table with one segment fewer.
-    """
+    """Every parseable row, in file order (malformed lines warned about). Raises ``OSError`` if unreadable."""
     rows = []
     with open(path) as fh:
         for number, line in enumerate(fh, 1):
@@ -174,10 +144,7 @@ def write_segments(dest: Path | str, rows: Iterable[SegmentRow]) -> None:
 
 
 def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
-    """Renumbers as it writes, so every table this repo produces is
-    contiguous and starts at :data:`FIRST_SEGMENT` whatever the callers
-    filled in -- they all count positions, and none of them has a number
-    worth preserving."""
+    """Renumbers contiguously from :data:`FIRST_SEGMENT`, whatever the callers filled in."""
     fh.write(SEGMENTS_HEADER + "\n")
     for k, row in enumerate(rows):
         fh.write(f"{FIRST_SEGMENT + k} {row.start_ts:.6f} {row.end_ts:.6f} {row.n_poses} {row.reason}".rstrip() + "\n")
@@ -186,12 +153,8 @@ def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
 # ---------------------------------------------------------------------------
 # What a post-processing pass last wrote
 # ---------------------------------------------------------------------------
-# split_segments_at_gaps.py and cut_segments_at_map_mismatch.py each keep their
-# input under regen/ and rebuild from it on a re-run. That is only right while
-# the published files are still the ones the pass itself wrote: once the other
-# pass, a re-extraction or a regeneration has changed them, rebuilding from the
-# backup silently throws that work away. Each pass therefore records a digest of
-# what it wrote next to its backup, and checks it before trusting the backup.
+# Post-processing passes rebuild from their regen/ backup on re-run; a digest of what
+# they wrote tells them whether something else has changed the files since.
 def published_digest(scene: Path) -> str:
     """sha256 over the scene's ``odometry.txt`` and ``odometry_segments.txt``."""
     h = hashlib.sha256()
@@ -210,11 +173,7 @@ def record_written(scene: Path, backup: str) -> None:
 
 
 def changed_since_written(scene: Path, backup: str) -> bool:
-    """True when the published files are no longer what that pass last wrote.
-
-    False when they still are, or when there is no record (a backup made before
-    records were kept): those runs proceed as they always did.
-    """
+    """True when the published files differ from what that pass last wrote (False without a record)."""
     record = _written_record(scene, backup)
     if not record.is_file():
         return False

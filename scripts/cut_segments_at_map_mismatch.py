@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
 """Cut the segments of a root where the ground-truth path leaves the lidar's ground.
 
-Applies :mod:`dataset_tools.gt_map` to every keyframe of a scene, then removes the
-poses inside each mismatch window (plus a margin) and re-anchors the pieces, the
-way ``split_segments_at_gaps.py`` handles holes. Rigid re-anchoring keeps every
-relative motion inside a piece exactly what it was.
+Scores every keyframe with :mod:`dataset_tools.gt_map`, removes the poses in each
+mismatch window (plus a margin) and re-anchors the pieces, like ``split_segments_at_gaps.py``.
 
     cut_segments_at_map_mismatch.py <root> [--scenes ...] [--horizon 4.0] [--max-off 0.3]
                                     [--margin 0.5] [--min-poses 20] [--jobs 8] [--check]
 
-Reads <scene>/odometry.txt, odometry_segments.txt, gravity_align.npy, pcd_ts.txt,
-height_maps/, height_masks/ and rewrites the first two in place, keeping the input
-as <scene>/regen/odometry_premapcut.txt, odometry_segments_premapcut.txt (a re-run
-starts from those, so the pass is idempotent; the windows are scored from the
-backup, so the check is idempotent too). --check writes nothing. A JSON of every
-flagged window goes to --report.
+Rewrites odometry.txt and odometry_segments.txt in place, backing the input up to
+regen/*_premapcut.txt; re-runs start from that backup, so the pass is idempotent.
+--check writes nothing; --report writes every flagged window as JSON.
 """
 
 from __future__ import annotations
@@ -98,7 +93,6 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check, use_backups:
             cut_s += float(np.sum(np.diff(ts)[bad[1:] | bad[:-1]]))
         return np.zeros(len(ts) - 1, bool), [], bad
 
-    # A run that ends before its input segment does ends at a cut pose.
     out_t, out_T, rows, st = cut_segments(
         t, T, segs, mark, lambda reason, cut: reason if cut is None else cut_reason(reason, TAG_MAP), min_poses
     )
@@ -108,9 +102,7 @@ def cut_scene(scene: Path, hits, horizon, margin, min_poses, check, use_backups:
         if src_traj == scene / "odometry.txt" and not regen.is_symlink():
             regen.mkdir(exist_ok=True)
             for name in (BACKUP_TRAJ, BACKUP_SEGS):
-                # A derived root links its parent's regen/ files; copying THROUGH
-                # such a link would overwrite the parent's history. Unlink first
-                # so the backup is this root's own file.
+                # A derived root links its parent's regen/ files: unlink, don't write through.
                 if (regen / name).is_symlink():
                     (regen / name).unlink()
             shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)

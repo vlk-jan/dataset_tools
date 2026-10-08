@@ -1,14 +1,6 @@
-"""Compatibility patches for the ``rosbags`` library.
-
-Some HELHEST mcap bags (old sensor generation, recorded with rosbag2 on ROS 2
-Jazzy) contain a schema record whose encoding is ``"unknown"`` (seen for
-``action_msgs/msg/GoalStatusArray``). ``rosbags`` <= 0.11 raises ``KeyError``
-for any encoding it does not know while *opening* the bag, which makes the
-whole recording unreadable even though the topic is never used.
-
-Importing this module makes ``rosbags`` treat unrecognised schema encodings as
-"no definition" so the bag opens; such topics deserialise via the built-in
-typestore if the type is known there, and are simply unusable otherwise.
+"""Compatibility patch for ``rosbags``: some old-rig mcap bags carry a schema with
+encoding ``"unknown"``, on which ``rosbags`` <= 0.11 refuses to open the bag.
+Importing this module treats unknown encodings as "no definition".
 """
 
 from __future__ import annotations

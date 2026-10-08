@@ -1,11 +1,6 @@
-{# The paged strip of frame thumbnails, shared by the scene page's Frames tab
-   and the segment page (where it is limited to that segment's own frames).
-
-   `frames` is one page of it (app._frame_page); `strip_base` is the URL its
-   pager appends `page=N` to, so the same strip pages within a scene or within
-   a segment without either page knowing about the other. `strip_jump` adds the
-   jump-to-frame box, which only makes sense where the strip covers the whole
-   scene. #}
+{# Paged frame thumbnails (scene Frames tab, segment page). `frames` is one
+   page (app._frame_page), `strip_base` the pager's URL, `strip_jump` adds the
+   jump-to-frame box. #}
   {% if frames and frames.entries %}
   <div class="card framebar">
     {% if strip_jump %}

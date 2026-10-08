@@ -1,35 +1,12 @@
 """The Odin1 odometry, rotated onto the frame its own clouds are in.
 
-A scene's poses (``odometry.txt``, ``transforms.npy``) and its levelling
-(``gravity_align.npy``) come from ``/odin1/odometry``; its clouds come from
-``/odin1/cloud_filtered`` through the static TF (the URDF mount and the pinned
-lidar-to-IMU edge, :mod:`dataset_tools.tf_pins`). The two are meant to describe
-one ``base_link``. They do not quite: the Odin1 computes its odometry with its
-own running estimate of the lidar-to-IMU rotation, not the constant the clouds
-are put through, and the two disagree by a few tenths of a degree, scene by
-scene, even within one boot.
-
-Measured on HELHEST v2.4 (2026-10-06): clouds 1.4-3 s apart registered by ICP
-in the cloud frame against the same motion in the pose frame. The direction of
-travel sits -0.8 to +0.5 deg apart in pitch (the Stromovka scenes -0.6 to -0.8,
-Lipnik -0.2 to -0.5, Temesvar -0.4 to +0.5). Levelled with the pose frame's
-gravity, a cloud then tilts against the driven path by that much: DRIFT's
-path-vs-map slope guard (dz/ds, limit 0.03) failed on v2.3 at 0.056.
-
-What this does
---------------
-:func:`measure` (needs open3d) finds the rotation ``C`` from the cloud frame
-to the pose frame: pitch from the elevation of the direction of travel, roll
-from a Kabsch fit over translation directions and rotation axes when that fit
-is tight, yaw left alone (it does not tilt anything). :func:`apply` then
-re-expresses every pose at the cloud frame, ``T -> X^T T X`` with
-``X = [[C, 0], [0, 1]]`` (positions unchanged, the anchored first pose still
-the identity), and levels with the corrected attitude. Clouds and images are
-not touched. The scene records what was done in :data:`RECORD`, and a scene
-that has one is refused, so the rotation is applied once.
-
-Every height map, mask, label and keyframe list built from the old
-``gravity_align.npy`` or poses is stale afterwards and must be rebuilt.
+The Odin1 computes odometry with its own running lidar-to-IMU estimate, not the
+pinned constant the clouds go through, so the two frames differ by a few tenths
+of a degree per scene (enough to fail DRIFT's path-vs-map slope guard).
+:func:`measure` (open3d) finds the cloud->pose rotation ``C`` from ICP pairs
+(pitch from travel elevation, roll from a Kabsch fit when tight, no yaw);
+:func:`apply` re-expresses poses as ``X^T T X`` and re-levels gravity, once
+(recorded in :data:`RECORD`). Derived products built before are stale.
 """
 
 from __future__ import annotations

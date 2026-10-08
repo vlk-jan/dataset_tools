@@ -8,11 +8,8 @@
 #SBATCH --partition=cpu
 #SBATCH --output=slurm/slurm_out/survey_%A_%a.out
 #
-# scripts/survey_v2_bag.py over one bag of docs/v2_inventory.csv: fetch it to
-# node-local scratch, summarise it (~1 MB: summary.json, track.npy, thumbnails)
-# into <out>/<session>/<bag>/, throw the bag away. The array index is the
-# 0-based row of the inventory, which is every v2-rig bag on subtdata in
-# recording order, extracted or not.
+# scripts/survey_v2_bag.py over one bag of docs/v2_inventory.csv (array index =
+# 0-based row) into <out>/<session>/<bag>/; the bag itself is discarded.
 #
 #   sbatch --array=20-23,33-51%4 slurm/survey_v2.batch      # the bags no root has seen
 set -uo pipefail

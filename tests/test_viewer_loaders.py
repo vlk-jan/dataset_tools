@@ -1,9 +1,4 @@
-"""Viewer: geometry, file readers (dataset_tools.viewer.loaders).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: geometry, file readers (dataset_tools.viewer.loaders)."""
 
 from __future__ import annotations
 

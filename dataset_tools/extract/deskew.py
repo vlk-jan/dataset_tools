@@ -1,37 +1,15 @@
 """Motion compensation: every return of a sweep moved onto one instant.
 
-A lidar frame is not a snapshot. The Odin1 scans its 256 x 192 raster bottom
-to top over 67 ms -- almost the whole 69 ms frame period -- and stamps the
-frame at the start of that sweep; each point carries the time it was actually
-taken (``offset_time``, 0 .. 0.067 s). While the robot turns, the top of the
-cloud therefore shows the world a few degrees further round than the bottom:
-at 60 deg/s the raster is sheared by 4 deg, at the 160 deg/s of a spin by 11.
-
-Measured on HELHEST v2.2 (2026-10-01), before this module: the extractor wrote
-the sweep as if every point were simultaneous, :mod:`dataset_tools.time_align`
-then found the clouds' effective instant 27-52 ms after the stamp (the mean of
-the offsets of the points it looks at) and moved the frame clock there -- and
-the camera, exposed at the stamp, read as 30-50 ms *early* against the frame
-clock. Nothing was wrong with the camera.
-
-What this does
---------------
-Each point is carried from the pose the robot held when the point was taken
-to the pose it held at the frame's reference instant::
+The Odin1 scans bottom to top over 67 ms and each point carries its own
+``offset_time``, so a turning robot shears the cloud by degrees. Each point is
+carried from the pose at its capture time to the pose at the reference instant::
 
     p_ref = R(t_ref)^T ( R(t_p) p + x(t_p) - x(t_ref) ),   t_p = t_stamp + offset
 
-with the pose interpolated from the ground-truth stream (translation linear,
-rotation slerp -- or, given the Odin1's gyro, integrated from it, see
-:class:`GyroTrack`). The points must already be in the frame the poses describe
-(``base_link``), so this runs after the lidar mount transform. Offsets are
-quantised to :data:`BIN_S` and the pose looked up once per bin: the Odin1
-itself ticks in 2.2 ms slots, so 32 lookups serve 49 152 points.
-
-A sweep whose span is below one bin is already an instant and is left alone,
-as is one the pose stream does not bracket closely enough (a hole the GNSS
-guard opened, or the stream's ends): guessing a motion there would smear a
-cloud that is merely raw.
+with poses interpolated from the ground truth (rotation optionally from the gyro,
+:class:`GyroTrack`). Points must already be in ``base_link``. Offsets are binned
+to :data:`BIN_S` so poses are looked up once per bin. Sweeps that are already an
+instant, or that the pose stream does not bracket, are left as recorded.
 """
 
 from __future__ import annotations
@@ -46,14 +24,11 @@ from dataset_tools.transforms import rotation_angle_deg
 
 #: Offsets are quantised to this before the poses are looked up.
 BIN_S = 0.001
-#: Pose samples bracketing a sweep must be at most this far apart for its
-#: motion to be interpolated; the Odin1 odometry runs at 14 Hz, the Fixposition at 10.
+#: Max spacing of the pose samples bracketing a sweep.
 MAX_GAP_S = 0.5
 #: Gyro samples inside a sweep may be at most this far apart (the Odin1 IMU: 2.5 ms).
 GYRO_MAX_GAP_S = 0.02
-#: The gyro's rotation over the sweep must agree with the pose track's slerp to
-#: this, or the gyro is not believed for that sweep. Constant-rate slerp is off
-#: by ~0.2 deg at the robot's angular accelerations; a broken gyro by much more.
+#: Max disagreement between gyro and slerp rotation over a sweep for the gyro to be used.
 GYRO_TOL_DEG = 1.0
 
 
@@ -68,16 +43,9 @@ def deskew(
 ) -> tuple[np.ndarray, str, str | None]:
     """``points`` (N, 3) taken at ``stamp + offsets``, re-expressed at ``t_ref``.
 
-    ``stamp`` is the header stamp the offsets count from; ``t_ref`` the frame's
-    instant on the dataset's clock (on the Odin1 the two differ by under a
-    millisecond, the camera's half of the pairing). Returns the moved points, a
-    status (``deskewed``, ``instant``, ``no_pose`` or ``empty``) and how the rotation inside the sweep was
-    found: ``"gyro"`` when a :class:`GyroTrack` covered the sweep and agreed
-    with the pose track's slerp to ``gyro_tol_deg`` over it, ``"slerp"``
-    otherwise, None when nothing was moved. The points come back untouched for
-    every status but ``deskewed``. A sweep is "instant" when its offsets span
-    less than one bin *and* the stamp is the reference: then there is no
-    motion to undo.
+    Returns the points, a status (``deskewed``, ``instant``, ``no_pose``, ``empty``;
+    points untouched unless ``deskewed``) and the rotation source (``"gyro"``,
+    ``"slerp"``, or None when nothing moved).
     """
     pts = np.asarray(points)
     off = np.asarray(offsets, dtype=np.float64)
@@ -100,8 +68,7 @@ def deskew(
     if gyro is not None:
         R_gyro = gyro.relative_rotations(t_ref, times)
         if R_gyro is not None:
-            # The farthest bin is where the two disagree most; the gyro is
-            # believed only where it agrees with the pose track to the tolerance.
+            # Check agreement at the farthest bin.
             far = int(np.argmax(np.abs(times - t_ref)))
             if rotation_angle_deg(R_rel[far].T @ R_gyro[far]) <= gyro_tol_deg:
                 R_rel, method = R_gyro, "gyro"
@@ -112,13 +79,7 @@ def deskew(
 
 @dataclass
 class GyroTrack:
-    """Body angular rates in the base frame, for the rotation inside a sweep.
-
-    A pose track sampled at 14 Hz can only slerp across a sweep, which assumes
-    the angular rate held constant for 67 ms. The Odin1's IMU reports it 400
-    times a second; integrating that (zero-order hold between samples) gives
-    the rotation the robot actually went through between any two instants.
-    """
+    """Body angular rates in the base frame, integrated (zero-order hold) for in-sweep rotation."""
 
     ts: np.ndarray
     omega: np.ndarray

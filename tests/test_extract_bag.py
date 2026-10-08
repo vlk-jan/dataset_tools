@@ -1,10 +1,4 @@
-"""End-to-end extraction of a synthetic ROS 2 bag.
-
-``rosbags`` can write bags as well as read them, so the whole bag-reading
-path -- stamp collection, synchronisation, cloud parsing, the static-TF chain,
-odometry and orientation matching, ground truth, resumption -- runs here on a
-bag built in a temporary directory. No recording, no ROS installation.
-"""
+"""End-to-end extraction of a synthetic ROS 2 bag written with ``rosbags`` (no ROS needed)."""
 
 from __future__ import annotations
 
@@ -217,17 +211,12 @@ def write_bag(
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
-    Camera frames come 30 ms after their sweep; ``dropped_camera`` sweeps have
-    no image at all and must therefore not become frames. From ``reset_from``
-    the odometry publishes what a GNSS/INS with no solution publishes -- one
-    position far away, held still -- and the fix goes to null island. From
-    ``odom_until`` the odometry stops altogether, as when the robot side shuts
-    down while the sensors record on. ``lidar_frame`` names a frame the TF tree
-    does not hold; the first ``boot_joints`` joint states are stamped with a
-    clock that started at boot. With ``yaw_rate`` (rad/s) the robot turns as it
-    drives, and with ``sweep_s`` each cloud is a raw sweep of :data:`WALL`
-    scanned bottom to top over that long, every point stamped with its own
-    ``offset_time`` -- the Odin1's raster, in miniature.
+    Cameras lag sweeps by 30 ms; ``dropped_camera`` sweeps have no image.
+    ``reset_from``: odometry held at a far-away point and fix at null island
+    (lost GNSS solution). ``odom_until``: odometry stops. ``lidar_frame``: a
+    frame missing from TF. ``boot_joints``: joint states on a boot clock.
+    ``yaw_rate`` (rad/s) turns the robot; ``sweep_s`` makes each cloud a raw
+    bottom-to-top sweep of :data:`WALL` with per-point ``offset_time``.
     """
     with Writer(bag_dir, version=8) as writer:
         conns = {
@@ -240,9 +229,8 @@ def write_bag(
                 ("/imu", "sensor_msgs/msg/Imu"),
                 ("/joint_states", "sensor_msgs/msg/JointState"),
                 ("/cmd_vel", "geometry_msgs/msg/Twist"),
-                # Two NavSatFix topics, as the real bags have: the fused
-                # solution, and a raw antenna that was declared but never
-                # published. --gps auto has to pick the first.
+                # Two NavSatFix topics as in real bags; the raw one never
+                # publishes, so --gps auto must pick the fused one.
                 ("/fixposition/odometry_llh", "sensor_msgs/msg/NavSatFix"),
                 ("/fixposition/gnss1", "sensor_msgs/msg/NavSatFix"),
                 ("/tf_static", "tf2_msgs/msg/TFMessage"),
@@ -361,12 +349,8 @@ def test_a_synthetic_bag_extracts_to_a_complete_scene(bags: Path, tmp_path: Path
 
 
 def test_gps_is_extracted_from_the_fused_navsatfix_topic(bags: Path, tmp_path: Path):
-    """--gps auto finds the fix by message type, and writes what it says.
-
-    The columns are ``[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]``,
-    full rate and sorted by time -- the cmd_vel.npy convention, not a
-    frame-aligned array.
-    """
+    """--gps auto finds the fix by type; gps.npy is full-rate, time-sorted
+    ``[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]``."""
     out = tmp_path / "out"
     assert main([str(bags), str(out), *COMMON]) == 0
     gps = np.load(out / "0000" / "gps.npy")
@@ -382,14 +366,9 @@ def test_gps_is_extracted_from_the_fused_navsatfix_topic(bags: Path, tmp_path: P
 
 
 def test_cam_time_offset_shifts_the_frame_clock(bags: Path, tmp_path: Path):
-    """The offset is applied in both passes, so no frame is lost to it.
+    """The offset is applied in both passes, else every pass-2 image lookup misses.
 
-    Pass 2 recomputes the camera stamps from the raw bytes and looks them up in
-    a set built in pass 1; if the two passes disagreed by the offset, every
-    image lookup would miss and the scene would come out with no images at all.
-    0.01 s is small enough not to re-pair any camera frame with a different
-    sweep, so the only visible change is the frame clock, which moves by half
-    the offset because data_ts.txt is the camera/lidar midpoint.
+    data_ts.txt is the camera/lidar midpoint, so it moves by half the offset.
     """
     plain, shifted = tmp_path / "plain", tmp_path / "shifted"
     assert main([str(bags), str(plain), *COMMON]) == 0
@@ -417,12 +396,7 @@ def test_the_default_run_is_unchanged_by_the_offset_flag(bags: Path, tmp_path: P
 
 
 def test_a_null_island_fix_is_dropped():
-    """lat = lon = 0 is never a fix, and the status field cannot say so.
-
-    A Fixposition that has lost its solution publishes zeros with
-    ``position_covariance_type`` UNKNOWN while ``status`` still reads
-    ``GBAS_FIX``, so the row has to be rejected on the position itself.
-    """
+    """lat = lon = 0 is rejected on position: a lost Fixposition still reports ``GBAS_FIX``."""
 
     class _Status:
         status = 2  # GBAS_FIX, exactly as the broken messages claim
@@ -480,11 +454,8 @@ def test_a_second_run_skips_the_complete_scene(bags: Path, tmp_path: Path):
 
 
 def test_overwrite_removes_what_an_earlier_run_left_behind(bags: Path, tmp_path: Path):
-    """A stale frame from a previous extraction must not outlive a re-extraction.
-
-    Otherwise the counts never agree again: the scene is 'incomplete' forever
-    and the validator reports a mismatch on every run.
-    """
+    """A stale frame from a previous extraction must not outlive a re-extraction,
+    or the counts never agree again."""
     out = tmp_path / "out"
     assert main([str(bags), str(out), *COMMON]) == 0
     scene = out / "0000"
@@ -522,13 +493,8 @@ def test_time_align_off_leaves_the_stamps_as_recorded(bags: Path, tmp_path: Path
 
 
 def test_a_given_offset_moves_both_sensor_clocks(bags: Path, tmp_path: Path):
-    """``--time_align SECONDS`` moves the frame clock, and nothing else.
-
-    Both sensor clocks move by the whole offset and the pairing is untouched --
-    unlike ``--cam_time_offset``, which moves one side of the match. The
-    streams that carry the reference clock do not move at all: that is the
-    point, since what is being corrected is the sensors' latency against them.
-    """
+    """``--time_align SECONDS`` shifts both sensor clocks; pairing and the
+    reference-clock streams are untouched (unlike ``--cam_time_offset``)."""
     plain, shifted = tmp_path / "plain", tmp_path / "shifted"
     assert main([str(bags), str(plain), *COMMON, "--gt", "on"]) == 0
     assert main([str(bags), str(shifted), *COMMON, "--gt", "on", "--time_align", "-0.05"]) == 0
@@ -577,9 +543,7 @@ def test_a_scene_too_short_to_measure_is_left_alone(bags: Path, tmp_path: Path):
 
 
 def test_a_reset_gnss_solution_never_reaches_the_scene(tmp_path: Path):
-    """The receiver loses its fix and keeps publishing: one position 900 m away,
-    held perfectly still. Those frames must not be exported at all -- the
-    alternative is an image with a pose that is a kilometre wrong."""
+    """Frames during a lost fix (pose frozen 900 m away) are not exported."""
     root = tmp_path / "bags"
     write_bag(root / "bag_a", frames=60, reset_from=40)
     out = tmp_path / "out"
@@ -665,9 +629,7 @@ def _pin_matrix(parent, child):
 
 
 def test_odin_extrinsics_are_pinned(tmp_path: Path):
-    """An Odin1 bag's own lidar-to-IMU and lidar-to-camera estimates are replaced by the pins,
-    the clouds and T_cam_to_base.txt come out with the pinned chain, and tf_pins.txt says what
-    the bag had."""
+    """The bag's Odin1 TF estimates are replaced by the pins; tf_pins.txt records the originals."""
     bags = tmp_path / "bags"
     write_bag(bags / "bag_a", odin=True)
     out = tmp_path / "out"
@@ -722,10 +684,7 @@ def test_livox_bag_has_nothing_to_pin(bags: Path, tmp_path: Path):
 
 
 def test_frames_past_the_pose_stream_are_dropped_once_the_clock_is_final(tmp_path: Path):
-    """The guard keeps frames up to a second past the last pose, because it runs
-    before the clock correction. On the final clock a frame with no pose
-    bracketing it would carry a copy of the last one; it goes, and the indices
-    close up behind it."""
+    """A frame past the last pose on the final clock is dropped and indices close up."""
     write_bag(tmp_path / "bags" / "bag_a", frames=60, odom_until=50)
     out = tmp_path / "out"
     flags = [*COMMON, "--gt", "on", "--gnss_guard", "on", "--time_align", "off"]
@@ -821,10 +780,8 @@ def test_joint_rows_follow_the_first_message_s_order():
 
 
 def test_a_sweep_recorded_while_turning_is_deskewed_onto_the_frame_clock(tmp_path: Path):
-    """The Odin1 raster in miniature: a wall scanned over 67 ms while the robot
-    turns at 60 deg/s is sheared by 4 degrees as recorded. Extracted, it has to
-    stand straight where the robot saw it at the frame's instant -- and with
-    --deskew off it has to come out as recorded, shear and all."""
+    """A wall sheared 4 deg by a 67 ms sweep at 60 deg/s comes out straight;
+    with --deskew off it stays sheared."""
     rate = math.radians(60.0)
     write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
     flags = [*COMMON, "--gt", "on", "--time_align", "off"]
@@ -868,10 +825,8 @@ def test_a_cloud_without_per_point_time_is_written_as_recorded(bags: Path, tmp_p
 
 
 def test_the_gyro_refines_the_sweep_and_the_odometry_is_checked(tmp_path: Path):
-    """With --deskew_imu the rotation inside each sweep comes from the gyro,
-    and with --check_odom the scene carries pose_check.txt. The synthetic bag
-    turns at a constant rate, so gyro and slerp agree and the gyro is believed;
-    checked against its own stream, the odometry disagrees with nothing."""
+    """--deskew_imu uses the gyro (agrees with slerp at constant rate);
+    --check_odom writes a clean pose_check.txt."""
     rate = math.radians(60.0)
     write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
     out = tmp_path / "out"

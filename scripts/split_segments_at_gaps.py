@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 """Cut the segments of an existing root at the holes filter_segments.py missed.
 
-Applies the gap rules of ``dataset_tools.gt_gaps`` to a scene's published
-``odometry.txt`` / ``odometry_segments.txt`` without redoing the window test
-(those poses already passed it) and without needing the v1.2 inputs or the gyro
-extracts a full refinement re-run would: cutting a segment and re-anchoring
-each side is a rigid transform of the poses on that side, so every relative
-motion inside a piece is exactly what it was. What goes is the pose pair that
-bridged the hole -- the one step nothing could have justified.
+Applies the gap rules of ``dataset_tools.gt_gaps`` to the published odometry
+without a full re-run. Re-anchoring is rigid, so relative motion within a piece
+is unchanged; only the pose pair bridging each hole is lost.
 
     split_segments_at_gaps.py <root> [--scenes 0000 0001] [--max-gap 1.0]
                               [--max-err 1.0] [--min-poses 20] [--check]
 
-Per scene it reads
-    <scene>/odometry.txt, <scene>/odometry_segments.txt, <scene>/regen/odom_ref.txt
-and rewrites the first two in place, keeping the input as
-    <scene>/regen/odometry_pregapsplit.txt, odometry_segments_pregapsplit.txt
-(a re-run starts from those, so the pass is idempotent). --check prints the
-numbers and writes nothing. One line per scene plus a TOTAL line:
-segments/poses/span in -> out, seams per rule, and the reference path length
-the robot drove inside the removed holes.
+Rewrites odometry.txt and odometry_segments.txt in place, backing the input up to
+regen/*_pregapsplit.txt; re-runs start from that backup, so the pass is idempotent.
+--check writes nothing.
 """
 
 from __future__ import annotations
@@ -73,8 +64,7 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
                 seams["ref_m_in_holes"] += float(d) if np.isfinite(d) else 0.0
         return seam, tags, None
 
-    # The run reaching the input segment's end keeps its tag (why that
-    # segment ended); a run cut at a seam ends because of the seam.
+    # Only the run reaching the input segment's end keeps its tag; a seam cut gets the seam's.
     out_t, out_T, rows, st = cut_segments(
         t, T, segs, mark, lambda reason, cut: reason if cut is None else cut_reason(reason, cut), min_poses
     )

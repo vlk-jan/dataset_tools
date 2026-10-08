@@ -16,15 +16,8 @@ set -euo pipefail
 #
 #   sbatch slurm/slurm_extract.batch [bags_dir] [out_root]
 #
-# The venv was built with the container's Python 3.12, so it must run inside
-# the sif. Bind every filesystem that is read or written: neither /mnt/data nor
-# /mnt/personal is mounted inside the container by default.
-#
-# Already-complete scenes are skipped, so re-queueing this job resumes the run.
-#
-# Submit from the repository root (see slurm/README.md): slurm runs a copy of
-# this file from its spool, so the checkout is found through the submit
-# directory rather than through $0, and --output above is relative to it too.
+# Runs inside the sif (the venv uses its Python); /mnt mounts must be bound.
+# Complete scenes are skipped, so re-queueing resumes. Submit from the repo root.
 
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }

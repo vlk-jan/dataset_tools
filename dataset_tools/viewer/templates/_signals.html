@@ -1,9 +1,5 @@
-{# The scene's or segment's time series, one chart per unit on a shared time
-   axis (signals.signal_charts). Drawn here as SVG, so every line is on the
-   page without JavaScript; charts.js adds the crosshair, the readout and the
-   click that opens the frame under the pointer. Included only when `signals`
-   exists: a scene with none of the arrays renders no markup. The whole card
-   folds away under its header's arrow, as each chart does under its own. #}
+{# Time series, one SVG chart per unit on a shared axis
+   (signals.signal_charts); charts.js adds crosshair, readout and click. #}
 <details class="card signals" open data-signals data-scene="{{ scene_id }}"
      data-duration="{{ signals.duration }}"
      {% if signals.offset %}data-offset="{{ signals.offset }}"{% endif %}
@@ -33,8 +29,7 @@
       </svg>
       <span class="ylab hi">{{ c.hi }}</span><span class="ylab lo">{{ c.lo }}</span>
     </div>
-    {# The time axis under every chart, so one folded or scrolled away never
-       takes the only reading of the clock with it. #}
+    {# An axis under every chart, so folding one never hides the clock. #}
     <div class="xaxis" aria-hidden="true">
       {% for tk in signals.ticks %}<span class="{{ tk.edge }}" style="left:{{ '%.3f'|format(tk.pct) }}%">{{ tk.label }}</span>{% endfor %}
     </div>

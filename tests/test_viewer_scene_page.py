@@ -1,9 +1,4 @@
-"""Viewer: the scene page's cards (dataset_tools.viewer.scene_page).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: the scene page's cards (dataset_tools.viewer.scene_page)."""
 
 from __future__ import annotations
 
@@ -182,18 +177,14 @@ def test_every_timeline_block_opens_its_own_segment(tmp_path):
     scene = root_path / "0000"
     ts = np.loadtxt(scene / "data_ts.txt")
     with open(scene / "odometry_segments.txt", "w") as fh:
-        # Numbered 3 and 7, not 0 and 1: segments are addressed by the number in
-        # their own file, which is not their position in it once a table has
-        # been re-filtered.
+        # Numbered 3 and 7: segments are addressed by their own number, not position.
         fh.write(f"3 {ts[0]:.6f} {ts[5]:.6f} 6 filtered:pose_jump\n")
         fh.write(f"7 {ts[6]:.6f} {ts[-1]:.6f} 6 v11_fill:end_of_run\n")
     marks = card_of(scene_page(tmp_path, root_path), "Ground truth")["timeline"]["marks"]
     assert [m["index"] for m in marks] == [3, 7]
     assert [m["href"] for m in marks] == ["/scene/0000/segment/3", "/scene/0000/segment/7"]
     assert [m["fill"] for m in marks] == [False, True]
-    # The tooltip says what the block is before it is clicked -- but never why
-    # the segment ended, which is a property of its boundary and reads the same
-    # on block after block.
+    # The tooltip describes the block but not why the segment ended.
     assert "segment 3" in marks[0]["title"] and "6 GT poses" in marks[0]["title"]
     assert "ends because" not in marks[0]["title"]
     # Where the poses came from stays: it is what makes an amber block amber.
@@ -292,9 +283,7 @@ def test_the_hero_thumbnails_are_the_index_slots_and_link_to_their_frames(tmp_pa
 
 
 def test_a_curated_hero_thumbnail_links_to_the_frame_it_was_cut_from(tmp_path):
-    """Picture and caption come from one number, so they cannot drift apart:
-    before the atlas named the frame, the link was recomputed from the fraction
-    and simply assumed the stored JPEG had been cut there."""
+    """Thumbnail picture and link come from the atlas's frame number, not the fraction."""
     root_path = make_root(tmp_path)
     write_atlas(root_path)
     page = scene_page(tmp_path, root_path)
@@ -312,9 +301,7 @@ def test_a_curated_thumbnail_with_no_stored_file_renders_the_frame_it_names(tmp_
     atlas_dir = write_atlas(root_path)
     for stored in (atlas_dir / "thumbs").glob("*.jpg"):
         stored.unlink()
-    # The fixture writes one flat colour per frame, so mark the frame the 50 %
-    # fraction would have picked -- otherwise every frame renders alike and the
-    # test cannot tell the two rules apart.
+    # Mark the frame the 50 % fraction would pick, so the two rules differ.
     from PIL import Image
 
     Image.new("RGB", (16, 10), (200, 30, 30)).save(root_path / "0000" / "images" / "00006.png")

@@ -1,10 +1,5 @@
 """Viewer: the ``driven_similarity`` modality -- DRIFT's driven cells and feature
-similarity -- through probe, tile, terrain layers and routes.
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+similarity -- through probe, tile, terrain layers and routes."""
 
 from __future__ import annotations
 

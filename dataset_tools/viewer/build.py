@@ -1,12 +1,7 @@
-"""Building one SimView scene for one window of one dataset scene.
+"""Build one SimView scene for one window of one dataset scene.
 
-Everything here is *on demand and bounded*: a build touches only the requested
-window's frames, reads at most a few dozen clouds and height maps out of it,
-and never scans the rest of the dataset. That is what makes a 20k-frame scene
-on network storage browsable.
-
-Which dataset file becomes what in the built scene is tabulated in
-docs/VIEWER.md ("What each file turns into").
+On demand and bounded: a build reads only the window's frames, at most a few
+dozen clouds and height maps. File-to-scene mapping: docs/VIEWER.md.
 """
 
 from __future__ import annotations
@@ -40,27 +35,20 @@ from .windows import (
 
 logger = logging.getLogger("dataset_tools.viewer.build")
 
-#: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d``
-#: being how far the sample sat from the robot that measured it. A window splats
-#: ~80 maps 12.8 m across along a path a few tens of metres long, so every cell
-#: is covered by dozens of them; a plain mean blends observations made from
-#: poses whose z disagrees by however much the odometry drifted between them,
-#: which lifts the ground away from the robot standing on it. Weighting by
-#: distance lets each cell be decided by the frames that drove over it.
+#: Height-map samples are weighted by ``exp(-(d / HM_BLEND_SIGMA)**2)``, ``d`` the
+#: distance from the measuring robot, so odometry z-drift between overlapping maps
+#: doesn't lift the ground: each cell is decided by the frames that drove over it.
 HM_BLEND_SIGMA = 3.0
 #: Ground (m) the terrain grid reaches beyond the window's path on every side.
 TERRAIN_MARGIN = 7.0
 
 WHEEL_LABELS = ("left", "rear", "right")
 
-#: File suffix of each per-frame directory's entries.
-#: Images are not here: their extension is the root's to say (`SceneAccess.frame_suffix`).
+#: File suffix of each per-frame directory (images: see `SceneAccess.frame_suffix`).
 FRAME_SUFFIX = {"clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz", "driven_similarity": ".npz"}
 
-#: Threads reading a window's per-frame files. A root usually sits on network
-#: storage, where a serial loop pays one round trip of latency per file before
-#: any bytes flow; a build touches ~200 files, so overlapping those round trips
-#: is what makes it fast. File reads release the GIL.
+#: Threads reading a window's ~200 per-frame files: overlaps network-storage
+#: round trips (file reads release the GIL).
 READ_WORKERS = 16
 
 
@@ -72,43 +60,13 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
         return list(pool.map(loader, paths))
 
 
-#: Bumped whenever :func:`build_scene`'s ``meta`` payload changes a field the
-#: overlay reads, or the same window *key* comes to mean different frames.
-#:
-#: The bundle cache is keyed by what was *asked for*, which does not change when
-#: the code that answers does; without a version in the file, an upgrade would
-#: serve yesterday's ``meta.json`` for every window already opened.
-#:
-#: 4: the whole-scene fallback is bounded by ``data_ts.txt`` rather than the
-#:    frame count, so ``raw.0`` can cover fewer frames than it used to.
-#: 5: windows are gravity-levelled and terrain is distance-weighted, so every
-#:    cached bundle holds poses and a height field that no longer match.
-#: 6: ``meta`` carries the GT-vs-IMU attitude comparison the panel reads, and
-#:    the attitude scalars are renamed to say which source they came from.
-#: 7: the ``validity`` terrain layer is the weighted mean of the samples behind
-#:    each cell rather than the best of them, so cached bundles hold a layer
-#:    that no longer means what its legend says.
-#: 8: wheel radius 0.36 -> 0.334 m, so cached bundles draw the old wheels.
-#: 9: ``wheel_slip_*`` scalars (setpoint minus measured), so a cached bundle's
-#:    plot list is short of them; and ``attitude`` carries its ``band`` (ok /
-#:    warn / bad), the verdict the window tables show, so the panel and the
-#:    tables cannot disagree.
-#: 10: the ``driven`` and ``drivable`` terrain layers from ``driven_similarity/``,
-#:    and ``meta.available`` lists that modality; a bundle built before knows
-#:    neither.
-#: 11: the episode label is the window's own ("Segment 1 (3/4)"), without the
-#:    pose source after it.
-#: 12: no episode at all. A window is one stretch of one segment, and the
-#:    panel's title already names it; the timeline label only repeated it.
+#: Bump when :func:`build_scene`'s ``meta`` changes a field the overlay reads, or a
+#: window key comes to mean different frames: the bundle cache is keyed by request
+#: and would otherwise serve stale bundles after an upgrade.
 META_VERSION = 12
 
-#: What each terrain colour mode means, in the viewer's own terms.
-#:
-#: SimView turns every named terrain property into a "Color Mode" entry with no
-#: description anywhere -- the names are ours (see ``_finish_terrain`` and
-#: ``aggregate_clouds``), so the explanations have to be ours too. They travel
-#: in the scene metadata and are rendered by the overlay panel; a layer not
-#: listed here still gets a legend row, just without prose.
+#: Descriptions of our terrain colour modes (SimView shows none), rendered by the
+#: overlay panel from the scene metadata.
 TERRAIN_COLOR_MODE_HELP = {
     "height": "Surface height in metres -- the terrain's own z. SimView's built-in mode.",
     "coverage": (
@@ -156,13 +114,7 @@ TERRAIN_COLOR_MODE_HELP = {
 
 
 def terrain_color_modes(layer_names) -> list[dict]:
-    """The colour modes this window's terrain actually offers, described.
-
-    ``height`` always exists (it is SimView's built-in mode); every property we
-    attach becomes a mode of the same name. Ordered exactly as SimView's own
-    "Color Mode" dropdown lists them, so the overlay legend can be read
-    alongside it.
-    """
+    """This window's terrain colour modes with descriptions, in SimView's dropdown order."""
     return [{"name": name, "description": TERRAIN_COLOR_MODE_HELP.get(name, "")} for name in ["height", *layer_names]]
 
 
@@ -192,31 +144,16 @@ class BuildOptions:
         return "-".join(map(str, astuple(self.sanitized())))
 
 
-#: Window length the budgets in :class:`BuildOptions` were chosen against. A
-#: window of this many frames gets exactly what the options ask for.
+#: Window length the :class:`BuildOptions` budgets were chosen against.
 BUDGET_REFERENCE_FRAMES = 1500
-#: Ceiling on that scaling. The budgets buy samples, and a window four times
-#: the reference already reaches the sanitized ceilings on most of them.
 MAX_BUDGET_SCALE = 4.0
-#: The terrain budget scales more slowly than the sampling ones: it buys cells,
-#: and cells are what the bundle is mostly made of (~36 bytes each across the
-#: layers), so doubling it is the difference between a 9 MB and a 24 MB window.
+#: Terrain scales less: cells dominate bundle size (~36 B each across layers).
 MAX_TERRAIN_SCALE = 2.0
 
 
 def budgets_for_window(opts: BuildOptions, n_frames: int) -> BuildOptions:
-    """``opts`` with the sampling budgets scaled to a window's length.
-
-    The budgets are fixed counts -- 80 height maps, 40 clouds, 160k points --
-    so a window twice as long samples the same ground half as densely, and a
-    long window would otherwise be visibly poorer than the parts it replaced.
-    They are scaled with the frame count to hold that density roughly constant,
-    and ``sanitized`` clips the result, so a very long window stops at the same
-    ceilings the UI offers rather than at whatever the arithmetic produced.
-
-    Short windows -- most windows, the median segment of v1.3 is 43 frames --
-    are left exactly as asked for; this only ever scales up.
-    """
+    """``opts`` with sampling budgets scaled up with window length to keep density
+    roughly constant; clipped by ``sanitized``. Never scales down."""
     scale = min(max(1.0, n_frames / BUDGET_REFERENCE_FRAMES), MAX_BUDGET_SCALE)
     if scale <= 1.0:
         return opts
@@ -231,12 +168,8 @@ def budgets_for_window(opts: BuildOptions, n_frames: int) -> BuildOptions:
 
 
 class SceneAccess:
-    """Lazily-loaded, cached handle on one scene's *small* per-scene files.
-
-    "Small" means anything whose whole-scene size is bounded by the frame count
-    (poses, timestamps, proprioception) -- never clouds, images or height maps,
-    which are read per frame by the caller.
-    """
+    """Lazily-loaded, cached handle on one scene's small per-scene files (poses,
+    timestamps, proprioception); clouds, images and height maps are read per frame."""
 
     def __init__(self, root: DatasetRoot, scene_id: str) -> None:
         self.root = root
@@ -246,18 +179,13 @@ class SceneAccess:
         self._cache: dict[str, object] = {}
 
     def cached(self, key: str, fn):
-        """Memoise a value on this scene handle: a file's contents, or a
-        summary assembled from several (the scene page's cards). They cost
-        reads on network storage, and paging between the tabs of one scene
-        must not pay for them twice.
-        """
+        """Memoise a value on this scene handle (reads cost network round trips)."""
         if key not in self._cache:
             self._cache[key] = fn()
         return self._cache[key]
 
     def _optional(self, key: str, artefact: str, fn):
-        """Load an optional artefact, returning None without complaining when
-        the probe already says the scene does not have it."""
+        """Load an optional artefact, or None if the probe says it is absent."""
         if not self.probe.has(artefact):
             return None
         return self.cached(key, fn)
@@ -273,8 +201,7 @@ class SceneAccess:
                     self._cache["clock_source"] = name
                     return ts
             if self.probe.n_frames:
-                # No timestamp file at all: synthesise a uniform 10 Hz clock so
-                # the frames still have an ordering to play back.
+                # No timestamp file: synthesise a uniform 10 Hz clock.
                 self._cache["clock_source"] = "synthetic"
                 return np.arange(self.probe.n_frames, dtype=np.float64) * 0.1
             return None
@@ -283,11 +210,7 @@ class SceneAccess:
 
     @property
     def clock_problem(self) -> str | None:
-        """Why the frame times on a page are not the scene's own, or None.
-
-        The fallbacks keep the pages working, which is also what hides them:
-        segment membership, windows and every signal are placed on this clock.
-        """
+        """Why the frame times are not the scene's own (a fallback clock), or None."""
         _ = self.frame_ts  # loading it records which file it came from
         source = self._cache.get("clock_source")
         if source in (None, "data_ts.txt"):
@@ -366,17 +289,12 @@ class SceneAccess:
     # -- per-frame directories --------------------------------------------
 
     def available_frames(self, kind: str) -> set[int]:
-        """Frame indices that actually have a file in ``kind``/ (cached).
-
-        Directories are built in flight, so a scene routinely has height maps
-        for only a prefix (or a subsample) of its frames.
-        """
+        """Frame indices that have a file in ``kind``/ (cached); often a subset."""
         suffix = self.frame_suffix(kind)
         return self.cached(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
 
     def frame_suffix(self, kind: str) -> str:
-        """The extension of a per-frame file. Fixed, except for the images: a
-        root holds the camera's JPEG or, before 2026-09-29, a PNG of it."""
+        """The extension of a per-frame file; images may be JPEG or (older roots) PNG."""
         if kind != "images":
             return FRAME_SUFFIX[kind]
 
@@ -420,8 +338,7 @@ class SceneAccess:
         for w in self.windows(max_frames, max_seconds):
             if w.key == key:
                 return w
-        # One-frame windows are addressable but not enumerated (see
-        # ``single_frame_window``): a 20k-frame scene has 20k of them.
+        # One-frame windows are addressable but not enumerated.
         index = parse_frame_window_key(key)
         if index is not None:
             return single_frame_window(self.frame_ts, self.segments, self.probe.n_frames, index)
@@ -459,12 +376,8 @@ def _identity_track(n: int, source: str, note: str) -> PoseTrack:
 def _gravity_level(access: SceneAccess, frame_index: int) -> np.ndarray | None:
     """Rotation taking a window's anchor frame into a gravity-aligned world.
 
-    Each segment is re-anchored to identity at its own first pose. That is right
-    for position and yaw -- the window is its own frame -- but roll and pitch are
-    absolute, measured against gravity, and zeroing them renders a robot that
-    starts on a slope as level, and one that starts on its side as upright.
-    ``gravity_align.npy`` holds the attitude the anchor discarded; rotating the
-    whole window by the anchor frame's own value puts it back.
+    Segments are anchored to identity, which zeroes roll/pitch too;
+    ``gravity_align.npy`` holds the discarded attitude to restore them.
     """
     ga = access.gravity_align
     if ga is None or frame_index < 0 or frame_index >= len(ga):
@@ -498,20 +411,13 @@ def _anchor_frame(access: SceneAccess, ts: float) -> int:
 def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> PoseTrack:
     """The window's robot pose, in the window's own reference frame.
 
-    For a ``segment`` window this is ground truth interpolated inside that one
-    segment -- never across its boundary, since each segment is anchored to its
-    own identity. For a ``raw`` window it is the wheel-odometry pose
-    re-anchored to the window's first frame, so the view starts at the origin
-    and the drift accumulates visibly from there.
+    ``segment`` windows: ground truth interpolated within that segment only.
+    ``raw`` windows: wheel odometry re-anchored to the window's first frame.
     """
     n = len(times)
     if window.kind == "frame":
-        # A single frame is a static inspection: its absolute position inside
-        # the identity-anchored segment carries no visual meaning, and using it
-        # would drop the robot tens of metres from the origin, off the initial
-        # camera (the black single-frame view). Anchored at the origin instead,
-        # upright on its own height map. ``pose_source`` still records whether
-        # ground truth exists.
+        # Single frame: robot at the origin (its segment position would put it
+        # off the initial camera); ``pose_source`` still says whether GT exists.
         R = _gravity_level(access, window.frame_start)
         one = mat_to_quat(R[None])[0] if R is not None else np.array([1.0, 0.0, 0.0, 0.0])
         quats = np.tile(one, (n, 1))
@@ -532,8 +438,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
             return _identity_track(n, "none", "segment has fewer than two poses")
         pos, quat, valid = interpolate_poses(ts, poses, times, tol=frame_slack(access.frame_ts))
         track = PoseTrack(pos, quat, valid, "odometry", f"ground truth, segment {window.segment_index}")
-        # Levelled about the *segment's* anchor, not the window's first frame:
-        # a later chunk of a split segment is still expressed in that anchor.
+        # Level about the segment's anchor: split chunks share it.
         anchor = _anchor_frame(access, seg.start_ts) if seg is not None else window.frame_start
         return _level_track(track, _gravity_level(access, anchor))
 
@@ -557,11 +462,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
 
 
 def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrack | None:
-    """Wheel odometry expressed in the ground-truth window frame.
-
-    Aligned to ground truth at the window's first valid frame, so the two
-    bodies start coincident and separate by exactly the accumulated drift.
-    """
+    """Wheel odometry in the ground-truth window frame, aligned at the first valid frame."""
     tf = access.transforms
     if tf is None or gt.source != "odometry" or not gt.valid.any():
         return None
@@ -595,23 +496,15 @@ class TerrainGrid:
     res: float
     nx: int
     ny: int
-    #: Weighted height sum and the weights behind it; their ratio is the
-    #: surface. ``count`` stays a plain observation tally for the coverage
-    #: layer, which reports how much was seen, not how much it was trusted.
+    #: Weighted height sum and weights (ratio = surface); ``count`` is a plain tally.
     sum_wz: np.ndarray = field(init=False)
     sum_w: np.ndarray = field(init=False)
     count: np.ndarray = field(init=False)
-    #: Weighted validity sum and *its own* weights. A separate pair from the
-    #: height's, because a frame whose validity mask is missing contributes a
-    #: height but no validity, and dividing by the height's weights would read
-    #: that absence as "extrapolated" rather than as "not said".
+    #: Validity sum with its own weights: a frame missing its mask adds height only.
     sum_wv: np.ndarray = field(init=False)
     sum_w_v: np.ndarray = field(init=False)
-    #: The same weighted height sum over *measured* samples only. A per-frame
-    #: map is mostly invented (~70 % extrapolated on real data), and a tree or a
-    #: person is measured by the few frames that saw it and filled in at ground
-    #: level by the dozens that did not; one mean over all of them squashes it
-    #: flat. Wherever any frame measured a cell, these decide its height.
+    #: Height sum over measured samples only; where any exist they decide the cell,
+    #: so objects seen by few frames aren't flattened by extrapolated ones.
     sum_wz_m: np.ndarray = field(init=False)
     sum_w_m: np.ndarray = field(init=False)
     layers: dict[str, np.ndarray] = field(default_factory=dict)
@@ -641,12 +534,7 @@ class TerrainGrid:
         return row, col, inside
 
     def binned(self, row: np.ndarray, col: np.ndarray, weights: np.ndarray | None = None) -> np.ndarray:
-        """Per-cell sum of ``weights`` (or a count) for samples at ``(row, col)``.
-
-        ``np.bincount`` over the flattened cell index: ``np.add.at`` does the
-        same job an order of magnitude slower, and a window splats over a
-        million samples.
-        """
+        """Per-cell sum of ``weights`` (or a count); bincount is ~10x faster than ``np.add.at``."""
         flat = np.bincount(row * self.nx + col, weights=weights, minlength=self.ny * self.nx)
         return flat.reshape(self.ny, self.nx)
 
@@ -702,9 +590,7 @@ def _place(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """One robot-centred, gravity-aligned map's samples in the world grid.
 
-    ``p_world = R_pose @ R_ga.T @ p_map + t_pose``: skipping the ``R_ga.T``
-    would tilt every map by the robot's roll/pitch. Returns ``(world, row, col,
-    inside)``, the last three as :meth:`TerrainGrid.cell_of` gives them.
+    ``p_world = R_pose @ R_ga.T @ p_map + t_pose``; returns ``(world, row, col, inside)``.
     """
     R = pose[:3, :3]
     if ga is not None and frame < len(ga):
@@ -714,12 +600,9 @@ def _place(
 
 
 def read_driven_similarity(path: Path) -> dict[str, Any] | None:
-    """The layers of one ``driven_similarity`` sidecar, or None.
+    """The layers of one ``driven_similarity`` sidecar, or None if missing/malformed.
 
-    ``driven`` and ``max_sim`` of one 2-D shape, ``threshold`` (0.9, as trained,
-    when the file does not say) and ``max_sim_geom`` when the file has it.
-    Tolerant the way ``loaders.load_npz_key`` is: a missing or malformed file is
-    "nothing to show", not an error.
+    ``driven``, ``max_sim``, ``threshold`` (default 0.9) and optional ``max_sim_geom``.
     """
     if not path.is_file():
         return None
@@ -749,17 +632,8 @@ def splat_height_maps(
     poses: np.ndarray,
     opts: BuildOptions,
 ) -> dict:
-    """Accumulate per-frame BEV height maps into the world grid.
-
-    Each map is robot-centred and *gravity-aligned*, so putting it in the world
-    needs both the robot pose and the inverse of that frame's gravity rotation
-    (:func:`_place`).
-
-    Each sample carries a weight falling off with its distance from the robot
-    that measured it (:data:`HM_BLEND_SIGMA`), so a cell is decided by the
-    frames that drove over it rather than averaged flat across every frame that
-    could see it.
-    """
+    """Accumulate per-frame BEV height maps into the world grid, each sample
+    weighted by distance from the measuring robot (:data:`HM_BLEND_SIGMA`)."""
     chosen, maps, stats = _read_window(
         access, "height_maps", frames, opts.max_hm_frames, lambda p: L.load_npz_key(p, "height_map")
     )
@@ -779,12 +653,7 @@ def splat_height_maps(
             continue
         X, Y = _cell_xy(hm.shape)
         z = np.asarray(hm, dtype=np.float64).ravel()
-        # A cell the generator left as NaN has to go before the grid ever sees
-        # it. It would poison its grid cell for good -- the weighted sums go
-        # NaN, ``covered`` stays true, and a NaN reaches the float32 heightfield
-        # -- and the rotation below smears it across world x and y as well,
-        # where the integer cast in ``cell_of`` is undefined. Clouds are
-        # filtered the same way, in ``L.load_cloud``.
+        # Drop NaN cells first: they would poison the weighted sums for good.
         finite = np.isfinite(z)
         if not finite.any():
             continue
@@ -801,11 +670,8 @@ def splat_height_maps(
         stats["used"] += 1
 
         if mask is not None and mask.shape == hm.shape:
-            # Rank, not the raw code. A root built with wheel-contact anchors
-            # codes those cells 3, and averaging the codes would paint the one
-            # region the lidar never saw as the best-measured in the scene.
-            # The lookup is the identity on the three states every published
-            # root ships (loaders.VALIDITY_RANK).
+            # Average the rank, not the raw code: wheel-contact anchors are
+            # code 3 but were never seen by the lidar (loaders.VALIDITY_RANK).
             code = np.clip(np.asarray(mask, dtype=np.intp), 0, len(L.VALIDITY_RANK) - 1)
             ranked = L.VALIDITY_RANK[code]
             flat = ranked.astype(np.float64).ravel()[finite][inside]
@@ -827,15 +693,8 @@ def splat_driven_similarity(
 ) -> dict:
     """Accumulate the per-keyframe ``driven_similarity`` sidecars into two layers.
 
-    Same grid, same layout and the same ``R_pose @ R_ga.T`` placement as
-    :func:`splat_height_maps`, so a driven cell lands on the terrain cell whose
-    height came from the same map. ``driven`` is the union over frames (a cell
-    is driven once any wheel rolled over it); ``drivable`` keeps each cell's
-    highest similarity to a driven cell, clipped below at 0 -- a max, not a
-    weighted mean, because the question is "did anything the robot drove on ever
-    look like this", and a distant frame's answer is as good as a near one's.
-    Frames without a sidecar (no driven cell in their horizon) contribute
-    nothing, which is what they have to say.
+    Placed like :func:`splat_height_maps`. ``driven`` is the union over frames;
+    ``drivable`` the max similarity (clipped at 0), not a distance-weighted mean.
     """
     chosen, sidecars, stats = _read_window(
         access, "driven_similarity", frames, opts.max_hm_frames, read_driven_similarity
@@ -854,9 +713,7 @@ def splat_driven_similarity(
         X, Y = _cell_xy(driven.shape)
         sim = np.clip(np.nan_to_num(max_sim, nan=0.0), 0.0, 1.0).ravel()
         drv = driven.ravel()
-        # Only cells that say something: the driven ones and any with a
-        # positive similarity. The rest would splat zeros over other frames'
-        # answers -- harmless under a max, but a million samples of nothing.
+        # Only cells that say something; zeros are no-ops under a max.
         keep = drv | (sim > 0.0)
         if not keep.any():
             continue
@@ -880,9 +737,8 @@ def aggregate_clouds(
 ) -> tuple[np.ndarray | None, dict]:
     """Read a bounded subset of the window's clouds into one world-frame cloud.
 
-    Returns the stacked ``(N, 4)`` array (x, y, z, intensity) and read stats.
-    Also fills the grid's cloud-derived layers (point count, mean intensity,
-    vertical spread), since the points are in hand anyway.
+    Returns the ``(N, 4)`` (x, y, z, intensity) array and read stats; also fills
+    the grid's cloud layers (point count, mean intensity, vertical spread).
     """
     chosen, clouds, stats = _read_window(access, "clouds", frames, opts.max_cloud_frames, L.load_cloud)
     stats["points"] = 0
@@ -937,12 +793,7 @@ def aggregate_clouds(
 
 
 def _fill_coarse_nans(coarse: np.ndarray, max_passes: int = 400) -> np.ndarray:
-    """Flood unobserved coarse cells outward from the observed ones.
-
-    Each pass averages the not-yet-filled cells over whichever of their four
-    neighbours already have a value, so the surface grows out of the observed
-    corridor instead of jumping to a constant.
-    """
+    """Flood unobserved coarse cells outward, each pass averaging filled 4-neighbours."""
     out = coarse.copy()
     for _ in range(max_passes):
         holes = np.isnan(out)
@@ -980,15 +831,8 @@ def _upsample_bilinear(coarse: np.ndarray, ny: int, nx: int, by: int, bx: int) -
 
 
 def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 56) -> np.ndarray:
-    """A smooth trend surface through the observed cells.
-
-    Unobserved cells have to be given *some* height -- the viewer's heightfield
-    has no notion of a hole. Filling them with one global constant produces a
-    huge flat plane cutting through a scene that climbs or descends, which
-    reads as terrain that is not there. Extending the observed trend instead
-    keeps the surroundings plausible, and the ``coverage`` colour layer still
-    marks exactly which cells were actually observed.
-    """
+    """A smooth trend surface through the observed cells, to fill the unobserved
+    ones (a heightfield has no holes; a constant would cut through slopes)."""
     ny, nx = height.shape
     by = max(1, int(math.ceil(ny / blocks)))
     bx = max(1, int(math.ceil(nx / blocks)))
@@ -1006,13 +850,8 @@ def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 5
 
 
 def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.ndarray, dict, dict]:
-    """Turn the accumulated grid into a height field plus its colour layers.
-
-    Cells nothing was observed in are filled from the trend surface through
-    the observed ones (:func:`_background_surface`) and reported through the
-    ``coverage`` layer, so invented ground is visible in the viewer instead of
-    being indistinguishable from measured ground.
-    """
+    """Turn the accumulated grid into a height field plus its colour layers;
+    unobserved cells are filled by :func:`_background_surface`."""
     covered = grid.sum_w > 0.0
     height = np.zeros((grid.ny, grid.nx), dtype=np.float64)
     if covered.any():
@@ -1037,19 +876,15 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
     }
     layers.update(grid.layers)
     bounds = {"validity": (0.0, 2.0), "driven": (0.0, 1.0), "drivable": (0.0, 1.0)}
-    # Drop layers that carry no information (all-zero) so the viewer's colour
-    # mode list only offers modes that show something.
+    # Drop constant layers: the colour mode list offers only informative ones.
     layers = {k: v for k, v in layers.items() if np.any(v != v.flat[0])}
     bounds = {k: v for k, v in bounds.items() if k in layers}
     return height, layers, bounds
 
 
 def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
-    """Fill the grid's height from the aggregated cloud (mean z per cell).
-
-    Used when a scene has no height maps at all -- the terrain is then the
-    lidar's own ground estimate rather than the pipeline's BEV product.
-    """
+    """Fill the grid's height from the aggregated cloud (mean z per cell), for
+    scenes without height maps."""
     row, col, inside = grid.cell_of(cloud[:, 0], cloud[:, 1])
     if not inside.any():
         return
@@ -1069,19 +904,15 @@ def _terrain_from_cloud(grid: TerrainGrid, cloud: np.ndarray) -> None:
 def build_scalars(
     access: SceneAccess, window: Window, times: np.ndarray, gt: PoseTrack, ghost: PoseTrack | None
 ) -> tuple[dict[str, np.ndarray], list[str]]:
-    """Every time series the scene can offer, resampled onto the frame clock.
-
-    Channels whose source file is absent are simply not created -- the viewer's
-    plot list is therefore itself a readout of what the scene contains.
-    """
+    """Every time series the scene can offer, resampled onto the frame clock;
+    channels whose source file is absent are not created."""
     scalars: dict[str, np.ndarray] = {}
     notes: list[str] = []
     dt = np.gradient(times) if len(times) > 1 else np.array([1.0])
     dt = np.where(dt > 1e-6, dt, 1e-6)
 
     if gt.source != "none":
-        # A one-frame window has no motion to differentiate: the derived
-        # channels are zero by construction rather than missing.
+        # A one-frame window has no motion: derived channels are zero.
         if len(times) > 1:
             vel = np.gradient(gt.positions, axis=0) / dt[:, None]
             scalars["speed"] = np.linalg.norm(vel[:, :2], axis=1)
@@ -1110,10 +941,7 @@ def build_scalars(
         scalars["roll_deg_imu"] = np.degrees(roll)
         scalars["pitch_deg_imu"] = np.degrees(pitch)
         if gt.source != "none":
-            # The window is levelled, so the ground truth now carries an
-            # absolute attitude too and the two are directly comparable. Row 2
-            # of either rotation is the world's up axis in body coordinates,
-            # which is what makes the same reader work on both.
+            # The window is levelled, so GT attitude is absolute and comparable.
             R_gt = poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
             roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
             scalars["roll_deg_gt"] = np.degrees(roll)
@@ -1134,9 +962,7 @@ def build_scalars(
         res = L.resample_series(sp[:, 0], sp[:, 1:10], times)
         for k, label in enumerate(WHEEL_LABELS):
             scalars[f"wheel_setpoint_{label}"] = res[:, 3 + k]
-            # Commanded minus measured: where slip and load show up, per wheel.
-            # Both series are already on the frame clock, so the difference is
-            # taken there rather than by resampling either again.
+            # Commanded minus measured, both already on the frame clock.
             if f"wheel_vel_{label}" in scalars:
                 scalars[f"wheel_slip_{label}"] = res[:, 3 + k] - scalars[f"wheel_vel_{label}"]
 
@@ -1151,21 +977,15 @@ def build_scalars(
     return scalars, notes
 
 
-#: Tilt disagreement (degrees) at which the panel stops calling the ground
-#: truth sound. Measured across this root: segments whose GT attitude is
-#: healthy sit under 11 deg from the IMU even on sustained steep slopes, and a
-#: segment whose GT has actually failed sits above 40.
+#: GT-vs-IMU tilt disagreement (deg) bands. Healthy GT stays under ~11 deg even
+#: on steep slopes; failed GT sits above 40.
 ATTITUDE_BANDS = {"ok": 10.0, "warn": 20.0}
 
 
 def attitude_error_deg(R_gt: np.ndarray, R_imu: np.ndarray) -> np.ndarray:
-    """Angle (degrees) between the two rotations' up axes, per frame.
+    """Angle (degrees) between the two rotations' up axes (row 2), per frame.
 
-    The tilt disagreement itself, free of yaw and of the wrap a per-angle
-    difference would hit near +-180 deg (a robot on its back). Row 2 of either
-    rotation is the world's up axis in body coordinates, which is what makes
-    the same reader work on the ground truth and on ``gravity_align.npy``.
-    One function for the panel's per-frame plot and the window tables' verdict.
+    Free of yaw and of the +-180 deg wrap a per-angle difference would hit.
     """
     cos = np.clip(np.sum(R_gt[:, 2, :] * R_imu[:, 2, :], axis=1), -1.0, 1.0)
     return np.degrees(np.arccos(cos))
@@ -1179,16 +999,8 @@ def attitude_band(median_deg: float) -> str:
 
 
 def window_attitude(access: SceneAccess, window: Window) -> dict | None:
-    """The ground-truth-versus-IMU verdict for one window, without a build.
-
-    The panel computes this inside the bundle, which exists only once someone
-    has opened the window. The tables listing a scene's windows want it before
-    that -- it is the one number that says which segments are worth opening --
-    so the same comparison is run here on the window's own frames: the poses
-    interpolated onto the frame clock and levelled exactly as a build does
-    (:func:`resolve_poses`), against ``gravity_align.npy``. Numpy only, no
-    torch, and cached on the scene handle. None for anything but a segment
-    window, and for a scene with no gravity alignment to compare against.
+    """The GT-vs-IMU verdict for one segment window, without a build (for the
+    window tables). Numpy only, cached; None without GT or gravity alignment.
     """
     if window.kind != "segment" or not access.probe.has("gravity_align"):
         return None
@@ -1220,11 +1032,7 @@ def window_attitude(access: SceneAccess, window: Window) -> dict | None:
 def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
     """The GT-vs-IMU attitude comparison the side panel reads, or None.
 
-    Once a window is levelled both attitudes are absolute, so the gap between
-    them says how far the ground truth's own orientation has wandered -- the one
-    reading that separates a robot really on a slope from odometry that thinks
-    it is. The IMU is independent of the odometry, which is what makes it a
-    check rather than a restatement.
+    The IMU is independent of the odometry, so the gap shows GT attitude drift.
     """
     need = ("roll_deg_gt", "pitch_deg_gt", "roll_deg_imu", "pitch_deg_imu", "attitude_error_deg")
     if not all(k in scalars for k in need):
@@ -1279,17 +1087,9 @@ def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def viewer_defaults(single_frame: bool) -> dict:
-    """What SimView's controls open on, declared with the scene.
-
-    SimView's own defaults fit a physics scene, where the terrain's properties
-    are the subject. Here the terrain is scenery whose colour layers the
-    overlay's legend explains, and framing the run (track body, FOV) is what
-    people reach for; Body States is a readout to open on demand. The
-    aggregated cloud is a heavy overlay that would cover the terrain, so it is
-    off until SimView's own "Show Point Clouds" turns it on. All four folders
-    are named so a change in SimView's defaults does not change this view.
-
-    A single frame has nothing to play and no series to plot.
+    """What SimView's controls open on: camera/body folders open, the heavy
+    aggregated cloud off, and no playback/plots for a single frame. All folders
+    are named so a SimView default change does not change this view.
     """
     defaults = {
         "ui": {"pointCloudsVisible": False},
@@ -1334,9 +1134,7 @@ def build_scene(
         raise ValueError(f"scene {scene_id} has no frame timestamps")
     frames = frames[frames < len(frame_ts)]
     if len(frames) == 0:
-        # Only reachable for a window whose whole range is past the end of the
-        # timestamp track; `windows` refuses to enumerate one, so this is the
-        # guard for a hand-typed key rather than a path the UI can take.
+        # Only reachable through a hand-typed key past the timestamp track.
         raise KeyError(
             f"scene {scene_id} window {window_key!r} covers frames "
             f"{window.frame_start}-{window.frame_end - 1}, none of which has a "
@@ -1344,8 +1142,7 @@ def build_scene(
         )
     abs_times = frame_ts[frames]
     times = abs_times - abs_times[0]
-    # After the frame range is final: what the window costs to sample is set by
-    # how much of it there is, not by what the key asked for.
+    # Scale budgets by the final frame count, not what the key asked for.
     opts = budgets_for_window(opts, len(frames))
 
     gt = resolve_poses(access, window, abs_times)
@@ -1383,8 +1180,7 @@ def build_scene(
         "clouds": cloud_stats,
         "frames": [int(frames[0]), int(frames[-1])],
         "notes": notes,
-        # What the scene lacks that would make this view fuller; optional
-        # extras (cmd_vel, the v1 camera file) are left out as noise.
+        # Optional extras are left out as noise.
         "missing_files": [k for k in access.probe.missing if k not in OPTIONAL_ARTEFACTS],
     }
     if access.K is not None:
@@ -1416,11 +1212,8 @@ def build_scene(
     for name in WHEELS:
         scene.create_body(name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot")
     if ghost is not None:
-        # A deliberately small, flat marker: it shows where wheel odometry thinks
-        # the robot is, without reading as a second robot.
-        # Hidden until asked for by name (the panel's ghost switch): it can end
-        # up a hundred metres away, and unexplained it reads as a box drifting
-        # around the scene. Amber and see-through against the robot's grey.
+        # Small flat marker for where wheel odometry thinks the robot is;
+        # hidden until the panel's ghost switch, since it can drift far away.
         scene.create_body(
             "wheel_odom_ghost",
             BodyShapeType.BOX,
@@ -1463,11 +1256,8 @@ def build_scene(
 
     if ghost is not None:
         trajectories.append(BodyTrajectory("wheel_odom_ghost", positions=ghost.positions, orientations=ghost.quats))
-    # `lidar_cloud` deliberately gets *no* trajectory. It is the window's clouds
-    # already accumulated in the world frame, so its transform is the identity
-    # at every frame -- a per-frame pose that says nothing, costs a blob, and
-    # (in SimView >= 4.3) is exactly what keeps a point-cloud body in the "Body
-    # states" list, which is not a list it belongs in.
+    # `lidar_cloud` gets no trajectory: it is already in the world frame, and a
+    # trajectory would list it under SimView's "Body states".
 
     scene.add_trajectory(
         times=times,

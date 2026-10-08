@@ -1,8 +1,5 @@
-// The cloud-on-image picture and its depth legend. The server sends the depth
-// the colours run over in an X-Depth-Range header instead of painting a legend
-// into the picture, and the page draws it over the picture's corner: painted
-// in, it zoomed and panned away with the picture. Fetched rather than set as a
-// plain src, since an <img> cannot read a response header.
+// Cloud-on-image picture plus its depth legend, from the X-Depth-Range header
+// (fetched, since an <img> can't read headers).
 window.dtDepth = {
   async load(url) {
     const r = await fetch(url);
@@ -23,8 +20,7 @@ window.dtDepth = {
     if (!legend) return;
     legend.hidden = !range;
     if (!range) return;
-    // The far end is the 98th percentile, not the farthest return: everything
-    // beyond it is the same dark red, and "+" says so.
+    // The far end is the 98th percentile, hence "+".
     legend.querySelector("[data-near]").textContent = `${range[0].toFixed(1)} m`;
     legend.querySelector("[data-far]").textContent = `${range[1].toFixed(1)} m+`;
   },

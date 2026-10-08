@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """Audit an extracted scene's frame clock against its poses.
 
-The extractor already does this and applies the result (``--time_align auto``,
-recorded per scene in ``time_align.txt``), so this is the tool for asking the
-question about a root that is already on disk: was it corrected, is it still
-off, and by how much over the course of each scene.
+The extractor applies this itself (``--time_align auto``); this checks a root on
+disk. A corrected scene reads as a flat profile at zero. See :mod:`dataset_tools.time_align`.
 
     scripts/measure_time_offset.py <root-or-scene>... [--json out.json]
-
-A corrected scene reads as a flat profile at zero. What
-:mod:`dataset_tools.time_align` measures, and why the number is a curve rather
-than a constant, is documented there.
 """
 
 from __future__ import annotations

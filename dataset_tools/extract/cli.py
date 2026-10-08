@@ -57,9 +57,7 @@ def _worker(bag_path: Path, output_dir: Path, idx: int, args) -> SceneResult:
 def time_align_mode(value: str) -> str:
     """Normalise a ``--time_align`` value: ``auto``, ``off`` or a number as text.
 
-    Also the parser's ``type``, so a typo is refused with a usage message before
-    any bag is opened rather than inside a worker process, where a ``SystemExit``
-    would take the whole pool down.
+    Used as the parser's ``type`` so typos fail before the worker pool starts.
     """
     mode = value.strip().lower()
     if mode in ("auto", "off"):
@@ -104,20 +102,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--odom",
         type=str,
         default="/odin1/odometry",
-        help="Odometry topic used for odometry.txt and transforms.npy (default: the Odin1's own "
-        "lidar-inertial odometry, 14 Hz, 6-DoF, on the lidar's clock -- the ground truth from v2.3 on; "
-        "v2 beta to v2.2 used /fixposition/odometry_enu, old bags /odom). It is checked against "
-        "--check_odom. Note: the Fixposition _smooth variant's child frame FP_POISH is not connected "
-        "to base_link via static TF, plain odometry_enu (FP_POI) is.",
+        help="Odometry topic for odometry.txt and transforms.npy (ground truth from v2.3 on; v2 beta to "
+        "v2.2 used /fixposition/odometry_enu, old bags /odom). Note: the Fixposition _smooth variant's "
+        "FP_POISH frame has no static TF to base_link; plain odometry_enu (FP_POI) does.",
     )
     parser.add_argument(
         "--imu",
         type=str,
         default="/odin1/odometry",
-        help="Orientation source for gravity alignment; accepts sensor_msgs/Imu "
-        "or nav_msgs/Odometry topics (default: the Odin1 odometry's attitude; v2 beta to v2.2 used "
-        "/fixposition/odometry_enu, old bags /ekf/imu/data). pose_check.txt reports the roll/pitch "
-        "difference against --check_odom.",
+        help="Orientation source for gravity alignment, sensor_msgs/Imu or nav_msgs/Odometry "
+        "(v2 beta to v2.2 used /fixposition/odometry_enu, old bags /ekf/imu/data).",
     )
     parser.add_argument(
         "--gps",
@@ -134,83 +128,57 @@ def build_parser() -> argparse.ArgumentParser:
         type=time_align_mode,
         default="auto",
         metavar="auto|off|SECONDS",
-        help="How to put the frame clock on the same clock as the poses. A "
-        "unit that stamps at publish rather than at capture hands out headers "
-        "that are late by its own pipeline latency, which makes the poses run "
-        "ahead of the imagery and the clouds; nothing in the bag records it, "
-        "because recv-minus-header measures publish-to-receive. 'auto' (the "
-        "default) measures it against the clouds this run just wrote, as a "
-        "curve over the scene -- a latency moves with load, and on the 2026-09 "
-        "Odin1 rig one scene spends 80 of its 290 s at 0.05 s and the rest at "
-        "0.69 s. A number applies that constant instead; 'off' leaves the "
-        "stamps as recorded. What it changes is data_ts.txt, pcd_ts.txt and "
-        "every pose sampled onto them; the camera/lidar pairing and the clouds "
-        "themselves are untouched. Recorded per scene in time_align.txt",
+        help="Correct the frame clock for the sensor's publish latency. 'auto' measures it per scene "
+        "against the written clouds (it varies with load); a number applies that constant; 'off' keeps "
+        "the recorded stamps. Changes data_ts.txt, pcd_ts.txt and the poses sampled onto them, not the "
+        "camera/lidar pairing. Recorded in time_align.txt",
     )
     parser.add_argument(
         "--gnss_guard",
         choices=("auto", "on", "off"),
         default="auto",
-        help="Drop stretches where the GNSS/INS published a reset solution "
-        "instead of a pose. A Fixposition that has lost its fix -- which is "
-        "what rolling the robot over does -- keeps publishing odometry at full "
-        "rate, filled with a position hundreds of metres away, held perfectly "
-        "still, with the attitude snapped to identity, and nothing in the "
-        "recording flags it. Those samples are removed, and so are the frames "
-        "they leave without a pose -- along with any frame the pose stream "
-        "never covered, which would otherwise be exported carrying the nearest "
-        "sample -- before any image or cloud is written. "
-        "'auto' (the default) turns it on for an absolute source and off for "
-        "wheel odometry, which legitimately holds still. Recorded per scene in "
-        "gnss_guard.txt; the holes read as 'fix_lost' in odometry_segments.txt",
+        help="Drop stretches where the GNSS/INS published a reset solution (e.g. after a roll-over), "
+        "and frames the pose stream does not cover. 'auto' enables it for absolute sources, not "
+        "wheel odometry. Recorded in gnss_guard.txt; holes read as 'fix_lost' in odometry_segments.txt",
     )
     parser.add_argument(
         "--cam_time_offset",
         type=float,
         default=0.0,
         metavar="SECONDS",
-        help="Added to the camera header stamp before synchronisation, for a "
-        "camera that stamps differently from the lidar beside it. On the "
-        "2026-09 Odin1 rig the two agree to a median 4 ms, so this stays 0.0 "
-        "there. Unlike --time_align this one re-pairs camera frames with "
-        "sweeps, since it moves only one side of the match",
+        help="Added to the camera stamp before synchronisation (unlike --time_align, this re-pairs "
+        "frames). The Odin1 camera and lidar agree to ~4 ms",
     )
     parser.add_argument(
         "--deskew",
         choices=("auto", "off"),
         default="auto",
-        help="auto (default): where the cloud carries a per-point time (Odin1: offset_time, a 67 ms "
-        "bottom-to-top raster behind one stamp) and the pose stream covers the sweep, every return is "
-        "moved to where the robot was at the frame's instant, so the cloud is a snapshot taken at data_ts "
-        "like the image beside it. off: the sweep is written as recorded, with its motion smear, as "
-        "every root before 2026-10-01 was. Recorded per scene in extract_meta.json (frames.deskew)",
+        help="auto: move each return to the robot's pose at data_ts, where the cloud has per-point times "
+        "(Odin1: a 67 ms sweep) and poses cover it. off: write sweeps as recorded (every root before "
+        "2026-10-01). Recorded in extract_meta.json (frames.deskew)",
     )
     parser.add_argument(
         "--deskew_imu",
         type=str,
         default="/odin1/imu",
         metavar="TOPIC",
-        help="sensor_msgs/Imu whose gyro gives the rotation inside each sweep when deskewing (default: the "
-        "Odin1's, 400 Hz); its frame needs a TF path to --base_frame. 'off', or a missing topic, falls back "
-        "to the pose track's slerp across the sweep. Per sweep the gyro is used only where it agrees with "
-        "that slerp to 1 deg; extract_meta.json counts gyro vs slerp",
+        help="sensor_msgs/Imu whose gyro gives the in-sweep rotation when deskewing; needs a TF path to "
+        "--base_frame. 'off' or a missing topic falls back to slerp; the gyro is used only where it agrees "
+        "with the slerp to 1 deg",
     )
     parser.add_argument(
         "--check_odom",
         type=str,
         default="/fixposition/odometry_enu",
         metavar="TOPIC",
-        help="nav_msgs/Odometry the scene's odometry is checked against, at the base frame: jumps, "
-        "displacement over 1/2/5 s, clock lag, tilt. Written to pose_check.txt and extract_meta.json; "
-        "nothing in the scene is built from it. 'off' skips the check; the default is the Fixposition "
-        "GNSS/INS, which stays the georeference (gps.npy) and the check from v2.3 on",
+        help="nav_msgs/Odometry to check the scene's odometry against (jumps, displacement, clock lag, "
+        "tilt), written to pose_check.txt and extract_meta.json only. 'off' skips the check",
     )
     parser.add_argument(
         "--image_format",
         choices=("camera", "png"),
         default="camera",
-        help="camera: store the camera's own compressed bytes unmodified, as .jpg or .png by what they are "
-        "(default). png: decode and store the pixels as PNG, four times the size for the same pixels; "
+        help="camera: store the camera's own compressed bytes. png: re-encode as PNG (~4x the size); "
         "only for extending a root that already holds PNG",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
@@ -218,9 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--tf_pins",
         choices=("on", "off"),
         default="on",
-        help="on (default): the static transforms the Odin1 estimates online (its lidar-to-IMU and "
-        "lidar-to-camera extrinsics) are replaced by one constant for every bag, and what the bag said "
-        f"is recorded in {tf_pins.FILE}. off: the bag's own values are used, as before 2026-09-30",
+        help="on: replace the Odin1's online-estimated extrinsics with constants, recording the bag's "
+        f"values in {tf_pins.FILE}. off: use the bag's own values (as before 2026-09-30)",
     )
     parser.add_argument(
         "--lidar_extrinsic",
@@ -236,16 +203,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.1,
         metavar="SECONDS",
-        help="Largest camera/lidar stamp difference a frame may pair; mutual nearest neighbours further apart "
-        "(an image across a camera stall) are dropped and counted in extract_meta.json. The Odin1 pairs to "
-        "within 2 ms; a 10 Hz lidar never leaves an image more than 0.05 s from its nearest sweep",
+        help="Largest camera/lidar stamp difference a frame may pair; further pairs are dropped and "
+        "counted in extract_meta.json",
     )
     parser.add_argument(
         "--allow_frame_fallback",
         action="store_true",
-        help="Extract a bag whose TF does not reach the base frame from the lidar, the odometry child or the "
-        "orientation source, leaving that stream in its own frame. Without it such a scene fails: clouds, poses "
-        "or gravity in the wrong frame look plausible and are found late. Recorded in extract_meta.json",
+        help="Extract a bag whose TF does not reach the base frame (lidar, odometry child or orientation "
+        "source), leaving that stream in its own frame instead of failing. Recorded in extract_meta.json",
     )
     parser.add_argument(
         "--trim_idle",
@@ -267,10 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--gt",
         choices=["auto", "on", "off"],
         default="auto",
-        help="Write odometry.txt + odometry_segments.txt (v1.2 ground-truth "
-        "contract) from the odometry stream, segmented at gaps and jumps "
-        "(relocalisations, GNSS teleports). 'auto' enables it when --odom is "
-        "the Odin1 odometry or a Fixposition topic.",
+        help="Write odometry.txt + odometry_segments.txt, segmented at gaps and jumps. 'auto' enables it "
+        "when --odom is the Odin1 odometry or a Fixposition topic.",
     )
     parser.add_argument(
         "--scenes",
@@ -315,9 +278,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # A finished scene names its bag. Under another bag's index it means the
-    # bag list moved (a bag added in the middle, one removed): skipping it would
-    # leave the new bag unextracted, overwriting it would renumber the root.
+    # A finished scene holding another bag means the bag list shifted; refuse.
     moved = []
     for idx, bag in jobs:
         held = source_bag(output_dir / f"{idx:04d}")
@@ -363,15 +324,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             LOG.info("%d/%d bags done (%s: %s)", n, len(todo), results[-1].bag, results[-1].status)
 
     csv_path = merge_scenes_csv(output_dir)
-    # The viewer's disk figures. Every scene this run touched is rescanned,
-    # failed ones too, since an overwrite may have left them smaller; a failure
-    # here costs the figures, never the extraction.
+    # Best effort: rescan every touched scene's disk usage, failed ones included.
     try:
         disk_usage.update(output_dir, {f"{idx:04d}" for idx, _ in todo})
     except (OSError, ValueError) as exc:
         LOG.warning("could not update %s: %s", disk_usage.NAME, exc)
-    # What the images are, where a consumer looks for it. Never the reason an
-    # extraction fails: a root whose scenes disagree is reported by the validator.
+    # Best effort; the validator reports disagreeing scenes.
     try:
         image_format.declare(output_dir)
     except (OSError, ValueError) as exc:

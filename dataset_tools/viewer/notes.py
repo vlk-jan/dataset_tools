@@ -1,28 +1,8 @@
-"""Reviewer notes: what a person found while looking at a scene.
+"""Reviewer notes: free text pinned to a frame range of one scene, with a topic.
 
-A note is free text pinned to a **frame range** of one scene, with a topic
-(``odometry``, ``camera``, ``event``, ``other``) so a stretch can be found again
-by what is wrong with it rather than only by reading every note. The frame range
-is the anchor because it is the most durable identifier a scene has: segment
-indices are renumbered whenever ``filter_segments.py`` or another cutting pass
-rewrites ``odometry_segments.txt``, and a note anchored to "segment 7" would
-then silently point at a different stretch of driving.
-
-Notes are stored next to the data, one file per scene::
-
-    <root>/notes/0007.json
-
-which is the same arrangement ``atlas/`` uses, and for the same reason: what is
-in them is editorial, so it cannot be derived and has to be kept. One file per
-scene keeps each file small enough to read, hand-edit and diff, and means two
-scenes are never written at once.
-
-The root is not always writable -- it is routinely a read-only or shared copy --
-so the store resolves to one of three states at startup and *says* which:
-notes written into the root, notes written to an explicit ``--notes-dir``, or
-disabled. A read-only root with no override still **reads** its notes; only
-composing is refused, with the reason shown rather than the UI silently
-vanishing.
+Frame ranges, not segment indices, because segments get renumbered. Stored one
+file per scene at ``<root>/notes/NNNN.json`` (or ``--notes-dir``). A read-only
+root still reads its notes; only writing is refused, with the reason shown.
 """
 
 from __future__ import annotations
@@ -39,13 +19,9 @@ from pathlib import Path
 
 logger = logging.getLogger("dataset_tools.viewer.notes")
 
-#: Topics offered in the UI. A file hand-edited to carry something else keeps
-#: it: an unknown topic is rendered verbatim, exactly as an unknown segment
-#: `reason` tag is (``windows.describe_reason``), rather than being rewritten.
+#: Topics offered in the UI; an unknown topic in a file is kept verbatim.
 TOPICS: tuple[str, ...] = ("odometry", "camera", "event", "other")
-#: A reviewer's decision about the noted range, if they made one: keep it,
-#: drop it from the dataset, or fix it (re-extract, re-segment). Empty when
-#: the note only describes. Exported with the range by ``/api/notes.csv``.
+#: A reviewer's optional decision about the range; empty when the note only describes.
 VERDICTS: tuple[str, ...] = ("keep", "drop", "fix")
 
 #: Caps, so one pasted log cannot make a scene's notes file unreadable.
@@ -64,10 +40,8 @@ class NotesUnavailable(RuntimeError):
 class Note:
     """One note: a frame range of one scene, a topic and what was seen there.
 
-    ``frame_start`` and ``frame_end`` are both **inclusive** -- "frames 1204 to
-    1388" means what a person writing that into the file means. This is
-    deliberately not :class:`windows.Window`'s convention, whose ``frame_end``
-    is exclusive, so the two never quietly stand in for one another.
+    ``frame_start`` and ``frame_end`` are both **inclusive**, unlike
+    :class:`windows.Window`'s exclusive ``frame_end``.
     """
 
     id: str
@@ -85,10 +59,7 @@ class Note:
         return self.frame_end - self.frame_start + 1
 
     def overlaps(self, start: int, end: int) -> bool:
-        """Does this note touch the half-open frame range ``[start, end)``?
-
-        Half-open because every caller is a :class:`windows.Window`, which is.
-        """
+        """Does this note touch the half-open frame range ``[start, end)``?"""
         return self.frame_start < end and start <= self.frame_end
 
     @property
@@ -130,11 +101,7 @@ def _clean_verdict(value: object) -> str:
 
 
 def _note_from_json(entry: dict) -> Note | None:
-    """One stored entry, or None when it is not a note at all.
-
-    Hand-editing this file is expected, so a single malformed entry drops out
-    and the rest of the scene's notes still load.
-    """
+    """One stored entry, or None when malformed (the rest still load)."""
     try:
         frames = entry.get("frames")
         if isinstance(frames, list | tuple) and len(frames) == 2:
@@ -180,10 +147,7 @@ def _note_to_json(note: Note) -> dict:
 def _probe_writable(directory: Path) -> bool:
     """Can this directory actually be written to?
 
-    An actual create-and-remove, not ``os.access``: network and container
-    mounts routinely report permissions they will not honour, and the point of
-    this check is to tell the user *before* they type a note that it cannot be
-    saved.
+    A real create-and-remove: network mounts' ``os.access`` answers can lie.
     """
     try:
         with tempfile.NamedTemporaryFile(dir=directory, prefix=".dtv-probe-"):
@@ -195,9 +159,8 @@ def _probe_writable(directory: Path) -> bool:
 class NoteStore:
     """Where a root's notes live, and whether they can be added to.
 
-    Resolved once, at startup: the state has to be reportable (the scene page
-    says why composing is off) and probing the filesystem per request would put
-    a write on the hot path of a page that is otherwise read-only.
+    Resolved once at startup, so the state is reportable and no probe write
+    sits on the request path.
     """
 
     def __init__(
@@ -212,8 +175,7 @@ class NoteStore:
         self.enabled = enabled
         self.author = _clean_author(author) or _default_author()
         self.dataset_version = str(dataset_version or "")
-        #: True when ``--notes-dir`` named the location, i.e. the notes do NOT
-        #: travel with the dataset. Worth saying out loud in the UI.
+        #: True when ``--notes-dir`` is used: the notes do not travel with the dataset.
         self.external = notes_dir is not None
         self.dir = Path(notes_dir).expanduser().resolve() if notes_dir else self.root_path / "notes"
         self.writable = False
@@ -224,9 +186,7 @@ class NoteStore:
         if not self.enabled:
             self.reason = "notes are disabled (--no-notes)"
             return
-        # The notes directory itself is only created when a note is actually
-        # written: opening a root to look at it should leave nothing behind.
-        # So the probe goes to whichever of the two exists.
+        # The notes dir is only created on the first write; probe whichever exists.
         target = self.dir if self.dir.is_dir() else self.dir.parent
         if self.external:
             try:
@@ -270,9 +230,7 @@ class NoteStore:
     def list(self, scene_id: str) -> list[Note]:
         """Every note on a scene, in frame order. [] when there are none.
 
-        Never raises on a bad file: a notes file someone hand-edited into
-        invalid JSON degrades to "no notes" with a warning in the log, the same
-        way a malformed ``atlas.json`` does.
+        A malformed file logs a warning and reads as no notes.
         """
         if not self.enabled:
             return []
@@ -301,11 +259,7 @@ class NoteStore:
     def list_all(self) -> dict[str, list[Note]]:
         """Every scene's notes, keyed by scene id, in scene order.
 
-        One listing of the notes directory, then :meth:`list` per file it
-        names -- so a scene whose file is malformed drops out with the same
-        warning it would give on its own page, and a file that is not a
-        scene's (``NNNN.json`` is the only shape written) is left alone.
-        ``{}`` when notes are off or nothing has been written yet.
+        Only ``NNNN.json`` files are read. ``{}`` when off or empty.
         """
         if not self.enabled:
             return {}
@@ -324,14 +278,9 @@ class NoteStore:
         return out
 
     def stale_version(self, scene_id: str) -> str | None:
-        """The dataset version a scene's notes were written against, when it is
-        no longer the root's.
+        """The dataset version a scene's notes were written against, if not the root's.
 
-        Frame numbering only survives as an anchor while the extraction does.
-        When it has not, the notes may point at a different stretch of driving
-        than they were written about -- so the scene page says so instead of
-        showing them as if nothing had moved. Same check, and the same reason,
-        as the atlas's ``dataset_version`` (``index_page.atlas_warning``).
+        A re-extraction can move frame numbers, so the page warns.
         """
         if not self.enabled or not self.dataset_version:
             return None
@@ -357,8 +306,7 @@ class NoteStore:
     def _save(self, scene_id: str, notes: list[Note]) -> None:
         """Replace a scene's notes file atomically.
 
-        tmp-then-``os.replace``: a note is typed once and a half-written file
-        would lose every other note in the scene along with it.
+        tmp-then-``os.replace``, so a failed write never loses the other notes.
         """
         path = self.path_for(scene_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,8 +338,7 @@ class NoteStore:
     ) -> Note:
         """Add one note and return it as stored.
 
-        ``n_frames`` is the scene's frame count, used to clamp the range: a
-        note past the end of the scene would never be shown by anything.
+        ``n_frames`` (the scene's frame count) clamps the range.
         """
         self._require_writable()
         text = _clean_text(text)
@@ -428,8 +375,7 @@ class NoteStore:
     ) -> Note | None:
         """Edit a note in place. None when the scene has no such note.
 
-        Only the fields passed change; ``created`` and ``author`` never do --
-        an edited note is still the note that person wrote.
+        Only the fields passed change; ``created`` and ``author`` never do.
         """
         self._require_writable()
         notes = self.list(scene_id)

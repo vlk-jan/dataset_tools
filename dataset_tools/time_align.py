@@ -1,49 +1,13 @@
-"""Putting a scene's frames on the same clock as its poses.
+"""Put a scene's frames on the same clock as its poses.
 
-A sensor unit that stamps at *publish* time hands out headers that are correct
-about when the message was sent and wrong about when the light and the returns
-were captured, by however long its own pipeline took. Nothing in the bag
-records that: ``recv - header`` measures publish-to-receive, so it stays a
-tidy few tens of milliseconds while the pixels are half a second old. Measured
-on the 2026-09 Odin1 rig, the pipeline runs ~0.69 s behind -- and, because a
-latency is a property of how loaded the unit is rather than of how a clock is
-disciplined, it does **not** hold still: scene 0000 of HELHEST v2 beta spends
-80 of its 290 seconds at ~0.05 s and the rest at ~0.69 s.
-
-So the correction is a curve, not a constant, and this module measures it from
-the data the extractor has just written.
-
-What it measures against
-------------------------
-Put a window's clouds in the world frame with the pose read at
-``frame_ts + delta`` and count the voxels they fill. A wrong ``delta``
-displaces each cloud along its own direction of travel, which differs from
-cloud to cloud whenever the velocity changes, so surfaces separate and the
-count rises. The minimum is the offset.
-
-This fits no transform, so unlike ICP it cannot slide -- which matters, because
-these clouds are dominated by ground and low vegetation and point-to-point
-slides to zero rotation. And the answer does not scale with speed, which is
-what separates a latency from a spatial error such as a wrong lidar mount: a
-mount 0.5 m out would come back as ``distance / speed`` and disagree between a
-slow window and a fast one.
-
-What it does with the measurements
-----------------------------------
-Only windows that actually localise a minimum are believed (see
-``MIN_DEPTH``); the rest are silent, not zero. The believed ones become knots
-of a piecewise-linear profile, median-filtered against single-window outliers
-and held flat beyond the outermost knot.
-
-The distinction that matters here is between a window with nothing to correct
-and a window that cannot tell: both leave the count at ``delta = 0`` looking
-fine, and they mean opposite things. A window already on the right clock has a
-sharp minimum sitting at zero -- it is evidence *for* zero, and has to enter
-the profile as such, or an aligned stretch contributes nothing and quietly
-inherits the offset of the stretch beside it. So what qualifies a window is the
-depth of its minimum against its own shoulders, which reads the same wherever
-that minimum sits, and not how far the minimum beats zero. A scene where no
-window localises anything is left alone rather than guessed at.
+Sensors that stamp at publish time are late by their pipeline latency (~0.69 s
+on the 2026-09 Odin1 rig), and that latency varies with load, so the correction
+is a piecewise-linear profile measured from the written clouds: per window, the
+offset ``delta`` that minimises the voxels filled by the clouds placed at
+``frame_ts + delta``. Unlike ICP it cannot slide, and it does not scale with
+speed, which separates a latency from a mount error. Only windows with a deep
+enough minimum (``MIN_DEPTH``, which also accepts a sharp minimum at zero)
+become knots; with none, the clock is left alone.
 """
 
 from __future__ import annotations
@@ -55,62 +19,29 @@ import numpy as np
 
 from dataset_tools.transforms import mat_to_quat, poses_from_quat, quat_slerp
 
-#: Voxel edge, metres. Fine enough that a 0.1 s error at walking pace separates
-#: two surfaces, coarse enough that the lidar's own noise does not.
+#: Voxel edge, m: separates a 0.1 s error at walking pace, coarser than lidar noise.
 VOXEL = 0.12
-#: Frames per window: ~6 s at the 2026-09 rig's 14 Hz. Long enough for the
-#: velocity to change within it -- a window driven at a constant velocity
-#: cannot see the offset at all, since shifting the clock then displaces every
-#: cloud by the same vector, which moves the map without blurring it -- and
-#: short enough to resolve a latency that moves over tens of seconds.
+#: Frames per window (~6 s at 14 Hz). The velocity must change within it:
+#: at constant velocity a clock shift moves the map without blurring it.
 WINDOW = 80
-#: Points nearer than this are the robot itself; further than this are too
-#: sparse to land repeatedly in one voxel.
+#: Range band, m: nearer is the robot itself, further is too sparse.
 R_MIN, R_MAX = 1.0, 15.0
-#: Above the sensor there is sky, below it the ground the robot stands on.
+#: Height band, m, relative to the sensor.
 Z_MIN, Z_MAX = -0.5, 3.0
-#: A window has to move and turn to be worth measuring. Stationary, it has
-#: nothing to say; driven straight at a steady speed, it cannot see the offset
-#: at all (see ``WINDOW``), so it would only be rejected by ``MIN_DEPTH``
-#: after paying the full cost. Straight stretches therefore inherit the
-#: offset interpolated from the turning windows either side of them.
+#: A window must move and turn to constrain the offset.
 MIN_SPEED, MIN_TURN, MAX_SPEED = 0.4, 0.05, 5.0
-#: How deep the minimum must be *relative to its own neighbourhood* for a
-#: window to be believed. This, not the gain below, is what says a window
-#: constrains the offset -- and the two say different things. A window that is
-#: already on the right clock has a sharp minimum sitting at zero, so it has
-#: nothing to gain and everything to tell; a window with no geometry or no
-#: change of velocity has a flat curve, so it has nothing to gain and nothing
-#: to tell. Judging by gain confuses the two, and then an aligned stretch
-#: contributes no knot and silently inherits its neighbour's offset -- which is
-#: how a scene that is right for 200 of its 290 seconds gets moved anyway.
-#: Set from what the real minima look like: on HELHEST v2 beta a window that
-#: agrees with its neighbours sits at 16-49 %, while the ones that wander sit
-#: below 16 %. Windows that fall short are retried over more ground
-#: (``LONG_WINDOW``) rather than written off, so the bar can afford to be here.
+#: Minimum depth (%) against its own shoulders for a window to be believed.
+#: Unlike gain, this credits a sharp minimum at zero (an already-aligned stretch).
 MIN_DEPTH = 18.0
-#: The gain -- percent of the voxel count at ``delta = 0`` that the best delta
-#: removes -- is what the correction is worth at that window, and is reported
-#: rather than used as the criterion. Above this a window is called strong in
-#: the summary.
+#: Gain (% of the count at delta = 0 removed) above which a window is "strong"; reported only.
 STRONG_GAIN = 25.0
-#: Knots whose median lies within this of zero are noise about an aligned clock,
-#: not an offset: half the fine sweep's 0.02 s step.
+#: Knot median within this of zero is noise about an aligned clock (half the fine step).
 ZERO_TOL = 0.010
-#: No rig's pipeline is further behind than this; anything larger is a failed
-#: measurement, not a latency, and is dropped rather than applied.
+#: Larger offsets are failed measurements, not latencies.
 MAX_ABS_OFFSET = 2.0
-#: Resolution to aim for when placing windows, and the ceiling on how many to
-#: measure in one scene. The 2026-09 transitions ramp over ~18 s, so a few
-#: seconds resolves them; the cap keeps a 20-minute scene affordable.
+#: Window spacing, s, and the per-scene cap.
 TARGET_STEP_S, MAX_WINDOWS = 3.0, 120
-#: Frames in the second, longer attempt at a window that came out too shallow
-#: to believe. More travel means more variation in the velocity, which is the
-#: only thing that constrains the offset at all -- measured on scene 0002, a
-#: stretch that read -0.333 s at depth 8.7 % over 6 s reads -0.040 s at depth
-#: 16.3 % over 20 s, and the longer answer is the one the neighbours agree
-#: with. Only shallow windows are retried, so the cost falls where it buys
-#: something.
+#: Frames in the retry of a too-shallow window: more travel, more velocity variation.
 LONG_WINDOW = 280
 
 
@@ -212,12 +143,7 @@ def measure_window(
 
 
 def _depth(coarse: np.ndarray, cc: np.ndarray, fine: np.ndarray, fc: np.ndarray, best: float) -> float:
-    """How far the count climbs on stepping away from the minimum, in percent.
-
-    Measured against the shoulder 0.3-0.6 s to either side rather than against
-    ``delta = 0``, so it says the same thing wherever the minimum happens to
-    sit -- which is the whole point of it.
-    """
+    """How far (%) the count climbs 0.3-0.6 s away from the minimum, wherever it sits."""
     off = np.abs(coarse - best)
     shoulder = cc[(off >= 0.3) & (off <= 0.6)]
     if not len(shoulder) or fc.min() <= 0:
@@ -226,12 +152,7 @@ def _depth(coarse: np.ndarray, cc: np.ndarray, fine: np.ndarray, fc: np.ndarray,
 
 
 def pick_windows(frame_ts: np.ndarray, track: PoseTrack, limit: int, step_s: float = TARGET_STEP_S) -> list[np.ndarray]:
-    """Windows where the robot moved and turned enough to constrain the offset.
-
-    Placed every ``step_s`` seconds rather than back to back, so a latency that
-    moves during the scene is resolved rather than averaged over; thinned to
-    ``limit`` when that would be more windows than a scene is worth.
-    """
+    """Windows every ``step_s`` seconds where the robot moved and turned enough, at most ``limit``."""
     pos, rot = track.at(frame_ts)
     yaw = np.unwrap(np.arctan2(rot[:, 1, 0], rot[:, 0, 0]))
     step = np.r_[0.0, np.hypot(np.diff(pos[:, 0]), np.diff(pos[:, 1]))]
@@ -249,11 +170,7 @@ def pick_windows(frame_ts: np.ndarray, track: PoseTrack, limit: int, step_s: flo
             scored.append(start)
     if not scored:
         return []
-    # Thin to `limit` across the WHOLE scene. Subsampling by a stride and then
-    # truncating to the first `limit` looks equivalent and is not: it walks off
-    # the end of a long scene and leaves its tail unmeasured, to inherit
-    # whatever the last knot happened to say. That cost HELHEST v2 beta's two
-    # longest scenes ~0.6 s over their closing minutes.
+    # Thin evenly across the whole scene, not by truncation (that leaves the tail unmeasured).
     if len(scored) > limit:
         scored = [scored[i] for i in np.unique(np.linspace(0, len(scored) - 1, limit).astype(int))]
     return [np.arange(s, s + WINDOW) for s in scored]
@@ -298,15 +215,7 @@ class Profile:
 def _retry_if_shallow(
     scene_dir: Path, w: dict, track: PoseTrack, frame_ts: np.ndarray, span: float, n_frames: int
 ) -> dict:
-    """A window too shallow to believe, measured again over more ground.
-
-    A short window that happens to be driven at a near-constant velocity says
-    almost nothing, and what little it says is noise -- but the stretch is not
-    unmeasurable, only under-sampled. Widening it brings in more variation in
-    the velocity, which is the only thing the objective has to work with. The
-    wider answer is kept only if it is actually better conditioned, so this can
-    add a measurement but never replace a good one with a worse one.
-    """
+    """Re-measure a too-shallow window over ``LONG_WINDOW`` frames; keep it only if deeper."""
     if w["depth"] >= MIN_DEPTH or n_frames < LONG_WINDOW:
         return w
     centre = w["frame_start"] + WINDOW // 2
@@ -341,13 +250,7 @@ def estimate(
     limit: int = MAX_WINDOWS,
     span: float = 1.5,
 ) -> Profile:
-    """Measure the frame clock's offset from the pose clock, over the scene.
-
-    Returns a profile that is the identity when nothing could be measured --
-    no poses, no window with enough motion, or no window whose voxel count
-    moved enough to place a minimum. Correcting by a number that was never
-    measured is worse than not correcting.
-    """
+    """Measure the frame clock's offset from the pose clock; identity when nothing localises."""
     if len(odom_ts) < 2 or len(frame_ts) < WINDOW:
         return Profile([], np.zeros(0), np.zeros(0), "too little to measure against")
     track = PoseTrack.build(odom_ts, odom_poses)
@@ -367,15 +270,9 @@ def estimate(
 
 
 def already_aligned(windows: list[dict], knot_delta: np.ndarray) -> bool:
-    """Whether the believed windows say the clock is right as it stands.
+    """Whether the knots scatter *around* zero (median within ``ZERO_TOL``).
 
-    Right means the knots scatter *around* zero -- their median within
-    ``ZERO_TOL`` -- not merely near it. Until 2026-10-01 this accepted any set
-    of knots all below 0.05 s, which swallowed scene 0011 of HELHEST v2.2:
-    four windows at +0.040..+0.048 s, each as deep as its neighbours' in other
-    scenes, left uncorrected while every other scene got its +0.04. A
-    consistent offset is a measurement, however small; only noise about zero
-    is nothing to correct.
+    A small but consistent offset is still a measurement.
     """
     if not len(knot_delta) or any(w["gain"] >= STRONG_GAIN for w in windows):
         return False
@@ -383,20 +280,12 @@ def already_aligned(windows: list[dict], knot_delta: np.ndarray) -> bool:
 
 
 def apply_to_clock(frame_ts: np.ndarray, profile: Profile) -> tuple[np.ndarray, bool]:
-    """The corrected clock, and whether it had to be forced back into order.
-
-    The profile is evaluated at the *uncorrected* stamps, which is where it was
-    measured. A latency that fell faster than time passes would fold the clock
-    over; that never happens on a real one -- the 2026-09 ramps run at 0.03 s
-    per second against the 1.0 that would be needed -- but a bad measurement
-    could, and a frame clock that runs backwards would break every consumer
-    downstream, so it is forced monotonic and the caller is told.
-    """
+    """The corrected clock (profile evaluated at the uncorrected stamps), and whether
+    a bad measurement forced it back to monotonic."""
     out = np.asarray(frame_ts, dtype=float) + profile.at(frame_ts)
     forced = bool(len(out) > 1 and np.any(np.diff(out) <= 0))
     if forced:
-        # nextafter, not a fixed epsilon: one ulp at a 1.7e9 epoch is ~4e-7, so
-        # any epsilon small enough to be harmless is too small to be added.
+        # nextafter: at a 1.7e9 epoch a harmless epsilon is below one ulp.
         out = np.maximum.accumulate(out)
         for k in range(1, len(out)):
             if out[k] <= out[k - 1]:
@@ -405,7 +294,7 @@ def apply_to_clock(frame_ts: np.ndarray, profile: Profile) -> tuple[np.ndarray, 
 
 
 def write_report(path: Path, profile: Profile, t0: float) -> None:
-    """Every window that was measured, so the correction can be audited."""
+    """Write every measured window, for auditing."""
     lines = [
         "# Frame-clock offset measured against the odometry (dataset_tools.time_align).",
         f"# {profile.summary}",

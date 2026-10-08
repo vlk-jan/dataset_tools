@@ -17,8 +17,7 @@
   {% endif %}
 
   {% if topics %}
-  {# The topic filter is plain links, so it works without JavaScript and a
-     filtered list can be linked to. #}
+  {# Plain links: works without JS and is linkable. #}
   <nav class="tabs">
     <a class="tab {{ 'active' if not topic }}" href="/notes">All topics</a>
     {% for t in topics %}

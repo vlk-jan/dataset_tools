@@ -1,9 +1,7 @@
 """Viewer: the scene-level train/val split (dataset_tools.viewer.splits).
 
-The split is *declared* by the root, never derived here, so most of what is
-worth testing is how a declaration is read: which spellings are accepted, what a
-scene the file does not mention means, and that a root with no declaration comes
-out of the viewer exactly as it did before the feature existed.
+The split is declared by the root, so this tests reading it: spellings, unnamed
+scenes, and that a root without one is unaffected.
 """
 
 from __future__ import annotations
@@ -348,9 +346,7 @@ def _split_client(tmp_path, **kwargs):
 
 
 def test_the_rendered_index_carries_the_bands_the_panel_and_the_filter(tmp_path):
-    """Rendered, not just assembled: the panel's list is reached through Jinja
-    attribute lookup, where a key named `items` resolves to ``dict.items`` and
-    the page dies with 'builtin_function_or_method is not iterable'."""
+    """Rendered through Jinja, where a key named `items` would resolve to ``dict.items``."""
     client = _split_client(
         tmp_path,
         val=("0001",),
@@ -468,9 +464,8 @@ def test_the_split_file_wins_over_the_declaration_and_both_refresh(tmp_path):
     assert root.splits().of("0000") == "val" and root.splits().of("0002") == "train"
     (root_path / "splits.json").unlink()
     assert root.splits().of("0002") == "val"  # back to the declaration
-    # Re-deciding the hold-out in the manifest is picked up without a restart.
-    # (The cache keys on mtime and size; a rewrite within the same clock tick
-    # would not be seen, as for every root file, so the test moves the clock.)
+    # A manifest rewrite is picked up without a restart; the cache keys on
+    # mtime and size, so the test moves the clock.
     _declare(root_path, held=("0001",))
     import os  # noqa: E401
     import time

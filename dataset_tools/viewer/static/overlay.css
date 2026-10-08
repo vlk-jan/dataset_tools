@@ -1,18 +1,11 @@
-/* The per-frame data panel laid over SimView's viewer.
-
-   Deliberately an absolutely-positioned overlay rather than a flex sibling:
-   SimView sizes its renderer from the window, so taking width away from the
-   document would fight its resize handling. */
+/* Per-frame data panel over SimView. An overlay, not a flex sibling: SimView
+   sizes its renderer from the window. */
 
 @import url("theme.css");
 @import url("zoom.css");
 
-/* Nothing on this page scrolls the document: the canvas fills the window and
-   everything else is fixed. SimView sizes the canvas to innerWidth/Height,
-   which round a fractional viewport (1.25x scaling: 1906.4 px) up, so it
-   overflowed by a fraction of a pixel -- and with classic scrollbars the
-   first one took width off the viewport, the canvas then overflowed the
-   other axis too, and both stuck. Overlay scrollbars never showed it. */
+/* Never scroll the document: SimView's canvas rounds a fractional viewport up
+   and would otherwise trigger stuck classic scrollbars. */
 html, body { overflow: hidden; }
 
 #dt-panel, .dt-build {
@@ -42,9 +35,7 @@ html, body { overflow: hidden; }
 .dt-sub a { color: var(--accent); text-decoration: none; }
 .dt-sub a:hover { text-decoration: underline; }
 
-/* Segment paging, in the header row beside the title. Sized to stay on one
-   line with it however long a window label runs (the head is a flex row and
-   the title's column is what gives). */
+/* Segment paging beside the title; the title column is what shrinks. */
 .dt-winnav { display: flex; gap: 4px; flex: 0 0 auto; }
 .dt-winstep {
   display: flex; align-items: center; justify-content: center;
@@ -55,20 +46,10 @@ html, body { overflow: hidden; }
 a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration: none; }
 .dt-winstep-off { opacity: 0.35; cursor: default; }
 
-/* One toggle for both directions, riding the panel's own left edge at its
-   vertical middle.
-
-   It used to be a button in the panel header plus a second one pinned to the
-   top-right corner -- which is exactly where SimView's lil-gui control panel
-   sits once the data panel is out of the way, so the two overlapped and the
-   collapsed panel could not be reopened without moving the mouse through the
-   controls. Anchoring the tab to the panel (`position: absolute` inside it,
-   at `top: 50%`) rather than to the viewport means it slides out with the
-   panel and stays exactly one tab-width on-screen when collapsed, always at
-   the vertical middle of the window edge, where nothing else is. */
+/* Collapse tab on the panel's left edge, so it slides with the panel and
+   stays clear of SimView's top-right controls. */
 .dt-edge {
-  /* Centred by `top`, not by a transform, so no `:active` transform of
-     SimView's can ever move the tab out from under a click. */
+  /* Centred by `top`, not a transform, so SimView's `:active` transforms can't move it. */
   position: absolute; left: -24px; top: calc(50% - 33px);
   width: 24px; height: 66px; padding: 0;
   display: flex; align-items: center; justify-content: center;
@@ -79,8 +60,7 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
   transition: color 0.15s ease, background 0.15s ease;
 }
 .dt-edge:hover { color: var(--fg); background: var(--panel-2); }
-/* The chevron is drawn, not a "›" glyph: a glyph stays hairline at any size
-   and is whatever the font makes of it. */
+/* Drawn chevron rather than a font glyph. */
 .dt-edge span { display: block; line-height: 0; transition: transform 0.18s ease; }
 .dt-panel.collapsed .dt-edge span { transform: rotate(180deg); }
 
@@ -95,9 +75,7 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-view, .dt-legend { padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line); }
 .dt-hint { color: var(--faint); font-size: var(--fs-2xs); line-height: 1.35; }
 
-/* 3D-view options: compact switches. The full explanation is a hover tooltip
-   (title=) on each row rather than always-on prose -- these toggle things (a
-   drift ghost) most viewers leave alone. */
+/* 3D-view options: compact switches, explained by title= tooltips. */
 .dt-toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 .dt-toggle { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .dt-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -118,17 +96,9 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-toggle input:checked ~ .dt-toggle-name { color: var(--fg); }
 .dt-sw-g { background: #ffb347; vertical-align: middle; }
 
-/* Terrain colour modes. SimView lists them by bare name in its Color Mode
-   dropdown with no explanation anywhere; the names are ours, so the prose is
-   too (build.py's TERRAIN_COLOR_MODE_HELP, carried in meta.json). */
-/* Collapsed by default: six layers' worth of prose is a reference, not
-   something to keep on screen over the per-frame tiles. The summary line
-   still names the mode currently being drawn, which is the part you want at
-   a glance. */
-/* The panel is a fixed-height column and only the tiles scroll, so an open
-   section taller than what is left (six modes' prose, a long note list) ran
-   off the bottom of the window with no way to reach it. An open section may
-   shrink to the room there is and scroll inside itself, its summary pinned. */
+/* Terrain colour-mode legend (prose from build.py's TERRAIN_COLOR_MODE_HELP).
+   An open section scrolls inside itself with its summary pinned, since the
+   panel is a fixed-height column. */
 .dt-legend[open] { min-height: 0; overflow-y: auto; padding-top: 0; }
 .dt-legend summary {
   cursor: pointer; list-style: none;
@@ -160,17 +130,10 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-legend .active dt { color: var(--accent); }
 .dt-legend .active dd { border-left-color: var(--accent-line); color: var(--muted); }
 
-/* Notes: written here because here is where a bad stretch is noticed. The
-   range buttons read as the values they hold (the frame each end is pinned
-   to), so the form states what it will save without a legend. */
+/* Notes */
 .dt-notes .dt-notelist { margin: 6px 0 0; display: flex; flex-direction: column; gap: 6px; }
-/* A note is what it says, then the buttons that change it in a column down its
-   right edge -- the panel is only as wide as the sidebar, so anything on the
-   head row is width taken off the range and the topic.
-
-   Scoped to the section: `.dt-note` unqualified also names the grey half of a
-   tile's heading further down, so this rule was giving those a blue bar and a
-   left indent they were never meant to have. */
+/* Text, then the edit/delete column on the right. Scoped: `.dt-note` also
+   names part of a tile heading. */
 .dt-notes .dt-note {
   border-left: 2px solid var(--accent-line); padding-left: var(--sp-2);
   display: flex; align-items: flex-start; gap: 6px;
@@ -187,9 +150,7 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
   font-family: var(--mono);
 }
 .dt-noterangebtn:hover { color: var(--accent); text-decoration: underline; }
-/* Edit above delete, each one glyph wide. Amber for the one that opens a form,
-   red for the one that throws the note away -- but the pen and the bin carry
-   that themselves, so the colour is confirmation and not the only signal. */
+/* Edit (amber) above delete (red). */
 .dt-notetools { display: flex; flex-direction: column; gap: 3px; flex: none; }
 .dt-notebtn {
   width: 20px; height: 18px; padding: 0; cursor: pointer;
@@ -201,18 +162,11 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-notebtn-del { background: color-mix(in srgb, var(--bad) 15%, var(--panel)); border-color: var(--bad-line); }
 .dt-notebtn-del:hover { background: color-mix(in srgb, var(--bad) 25%, var(--panel)); border-color: var(--bad); }
 .dt-notebody { color: var(--muted); font-size: var(--fs-2xs); line-height: 1.4; white-space: pre-wrap; }
-/* A note opened for editing. Its range row is a .dt-noterange, so the fields,
-   the `now` buttons and the topic are already the compose form's -- all this
-   adds is the column and the textarea, which the form styles by its own id. */
-.dt-notes .dt-noteediting {
-  /* Overrides the row above: an editor is a stack, and its fields fill the
-     width rather than shrinking to their content. */
-  flex-direction: column; align-items: stretch;
-}
+/* A note open for editing: a full-width stack, reusing the compose form's row. */
+.dt-notes .dt-noteediting { flex-direction: column; align-items: stretch; }
 .dt-noteform { margin-top: var(--sp-2); display: flex; flex-direction: column; gap: 6px; }
 .dt-noterange { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-/* Each end of the range is a field with a `now` button beside it: type a frame
-   number, or take the one showing. Both spellings write the same value. */
+/* Each range end: a field plus a `now` button. */
 .dt-rangefield {
   display: flex; align-items: center; gap: 4px;
   color: var(--faint); font-size: var(--fs-2xs);
@@ -242,10 +196,7 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-save { color: var(--fg-2); background: var(--accent-soft); border-color: var(--accent-line); }
 .dt-notes .dt-hint { margin-top: 6px; }
 
-/* Ground truth against the IMU. The IMU is independent of the odometry, so
-   the gap between the two attitudes is a check on the ground truth rather
-   than a restatement of it -- the summary line carries the live number and
-   the verdict, which is the part worth keeping on screen. */
+/* Ground truth attitude vs the (independent) IMU. */
 .dt-att-grid {
   display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3);
   margin: 5px 0 6px; font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
@@ -261,10 +212,7 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
   font-size: var(--fs-xs); font-weight: 600; margin: 0 0 4px;
   display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-2);
 }
-/* The grey half of a tile's heading ("BEV, forward up", the validity swatches).
-   Scoped to the tile: `.dt-note` unqualified also names a reviewer note in the
-   notes list above, and this rule, being the later of the two, was quietly
-   restyling those as well. */
+/* The grey half of a tile's heading. Scoped: `.dt-note` also names a reviewer note. */
 .dt-tile .dt-note { color: var(--muted); font-weight: 400; font-size: var(--fs-2xs); display: flex; align-items: center; gap: 3px; }
 .dt-sw { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-left: 4px; }
 .dt-sw-m { background: #3caa5a; }
@@ -307,44 +255,27 @@ a.dt-winstep:hover { background: var(--line); color: var(--fg); text-decoration:
 .dt-build.failed .dt-build-bar { display: none; }
 .dt-build.failed .dt-build-msg { color: var(--bad); }
 
-/* SimView's own lil-gui control panel is fixed to the top-right, exactly where
-   our data panel sits. Nudge it clear of the panel and of the 24 px edge tab
-   that sticks out of the panel's left side, with a 16 px gap: 340 + 24 + 16
-   (a CSS-only adjustment; SimView is untouched). The selector has to beat
-   lil-gui's own runtime-injected rule, hence the specificity and !important. */
+/* Move lil-gui clear of the panel and its edge tab (340 + 24 + 16 px);
+   !important beats lil-gui's injected rule. */
 body:not(.dt-collapsed) .lil-gui.autoPlace { right: 380px !important; }
 /* Collapsed, the panel is gone but its tab still sits on the window edge. */
 body.dt-collapsed .lil-gui.autoPlace { right: calc(24px + 16px) !important; }
 
-/* SimView's Analysis panel is 40% of the viewport centred on it, which
-   runs straight under SimView's own control panel -- more so here, because
-   this overlay pushes that panel left by its own width. The right-hand tabs
-   ("wheel_odom_drift" among them) end up unclickable: lil-gui is on top and
-   swallows the pointer.
-
-   Pinned between the two panels instead of centred, the same 10 px from the
-   "Body states" window on the left and the controls on the right. Their
-   sizes change between simview versions, so simview_patch.js measures them
-   and sets left/right itself (fitAnalysisBar); this only lets it stretch. */
+/* SimView's centred Analysis panel runs under lil-gui; simview_patch.js
+   (fitAnalysisBar) pins it between the panels, this only lets it stretch. */
 .analysis-container {
   width: auto !important;
   min-width: 300px;
   transform: none !important;
 }
 
-/* SimView centres its playback bar on the window; beside the open panel that
-   is off-centre in the part of the scene still showing. Centred on what is
-   left of the window instead, sliding with the panel -- but never closer
-   than 10 px to the height legend in the corner (20 + 172 px wide), which a
-   narrow window would otherwise slide it over. CSS cannot read the bar's
-   own width, so the floor assumes half of it is 325 px (it is ~642 px in
-   simview 5.1); only windows under ~1400 px reach that floor. */
+/* Centre the playback bar on the visible scene, but keep it clear of the
+   height legend (20 + 172 + 10 px, assuming half the bar is ~325 px). */
 .sv-playback { transition: left 0.18s ease; }
 body:not(.dt-collapsed) .sv-playback {
   left: max(calc((100% - 340px) / 2), calc(20px + 172px + 10px + 325px));
   max-width: calc(100vw - 340px - 32px);
 }
 
-/* The zoom dialog over the 3D view; its .btn and .muted come from zoom.css,
-   the palette is the panel's (dark), via .dt-zoom in theme.css. */
+/* The zoom dialog over the 3D view (see zoom.css, theme.css). */
 .dt-zoom { font: var(--fs-sm)/1.45 var(--sans); }

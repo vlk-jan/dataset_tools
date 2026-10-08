@@ -1,19 +1,7 @@
-"""Turning a scene's GNSS fixes into something a map can draw.
+"""Pure functions turning a scene's ``gps.npy`` into something a map can draw.
 
-Pure functions over the ``(M, >= 4)`` array ``gps.npy`` holds -- no I/O and no
-file knowledge -- so the map's arithmetic is testable without a dataset.
-
-Coordinates stay in degrees from end to end: the front end wants latitude and
-longitude, and projecting here would only mean unprojecting there. Distances
-use the local equirectangular approximation (a degree of latitude is ~111.3 km
-everywhere; a degree of longitude is that times ``cos(lat)``), which is good to
-a fraction of a percent over the few kilometres one recording covers and needs
-no projection library.
-
-Nothing here is ground truth. A fix says where the robot was on the Earth; the
-scene's poses say where it was relative to its own segment anchor, and on the
-old rig the two do not even come from the same device. The map is *provenance*,
-which is why it is never mixed into a window bundle.
+Coordinates stay in degrees; distances use the local equirectangular
+approximation. GNSS is provenance, not ground truth, so it never enters a window bundle.
 """
 
 from __future__ import annotations
@@ -29,14 +17,11 @@ COV = slice(5, 8)
 #: Metres per degree of latitude. Longitude scales this by ``cos(lat)``.
 M_PER_DEG = 111_320.0
 
-#: ``sensor_msgs/NavSatStatus.status`` in words. Both rigs' receivers use the
-#: standard constants, so this needs no per-rig knowledge; an unknown value is
-#: reported as its own number rather than dropped.
+#: ``sensor_msgs/NavSatStatus.status`` in words; unknown values show as their number.
 FIX_LABELS = {-2: "unknown", -1: "no fix", 0: "single", 1: "SBAS", 2: "RTK / GBAS"}
 
-#: How far from a fix a timestamp may sit and still be located by it. Both rigs
-#: publish at 10 Hz, so a second of silence means the receiver dropped out, not
-#: that the robot was somewhere between two samples.
+#: Max seconds from a fix a timestamp may sit and still be located by it
+#: (both rigs publish at 10 Hz, so a longer gap is a dropout).
 MAX_INTERP_GAP = 1.0
 
 
@@ -51,13 +36,7 @@ def slice_time(gps: np.ndarray, t0: float, t1: float) -> np.ndarray:
 
 
 def decimate(track: np.ndarray, max_points: int) -> np.ndarray:
-    """At most ``max_points`` fixes, evenly spaced, both ends kept.
-
-    An even stride rather than a shape-preserving simplification: a 10 Hz track
-    thinned to one sample every half second still draws every corner a robot
-    driving at walking pace actually turned, and the arithmetic is obvious
-    enough to trust without a tolerance to tune.
-    """
+    """At most ``max_points`` fixes, evenly spaced, both ends kept."""
     if max_points <= 0 or len(track) <= max_points:
         return track
     step = -(-len(track) // max_points)  # ceil
@@ -109,11 +88,9 @@ def fix_shares(track: np.ndarray) -> list[tuple[str, float]]:
 
 
 def sigma_m(track: np.ndarray) -> float | None:
-    """Median horizontal standard deviation, in metres, or None.
+    """Median horizontal one-sigma radius ``sqrt(cov_ee + cov_nn)`` in metres, or None.
 
-    ``sqrt(cov_ee + cov_nn)``: the radius of the one-sigma circle around a fix,
-    which is the number a person reads as "how well does it know where it is".
-    Fixes whose covariance the receiver called unknown carry NaN and drop out.
+    Fixes with unknown (NaN) covariance drop out.
     """
     if not len(track) or track.shape[1] < COV.stop:
         return None
@@ -126,9 +103,7 @@ def locate(gps: np.ndarray, t: float) -> list[float] | None:
     """``[lat, lon]`` at time ``t``, interpolated between the fixes around it.
 
     None when ``t`` sits outside the track or in a gap longer than
-    :data:`MAX_INTERP_GAP`:
-    a straight line drawn across a receiver dropout is a claim about where the
-    robot went, and this file does not know that.
+    :data:`MAX_INTERP_GAP`; a dropout is not interpolated across.
     """
     if not is_track(gps) or not math.isfinite(t):
         return None
@@ -148,9 +123,5 @@ def locate(gps: np.ndarray, t: float) -> list[float] | None:
 
 
 def points(track: np.ndarray) -> list[list[float]]:
-    """The track as ``[[lat, lon], ...]``, rounded to ~1 cm.
-
-    Seven decimals is about a centimetre of latitude -- far finer than any of
-    these receivers -- and halves the JSON a long scene ships.
-    """
+    """The track as ``[[lat, lon], ...]``, rounded to 7 decimals (~1 cm)."""
     return [[round(float(lat), 7), round(float(lon), 7)] for lat, lon in track[:, [LAT, LON]]]

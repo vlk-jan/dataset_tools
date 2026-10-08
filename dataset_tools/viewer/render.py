@@ -1,13 +1,7 @@
 """Colour maps and small PNG/JPEG renderers for the per-frame side panel.
 
-SimView shows 3D geometry; the panel next to it shows what the scene carries
-per frame that is *not* geometry -- the camera image, the BEV height map, its
-validity mask and a top-down view of the raw cloud. Everything is rendered on
-demand for one frame at a time, so a 20k-frame scene never costs more than the
-frames actually looked at.
-
-Only numpy, Pillow and OpenCV's projection are used (no matplotlib): the colour maps are small
-piecewise-linear look-up tables built once at import.
+Rendered on demand, one frame at a time. No matplotlib: colour maps are small
+piecewise-linear LUTs built at import.
 """
 
 from __future__ import annotations
@@ -36,12 +30,8 @@ _TURBO_ANCHORS = np.array(
     ],
     dtype=np.float64,
 )
-#: Fixed, meaningful colours for the height-map validity states.
-#:
-#: Anchored reads as a cousin of extrapolated rather than of measured, because
-#: that is what it is: a cell the lidar never saw, filled from the robot's own
-#: wheel contacts instead of from a distant return. Warm = invented, green =
-#: measured; see :data:`loaders.VALIDITY_RANK`.
+#: Fixed colours for the validity states: warm = invented, green = measured.
+#: Anchored is coloured as a cousin of extrapolated (see :data:`loaders.VALIDITY_RANK`).
 VALIDITY_COLORS = np.array(
     [
         [200, 60, 60],  # 0 extrapolated -- invented
@@ -53,9 +43,7 @@ VALIDITY_COLORS = np.array(
 )
 
 
-#: Ramp for the ``driven_similarity`` tile's ``max_sim`` (0 -> 1): dark grey
-#: through ember to a pale orange, so the tile cannot be mistaken for the
-#: turbo-coloured height map beside it.
+#: Ramp for ``driven_similarity``'s ``max_sim`` (0 -> 1), distinct from turbo.
 DRIVEN_SIM_ANCHORS = np.array(
     [
         [38, 38, 42],  # 0.0  nothing like anything driven
@@ -66,11 +54,9 @@ DRIVEN_SIM_ANCHORS = np.array(
     ],
     dtype=np.float64,
 )
-#: Cells the wheels actually rolled over, one fixed colour: cyan, which the ramp
-#: never produces.
+#: Cells the wheels rolled over: cyan, which the ramp never produces.
 DRIVEN_COLOR = np.array([40, 220, 235], dtype=np.uint8)
-#: Brightening applied to cells above the sidecar's trust threshold, so the gate
-#: DRIFT actually applies is visible as a step inside the smooth ramp.
+#: Brightening of cells above the trust threshold, so DRIFT's gate shows as a step.
 DRIVEN_TRUST_BOOST = 1.18
 
 
@@ -82,8 +68,7 @@ def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
     return (anchors[lo] * (1 - frac) + anchors[hi] * frac).astype(np.uint8)
 
 
-#: The one colour map every renderer here uses; ``colorize`` falls back to it
-#: for a name it does not know.
+#: Named LUTs; ``colorize`` falls back to turbo for an unknown name.
 LUTS = {"turbo": _build_lut(_TURBO_ANCHORS), "ember": _build_lut(DRIVEN_SIM_ANCHORS)}
 
 
@@ -114,8 +99,7 @@ def colorize(
 
 
 def unit_colors(values: np.ndarray) -> np.ndarray:
-    """Like :func:`colorize` but returns float RGB in [0, 1], which is what
-    SimView's point-cloud ``color`` field expects."""
+    """:func:`colorize` as float RGB in [0, 1], for SimView's point-cloud ``color``."""
     return colorize(values).astype(np.float32) / 255.0
 
 
@@ -139,13 +123,8 @@ def _png(img) -> bytes:
 def _bev_to_display(grid: np.ndarray) -> np.ndarray:
     """Orient a ``[row=x forward, col=y left]`` BEV grid for screen display.
 
-    Screen convention: +x (forward) is up, +y (left) is left, i.e. a top-down
-    view with the robot at the centre facing up.
-
-    ``grid[i, j]`` indexes x by ``i`` and y by ``j``, both increasing, so row
-    ``r`` maps to ``x = N-1-r`` and column ``c`` to ``y = N-1-c``: a double flip
-    and **no** transpose. Transposing rotates the map 90 degrees, which shows up
-    as the lidar's cone pointing sideways.
+    Forward up, left left: a double flip and **no** transpose (a transpose
+    rotates the map 90 degrees).
     """
     return grid[::-1, ::-1]
 
@@ -153,8 +132,7 @@ def _bev_to_display(grid: np.ndarray) -> np.ndarray:
 def _bev_png(rgb: np.ndarray, size: int) -> bytes:
     """Encode a robot-centred BEV grid, upscaled, with the robot drawn on top.
 
-    The silhouette is drawn *after* the nearest-neighbour upscale so it is
-    smooth at display resolution while the data cells stay honestly chunky.
+    The silhouette is drawn after the nearest-neighbour upscale, at display resolution.
     """
     from PIL import Image
 
@@ -182,12 +160,8 @@ def render_validity(mask: np.ndarray, size: int = 384) -> bytes:
 def render_driven_similarity(driven: np.ndarray, max_sim: np.ndarray, threshold: float, size: int = 384) -> bytes:
     """The ``driven_similarity`` tile: similarity ramp, trust gate, driven cells.
 
-    ``max_sim`` in [0, 1] runs through the ``ember`` ramp (negative similarity
-    is as unlike as zero and is shown so); cells above ``threshold`` are
-    brightened by :data:`DRIVEN_TRUST_BOOST` so the step where DRIFT starts
-    trusting its prediction is visible; the cells the wheels rolled over are
-    painted :data:`DRIVEN_COLOR` on top of everything, and the robot silhouette
-    on top of that. Robot centred, forward up, like every BEV tile.
+    ``max_sim`` on the ``ember`` ramp (negatives clip to 0), cells above
+    ``threshold`` brightened, driven cells painted :data:`DRIVEN_COLOR` on top.
     """
     sim = np.nan_to_num(np.asarray(max_sim, dtype=np.float64), nan=0.0)
     disp_sim = _bev_to_display(sim)
@@ -203,14 +177,7 @@ def render_driven_similarity(driven: np.ndarray, max_sim: np.ndarray, threshold:
 def draw_robot_silhouette(img, px_per_m: float):
     """Draw HELHEST top-down at the centre of a robot-centred, forward-up tile.
 
-    A single pixel says "the robot is here" but not how big it is or which way
-    it faces -- which is what a BEV tile is read for. This draws the footprint
-    to scale (0.7 x 0.5 m chassis, two front wheels on the axle at the tile's
-    centre, one rear) so features can be sized against it by eye.
-
-    ``px_per_m`` is the tile's scale *after* upscaling, so this draws at display
-    resolution rather than in chunky grid cells. Translucent with a thin opaque
-    outline, to stay readable over both dark and bright colour maps.
+    Footprint to scale, with a heading wedge. ``px_per_m`` is the scale after upscaling.
     """
     from PIL import ImageDraw
 
@@ -237,8 +204,7 @@ def draw_robot_silhouette(img, px_per_m: float):
     cx0, cy0, _ = CHASSIS_CENTER
     box(cx0 - hx, cx0 + hx, cy0 - hy, cy0 + hy, (255, 255, 255, 70), (255, 255, 255, 235))
 
-    # Heading wedge just ahead of the chassis: which end is the front is not
-    # inferable from a symmetric-looking box.
+    # Heading wedge: the box alone does not show which end is the front.
     front = cx0 + hx
     nose = [pt(front + 0.30, 0.0), pt(front + 0.02, 0.16), pt(front + 0.02, -0.16)]
     draw.polygon(nose, fill=(255, 255, 255, 235))
@@ -252,9 +218,7 @@ CLOUD_BEV_EXTENT = 12.0
 def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
     """Top-down scatter of one raw cloud, in the robot's own frame, coloured by z.
 
-    Rendered by binning rather than plotting, so it costs one pass over the
-    points. Empty cells stay dark, which makes the sensor's blind wedge (no
-    returns behind the robot on a forward-only lidar) immediately visible.
+    Binned in one pass; empty cells stay dark, so the blind wedge is visible.
     """
     extent = CLOUD_BEV_EXTENT
     cloud = np.asarray(cloud)
@@ -302,11 +266,7 @@ def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
 def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:
     """JPEG of a camera frame, downscaled to at most ``width`` pixels across.
 
-    The frames are 1280x800 and one is shipped per playback frame, so the
-    panel asks for them small. A root that holds the camera's own JPEG
-    (``images.extension: jpg``, roots made from 2026-09-29) is served the file
-    as it is whenever no downscale is needed: re-encoding it would only cost
-    CPU and a generation of JPEG loss.
+    A JPEG source that needs no downscale is served as is (no re-encode loss).
     """
     from PIL import Image
 
@@ -322,8 +282,7 @@ def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> byte
     return buf.getvalue()
 
 
-#: Returns closer to the camera than this (metres, along its optical axis) are
-#: not drawn: they are the robot's own body, or behind the lens.
+#: Returns closer than this (m, along the optical axis) are the robot itself or behind the lens.
 OVERLAY_MIN_DEPTH = 0.1
 
 
@@ -336,9 +295,8 @@ def _project_points(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Project camera-frame 3D points (x, y, z) into pixel coordinates (u, v).
 
-    Applies the camera's distortion model when available (e.g. equidistant fisheye
-    or plumb_bob/rational_polynomial), falling back to pinhole projection when
-    unspecified or unsupported.
+    Uses the distortion model when known (fisheye, plumb_bob, rational_polynomial),
+    otherwise plain pinhole.
     """
     if not len(cam):
         return np.array([], dtype=np.int64), np.array([], dtype=np.int64)
@@ -376,25 +334,9 @@ def render_cloud_on_image(
 ) -> tuple[bytes, tuple[float, float] | None]:
     """The frame's lidar returns projected into its camera image, as a JPEG.
 
-    A calibration check, not a product: a road that lands beside the road, or
-    a trunk that lands a metre from its picture, is a wrong ``T_cam_to_base``
-    -- the kind of error that shifted every v1 cloud by 0.34 m and that the
-    Odin1's own extrinsic estimate wanders by. Each return is taken from the
-    base frame into the camera's optical frame with the inverse of
-    ``T_cam_to_base`` (``p_base = T @ p_cam_optical``), kept if it lies in
-    front of the lens, and projected through the camera model; the dots are
-    coloured by depth, near to far.
-
-    When ``distortion_model`` and ``distortion_coeffs`` are provided (from
-    ``camera_info.yaml``), the camera's distortion model is applied (e.g.
-    equidistant fisheye for Odin1, plumb_bob / rational_polynomial for pinhole
-    lenses). If absent or unknown, uncorrected pinhole projection is used as a
-    fallback. ``K`` is scaled with the image when it is downscaled to ``width``.
-
-    Returns the JPEG and the depth span the colours run over -- this frame's
-    own 2nd-98th percentile, in metres -- or ``None`` when no return landed.
-    The legend that says it is the page's, drawn over the picture rather than
-    into it, so it stays in its corner when the picture is zoomed.
+    A calibration check for ``T_cam_to_base`` (``p_base = T @ p_cam_optical``);
+    dots coloured by depth. Returns the JPEG and the colour depth span (2nd-98th
+    percentile, m), or ``None`` when no return landed.
     """
     from PIL import Image
 
@@ -420,12 +362,11 @@ def render_cloud_on_image(
         if len(z):
             # Far to near, so where dots overlap the nearer return is on top.
             order = np.argsort(-z)
-            # The span colorize would pick by itself, taken here so the legend can say it.
+            # Computed here so the legend can report it.
             near, far = (float(q) for q in np.percentile(z, (2, 98)))
             far = max(far, near + 0.1)
             u, v, colors = u[order], v[order], colorize(z[order], near, far, cmap="turbo")
-            # A 3x3 dot per return, painted in nine vectorised strokes rather
-            # than one Pillow call per point: a cloud has tens of thousands.
+            # 3x3 dots in nine vectorised strokes, not one Pillow call per point.
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     vv, uu = v + dy, u + dx

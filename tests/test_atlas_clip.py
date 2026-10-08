@@ -1,10 +1,4 @@
-"""Ground-truth statistics are clipped to the frame window.
-
-The Odin comes up later than the Fixposition in several 2026-09 bags, so
-``odometry.txt`` legitimately covers time with no image and no cloud. Counting
-it made the atlas report more time "with GT" than the scene's own duration,
-which cannot be true of a subset.
-"""
+"""Ground-truth statistics are clipped to the frame window (GT can start before the Odin)."""
 
 import sys
 from pathlib import Path

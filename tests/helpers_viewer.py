@@ -1,10 +1,4 @@
-"""Synthetic dataset roots for the viewer tests.
-
-``make_root`` writes a scene with a controllable set of optional files;
-``write_atlas`` adds the optional curated ``atlas/`` half and ``write_splits``
-the optional train/val declaration. Shared by every ``test_viewer_*`` module;
-the fixtures built on them live in ``conftest.py``.
-"""
+"""Synthetic dataset roots for the viewer tests (fixtures live in ``conftest.py``)."""
 
 from __future__ import annotations
 
@@ -115,12 +109,8 @@ def make_root(
                 validity[:64] = 0  # behind the robot: extrapolated
                 np.savez_compressed(d / "height_masks" / f"{i:05d}.npz", validity=validity)
         if with_driven_similarity:
-            # Off by default: a DRIFT product most roots never carry. Every frame
-            # gets a sidecar with the cell right under the robot driven (the
-            # grid's centre, [row=x, col=y]), a 3x3 patch of driven cells one
-            # metre ahead, and a similarity that falls off with range from the
-            # driven patch -- so a known cell is driven, a known cell is trusted
-            # and a known cell is neither.
+            # Driven: the centre cell ([row=x, col=y]) and a 3x3 patch 1 m ahead;
+            # similarity falls off with range from that patch.
             (d / "driven_similarity").mkdir()
             rows, cols = np.mgrid[0:128, 0:128]
             for i in range(frames):
@@ -147,9 +137,7 @@ def make_root(
                     odometry_frame="base_link",
                 )
         if with_gps:
-            # Off by default: most roots have no GNSS, and the viewer must look
-            # exactly as it always did on those. Four fixes per frame, walking
-            # east-north-east across a hundred metres or so of Prague.
+            # Four fixes per frame, walking ENE across ~100 m of Prague.
             gt = np.linspace(ts[0], ts[-1], frames * 4)
             gps = np.zeros((len(gt), 8))
             gps[:, 0] = gt
@@ -187,9 +175,7 @@ binning_x: 0
 """
 
 
-#: The fixture's curated thumbnail frames. Deliberately NOT the 10/50/90 %
-#: fractions of a 12-frame scene (1, 6, 10), so a test can tell which one the
-#: viewer used.
+#: Curated thumbnail frames; deliberately not the 10/50/90 % ones (1, 6, 10).
 CURATED_THUMBS = {"a": 2, "b": 7, "c": 11}
 
 
@@ -206,12 +192,9 @@ def write_splits(
     labels: dict | None = None,
     windows: dict | None = None,
 ) -> Path:
-    """The root-level ``splits.json``, in the spelling DRIFT's exporter writes.
+    """The root-level ``splits.json`` as DRIFT's ``dump_split.py`` writes it.
 
-    ``scripts/data/dump_split.py`` in DRIFT is the real producer; this writes the
-    same keys so the tests exercise the schema that will actually arrive.
-    ``train=None`` writes no ``train_scenes`` key at all, which is the
-    bare-holdout spelling -- every scene the file does not name trains.
+    ``train=None`` omits ``train_scenes`` (bare hold-out: unnamed scenes train).
     """
     data: dict = {"val_scenes": list(val)}
     if name is not None:

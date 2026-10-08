@@ -1,9 +1,4 @@
-"""Viewer: cutting a scene into windows (dataset_tools.viewer.windows).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: cutting a scene into windows (dataset_tools.viewer.windows), on synthetic roots."""
 
 from __future__ import annotations
 
@@ -51,12 +46,7 @@ def test_long_segments_are_split_into_even_chunks():
 
 
 def test_the_parts_of_a_split_segment_are_equal_in_time_not_in_frame_count():
-    """The cap is in seconds, so the division is too.
-
-    A clock with frames dropped from its first half: cutting the index range in
-    half would put the boundary late and hand the second window more seconds
-    than the cap allows, which is the thing the cap exists to prevent.
-    """
+    """The cap is in seconds, so the split is by time, not by index range."""
     # 200 s at 10 Hz, but only every fourth frame survives the first 100 s.
     ts = np.concatenate([np.arange(0, 100, 0.4), np.arange(100, 200, 0.1)])
     segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
@@ -82,9 +72,7 @@ def test_a_hole_in_the_clock_never_makes_an_empty_window():
 
 
 def test_the_frame_ceiling_survives_a_division_by_time():
-    """Cutting by time hands each part the frames that fall in its slice, and a
-    burst puts more of them in one part than another -- so the piece count is
-    raised until the ceiling holds for every part, not just on average."""
+    """A frame burst raises the piece count until every part is under the frame ceiling."""
     # 300 s: sparse for the first 200, then 100 s of 100 Hz.
     ts = np.concatenate([np.arange(0, 200, 1.0), np.arange(200, 300, 0.01)])
     segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
@@ -96,13 +84,7 @@ def test_the_frame_ceiling_survives_a_division_by_time():
 
 
 def test_two_scenes_at_different_frame_rates_are_cut_at_the_same_length():
-    """The cap counts seconds, not frames.
-
-    HELHEST v1.3 holds scenes recorded at 3.2 Hz and at 10 Hz. Counting frames
-    made one cap mean two lengths -- a 462 s window stayed whole in a slow
-    scene while a 180 s segment was halved in a fast one -- which is exactly
-    what a reviewer paging through the windows table sees.
-    """
+    """The cap counts seconds, not frames, so 3.2 Hz and 10 Hz scenes cut alike."""
     cut = []
     for hz in (3.2, 10.0):
         n = int(round(400 * hz))  # 400 s of recording, either way
@@ -125,9 +107,7 @@ def test_a_segment_inside_the_cap_is_never_cut():
 
 
 def test_the_frame_ceiling_still_bites_on_a_fast_clock():
-    """The seconds cap is the rule, the frame count a backstop under it: a root
-    recorded fast enough puts more frames in one capped window than a
-    trajectory should carry, and that window is cut anyway."""
+    """The frame count backstops the seconds cap for very fast recordings."""
     ts = np.arange(20_000, dtype=np.float64) / 200.0  # 200 Hz, 100 s in total
     segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), 20_000, "x")]
     ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=6000)
@@ -136,20 +116,13 @@ def test_the_frame_ceiling_still_bites_on_a_fast_clock():
 
 
 def test_a_scene_with_no_clock_is_cut_on_frames_alone():
-    """No ``data_ts.txt`` means a synthesised clock upstream, and here no clock
-    at all -- there is nothing for a seconds cap to measure, so the fallback
-    window falls back to the frame ceiling."""
+    """Without ``data_ts.txt`` the fallback window uses the frame ceiling."""
     ws = windows.windows_for_scene(None, [], 900, has_transforms=True, max_frames=300)
     assert [w.n_frames for w in ws] == [300, 300, 300]
 
 
 def test_a_frame_just_before_a_segment_starts_still_belongs_to_it():
-    """Segment edges are on the ground-truth pose clock, frames on their own.
-
-    A frame a few ms short of a segment's first pose is that segment's first
-    frame; treated strictly it belongs to nothing and the frame page reports no
-    ground truth for a frame that plainly has some.
-    """
+    """A frame a few ms before a segment's first pose still belongs to that segment."""
     ts = np.arange(20, dtype=np.float64) * 0.32
     # The segment opens 3 ms after frame 5 -- a hundredth of a frame period.
     segs = [loaders.Segment(0, float(ts[5]) + 0.003, float(ts[15]), 30, "a")]
@@ -213,11 +186,7 @@ def test_a_single_frame_window_takes_its_pose_from_the_segment_it_is_in():
 
 
 def _root_with_untimestamped_frames(tmp_path: Path, timestamped: int = 8, extra: int = 6) -> Path:
-    """A root mid-extraction: more images on disk than lines in data_ts.txt.
-
-    Exactly what ``probe`` warns about ("per-frame counts disagree"), and what
-    the module docstrings promise the viewer degrades gracefully for.
-    """
+    """A root mid-extraction: more images on disk than lines in data_ts.txt."""
     root_path = make_root(tmp_path, frames=timestamped, segments=False, with_transforms=False)
     scene = root_path / "0000"
     for i in range(timestamped, timestamped + extra):
@@ -226,9 +195,7 @@ def _root_with_untimestamped_frames(tmp_path: Path, timestamped: int = 8, extra:
 
 
 def test_no_window_reaches_past_the_end_of_the_timestamp_file(tmp_path):
-    """A frame with no timestamp has no place on the playback clock, so no
-    window may contain one -- a window made only of such frames used to be
-    offered, built zero frames and died with an IndexError (HTTP 500)."""
+    """No window may contain a frame without a timestamp (used to 500)."""
     root = probe.DatasetRoot(_root_with_untimestamped_frames(tmp_path), cache_dir=tmp_path / "c")
     p = root.probe("0000")
     assert p.n_frames == 14 and p.counts["data_ts"] == 8  # the disagreement
@@ -285,13 +252,8 @@ def test_every_offered_window_actually_builds(tmp_path):
 
 
 def test_a_cached_bundle_is_not_served_for_a_window_that_has_been_recut(tmp_path):
-    """A window *key* outlives its frame range.
-
-    ``raw.0`` is the first part of the scene however many parts there are, so a
-    cache filled under one cap holds an entry that a run with another cap would
-    otherwise serve for a different stretch of the scene -- the view would play
-    frames the panel does not think it is showing.
-    """
+    """A window key like ``raw.0`` means different frames under another cap,
+    so the cache key must include the range."""
     pytest.importorskip("simview")
     pytest.importorskip("torch")
 
@@ -316,9 +278,7 @@ def test_a_cached_bundle_is_not_served_for_a_window_that_has_been_recut(tmp_path
 
 
 def test_a_window_carries_the_pose_count_of_its_segment(tmp_path):
-    """Two segments of the same length and frame count can rest on 10 Hz poses
-    or on one every two seconds; interpolated onto the frame clock they look
-    identical, so the count has to travel with the window."""
+    """The ground-truth pose count travels with the window; interpolation hides it."""
     ts = np.arange(40, dtype=np.float64) * 0.1
     segs = [
         loaders.Segment(0, ts[0], ts[19], n_poses=200, reason="dense"),
@@ -353,9 +313,7 @@ def test_neighbour_windows_walk_a_scene_in_frame_order():
 
 
 def test_a_single_frame_window_pages_into_the_segment_holding_it():
-    """A ``frame00042`` window is addressable but never enumerated, so its
-    neighbours come from where its frame sits, not from a position in the list:
-    paging back from a frame inside a segment opens that whole segment."""
+    """A ``frame00042`` window's neighbours come from where its frame sits."""
     ts = np.arange(100, dtype=np.float64)
     segs = [loaders.Segment(0, 0.0, 39.0, 40, "a"), loaders.Segment(1, 60.0, 99.0, 40, "b")]
     ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=True)

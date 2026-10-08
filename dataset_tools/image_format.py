@@ -4,31 +4,14 @@
     helhest-image-format <root>            # declare what the scenes hold
     helhest-image-format <root> --check    # say it, write nothing
 
-The cameras of both rigs publish ``sensor_msgs/CompressedImage``: a JPEG the
-camera has already made. Until 2026-09-29 the extractor decoded it and wrote
-the pixels out again as a PNG, which is a lossless copy of a lossy image --
-pixel for pixel what the JPEG decodes to, at four times its size (2.9 MB
-against 0.7 MB for the Odin1, measured; images were 91 % of a root). A root
-now holds the camera's own bytes, ``msg.data`` unmodified, under the extension
-their first bytes name.
-
-So a root's images are one of two things, and nothing may have to guess which:
-
-``<root>/manifest.json`` declares it, in the key this module owns::
+Since 2026-09-29 a root stores the camera's own compressed bytes (``.jpg``)
+rather than re-encoded PNG (~4x the size). ``<root>/manifest.json`` declares it::
 
     "images": {"extension": "jpg",
                "encoding": "camera JPEG bytes verbatim, msg.data unmodified"}
 
-A root without the key is a PNG root, which is every root written before the
-change. A root with the key holds that extension in every scene, and a scene
-that does not is an error rather than a scene with fewer frames: a consumer
-that lists frames by testing for the file would otherwise hand back a short
-list, and the first anyone would hear of it is a training run on less data.
-
-Inside this package the extension of one scene is `of_scene`: what the root
-declares, checked against what the directory holds, and what the directory
-holds where nothing is declared -- a scene fresh out of the extractor has no
-manifest above it yet.
+No key means PNG. A scene holding anything other than the declared format is
+an error, so frame lists can never come up silently short.
 """
 
 import argparse
@@ -106,11 +89,9 @@ def held(scene_dir) -> dict[str, int]:
 
 
 def of_scene(scene_dir, root=None) -> str:
-    """The extension of this scene's images.
+    """The extension of this scene's images (``root`` defaults to the scene's parent).
 
-    ``root`` is where the manifest is looked for; by default the directory the
-    scene is in. Raises `ImageFormatError` for a scene that holds two formats,
-    or one other than its root declares.
+    Raises `ImageFormatError` for mixed formats or one the root does not declare.
     """
     scene_dir = Path(scene_dir)
     have = held(scene_dir)
@@ -136,10 +117,7 @@ def scenes(root) -> list[Path]:
 
 
 def of_root(root) -> str | None:
-    """The one extension every scene with images holds, or None for a root with no images.
-
-    Looks at the scenes only, not at the manifest: this is what `declare` writes.
-    """
+    """The one extension every scene holds (scenes only, not the manifest), or None."""
     found: dict[str, list[str]] = {}
     for scene in scenes(root):
         have = held(scene)
@@ -156,10 +134,7 @@ def of_root(root) -> str | None:
 def declare(root, ext=None) -> str | None:
     """Write what the scenes hold into ``<root>/manifest.json`` and return it.
 
-    Every other key of the manifest is kept as it is, and so is anything a
-    person added to the ``images`` block. A PNG root that declares nothing is
-    left declaring nothing, which is what it already means. Refuses a root
-    that declares one format and holds another.
+    Other keys are kept; an undeclared PNG root stays undeclared. Refuses a mismatch.
     """
     root = Path(root)
     have = of_root(root)

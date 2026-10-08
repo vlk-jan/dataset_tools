@@ -1,13 +1,6 @@
 /*
- * Wrapper-side corrections to the stock SimView front-end.
- *
- * Nothing in the installed `simview` package is modified: what is here works
- * from outside, through SimView's public instance (`window.simview`), its
- * events and its DOM.
- *
- * What the scene itself can say -- the ghost's look, which folders open, the
- * point cloud starting hidden -- is declared at build time (build.py's
- * `viewer_defaults` and `create_body`), not patched in here.
+ * Wrapper-side corrections to SimView, through `window.simview`, its events and
+ * DOM. What the scene can declare itself is set in build.py instead.
  */
 
 /** The wheel-odometry pose marker (see build.py's `_ghost_track`). */
@@ -16,12 +9,8 @@ export const GHOST_BODY = "wheel_odom_ghost";
 /** The chassis: the body a view of this dataset is meant to be looking at. */
 export const ROBOT_BODY = "robot";
 
-/*
- * SimView announces itself with `simview:ready` once its data is loaded and
- * its UI built. Listened for from the moment this module loads, which is
- * before overlay.js inserts SimView's entry script, so the event cannot be
- * missed; every caller shares the one promise.
- */
+/* Listening from module load, before overlay.js inserts SimView, so
+ * `simview:ready` cannot be missed. */
 const ready = new Promise((resolve) => {
     window.addEventListener("simview:ready", (event) => resolve(event.detail.simview), { once: true });
 });
@@ -59,14 +48,8 @@ export function installSimviewPatches(app) {
 }
 
 /**
- * Pin SimView's Analysis bar between the Body states window and the controls,
- * the same gap from each.
- *
- * Measured, not written as constants in overlay.css: both panels' sizes have
- * changed between simview versions (the Body states window lost 33 px in the
- * collapsible-panel refactor), and fixed numbers left the gaps lopsided twice.
- * Re-fitted when either panel resizes, the window resizes, or the data panel
- * opens or closes (the controls move with it, via a class on <body>).
+ * Pin SimView's Analysis bar between the Body states window and the controls.
+ * Measured rather than constant: panel sizes change between simview versions.
  */
 const ANALYSIS_GAP = 10;
 

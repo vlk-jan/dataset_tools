@@ -1,9 +1,4 @@
-"""Viewer: the wire format and building a SimView scene (dataset_tools.viewer.wire, .build).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: the wire format and building a SimView scene (dataset_tools.viewer.wire, .build)."""
 
 from __future__ import annotations
 
@@ -68,10 +63,7 @@ def _tilt_gravity(root: Path, scene: str, frames: int, roll_deg: float) -> None:
 
 
 def test_a_window_is_levelled_by_the_attitude_its_segment_anchor_discarded(tmp_path):
-    """A segment is re-anchored to identity at its own first pose, which zeroes
-    the robot's roll and pitch there. Those are absolute, so a segment opening
-    on a slope -- or with the robot on its side -- would otherwise render level
-    and stay level for its whole length."""
+    """Re-anchoring a segment must keep its absolute roll and pitch (no fake levelling)."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -115,10 +107,7 @@ def test_a_scene_without_gravity_alignment_is_left_unlevelled(tmp_path):
 
 
 def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_path):
-    """Every cell is covered by dozens of the ~80 maps a window splats. Averaged
-    flat, a cell mixes observations made from poses whose z disagrees by however
-    much the odometry drifted between them, and the ground drifts away from the
-    robot standing on it."""
+    """Height maps are distance-weighted, so drifted far observations don't lift the ground."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -155,9 +144,7 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
 
 
 def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
-    """A cell any frame measured takes its height from the measurements alone,
-    however far off they were taken -- a near frame's extrapolation is invented
-    ground and must not flatten a real return. The layer says so."""
+    """A measured cell ignores extrapolations, however near they were taken."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -204,10 +191,7 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
 
 
 def test_wheel_anchored_cells_do_not_read_as_measured(tmp_path):
-    """A root built with DRIFT's --anchors codes wheel-contact cells 3. That is
-    a provenance, not a better 2: the lidar never saw those cells. Averaging
-    the raw code would paint the blind region under the robot as the
-    best-measured terrain in the scene, and off the top of the legend's scale."""
+    """Validity code 3 (DRIFT wheel anchors) counts as unmeasured, not better than 2."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -251,10 +235,7 @@ def test_validity_rank_is_the_identity_on_every_published_root(tmp_path):
 
 
 def test_a_nan_in_a_height_map_does_not_poison_the_terrain(tmp_path):
-    """The generator is free to leave a cell NaN. Splatted, it would sit in the
-    weighted sums for good -- the cell counts as covered, so nothing fills it,
-    and a NaN reaches the heightfield -- and it smears into world x and y too,
-    where the cast to a cell index is undefined."""
+    """NaN height-map cells are dropped before splatting."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
@@ -323,9 +304,7 @@ def _attitude_of(root_path: Path, scene: str = "0000") -> dict | None:
 
 
 def test_the_attitude_comparison_is_silent_when_the_ground_truth_agrees(tmp_path):
-    """A levelled window puts both attitudes in the same frame, so ground truth
-    that matches the IMU has to score zero -- otherwise the check cries wolf on
-    every sound segment."""
+    """Ground truth that matches the IMU scores zero in a levelled window."""
     root_path = make_root(tmp_path, frames=12)
     _tilt_gravity(root_path, "0000", 12, 20.0)
     _rewrite_odometry(root_path / "0000", roll_step_deg=0.0)
@@ -367,9 +346,7 @@ def test_a_short_window_gets_exactly_the_budgets_it_asked_for():
 
 
 def test_a_long_window_samples_it_as_densely_as_a_short_one():
-    """The budgets are fixed counts, so a window twice as long would otherwise
-    splat half as many height maps per second driven and show a visibly poorer
-    terrain than the two windows it replaced."""
+    """Sampling budgets scale with window length."""
     from dataset_tools.viewer.build import BuildOptions, budgets_for_window
 
     opts = BuildOptions()
@@ -380,9 +357,7 @@ def test_a_long_window_samples_it_as_densely_as_a_short_one():
 
 
 def test_the_budgets_stop_at_the_ceilings_the_ui_offers():
-    """A half-hour segment is twelve times the reference length; the scaling is
-    bounded so its window stops where the option sliders do rather than at
-    whatever the arithmetic produced."""
+    """Budget scaling is capped at the option sliders' maxima."""
     from dataset_tools.viewer.build import BuildOptions, budgets_for_window
 
     huge = budgets_for_window(BuildOptions(), 17_443)
@@ -395,9 +370,7 @@ def test_the_budgets_stop_at_the_ceilings_the_ui_offers():
 
 
 def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
-    """The one thing merging two windows really costs: a longer traverse needs
-    more cells at the same resolution, and without a bigger budget ``_make_grid``
-    coarsens instead (0.1 m to 0.2 m across a 163 m drive of v1.3's 0020/0)."""
+    """A longer traverse gets a bigger cell budget instead of a coarser grid."""
     from dataset_tools.viewer.build import BuildOptions, _make_grid, budgets_for_window
 
     # A 160 m x 30 m traverse: 766k cells at 0.1 m, over the default budget and
@@ -412,9 +385,7 @@ def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
 
 
 def test_wheel_slip_is_the_commanded_speed_minus_the_measured_one(tmp_path):
-    """joint_setpoints beside joint_states: the difference is where slip and
-    load show up, so it is a plot of its own rather than two to read against
-    each other."""
+    """Wheel slip (setpoint minus measured) is plotted on its own."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 

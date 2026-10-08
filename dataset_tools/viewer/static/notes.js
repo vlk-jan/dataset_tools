@@ -1,25 +1,13 @@
 /**
- * The scene page's notes card: compose, edit, delete.
- *
- * The list itself is rendered by the server, so the notes are on the page
- * before this file loads and stay there if it fails. This only adds the three
- * mutations, and each one re-renders afterwards rather than patching the DOM --
- * a note changes the windows table's markers too, so the card and the tab
- * panel are fetched again from the server (swap.js `refresh`) and swapped in,
- * which keeps the scroll position and cannot let the two disagree.
- *
- * An edit reaches every field a note has -- range, topic and text -- because
- * all three are things that get typed wrong: a range pinned one segment too
- * early, a topic picked before reading the rest of the window. Correcting one
- * of those by deleting the note and writing it again would throw away its
- * author and its date, which are the parts nobody can retype.
+ * The scene page's notes card: compose, edit, delete. The list is server-
+ * rendered; after each mutation the card and tab panel are re-fetched
+ * (swap.js `refresh`), since notes also mark the windows table.
  */
 
 import { frameField, makeButton, noteRequest, topicSelect } from "./notes_ui.js";
 import { refresh } from "./swap.js";
 
-/** The card and what shows notes elsewhere on the page, re-rendered; the
- *  whole page when that fails. */
+/** Re-render the card and tab panel; reload the page if that fails. */
 async function rerender() {
   try {
     await refresh(["notes", "tabpanel"]);
@@ -71,13 +59,7 @@ function setup(card) {
     });
   }
 
-  /**
-   * Swap a note's rendered body for an editor over all of its fields.
-   *
-   * The head (range chip, topic, author, date) stays put and is left stale
-   * until the reload: it is what the note *is* now, next to what it is being
-   * changed to, and the reload is a moment away.
-   */
+  /** Swap a note's body for an editor over all its fields; the head stays. */
   function openEditor(item, id) {
     const paragraph = item.querySelector(".notetext");
     if (!paragraph || item.querySelector(".noteedit")) return; // already editing
@@ -128,9 +110,7 @@ function setup(card) {
     save.addEventListener("click", async () => {
       const text = box.value.trim();
       if (!text) return say("A note needs some text.", true);
-      // Both ends go up together even when only one was touched: the server
-      // orders a backwards pair, so typing them the other way round is not an
-      // error here either.
+      // The server orders a backwards pair.
       const start = Number(from.value);
       const end = Number(to.value);
       if (!Number.isFinite(start) || !Number.isFinite(end)) {

@@ -1,5 +1,4 @@
-/* Shared styling for the index and scene pages. The 3D viewer itself is
-   SimView's; only the pages around it are ours. */
+/* Shared styling for the pages around the SimView 3D viewer. */
 @import url("theme.css");
 @import url("zoom.css");
 * { box-sizing: border-box; }
@@ -20,8 +19,7 @@ html { scroll-padding-top: calc(var(--headh, 0px) + var(--sp-3)); }
   padding: 6px var(--sp-3); background: var(--panel); border: 1px solid var(--accent); border-radius: 6px;
 }
 .skip:focus { top: 8px; }
-/* The site header stays on screen; theme.js writes its height to --headh so
-   sticky table headings park below it rather than under it. */
+/* Sticky header; theme.js writes its height to --headh for sticky table headings. */
 body > header {
   position: sticky; top: 0; z-index: 1100;
   padding: var(--sp-4) var(--sp-5);
@@ -34,12 +32,10 @@ body > header {
 }
 header h1 { font-size: var(--fs-xl); margin: 0; font-weight: 600; }
 header nav { margin-left: auto; display: flex; gap: var(--sp-4); }
-/* The scene and segment pages' way into the 3D view, just left of the theme
-   toggle, which then gives up its push to the right. */
+/* The "open 3D" button takes over the theme toggle's push to the right. */
 header .open3d { margin-left: auto; align-self: center; }
 header :is(nav, .open3d) ~ .theme-toggle { margin-left: 0; }
-/* The dark theme's accent wash sinks into its panel; there the button is
-   filled with the accent itself, dark text on it. */
+/* In dark theme the accent wash is too faint, so fill with the accent. */
 :root[data-theme="dark"] header .open3d { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
 :root[data-theme="dark"] header .open3d:hover { background: color-mix(in srgb, var(--accent) 82%, white); }
 header .path { color: var(--muted); font-family: var(--mono); font-size: var(--fs-base); }
@@ -51,9 +47,7 @@ th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 
 th[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-/* Short cells (ids, ranges, counts, the Open button) keep to one line; the one
-   free-text column (td.prose) takes the spare width and wraps. Below 1000px
-   there is no spare width, so everything wraps again. */
+/* Cells don't wrap except td.prose, which takes the spare width; all wrap below 1000px. */
 th, td { white-space: nowrap; }
 td.prose { white-space: normal; width: 100%; }
 @media (max-width: 1000px) { th, td { white-space: normal; } }
@@ -96,12 +90,7 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
 .btn.primary { background: var(--accent-soft); border-color: var(--accent-line); }
 
 /* --------------------------------------------------------- card furniture
-   The index and the scene page share one anatomy: a strip of sampled frames,
-   a stat grid of mono uppercase labels, artefact chips, a ground-truth
-   timeline. It came from the hand-made HELHEST atlas page; it is the viewer's
-   own component set now, painted in the palette above, so the two pages read
-   as one document whether or not the root has an atlas/ next to the data.
-   Only the *typography* is still the index's own (body.atlas, at the end). */
+   Shared by the index and scene pages. */
 
 /* Said above the masthead, because the masthead itself is the stale part. */
 .stale {
@@ -133,15 +122,9 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
   margin: 2px 0 0; font: 600 var(--fs-lg)/1.2 var(--display); font-variant-numeric: tabular-nums;
 }
 .totals dd small { display: block; margin-top: 2px; font: 400 var(--fs-xs)/1.3 var(--sans); color: var(--muted); }
-/* Disk usage by modality, in Catppuccin: Latte here, Mocha in the dark theme.
-   Images blue, clouds peach, height maps green, height masks red, driven
-   similarity pink; "other" is a catch-all, so it is the theme's neutral grey,
-   not a sixth hue. The bar is sorted by size, so any two can touch: chosen to
-   maximise the worst all-pairs dE (dataviz validate_palette.js) among
-   Catppuccin hues -- 12 normal / 3.8 CVD in Mocha, 16 / 5.9 in Latte. That is
-   below a categorical palette's targets, and no five Catppuccin hues do
-   better, so the bar never leans on colour alone: 2 px gaps between
-   segments, a legend that names and sizes every one, a title on each. */
+/* Disk usage by modality, Catppuccin Latte / Mocha; "other" is neutral grey.
+   Hues picked for max worst-pair dE, still low, so the bar also has gaps,
+   a legend and titles rather than relying on colour alone. */
 :root { --dk-1: #1e66f5; --dk-2: #fe640b; --dk-3: #40a02b; --dk-4: #d20f39; --dk-5: var(--faint); --dk-6: #ea76cb; }
 :root[data-theme="dark"] { --dk-1: #89b4fa; --dk-2: #fab387; --dk-3: #a6e3a1; --dk-4: #f38ba8; --dk-6: #f5c2e7; }
 .diskpanel { margin: 0 0 var(--sp-3); }
@@ -186,8 +169,7 @@ section { margin-top: var(--sp-6); }
   border-radius: 8px; overflow: hidden;
 }
 .strip { display: flex; flex-direction: column; background: var(--shade); }
-/* The three frames divide the card's height between them, so the strip ends
-   flush with the stats rather than leaving a gap under the last one. */
+/* The frames split the card height, so the strip ends flush with the stats. */
 .strip a { display: block; line-height: 0; flex: 1 1 0; min-height: 96px; }
 .strip img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .strip.empty {
@@ -207,15 +189,9 @@ section { margin-top: var(--sp-6); }
 .env { font-size: var(--fs-base); margin: 6px 0 var(--sp-3); max-width: 74ch; }
 
 /* ------------------------------------------------------- train / val split
-   Which side of the scene-level split a scene is on: a labelled band down the
-   edge of its index card, a tag on its scene page, and a panel under the
-   masthead that explains the bands and filters by them. Everything here is
-   scoped to markup the templates only emit on a root that declares a split, so
-   an unsplit root renders exactly as before. */
+   Only emitted on a root that declares a split. */
 .scene.split { grid-template-columns: 30px 224px 1fr; }
-/* Wide enough to read at a glance down a column of cards. Held out is solid,
-   because it is the short list a reader is looking for; trained on is the
-   quiet default. The label runs bottom to top, like a book spine. */
+/* Held-out is solid, train is quiet; the label reads bottom to top. */
 .splitband {
   display: flex; align-items: center; justify-content: center;
   writing-mode: vertical-rl; transform: rotate(180deg);
@@ -228,16 +204,14 @@ section { margin-top: var(--sp-6); }
 .val { --c: var(--val); }
 .train { --c: var(--train); }
 .excluded { --c: var(--muted); }
-/* Stacked cards put the strip above the body, so the band becomes a bar
-   across the top. Same 700px the card stacks at, and declared here because
-   `.scene.split` outranks the plain `.scene` rule that does the stacking. */
+/* Stacked cards: the band becomes a top bar. Here because `.scene.split`
+   outranks the plain `.scene` stacking rule. */
 @media (max-width: 700px) {
   .scene.split { grid-template-columns: 1fr; }
   .splitband { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: 6px var(--sp-3); }
 }
 
-/* The scene page's tag, in the site header, whose items are baseline aligned
-   against a 22px h1. */
+/* The scene page's split tag in the site header. */
 .split-tag {
   font: 600 var(--fs-xs) var(--mono); padding: 3px var(--sp-2); border-radius: 2px;
   text-transform: uppercase; letter-spacing: .08em;
@@ -284,22 +258,14 @@ header > .split-tag { align-self: center; }
 /* "4 of 12 shown" beside a section title while a filter is on. */
 .sshown { font: 500 var(--fs-xs) var(--mono); color: var(--muted); margin-left: auto; }
 
-/* The GT timeline: blocks scaled over the scene's own time span. On a scene
-   page each block is a link to its own segment (`a.seg`); on the index card,
-   and on a scene whose segment file could not be read, they are plain marks
-   (`i`) that name no segment. Both draw identically. */
+/* GT timeline: blocks over the scene's span; `a.seg` links, `i` plain marks. */
 .bar .track { position: relative; height: 14px; background: var(--track); overflow: hidden; }
 .bar i, .bar a.seg { position: absolute; top: 0; bottom: 0; background: var(--ok); }
 .bar i.fill, .bar a.seg.fill { background: var(--warn); }
 .bar a.seg { cursor: pointer; }
-/* A segment a second or two long is barely a pixel wide on a card-width track.
-   The block stays that width -- the timeline must not overstate how much of the
-   scene it covers -- and only the hit area is widened, by two pixels either
-   side. Blocks that close together are all plausible targets of the same
-   click, and the tooltip says which one the pointer found. */
+/* Widen only the hit area of tiny segments, not the drawn block. */
 .bar a.seg::after { content: ""; position: absolute; top: 0; bottom: 0; left: -2px; right: -2px; }
-/* The hit target is often a couple of pixels wide, so the hover state has to
-   be unmissable: the block brightens and the whole track dims behind it. */
+/* Hover must be unmissable on a few-pixel target. */
 .bar a.seg:hover, .bar a.seg:focus-visible {
   background: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--fg);
   z-index: 1;
@@ -341,9 +307,7 @@ dl.stats dd small {
   .strip img { aspect-ratio: 8 / 5; height: auto; }
 }
 
-/* ------------------------------------------------------------ scene header
-   The three frames the index card shows, at the top of the scene they belong
-   to; each links to the frame it was cut from. */
+/* ------------------------------------------------------------ scene header */
 .hero {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-4); margin: 4px 0 var(--sp-4);
@@ -366,9 +330,7 @@ dl.stats dd small {
 .hero figcaption b { color: var(--fg); font-weight: 500; }
 @media (max-width: 760px) { .hero { grid-template-columns: 1fr; } }
 
-/* The info cards, three to a row on the same columns as the hero frames above,
-   every card in a row as tall as the tallest. A card with nothing to say is
-   not rendered at all. */
+/* Info cards, three to a row on the hero's columns. */
 .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-4); }
 .cards .card { padding: var(--sp-3) var(--sp-4) var(--sp-4); display: flex; flex-direction: column; margin: 0; }
 .cards .card > .cardnote:first-of-type { margin-top: auto; padding-top: var(--sp-3); }
@@ -400,10 +362,7 @@ details.diskusage dl.stats { margin-top: var(--sp-2); }
   font: 500 var(--fs-2xs)/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted);
 }
 
-/* The inventory strip is a set of toggles, and the entry that is open reads
-   out below it: what the file holds, what the dataset does with it, and
-   whether this scene has it. Only one is open at a time (see files.js), so the
-   card's height moves by one panel at most -- it sits beside the map. */
+/* Inventory chips toggle one file panel at a time (files.js). */
 button.chip {
   background: none; color: inherit; cursor: pointer;
   font: 400 var(--fs-xs) var(--mono); line-height: 1.5;
@@ -430,8 +389,7 @@ button.chip[aria-expanded="true"] {
   font: 500 var(--fs-2xs) var(--mono); letter-spacing: .06em; text-transform: uppercase; margin-right: 6px;
 }
 .fileinfo .bar { margin-top: var(--sp-3); }
-/* Coverage of a per-frame directory: green where a frame has its file, the
-   gaps in orange -- at least a pixel, however short. */
+/* Per-frame coverage: green present, orange gaps (at least 1px). */
 .bar .track.cover { background: var(--ok); height: 10px; border-radius: 2px; }
 .bar .track.cover i { background: var(--warn); min-width: 1px; }
 
@@ -439,10 +397,8 @@ button.chip[aria-expanded="true"] {
 /* A region being swapped in place (swap.js) dims until the new one lands. */
 [data-swap][aria-busy="true"] { opacity: .6; }
 .tabs { display: flex; gap: 2px; margin: 0; border-bottom: 1px solid var(--line); }
-/* The open tab is the page it opens onto: the page's own background, joined
-   to the content under it, with an accent bar on top. The others are quiet
-   labels. Not panel shades -- --panel is lighter than --bg in the light theme
-   and darker in the dark one, so a shade reads the opposite way in one of them. */
+/* The active tab uses --bg (joins the content) plus an accent bar; panel
+   shades would read inverted in one of the themes. */
 .tab {
   padding: 7px var(--sp-4); border: 1px solid transparent; border-bottom: 0;
   border-radius: 6px 6px 0 0; color: var(--muted);
@@ -483,8 +439,7 @@ button.chip[aria-expanded="true"] {
 .bigframe {
   width: 100%; display: block; border: 1px solid var(--line); border-radius: 8px; background: var(--shade);
 }
-/* The big frame. The frame bar's button swaps the lidar cloud onto it, and
-   what the cloud shows is said under it while it is on. */
+/* The big frame, optionally with the lidar cloud swapped on. */
 .bigoverlay { margin: 0; }
 .bigoverlay figcaption { font-size: var(--fs-sm); margin-top: 6px; max-width: 100ch; }
 .cloudtoggle { margin-left: auto; }
@@ -513,12 +468,7 @@ button.chip[aria-expanded="true"] {
   border-left: 2px solid var(--accent); pointer-events: none;
 }
 
-/* ------------------------------------------------------------------ notes
-   Reviewer notes on the scene page: what a person found, pinned to a frame
-   range. Styled as one more card so it sits in the same document as the
-   probed facts around it -- it is not a separate app, it is the half of the
-   scene's description that only a person can write. */
-/* Last on every page, often after a table or pager that has no margin under it. */
+/* ------------------------------------------------------------------ notes */
 .card.notes { margin-top: var(--sp-4); }
 .notelist { list-style: none; margin: 0; padding: 0; }
 .notelist li { padding: var(--sp-2) 0; border-top: 1px solid var(--line); }
@@ -548,9 +498,7 @@ button.chip[aria-expanded="true"] {
   width: 100%; margin-top: var(--sp-2); font-size: var(--fs-base); resize: vertical;
 }
 .noteform .btn { margin-left: auto; }
-/* The inline editor is the compose form again, over one note: the same range,
-   topic and text, so correcting any of them is the same gesture as writing
-   them was. */
+/* Inline note editor, shaped like the compose form. */
 .noteedit { margin-top: 4px; display: flex; flex-direction: column; gap: var(--sp-2); }
 .noteedit textarea { margin-top: 0; }
 .noteeditactions { display: flex; gap: var(--sp-2); }
@@ -563,15 +511,11 @@ button.chip[aria-expanded="true"] {
 }
 .notemark:hover { text-decoration: none; border-color: var(--warn); }
 
-/* The scene index reads as a document rather than a control panel: the
-   display face (theme.css) and balanced headings. */
+/* The scene index uses the display face and balanced headings. */
 body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-wrap: balance; }
 
 /* --------------------------------------------------------- the GNSS map
-   Two cards side by side, each as tall as the other: what the scene has on
-   disk, and where on the Earth it was recorded. Without gps.npy the map card
-   is not rendered at all and the files card is the full-width strip it has
-   always been -- so a scene with no GNSS looks exactly as it did. */
+   Files card and map card side by side; no map card without gps.npy. */
 .pair {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
@@ -579,12 +523,10 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   align-items: stretch;
 }
 .pair > .card { display: flex; flex-direction: column; min-width: 0; }
-/* Files and map half and half. The map stretches to the inventory's height
-   (map.js re-lays it out as it grows). */
+/* The map stretches to the inventory's height (map.js re-lays it out). */
 .pair.withmap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1100px) { .pair.withmap { grid-template-columns: minmax(0, 1fr); } }
-/* The strip no longer runs to the bottom of the card: an opened file panel
-   follows it, and the note is what holds the card's foot instead. */
+/* The note, not the chip strip, holds the card's foot. */
 .pair > .card > .chips { flex: 0 1 auto; align-content: flex-start; }
 .pair > .card.files > .cardnote:first-of-type { margin-top: auto; padding-top: var(--sp-3); }
 
@@ -600,14 +542,8 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .mapnote { color: var(--muted); font-size: var(--fs-sm); margin: var(--sp-2) 0 0; }
 .mapnote.warn { color: var(--warn); }
 
-/* OpenStreetMap ships one raster style, and it is a light one. Inverting the
-   tiles (and only the tiles -- the track, the markers and the controls are
-   drawn over them) puts the backdrop in the same register as the rest of the
-   viewer instead of a white rectangle in a dark page.
-
-   On the *pane*, not on `.leaflet-tile`: Leaflet declares `filter: inherit`
-   there precisely so a page can filter the pane, and its own stylesheet loads
-   after this one, so a rule of the same specificity would simply lose. */
+/* Dark theme: invert the OSM tiles only. On the pane, not `.leaflet-tile`:
+   Leaflet sets `filter: inherit` there and its stylesheet loads after ours. */
 .leaflet-container { background: var(--shade); font: inherit; }
 :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) saturate(0.5) brightness(0.95) contrast(0.85); }
 .leaflet-container .leaflet-control-attribution {
@@ -618,11 +554,8 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
   background: var(--panel); color: var(--fg); border-bottom-color: var(--line);
 }
 
-/* The track itself. `track` is the stretch being looked at; `trackctx` is the
-   rest of the scene behind it, present for context and never for detail. */
+/* `track` is the stretch in view; `trackctx` the rest of the scene, dimmed. */
 .track { stroke: var(--accent); stroke-width: 3; fill: none; }
-/* Dashed and dimmed: the rest of the outing, there to place the highlighted
-   stretch in it, and never to be mistaken for the stretch itself. */
 .trackctx {
   stroke: var(--accent); stroke-width: 2; stroke-opacity: 0.45;
   stroke-dasharray: 5 4; fill: none;
@@ -641,24 +574,16 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 .btn.disabled { color: var(--muted); border-style: dashed; cursor: default; }
 
 /* --------------------------------------------------------- signal charts
-   One chart per unit, stacked on a shared time axis (templates/_signals.html).
-   Series are Catppuccin blue / red / green -- Mocha in the dark theme, SimView's
-   own palette, and Latte in the light one. The only Catppuccin triple that
-   passes dataviz validate_palette.js (--pairs all, against each plot
-   background): blue / peach / mauve, SimView's batch order, puts blue and
-   mauve at CVD dE ~1, one line to a red-green colour-blind reader. Red and
-   green are status hues elsewhere in the viewer, but which wheel a line is has
-   nothing to do with good or bad; identity is also carried by the legend and
-   the readout, never by colour alone. (Mocha's accents sit above the
-   validator's lightness band; they are pastels by design.) */
+   One chart per unit on a shared time axis (_signals.html). Catppuccin blue /
+   red / green (Latte / Mocha): blue / peach / mauve fails CVD separation.
+   Identity is also carried by legend and readout. */
 .signals { --s1: #1e66f5; --s2: #d20f39; --s3: #40a02b; margin: 0 0 var(--sp-4); }
 :root[data-theme="dark"] .signals { --s1: #89b4fa; --s2: #f38ba8; --s3: #a6e3a1; }
 .signals:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .signals > summary { display: flex; gap: var(--sp-3); align-items: baseline; flex-wrap: wrap; }
 .signals[open] > summary { padding-bottom: 7px; border-bottom: 1px solid var(--line); }
 .signals > summary h2 { margin: 0; font-size: var(--fs-md); font-weight: 600; }
-/* The card's toggle and each chart's: a flex summary loses the native marker,
-   so the arrow is drawn here and turns down while its section is open. */
+/* A flex summary loses its native marker, so draw the arrow. */
 :is(.sigcardhead, .sighead) { cursor: pointer; list-style: none; user-select: none; }
 :is(.sigcardhead, .sighead)::before {
   content: "\25B6"; font-size: 11px; color: var(--muted);
@@ -686,15 +611,13 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 }
 .sig .plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
 .sig .plot i.gt { position: absolute; top: 0; bottom: 0; background: var(--ok); opacity: .12; }
-/* Green over the light theme's blue-grey reads as murk; half the wash still
-   marks the gaps. */
+/* Lighter wash in the light theme. */
 :root:not([data-theme="dark"]) .sig .plot i.gt { opacity: .06; }
 .sig path { fill: none; stroke: var(--c); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
 .sig path.dash { stroke-dasharray: 4 3; stroke-opacity: .75; }
 .sig line.zero { stroke: var(--line-2); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .sig line.cursor { stroke: var(--fg); stroke-width: 1; vector-effect: non-scaling-stroke; }
-/* On a backing of the plot's own colour, so a line running through the corner
-   does not strike the number out. */
+/* Backed, so a line through the corner doesn't strike the number out. */
 .sig .ylab {
   position: absolute; left: 4px; font: 400 var(--fs-2xs) var(--mono); color: var(--muted);
   pointer-events: none; padding: 0 3px; border-radius: 2px;
@@ -702,8 +625,7 @@ body.atlas h1, body.atlas h2, body.atlas h3 { font-family: var(--display); text-
 }
 .sig .ylab.hi { top: 2px; }
 .sig .ylab.lo { bottom: 2px; }
-/* The time axis: round-numbered ticks under each plot, centred on their
-   position, except those at an edge, which align to it rather than spill. */
+/* Time axis ticks: centred, except edge ticks align to the edge. */
 .sig .xaxis { position: relative; height: 14px; font: 400 var(--fs-2xs) var(--mono); color: var(--muted); }
 .sig .xaxis span { position: absolute; top: 1px; transform: translateX(-50%); white-space: nowrap; }
 .sig .xaxis span::before {

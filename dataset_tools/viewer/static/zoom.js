@@ -1,10 +1,6 @@
-// The frame page's click-to-zoom. Any `.zoomable` picture opens big in the
-// dialog: `data-zoom` names a larger render, else the shown image is asked for
-// at full width (so the cloud-on-image toggle zooms whatever it is showing).
-// A picture with `data-grid` is one of the 128x128 height-map grids, and its
-// zoom is a probe: hover reads the cell under the pointer, a click pins it
-// (a click on the pinned cell lets it go), arrow keys walk the pin. The camera
-// image instead magnifies further in the dialog: wheel, drag, double click.
+// Click-to-zoom dialog for `.zoomable` pictures. `data-zoom` names a larger
+// render; `data-grid` makes it a cell probe (hover reads, click pins, arrows
+// walk). The camera photo magnifies instead: wheel, drag, double click.
 (() => {
   const dlg = document.getElementById("zoom");
   if (!dlg) return;
@@ -19,9 +15,7 @@
   let grid = null;
   let pinned = null;
 
-  // Two decimals, padded to a fixed width (the readout is monospace and keeps
-  // its spaces): a line that changes length as the pointer moves reflows the
-  // dialog, and the picture shakes.
+  // Fixed width, so the readout doesn't reflow the dialog as the pointer moves.
   const fixed = (v, width) => v.toFixed(2).padStart(width);
   const side = (v, pos, neg) => `${fixed(Math.abs(v), 5)} m ${v >= 0 ? pos : neg}`;
   const num = (v) => (v == null ? "no value" : fixed(v, 5));
@@ -97,9 +91,7 @@
     cell.classList.add("pinned");
     show(...pinned);
   });
-  // The camera image (and only it) magnifies: the wheel zooms toward the
-  // pointer, a drag pans, a double click or "0" goes back to the whole frame.
-  // The grids stay 1:1 -- a click there is the probe's, and a cell is already big.
+  // Photo magnification (grids stay 1:1: a click there is the probe's).
   const stage = dlg.querySelector(".zoomstage");
   const MAX_ZOOM = 8;
   let photo = false;
@@ -148,31 +140,23 @@
     e.preventDefault();
   });
 
-  // The cloud toggle, mirrored in the dialog. On the frame page it presses the
-  // page's own button (so the choice is shared and remembered) and swaps the
-  // zoomed picture to match, leaving the magnification where it was. Where
-  // there is no page button -- the 3D view's camera tile -- the dialog keeps
-  // the choice itself, for as long as the page is open, and the picture names
-  // its projected twin in data-cloud. Off on every page load, like the page's.
+  // Cloud toggle: on the frame page it presses the page's own button; on the
+  // 3D view (no page button) the dialog keeps the choice and uses data-cloud.
   const zoomCloud = document.getElementById("zoomcloud");
   const pageCloud = document.getElementById("cloudtoggle");
   const bigframe = document.getElementById("bigframe");
-  // The photo at full width: the frame page's carries a w= to raise, the 3D
-  // view's tile asks for the endpoint's 640 px default and gets one added.
+  // The photo at full width: raise or add w=.
   const fullSize = (url) =>
     /[?&]w=\d+/.test(url) ? url.replace(/([?&]w=)\d+/, "$11920") : `${url}${url.includes("?") ? "&" : "?"}w=1920`;
   let ownCloud = false;
   const cloudOn = () => (pageCloud ? pageCloud.getAttribute("aria-pressed") === "true" : ownCloud);
   let current = null;
-  // The photo, plain or with the cloud on it and its depth legend over the
-  // stage's corner (depthlegend.js) -- outside the picture, so it stays put
-  // while the picture magnifies and pans. A newer request wins over a slower one.
+  // Plain or cloud photo plus depth legend (depthlegend.js); newest request wins.
   const legend = dlg.querySelector(".depthlegend");
   const plainOf = (src) => fullSize(src.dataset.plain ?? src.src);
   const cloudOf = (src) => (pageCloud ? fullSize(pageCloud.dataset.cloud) : src.dataset.cloud);
   let photoTurn = 0;
-  // Resolves once the picture set has loaded (or failed), so following
-  // playback can wait for one before asking for the next.
+  // Resolves once the picture has loaded or failed.
   const loaded = () => new Promise((resolve) => {
     img.addEventListener("load", resolve, { once: true });
     img.addEventListener("error", resolve, { once: true });
@@ -210,15 +194,13 @@
     showPhoto(current);
   });
 
-  // Keys pressed in the dialog are its own: over the 3D view, SimView's
-  // shortcuts (arrows, A, C, space...) listen on the window behind it.
+  // Keep dialog keys from SimView's window-level shortcuts.
   dlg.addEventListener("keydown", (e) => { if (e.key !== "Escape") e.stopPropagation(); });
 
   // A click on the backdrop (the dialog box itself, outside its content) closes it.
   dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
 
-  // What the dialog is showing for its picture, as the URLs it came from: on
-  // the 3D view a tile moves on with playback, and the dialog follows it.
+  // Identity of what's shown, to detect when a followed tile has moved on.
   const keyOf = (src) =>
     src.dataset.zoom ? `${src.dataset.zoom}|${src.dataset.grid ?? ""}` : `${plainOf(src)}|${cloudOn() ? cloudOf(src) ?? "" : ""}`;
   let shownKey = null;
@@ -236,9 +218,8 @@
     pinned ? show(...pinned) : idle();
   };
 
-  // Follow the picture the dialog was opened from as it changes (3D playback),
-  // keeping the magnification and the pinned cell. One frame at a time: a
-  // frame that arrives while one is loading is skipped for the newest.
+  // Follow the source picture through 3D playback, one frame at a time,
+  // skipping to the newest; magnification and pin are kept.
   let following = false;
   let followAgain = false;
   const follow = async () => {
@@ -303,8 +284,7 @@
 
   for (const el of document.querySelectorAll(".zoomable")) {
     el.addEventListener("click", () => open(el));
-    // A new picture in the element the dialog came from: show it there too.
-    // On the frame page nothing it is keyed on changes, so this does nothing.
+    // A new picture in the source element: follow it.
     el.addEventListener("load", () => { if (el === current) follow(); });
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(el); }

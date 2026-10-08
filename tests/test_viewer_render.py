@@ -1,9 +1,4 @@
-"""Viewer: colour maps and the per-frame tiles (dataset_tools.viewer.render).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: colour maps and the per-frame tiles (dataset_tools.viewer.render)."""
 
 from __future__ import annotations
 

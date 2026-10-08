@@ -1,9 +1,4 @@
-"""Viewer: every route, end to end over HTTP (dataset_tools.viewer.app).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer routes end to end over HTTP on synthetic roots; skips without the viewer extra."""
 
 from __future__ import annotations
 
@@ -138,9 +133,8 @@ def test_viewer_page_wires_the_static_base_and_defers_simview(client):
 
 
 def test_the_viewer_page_pages_between_a_scene_s_windows(client):
-    """The panel's < / > next to the title: a link to the neighbouring window,
-    a dead end at either end of the scene, and the build options carried over
-    so paging keeps the view you set up."""
+    """The panel's < / > link neighbouring windows, dead-end at the scene ends,
+    and carry the build options over."""
     first = client.get("/view/0000/seg000").text
     assert '/view/0000/seg001"' in first
     assert 'aria-disabled="true"' in first  # nothing before the first window
@@ -300,11 +294,7 @@ def test_a_single_frame_view_page_opens(client):
 
 
 def test_the_tile_robot_is_helhest_drawn_to_scale():
-    """The BEV tiles carry a top-down robot, not an anonymous dot.
-
-    Checked geometrically rather than by eye: the drawn footprint has to be
-    the real one, so it can be used as a ruler for the map around it.
-    """
+    """The BEV tiles draw the robot's real footprint, so it works as a ruler."""
     pytest.importorskip("PIL")
     import io
 
@@ -322,17 +312,14 @@ def test_the_tile_robot_is_helhest_drawn_to_scale():
     rows, cols = np.nonzero(marked)
     assert marked.any(), "nothing was drawn on the tile"
 
-    # Extent: the chassis box runs x = -0.5 .. +0.2, the rear wheel reaches
-    # back to x = -1.057 and the heading wedge sticks 0.3 m past the nose; the
-    # front tyres span y = +-0.431.
+    # Chassis x = -0.5..+0.2, rear wheel to -1.057, wedge 0.3 m past the nose;
+    # front tyres y = +-0.431.
     height_m = (rows.max() - rows.min() + 1) / px_per_m
     width_m = (cols.max() - cols.min() + 1) / px_per_m
     assert 1.45 < height_m < 1.7, height_m  # -1.057 .. +0.5 forward
     assert 0.75 < width_m < 1.0, width_m  # +-0.431 across the wheels
 
-    # The tile's centre is base_link, which is the FRONT AXLE: the front hubs
-    # sit on the middle row, so most of the robot is drawn behind it, and the
-    # ink is symmetric left-right.
+    # Tile centre is base_link (front axle): most ink is behind it, symmetric left-right.
     front_m = (img.height / 2 - rows.min()) / px_per_m
     rear_m = (rows.max() + 1 - img.height / 2) / px_per_m
     assert 0.4 < front_m < 0.6, front_m  # nose + wedge
@@ -352,9 +339,7 @@ def test_every_bev_tile_carries_the_same_robot():
 
     from PIL import Image
 
-    # The silhouette's outline is the only near-white ink on any of these
-    # tiles (turbo's low end, the validity green, and the cloud's black
-    # background with its grey range rings are all far from white).
+    # The silhouette outline is the only near-white ink on these tiles.
     tiles = {
         128 * loaders.HM_RES: render.render_height_map(np.zeros((128, 128))),
         128 * loaders.HM_RES + 1e-9: render.render_validity(np.full((128, 128), 2)),
@@ -374,10 +359,7 @@ def test_every_bev_tile_carries_the_same_robot():
 
 
 def test_the_robot_model_is_drifts():
-    """base_link is HELHEST's front axle: the front hubs sit on the origin and
-    the box must not reach ahead of the sensors (x <= +0.2). A stale copy once
-    drew the axle at +0.4 and the chassis to +0.5, which put the lidar in the
-    middle of the robot."""
+    """base_link is the front axle: hubs on the origin, chassis not past x = +0.2."""
     pytest.importorskip("torch")
     from dataset_tools.viewer import build
 
@@ -470,14 +452,7 @@ def test_the_viewer_page_installs_the_simview_patches(client):
 
 
 def test_the_initial_frame_is_opened_through_simviews_own_seek(client):
-    """Assigning `currentTime` does not move the scene.
-
-    Nothing in SimView reads that field until playback advances it, so a window
-    opened from a frame's page drew the window's *first* frame and only jumped
-    to the requested one once play was pressed. `goToTime` is what every one of
-    SimView's own seek affordances calls: it moves `currentStateIndex` with the
-    clock, redraws the scene and refreshes the playback bar.
-    """
+    """Seeking uses `goToTime`; assigning `currentTime` alone doesn't redraw until play."""
     body = client.get("/viewer-static/overlay.js").text
     assert "app.animationController.goToTime(seekTo);" in body
     # The old write is what the bug was; it must not come back.
@@ -485,9 +460,7 @@ def test_the_initial_frame_is_opened_through_simviews_own_seek(client):
 
 
 def test_the_view_opens_with_the_robot_in_shot(client):
-    """SimView's camera is fixed at the world origin, which is not where every
-    window starts the robot -- a later part of a split segment carries on from
-    the previous part, and `?frame=N` seeks into the middle of a traverse."""
+    """The camera follows the robot's start, which isn't always the world origin."""
     body = client.get("/viewer-static/simview_patch.js").text
     assert 'ROBOT_BODY = "robot"' in body
     overlay = client.get("/viewer-static/overlay.js").text
@@ -533,10 +506,8 @@ def test_a_single_frame_drops_the_playback_bar_and_analysis():
 
 
 def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
-    """It is already in the world frame, so a per-frame identity transform is
-    a blob that says nothing -- and is what would keep it in SimView's Body
-    states, Track Body and terrain-profile lists, which since simview 5.1 take
-    only bodies with a pose (`Body.hasPose`)."""
+    """It is already in the world frame, so it carries no pose and stays out of
+    SimView's per-body lists (`Body.hasPose`)."""
     opts = "40-160000-80-500000-0.1-height"
     client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
     model = client.get(f"/api/data/0000/seg000/{opts}/x/model.json").json()
@@ -566,9 +537,7 @@ def test_the_frame_page_reads_the_segment_tag_out_in_words(client):
 
 
 def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
-    """Not `index // 100`: a scene with a sparse per-frame directory pages
-    through the frames that exist, so a frame's page is its position in that
-    list, not its own number."""
+    """A frame's page is its position among existing frames, not `index // 100`."""
     pytest.importorskip("fastapi")
 
     from dataset_tools.viewer.app import FRAMES_PER_PAGE
@@ -616,9 +585,7 @@ def test_probing_a_root_writes_its_cache_once_not_once_per_scene(tmp_path):
 
 
 def test_the_bundle_stamp_covers_every_module_that_shapes_a_bundle(client):
-    """The stamp is what makes a browser-cached bundle unaddressable after a
-    code change, so it has to cover windowing and pose interpolation too --
-    not only the three modules that write the files out."""
+    """The code stamp invalidates cached bundles, so it covers windowing and interpolation too."""
     import inspect
 
     from dataset_tools.viewer import app as appmod
@@ -652,9 +619,7 @@ def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(cli
 
 
 def test_changed_data_reaches_every_page_without_a_restart(client, tmp_path):
-    """A re-extraction in place: new frame images, a rewritten odometry file.
-    The browser's copies are revalidated against the scene's fingerprint, and
-    the built 3D window is rebuilt rather than served."""
+    """After an in-place re-extraction, cached files revalidate and the 3D window rebuilds."""
     image = client.get("/api/scene/0000/frame/0/image.jpg")
     assert image.status_code == 200 and image.headers["cache-control"] == "no-cache"
     tag = image.headers["etag"]
@@ -671,9 +636,7 @@ def test_changed_data_reaches_every_page_without_a_restart(client, tmp_path):
 
 
 def test_a_bundle_key_that_is_not_canonical_is_refused(client):
-    """The options key names a cache directory. Only the spelling
-    ``BuildOptions.cache_key`` writes is accepted: ``..`` never becomes a path,
-    and a variant spelling of the same options cannot mint a fresh build."""
+    """Only the canonical ``BuildOptions.cache_key`` spelling is accepted as a cache dir."""
     for opts in ("%2e%2e", "..", "40-160000-80-500000-0.10-height", "9999-160000-80-500000-0.1-height", "x"):
         r = client.get(f"/api/data/0000/seg000/{opts}/x/meta.json")
         assert r.status_code == 404, (opts, r.status_code)
@@ -735,11 +698,7 @@ def test_a_loopback_viewer_answers_only_to_loopback_hosts(tmp_path):
 
 
 def test_a_root_without_gps_has_no_map_anywhere(client):
-    """The promise: a scene with no gps.npy looks exactly as it always did.
-
-    Not "an empty map" and not "a map that fails to load" -- no map markup, no
-    Leaflet, no fetch. Checked on every page that can carry one.
-    """
+    """Without gps.npy no page carries map markup, Leaflet or a track fetch."""
     for path in ("/scene/0000", "/scene/0000/segment/0", "/scene/0000/frame/3"):
         page = client.get(path).text
         assert "leaflet" not in page.lower()

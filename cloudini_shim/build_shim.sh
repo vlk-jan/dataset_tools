@@ -3,19 +3,11 @@
 # cloudini-compressed point clouds (point_cloud_interfaces/CompressedPointCloud2).
 #
 # Usage: ./build_shim.sh [path-to-cloudini-checkout]
-# Requires: cmake, g++ (C++20). libzstd-dev / liblz4-dev are used if present;
-# otherwise cloudini's vendored copies are built instead, so the script works
-# on a machine without those headers.
+# Requires: cmake, g++ (C++20). System libzstd/liblz4 if present, else vendored.
 #
-# ABI FLOOR -- THE THING THAT ACTUALLY BITES. The .so records the glibc of the
-# machine that built it and will not load on anything older. A shim built in
-# a ROS 2 Jazzy (Ubuntu 24.04) container came out needing GLIBC_2.38 and loaded
-# on NEITHER an Ubuntu 22.04 workstation (2.35) NOR a cluster's RHEL 8 nodes
-# (2.28), which is silent until the first decode() and then surfaces as a bare
-# OSError from ctypes. So BUILD ON THE OLDEST MACHINE YOU NEED TO SUPPORT. The
-# committed binary was built on Ubuntu 22.04 (g++ 11.4, glibc 2.35) and needs
-# GLIBC_2.32 / GLIBCXX_3.4.30 -- fine there and newer, too new for glibc 2.28.
-# Check with:
+# BUILD ON THE OLDEST MACHINE YOU NEED TO SUPPORT: the .so won't load on an older
+# glibc (a bare ctypes OSError). The committed binary (Ubuntu 22.04) needs
+# GLIBC_2.32 / GLIBCXX_3.4.30. Check with:
 #   objdump -T libcloudini_shim.so | grep -oE "GLIBC[A-Z_]*_[0-9.]+" | sort -uV | tail
 set -euo pipefail
 
@@ -28,9 +20,7 @@ fi
 
 BUILD_DIR="$HERE/build"
 
-# Use the system zstd/lz4 when their headers are installed, otherwise let
-# cloudini vendor them. Without this the configure step succeeds and the final
-# link fails on -lzstd/-llz4, which reads like a cloudini problem and is not.
+# Without this check, a missing zstd/lz4 only fails at the final link.
 if [ -f /usr/include/zstd.h ] && [ -f /usr/include/lz4.h ]; then
     VENDORED=OFF
     SYSLIBS="-lzstd -llz4"
@@ -49,8 +39,7 @@ cmake -B "$BUILD_DIR" -S "$CLOUDINI_SRC/cloudini_lib" \
     -DBUILD_TESTING=OFF
 cmake --build "$BUILD_DIR" --target cloudini_lib -j"$(nproc)"
 
-# When vendored, the static archives land in the build tree and must be linked
-# explicitly; when not, the system -l flags cover it.
+# Vendored static archives must be linked explicitly.
 VENDORED_ARCHIVES=""
 if [ "$VENDORED" = "ON" ]; then
     VENDORED_ARCHIVES=$(find "$BUILD_DIR" \

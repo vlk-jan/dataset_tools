@@ -1,9 +1,4 @@
-"""Viewer: the map's arithmetic (dataset_tools.viewer.geo).
-
-Pure functions over the array ``gps.npy`` holds -- no files, no HTTP, no
-network -- so every distance, extent and interpolation here is checked against
-a number worked out by hand.
-"""
+"""Viewer: the map's arithmetic (dataset_tools.viewer.geo), checked against hand-worked numbers."""
 
 from __future__ import annotations
 

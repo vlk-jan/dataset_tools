@@ -23,19 +23,13 @@ STATUS_SKIPPED = "skipped"
 STATUS_EMPTY = "empty"
 STATUS_FAILED = "failed"
 
-#: Everything one extraction run writes into a scene directory. A re-extraction
-#: (``--overwrite``, or resuming a scene that never finished) removes these
-#: first, so frames of a previous run cannot outlive it and skew the counts.
+#: Everything an extraction run writes; a re-extraction removes these first.
 SCENE_OUTPUT_DIRS = ("images", "clouds")
-#: The record of what the frame clock was corrected by, and on what evidence.
 TIME_ALIGN_FILE = "time_align.txt"
-#: The record of what the pose guard threw away, and why (gnss_guard).
 GNSS_GUARD_FILE = "gnss_guard.txt"
-#: The scene's odometry checked against the rig's other pose stream (extract.pose_check).
 POSE_CHECK_FILE = "pose_check.txt"
-#: What this run was, what the bag held, and what the run made of it.
 META_FILE = "extract_meta.json"
-#: The joint order of the joint_states.npy / joint_setpoints.npy columns.
+#: Column order of joint_states.npy / joint_setpoints.npy.
 JOINT_NAMES_FILE = "joint_names.txt"
 SCENE_OUTPUT_FILES = (
     "data_ts.txt",
@@ -59,11 +53,8 @@ SCENE_OUTPUT_FILES = (
 )
 #: Written only when the odometry source is its own ground truth (``--gt``).
 GROUND_TRUTH_FILES = ("odometry.txt", "odometry_segments.txt")
-#: Built after the extraction, one file per frame index (DRIFT and friends).
-#: The extractor never writes them, so a re-extraction that changes the frame
-#: clock leaves them describing frames that no longer exist; it moves them
-#: aside instead (see ``scene._set_aside_stale``). ``regen/`` is not here: it is
-#: keyed by time, not by frame index.
+#: Per-frame products built after extraction; moved aside when the frame clock changes
+#: (``scene._set_aside_stale``). ``regen/`` is keyed by time, so it is not here.
 DERIVED_DIRS = ("height_maps", "height_masks", "proprio_labels", "driven_similarity")
 
 
@@ -155,9 +146,7 @@ def _count_images(scene_dir: Path) -> int:
 
 
 def root_image_extension(scene_dir: Path) -> str | None:
-    """What the root this scene belongs to holds already: what its manifest
-    declares, else what another of its scenes has. None for a root with no
-    images yet, which may take either format."""
+    """The root's image extension: declared, else another scene's; None if no images yet."""
     root = scene_dir.parent
     want = image_format.declared(root)
     if want is not None:
@@ -171,12 +160,7 @@ def root_image_extension(scene_dir: Path) -> str | None:
 
 
 def image_extension(payload, how: str, index: int) -> str:
-    """The extension frame ``index`` is written under.
-
-    ``camera`` keeps the camera's own bytes, so the payload has to say what it
-    is; ``png`` decodes and writes the pixels out again, as every root before
-    2026-09-29 was made.
-    """
+    """The extension frame ``index`` is written under (sniffed from the payload for ``camera``)."""
     if how == "png":
         return ".png"
     ext = image_format.sniff(payload)
@@ -245,13 +229,10 @@ def merge_scenes_csv(output_dir: Path) -> Path:
 
 
 def clear_scene_outputs(scene_dir: Path, ground_truth: bool) -> None:
-    """Remove what a previous extraction of this scene wrote.
+    """Remove only the extractor's own outputs from a previous run.
 
-    Only the extractor's own outputs go; anything else in the directory (a
-    ``regen/`` provenance folder, height maps, reviewer notes) is left alone.
-    ``odometry.txt`` and its segment table are removed only when this run will
-    write them itself: on the old rig they come from the FAST-LIO regeneration,
-    which runs *before* the extraction and has to survive it.
+    Ground-truth files go only when this run rewrites them: on the old rig they
+    come from a FAST-LIO regeneration that runs before extraction.
     """
     if not scene_dir.is_dir():
         return

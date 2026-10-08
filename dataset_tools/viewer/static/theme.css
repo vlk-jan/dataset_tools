@@ -1,13 +1,5 @@
-/* The viewer's palette: Catppuccin Latte (light) and Mocha (dark), with the
-   same single blue accent as the author's web page, so the two read as one
-   family. Light is the default; theme.js sets data-theme="dark" on <html>
-   from the saved choice or the OS preference before the page paints.
-
-   The 3D view's panel (#dt-panel, .dt-build) and its zoom (.dt-zoom) are
-   always dark: they float over SimView's renderer, which is dark whatever the
-   page around it says.
-
-   Tokens only -- every page's stylesheet imports this one. */
+/* Palette tokens: Catppuccin Latte (light, default) and Mocha (dark, set by
+   theme.js). The 3D view's panel and zoom are always dark, over SimView. */
 :root {
   color-scheme: light;
   --bg: #e6e9ef;        /* mantle */
@@ -24,14 +16,10 @@
   --warn: #fe640b;      /* peach, as the web page's warning colour */
   --caution: #df8e1d;   /* yellow */
   --bad: #d20f39;
-  /* Train/val. Deliberately not --ok/--warn/--bad: which side of a split a
-     scene is on is not a quality judgement, and a held-out scene reading as a
-     warning is exactly the wrong thing for it to say. Mauve for held out,
-     sapphire for trained on, grey for a scene in neither. */
+  /* Train/val: deliberately not status colours, a split is not a verdict. */
   --val: #8839ef;
   --train: #209fb5;
-  /* Component tokens: the groove a timeline is drawn in, the backdrop an
-     image or a matrix sits on. */
+  /* Timeline groove; image backdrop. */
   --track: #ccd0da;     /* surface0 */
   --shade: #dce0e8;     /* crust */
 }
@@ -56,9 +44,7 @@
   --track: #313244;
   --shade: #11111b;     /* crust */
 }
-/* Washes and rules derived from the hues above, so each theme gets its own
-   without a second list. Declared on every element that redefines the hues,
-   or they would be computed once from the light ones and inherited. */
+/* Derived washes, declared wherever the hues are redefined so they recompute. */
 :root, #dt-panel, .dt-build, .dt-zoom {
   --ok-soft: color-mix(in srgb, var(--ok) 18%, var(--panel));
   --train-soft: color-mix(in srgb, var(--train) 18%, var(--panel));
@@ -69,18 +55,13 @@
   --accent-line: color-mix(in srgb, var(--accent) 55%, var(--panel));
 }
 
-/* Type and spacing, shared by the pages (style.css) and the 3D panel
-   (overlay.css). */
+/* Type and spacing. */
 :root {
-  /* Type stacks. System fonts only: the viewer runs where there is no route
-     to the internet. Inter, the web page's heading face, is used for display
-     type where it is installed locally. */
+  /* System fonts only (offline use); Inter for display if installed. */
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", monospace;
-  /* Type scale. Every size on these pages and the 3D panel is one of these;
-     the two smallest are for mono labels and captions, which read larger than
-     sans at a size. */
+  /* Type scale; the two smallest are for mono labels. */
   --fs-2xs: 10.5px;
   --fs-xs: 11.5px;
   --fs-sm: 13px;
@@ -88,8 +69,7 @@
   --fs-md: 16px;
   --fs-lg: 18px;
   --fs-xl: 22px;
-  /* Spacing scale, for every margin, padding and gap of 8px and up. Smaller
-     ones are the insides of chips and buttons and stay literal. */
+  /* Spacing scale for 8px and up; smaller values stay literal. */
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;

@@ -1,9 +1,4 @@
-"""Viewer: reviewer notes (dataset_tools.viewer.notes) and their routes.
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: reviewer notes (dataset_tools.viewer.notes) and their routes."""
 
 from __future__ import annotations
 
@@ -71,9 +66,7 @@ def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
 
 
 def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path):
-    """Both ends are included, a range typed backwards still means a range, and
-    nothing is stored past the end of a scene -- a note out there would never
-    be shown by anything that reads it back."""
+    """Ranges are inclusive, reversed ranges are normalised, and clamped to the scene."""
     _, client = _notes_client(tmp_path)
 
     one = client.post("/api/scene/0000/notes", json={"frames": [5, 5], "text": "here"}).json()
@@ -93,10 +86,7 @@ def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path)
 
 
 def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path):
-    """Every field of a note is typed by hand and so is gettable wrong: a range
-    pinned a segment too early, a topic picked before the window was read. All
-    three move under one PATCH, and the note stays the one that person wrote --
-    id, author and created date do not move with them."""
+    """One PATCH edits range, topic and text; id, author and created date stay."""
     _, client = _notes_client(tmp_path)
     note = client.post(
         "/api/scene/0000/notes",
@@ -128,9 +118,7 @@ def test_an_edit_reaches_a_notes_range_and_topic_and_not_only_its_text(tmp_path)
 
 
 def test_a_note_is_marked_on_every_window_its_frames_touch():
-    """A note is an inclusive frame range and a window a half-open one; a note
-    spanning a boundary belongs to both windows, since opening either is a
-    reason to be warned."""
+    """A note spanning a window boundary belongs to both windows."""
     from dataset_tools.viewer.notes import Note
 
     note = Note(id="a", frame_start=4, frame_end=8, topic="odometry", text="bad")
@@ -154,9 +142,7 @@ def test_the_scene_page_shows_its_notes_and_which_windows_carry_them(tmp_path):
 
 
 def test_the_frame_page_shows_the_notes_whose_range_holds_the_frame(tmp_path):
-    """Both ends of a note's range are inclusive, so a note on frames 4-6 is on
-    the pages of 4, 5 and 6 -- the first one included, which an exclusive
-    overlap test against ``[index, index)`` used to leave out."""
+    """A note on frames 4-6 shows on the pages of 4, 5 and 6 (first one included)."""
     _, client = _notes_client(tmp_path)
     client.post("/api/scene/0000/notes", json={"frames": [4, 6], "topic": "camera", "text": "lens flare"})
     for index in (4, 5, 6):
@@ -166,11 +152,8 @@ def test_the_frame_page_shows_the_notes_whose_range_holds_the_frame(tmp_path):
 
 
 def test_the_scene_page_hands_its_editor_the_fields_as_stored(tmp_path):
-    """The inline editor opens on a note's own range and topic, so both are on
-    the element as stored: re-parsing them back out of the rendered label
-    ("frames 3-7") would break the first time the label read differently. The
-    topics the picker offers come from the card, so an editor can be opened on
-    a note whether or not the compose form is on the page."""
+    """The editor reads range and topic from data attributes, not the rendered label,
+    and its topic list comes from the card, compose form or not."""
     _, client = _notes_client(tmp_path)
     client.post(
         "/api/scene/0000/notes",
@@ -201,9 +184,7 @@ def test_the_overlay_range_ends_are_typeable_fields(client):
 
 
 def test_a_read_only_root_still_reads_its_notes_but_refuses_new_ones(tmp_path):
-    """The routine case: the dataset is a shared or mounted copy. Existing
-    notes still show, composing is refused with the reason, and nothing about
-    the rest of the viewer changes."""
+    """On a read-only root, notes still show and composing is refused with the reason."""
     if os.geteuid() == 0:
         pytest.skip("root ignores the write bits this test relies on")
     root_path = make_root(tmp_path, frames=12)

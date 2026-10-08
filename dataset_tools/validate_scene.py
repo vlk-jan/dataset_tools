@@ -5,21 +5,11 @@ Usage:
     helhest-validate <scene-dir> [<scene-dir> ...]
     helhest-validate <dataset-root>            # every NNNN scene below it
 
-Structural problems (missing files, frame-count mismatches, wrong dtypes or
-shapes, non-monotonic timestamps) are reported as errors and make the tool exit
-non-zero. Data-quality observations (NaNs, implausible speed, extreme tilt,
-proprioception that does not cover the frames) are warnings; ``--strict`` turns
-them into failures too. What is worth knowing but no defect (a hole in the
-frame clock, a long odometry step across one) is INFO and never fails.
-
-Every message carries a stable code (``ODO_SPEED``, ``FRAME_GAP``, ...), so a
-root can list what it is known to contain in ``validation_expect.json`` --
-``{"expected": [["0008", "TILT"], ["*", "CLOUD_EMPTY"]]}`` -- and those become
-INFO, which is what makes ``--strict`` usable as a gate. ``--json`` writes
-every message with its code, severity and time span.
-
-The older HELHEST layout is accepted too; its extra files (``trajectory.txt``,
-``T_cam_to_lidar.txt``, ``<scene>_full.npz``, ...) count as optional extras.
+Structural problems are errors (non-zero exit), data-quality findings are
+warnings (failures under ``--strict``), and notable non-defects are INFO.
+Each message has a stable code; findings listed in a root's
+``validation_expect.json`` (``{"expected": [["0008", "TILT"], ["*", "CLOUD_EMPTY"]]}``)
+are downgraded to INFO.
 """
 
 from __future__ import annotations
@@ -283,9 +273,7 @@ def _npy_rows(path: Path) -> int | None:
 
 
 def check_cloud_sizes(report: SceneReport, clouds: Sequence[Path], min_points: int = 100) -> None:
-    """Every cloud's point count, from its header: the sampled full loads cannot
-    find the one empty frame in twenty thousand, and a consumer that crops or
-    voxelises has to."""
+    """Every cloud's point count, read from headers only (sampling misses the odd empty frame)."""
     rows = [_npy_rows(p) for p in clouds]
     bad = [p.name for p, n in zip(clouds, rows, strict=True) if n is None]
     if bad:
@@ -306,8 +294,7 @@ def check_cloud_sizes(report: SceneReport, clouds: Sequence[Path], min_points: i
 
 
 def check_frame_gaps(report: SceneReport, data_ts: np.ndarray, max_gap: float = 1.0) -> None:
-    """Holes in the frame clock: no defect -- a sensor went quiet, or the guard
-    took the frames -- but where they are is what explains everything else."""
+    """Holes in the frame clock (INFO: a sensor went quiet, or the guard dropped frames)."""
     if data_ts.size < 2:
         return
     dt = np.diff(data_ts)
@@ -326,11 +313,9 @@ PROPRIO = (("joint_states.npy", WARNING), ("joint_setpoints.npy", WARNING), ("cm
 def check_proprio(
     report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None, max_gap: float = 1.0, max_short: float = 2.0
 ) -> None:
-    """The time-stamped streams beside the frames: stamped on the wall clock,
-    in order, and running for as long as the frames do.
+    """Proprioception streams are wall-clock stamped, sorted, and cover the frames.
 
-    ``cmd_vel`` is published only while the autonomy stack drives, so its
-    coverage and gaps are INFO; the joint streams run whenever the robot is on.
+    ``cmd_vel`` exists only while autonomy drives, so its coverage findings are INFO.
     """
     for name, severity in PROPRIO:
         path = scene_dir / name
@@ -360,8 +345,7 @@ def check_proprio(
             continue
         f0, f1 = float(data_ts[0]), float(data_ts[-1])
         late, early = t[0] - f0, f1 - t[-1]
-        # The guard keeps frames up to a second past the pose stream, and the
-        # robot side stops with it, so a second short is the extraction's own.
+        # The guard keeps frames up to a second past the pose stream, so allow some slack.
         if late > max_short or early > max_short:
             parts = ([f"starts {late:.1f} s after the first frame"] if late > max_short else []) + (
                 [f"ends {early:.1f} s before the last"] if early > max_short else []
@@ -383,8 +367,7 @@ def check_proprio(
 
 
 def check_derived(report: SceneReport, scene_dir: Path, n_frames: int | None) -> None:
-    """Per-frame products built after the extraction name frames that exist,
-    and are not left over from an extraction with a different clock."""
+    """Derived per-frame products name existing frames and are not stale."""
     for name in DERIVED_DIRS:
         directory = scene_dir / name
         if not directory.is_dir():
@@ -411,8 +394,7 @@ def check_derived(report: SceneReport, scene_dir: Path, n_frames: int | None) ->
 
 
 def check_provenance(report: SceneReport, scene_dir: Path) -> None:
-    """What the extraction recorded about itself: the guard's cost, and the
-    frame-clock correction (absent: the clock was left as recorded)."""
+    """Stats from gnss_guard.txt and time_align.txt."""
     guard = scene_dir / "gnss_guard.txt"
     if guard.is_file():
         rows = [ln for ln in guard.read_text().splitlines() if ln.strip() and not ln.startswith("#")]
@@ -453,12 +435,8 @@ def check_odometry(
             f"transforms.npy: {n_jumps} frame-to-frame jumps > {max_jump} m " f"(max {np.max(steps):.2f} m)",
         )
 
-    # Distance alone lets a short step past that no robot could have taken: at a
-    # 16 Hz frame rate 0.9 m is 14 m/s. Divide by the interval the frames
-    # actually claim and the question becomes the one that matters -- is this
-    # motion, or is it a pose that belongs to a different moment
-    # (dataset_tools.gnss_guard). The gate is the one write_ground_truth breaks
-    # segments on, so the two agree about which steps are real.
+    # Speed, not distance, flags poses from another moment (0.9 m at 16 Hz is 14 m/s).
+    # Same gate as write_ground_truth's segment breaks.
     if ts is None or len(ts) != len(positions) or not np.isfinite(ts).all():
         return
     dt = np.diff(ts)
@@ -504,14 +482,8 @@ def check_extrinsic(report: SceneReport, path: Path) -> None:
 
 
 def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6) -> None:
-    """``odometry.txt`` and ``odometry_segments.txt`` agree with each other.
-
-    Every segment's pose count must match the poses in its span, segments may
-    not overlap, and each segment's first pose should be the identity (they
-    are re-anchored). Poses outside every segment are a warning: consumers
-    following the contract never read them, so they are dead weight rather
-    than a defect.
-    """
+    """``odometry.txt`` and ``odometry_segments.txt`` agree: counts match, no
+    overlap, each segment starts at identity; poses outside segments are a warning."""
     odometry = scene_dir / "odometry.txt"
     segments = scene_dir / "odometry_segments.txt"
     if not odometry.is_file():
@@ -571,14 +543,7 @@ def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6)
 
 
 def check_gps(report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None) -> None:
-    """``gps.npy`` is well-formed, when the scene has one.
-
-    Everything here is a warning. GPS is an optional extra: it is not part of
-    the scene contract, nothing else is computed from it, and it is not
-    frame-aligned. What is worth saying is that a file which *is* there cannot
-    be used -- too few columns, an unsorted clock, coordinates off the globe,
-    or a track that does not overlap the frames it is supposed to describe.
-    """
+    """``gps.npy`` is well-formed, if present. Warnings only: GPS is an optional extra."""
     path = scene_dir / "gps.npy"
     if not path.is_file():
         return
@@ -624,8 +589,7 @@ def validate_scene(
     report = SceneReport(path=scene_dir)
     counts: dict[str, int] = {}
 
-    # One format per scene, and the one the root declares: a scene that holds
-    # another is an error here, not a scene a consumer finds empty.
+    # One image format per scene, the root's.
     try:
         image_ext = image_format.of_scene(scene_dir)
     except image_format.ImageFormatError as exc:
@@ -679,8 +643,7 @@ def validate_scene(
     if {"data_ts.txt", "pcd_ts.txt"} <= timestamps.keys():
         data_ts, pcd_ts = timestamps["data_ts.txt"], timestamps["pcd_ts.txt"]
         if data_ts.shape == pcd_ts.shape and data_ts.size:
-            # data_ts is the midpoint of the camera and lidar stamps, so the
-            # camera/lidar offset is twice the difference to pcd_ts.
+            # data_ts is the cam/lidar midpoint, so the offset is twice the difference.
             offset = 2.0 * np.max(np.abs(data_ts - pcd_ts))
             report.stats["max_sync_offset_s"] = float(offset)
             if offset > max_sync_offset:
@@ -756,8 +719,7 @@ def validate_scene(
 # Across the scenes of a root
 # ---------------------------------------------------------------------------
 def validate_root(root: Path, reports: Sequence[SceneReport], max_extrinsic_m: float = 0.005) -> list[Message]:
-    """What no single scene can show: two scenes from one bag, a manifest that
-    no longer describes the disk, a camera mount that moved between scenes."""
+    """Cross-scene checks: duplicate bags, manifest drift, keyframe lists, camera mount consistency."""
     out: list[Message] = []
     by_bag: dict[str, list[str]] = {}
     for r in reports:
@@ -801,8 +763,7 @@ def validate_root(root: Path, reports: Sequence[SceneReport], max_extrinsic_m: f
                         )
                     )
 
-    # The keyframe lists against the manifest's hold-out: a held-out scene in
-    # the training list is the one mistake the layout used to make impossible.
+    # Keyframe lists vs the manifest's hold-out: no held-out scene in training.
     held_out: set[str] = set()
     if manifest.is_file():
         with contextlib.suppress(OSError, ValueError):
@@ -872,8 +833,7 @@ def load_expected(path: Path) -> set[tuple[str, str]]:
 
 
 def apply_expected(reports: Sequence[SceneReport], expected: set[tuple[str, str]]) -> list[Message]:
-    """Mark the listed findings expected; return INFO for entries nothing matched,
-    so an allowlist does not quietly outlive what it was written for."""
+    """Mark the listed findings expected; return INFO for entries nothing matched."""
     used: set[tuple[str, str]] = set()
     for r in reports:
         for m in r.messages:

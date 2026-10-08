@@ -1,15 +1,6 @@
-/* The GNSS map: one scene's track on an OpenStreetMap backdrop.
- *
- * Every map on a page is a `<div data-map data-src="...">`; this module fetches
- * that URL (the viewer's own `/api/scene/<id>/gps.json`, already thinned to a
- * drawable number of points) and draws it. Nothing here computes anything about
- * the track -- distances, extents and fix quality are stated by the page next
- * to the map, from the same file the server read.
- *
- * Leaflet is vendored (static/vendor/) rather than pulled from a CDN, because
- * the viewer is routinely run where there is no route to the internet. The
- * *tiles* still need one; when they do not load, the track is drawn on a plain
- * backdrop and the map says so rather than looking empty.
+/* GNSS track on an OpenStreetMap backdrop, for each `<div data-map data-src>`.
+ * Leaflet is vendored for offline use; without tiles the track is drawn on a
+ * plain backdrop and the map says so.
  */
 
 const OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -67,11 +58,9 @@ async function draw(el) {
   }
 
   const map = L.map(el, { scrollWheelZoom: false, zoomSnap: 0.5 });
-  // The box stretches with the card beside it (a file panel opening); Leaflet
-  // only notices window resizes on its own.
+  // Leaflet only notices window resizes on its own.
   new ResizeObserver(() => map.invalidateSize()).observe(el);
-  /* The page scrolls under the pointer until the map is deliberately clicked;
-     a map that grabs the wheel makes a page it is embedded in unscrollable. */
+  /* Wheel zoom only after a click, so the map doesn't trap page scrolling. */
   map.once("focus click", () => map.scrollWheelZoom.enable());
 
   let tileErrors = 0;
@@ -84,8 +73,7 @@ async function draw(el) {
   });
   tiles.addTo(map);
 
-  /* The rest of the scene, faint, so a highlighted segment is seen where in
-     the outing it happened rather than floating on its own. */
+  /* The rest of the scene, faint, for context. */
   if (context.length) {
     L.polyline(context, { className: "trackctx", interactive: false }).addTo(map);
   }
@@ -102,15 +90,13 @@ async function draw(el) {
 
   const focus = track.length ? track : context;
   if (hasExtent(data.bounds)) {
-    /* A short stretch inside a long outing is fitted less tightly: zoomed to a
-       ten-metre segment, the backdrop says nothing about where it happened. */
+    /* Fit a stretch inside a scene less tightly, so the backdrop stays useful. */
     const maxZoom = context.length ? 17 : MAX_TILE_ZOOM;
     map.fitBounds(L.latLngBounds(data.bounds), { padding: [24, 24], maxZoom });
   } else if (focus.length) {
     map.setView(data.marker || focus[0], STANDING_STILL_ZOOM);
   }
-  /* Never past what the tile server actually has: beyond its deepest zoom the
-     backdrop is blank and the track floats on nothing. */
+  /* Never past the tile server's deepest zoom. */
   if (map.getZoom() > MAX_TILE_ZOOM) map.setZoom(MAX_TILE_ZOOM);
 }
 

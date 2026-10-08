@@ -1,9 +1,4 @@
-"""Viewer: the scene index and the curated atlas (dataset_tools.viewer.index_page).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: the scene index and the curated atlas (dataset_tools.viewer.index_page)."""
 
 from __future__ import annotations
 
@@ -183,10 +178,7 @@ def test_duration_formatting_matches_the_atlas_phrasing():
 
 
 def test_the_atlas_cannot_add_filled_segments_the_live_file_does_not_have(tmp_path):
-    """The segment file is the truth. "No filled segments" is an answer, not a
-    hole to fall through to the atlas with -- a scene re-filtered since the
-    atlas was written used to keep claiming amber v1.1 stretches, on the index
-    card, on the scene timeline and in the card's prose."""
+    """The segment file beats a stale atlas, even when it lists no filled segments."""
     root_path = make_root(tmp_path)
     write_atlas(root_path)
     atlas_file = root_path / "atlas" / "atlas.json"
@@ -275,10 +267,7 @@ VALIDATION_CSV = (
 
 
 def test_the_validation_report_marks_each_scene_it_names(tmp_path):
-    """validation.csv at the root gives every scene it names a chip and the
-    scene page a card; a scene it does not name, and a root without the file,
-    get nothing. The file carries counts, so the card says the messages are
-    not in it."""
+    """validation.csv gives named scenes a chip and a card; others get nothing."""
     from dataset_tools.viewer.build import SceneAccess
     from dataset_tools.viewer.scene_page import build_scene_page
 

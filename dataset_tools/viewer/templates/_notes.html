@@ -1,13 +1,6 @@
-{# The reviewer-notes card, shared by the scene, segment and frame pages.
-
-   Always rendered, even when there are none and even when they cannot be
-   written: "nothing noted yet" and "this root is read-only" are both worth
-   knowing, and a card that disappears says neither.
-
-   `notes` is the list to show (the segment page passes only the notes touching
-   its own frames), `notes_scope` names what that list is about, and
-   `note_range` pre-fills the compose form -- a note written from a segment
-   page starts out pinned to that segment's frames. #}
+{# Reviewer-notes card (scene, segment, frame pages), always rendered.
+   `notes` to show, `notes_scope` what they're about, `note_range` pre-fills
+   the compose form. #}
 {% set scope = notes_scope | default("scene") %}
   <div class="card notes" id="notes"
        data-scene="{{ scene_id }}"
@@ -31,9 +24,7 @@
     {% if notes %}
     <ul class="notelist">
       {% for n in notes %}
-      {# The stored values, not the rendered ones: the inline editor opens on
-         them, and re-parsing "frames 3-7" out of the label to get them back
-         would break the first time the label reads differently. #}
+      {# Stored values for the inline editor, not the rendered label. #}
       <li data-note-id="{{ n.id }}" data-frame-start="{{ n.frame_start }}"
           data-frame-end="{{ n.frame_end }}" data-topic="{{ n.topic }}" data-verdict="{{ n.verdict }}">
         <div class="notehead">
@@ -65,8 +56,7 @@
     {% if notes_status.writable %}
     <form class="noteform" id="noteform">
       <div class="noterow">
-        {# Pre-filled from the segment a note is being written on; empty on the
-           scene page, where there is no range to assume. #}
+        {# Pre-filled on a segment page; empty on the scene page. #}
         <label>frames
           <input type="number" name="frame_start" min="0" max="{{ probe.n_frames - 1 }}"
                  inputmode="numeric" required

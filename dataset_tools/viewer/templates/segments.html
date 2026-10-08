@@ -6,8 +6,7 @@
   <span class="muted">{{ rows | length }} window{{ "s" if rows | length != 1 }} of ground truth across {{ n_scenes }} scene{{ "s" if n_scenes != 1 }}</span>
 {% endblock %}
 {% block main %}
-  {# A plain GET form, so the choice stays in the address and a reload or a
-     shared link shows the same table; the button is for a browser without script. #}
+  {# A plain GET form, so the choice is in the URL; the button is the no-JS fallback. #}
   <form class="tablemenu" method="get" action="/segments">
     {% if splits %}
     <label>Filter

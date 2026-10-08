@@ -1,8 +1,5 @@
-// Light/dark theme. Loaded as a plain blocking script in <head>, so the saved
-// or OS theme is on <html> before the first paint -- a deferred module would
-// flash the light page at every dark-mode reader on every navigation. Same
-// contract as the author's web page: localStorage "theme" is "light"/"dark",
-// absent means follow the OS.
+// Light/dark theme. A blocking script in <head>, so it applies before first
+// paint. localStorage "theme" is "light"/"dark"; absent follows the OS.
 (() => {
   const svg = (body) =>
     `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;

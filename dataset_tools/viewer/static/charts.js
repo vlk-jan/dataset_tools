@@ -1,12 +1,5 @@
-/* The signal charts' crosshair, readout and click.
- *
- * Every chart in a [data-signals] card is drawn over the same columns of the
- * same time span, so one pointer position is one instant in all of them: the
- * cursor line moves in every chart at once, each chart reads its own values at
- * that column into its header, and the card's header says the time and the
- * frame. A click opens that frame's page. The lines themselves are server-
- * rendered SVG; without this file they are still all there.
- */
+/* Shared crosshair, readout and click-to-frame for a [data-signals] card's
+ * server-rendered charts, which all share one time axis. */
 
 function fmtTime(s) {
   if (s < 60) return `${s.toFixed(1)} s`;
@@ -30,8 +23,7 @@ function wire(card) {
   const bins = charts[0].data.series[0].v.length;
   const frames = card.dataset.frames ? JSON.parse(card.dataset.frames) : null;
   const duration = Number(card.dataset.duration);
-  // Where the charts' left edge sits in the recording (s): 0 unless they cover
-  // only part of it, as on a frame page, which reads times from the scene start.
+  // Time (s) of the charts' left edge, nonzero on a frame page.
   const offset = Number(card.dataset.offset ?? 0);
   const time = card.querySelector("[data-sigtime]");
   const idle = time.textContent;

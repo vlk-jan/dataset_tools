@@ -1,30 +1,12 @@
 """Holes in a ground-truth pose stream, judged by what the wheels did meanwhile.
 
-The post-hoc /odom filter (``scripts/filter_segments.py``) scores 2 s windows of
-poses against the live odometry. A *hole* -- FAST-LIO publishing nothing for
-seconds to minutes while the robot keeps driving -- has no window to score: the
-only pose pair that spans it is skipped because the window cannot be closed in
-time, so the hole survives inside one segment and every consumer that
-interpolates within a segment (the viewer, DRIFT's trajectory loader) draws a
-straight line through it. On HELHEST v1.3 that was 11 % of the GT span, with
-1.6 km of driving inside the holes (2026-09-07).
+A multi-second hole in the GT stream has no window for the /odom filter to score,
+so consumers would interpolate straight through it. Every consecutive pose pair
+inside a segment becomes a *seam* (segment cut, both sides re-anchored) when:
 
-The recorder's live detector misses the same holes for a related reason: its
-jump allowance is ``reference_speed * dt`` and grows without bound with the gap,
-and its speed test needs the mismatch to persist for a second, which a single
-gap-closing sample never does.
-
-Two rules, applied to every pair of consecutive poses inside a segment:
-
-* **wheel-distance**: the reference (live /odom, wheel-derived) travelled more
-  than ``max_err`` further across the gap than the GT pose moved. Inert on a
-  dense stream (a 0.1 s step cannot accumulate 1 m of disagreement), it bites
-  exactly on holes the robot drove through.
-* **max-gap**: the gap is longer than ``max_gap`` seconds. Even when the
-  endpoints happen to agree with the wheels, nothing between them is known.
-
-A pair failing either rule is a *seam*: the segment is cut there, and the two
-sides are re-anchored as separate segments.
+* **wheel-distance**: the wheel odometry travelled more than ``max_err`` further
+  than the GT pose moved (inert on a dense stream);
+* **max-gap**: the gap is longer than ``max_gap`` seconds.
 """
 
 from __future__ import annotations
@@ -45,12 +27,7 @@ TAG_MISMATCH = "odom_mismatch"
 
 @dataclass
 class ReferencePath:
-    """Cumulative path length of a reference trajectory, sampled on its own clock.
-
-    The live /odom is logged at ~100 Hz; differencing it at that rate turns
-    sensor jitter into path length while the robot stands still, so the
-    trajectory is sub-sampled to at least ``min_dt`` between samples first.
-    """
+    """Cumulative path length of a reference trajectory, sub-sampled to ``min_dt`` so jitter adds no length."""
 
     ts: np.ndarray
     cum: np.ndarray
@@ -153,11 +130,8 @@ def window_errors(
 ) -> list[tuple[int, int, float]]:
     """``(i, j, err)`` for every ``window``-second stretch of ``T`` the reference covers.
 
-    ``j`` is the first pose at least ``window`` after ``i`` (skipped when that is
-    over half a second late); ``err`` is the distance between the translation
-    ``T`` and ``rT`` each report across ``[t_i, t_j]``. Both reference
-    endpoints must lie within 0.2 s of the poses'. The window test of
-    ``scripts/filter_segments.py`` and the atlas's 2 s error both read this.
+    ``err`` is the distance between the relative translations of ``T`` and ``rT``
+    over ``[t_i, t_j]``; reference endpoints must be within 0.2 s of the poses.
     """
     out = []
     for i in range(len(t)):
@@ -174,8 +148,7 @@ def window_errors(
 
 
 def cut_reason(reason: str, tag: str) -> str:
-    """The tag of a run a post-processing pass cut short: the pass prefix of the
-    input's ``reason`` (``filtered`` when it has none) and why this cut."""
+    """``<pass prefix of reason, or 'filtered'>:<tag>``."""
     prefix = reason.split(":", 1)[0] if ":" in reason else "filtered"
     return f"{prefix}:{tag}"
 
@@ -190,12 +163,9 @@ def cut_segments(
 ) -> tuple[np.ndarray, np.ndarray, list[SegmentRow], dict]:
     """Split every segment into runs, drop the short ones and re-anchor the rest.
 
-    ``mark(ts, Ts)`` returns ``(seam, tags, bad)`` for one segment's poses, as
-    :func:`split_runs` takes them; ``retag(reason, cut)`` names a kept run from
-    its input segment's reason and :func:`split_runs`' third field. Returns the
-    kept poses, their segment rows, and ``span_in``/``span_out``/``poses_out``/
-    ``dropped_short``. Re-anchoring is rigid, so every relative motion inside a
-    run is what it was.
+    ``mark(ts, Ts)`` returns :func:`split_runs`' ``(seam, tags, bad)``;
+    ``retag(reason, cut)`` names a kept run. Returns the kept poses, their rows,
+    and ``span_in``/``span_out``/``poses_out``/``dropped_short`` stats.
     """
     kept_ts, kept_T, rows = [], [], []
     st = dict(span_in=0.0, span_out=0.0, poses_out=0, dropped_short=0)

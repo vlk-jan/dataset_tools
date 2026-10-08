@@ -1,29 +1,11 @@
 """Static transforms the extractor pins to a constant instead of taking from the bag.
 
-The Odin1 publishes its own lidar-to-IMU and lidar-to-camera extrinsics on
-``/tf_static``, and it does not publish a calibration: it publishes an
-estimate it keeps refining while it runs. Read straight out of the bags of the
-2026-09-14 firmware, ``imu_link -> odin1_lidar`` differs by up to 3 cm per axis
-and half a degree between boots, and inside one bag it can take half a dozen
-values in the first minutes (``26-09-28 18_03_45`` starts with roll +0.95 deg
-and ends at -0.35 deg). Two sensors in one housing have one extrinsic. Read
-from the bag, the same ground stands 3.5 cm higher in one scene than in the
-next for no physical reason, and every map, anchor and label inherits it.
-
-So the extractor puts these edges at one value for every bag (`PINS`), and
-records beside each scene what the bag itself said (`FILE`), so that a bag
-whose estimate sat unusually far from the constant can be found. The
-constants are the per-axis median of what the driver published over the 42
-bags of the 2026-09-14 firmware recorded up to 2026-09-29 (the per-bag values
-are in ``docs/odin_tf_static_2026-09-30.txt``): the driver's estimate with its
-wandering taken out, not a measurement. Between the 10th and 90th percentile
-of the bags the lidar-to-IMU translation spans 2.6, 3.0 and 3.4 cm in x, y and
-z, the pitch 0.25 deg. The mount of the
-unit on the robot, ``base_link -> odin1_base_link``, is the robot's own URDF
-and is not touched.
-
-A pin applies only to an edge the bag has. A bag without the Odin1 (the Livox
-rig) has no ``odin1_lidar`` and nothing is added.
+The Odin1 publishes a continuously refined *estimate* of its lidar-to-IMU and
+lidar-to-camera extrinsics on ``/tf_static``; it wanders by centimetres and
+tenths of a degree between and within bags, shifting the ground between scenes.
+:data:`PINS` fixes each edge at the per-axis median over 42 bags
+(``docs/odin_tf_static_2026-09-30.txt``), and :data:`FILE` records the bag's own
+value. Only edges the bag has are pinned; the URDF mount is untouched.
 """
 
 from __future__ import annotations
@@ -109,12 +91,7 @@ def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
 
 
 def apply(G: dict[str, dict[str, np.ndarray]]) -> list[Record]:
-    """Replace each pinned edge the graph has with its pin; return what the bag had.
-
-    ``G`` is from ``extract.tf_graph.build_tf_graph``: ``G[parent][child]`` holds
-    ``inv(M)`` and ``G[child][parent]`` holds ``M``, the pose of the child in
-    the parent. Both directions are replaced.
-    """
+    """Replace both directions of each pinned edge in ``G`` (``build_tf_graph``); return what the bag had."""
     records = []
     for pin in PINS:
         was = G.get(pin.child, {}).get(pin.parent)

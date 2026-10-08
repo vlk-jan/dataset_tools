@@ -1,25 +1,12 @@
 """One pose stream checked against another: ``pose_check.txt``.
 
-From HELHEST v2.3 the ground truth is the Odin1's own odometry
-(``/odin1/odometry``: 14 Hz, 6-DoF, on the lidar's clock) and the Fixposition
-GNSS/INS is the reference it is checked against -- georeferenced, absolute, and
-on GNSS time, but 10 Hz and on a receiver with its own failure modes. Neither
-is believed blindly: this module measures where the two agree and where they do
-not, per scene, so a scene whose odometry relocalised in jumps (0011 of v2.2:
-31 steps above 4 m/s carrying 48 of 80 m) is flagged rather than trusted.
+From v2.3 the ground truth is the Odin1 odometry, checked against the
+Fixposition GNSS/INS. Measured at ``base_link`` in both streams:
 
-What is measured, both streams at ``base_link``:
-
-- **jumps**: steps implying more than ``max_speed`` (the segment gate), their
-  count and the metres they carry, in each stream;
-- **displacement**: over windows of 1, 2 and 5 s, the difference between how
-  far each stream says the robot moved -- median and p90, and the scale --
-  over windows without a jump in either stream;
-- **clock**: the lag that best aligns the primary's yaw rate with the
-  reference's (positive: the primary's content is later than its stamps say,
-  on the reference's clock);
-- **tilt**: median roll and pitch difference, which says whether the primary's
-  world frame is gravity-aligned like the reference's;
+- **jumps**: steps over ``max_speed``, their count and metres carried;
+- **displacement**: |distance| disagreement over 1/2/5 s jump-free windows (median, p90, scale);
+- **clock**: the lag best aligning the yaw rates (positive: primary content later than its stamps);
+- **tilt**: median roll/pitch difference;
 - **z**: the vertical extent of each.
 """
 

@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """Survey one v2-rig bag without extracting it.
 
-What the recording carries (topics, tf_static, diagnostics), how the Odin1
-behaved (camera:lidar ratio, publish latency, self-returns, ground profile by
-range), where the robot went (path, speed, tilt, RTK share, a 1 Hz track) and
-what it saw (thumbnails). One JSON, one track array and a handful of JPEGs per
-bag, so the choice of what goes into a root can be made from ~1 MB per bag
-instead of the bag itself.
+Writes summary.json (topics, tf_static, Odin1 behaviour, motion, GNSS, clouds),
+a 1 Hz track.npy and a few thumbnails: ~1 MB per bag to choose scenes from.
 
     scripts/survey_v2_bag.py <bag_dir> <out_dir> [--thumbs 12] [--clouds 60]
 """
@@ -186,8 +182,7 @@ def main(argv=None) -> int:
         o = o[np.argsort(o[:, 0])]
         d = np.linalg.norm(np.diff(o[:, 1:4], axis=0), axis=1)
         dt = np.diff(o[:, 0])
-        # The extractor's own receiver-reset gate (gnss_guard.MAX_SPEED), so a bag
-        # surveyed here and the scene cut from it agree on what a teleport is.
+        # Same teleport gate as the extractor.
         ok = (dt > 0) & (dt < 1.0) & (d / np.maximum(dt, 1e-6) < MAX_SPEED)
         v = d[ok] / dt[ok]
         tilt = np.degrees(np.arccos(np.clip([quaternion_matrix(q)[2, 2] for q in o[:, 4:8]], -1, 1)))

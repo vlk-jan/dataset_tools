@@ -1,6 +1,4 @@
-{# Where the bytes go: one bar and a legend that carries every number, so a
-   modality too thin to see in the bar is still named. Expects `parts` from
-   index_page.disk_parts. #}
+{# Disk usage bar + legend; `parts` from index_page.disk_parts. #}
 <div class="diskbar" role="img" aria-label="disk usage by modality: {% for part in parts %}{{ part.label }} {{ part.pct }}{{ ', ' if not loop.last }}{% endfor %}">
   {% for part in parts %}<i class="dk-{{ part.key }}" style="width:{{ "%.3f"|format(part.share * 100) }}%" title="{{ part.label }}: {{ part.size }} ({{ part.pct }})"></i>{% endfor %}
 </div>

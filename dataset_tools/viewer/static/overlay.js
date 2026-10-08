@@ -1,19 +1,9 @@
 /*
- * Time-synced per-frame data panel for the SimView viewer.
- *
- * SimView renders geometry; a dataset frame also carries a camera image, a BEV
- * height map, its validity mask and a raw cloud, none of which are. This shows
- * those next to the 3D view, on the frame the playhead is at.
- *
- * It modifies SimView not at all, on its stock embedding affordances:
- *   1. `window.__simviewStaticBase` points its fetches at our bundle endpoints.
- *   2. `window.simview` is the running instance, announced by `simview:ready`;
- *      `simview:frame` says when the playhead lands on another state. Seeks go
- *      through `goToTime` (see `openInitialView`).
- *
- * The server withholds SimView's entry module until the bundle is built (see
- * `_defer_main_script`), so this file loads it once its data is there.
- * Corrections that reach into SimView's objects live in `simview_patch.js`.
+ * Time-synced per-frame data panel (camera, height map, mask, cloud) beside
+ * the SimView 3D view. Uses only SimView's embedding hooks: `__simviewStaticBase`,
+ * `window.simview`, `simview:ready` / `simview:frame`. The server withholds
+ * SimView's entry module until the bundle is built (`_defer_main_script`), so
+ * this file loads it. Patches into SimView's objects live in simview_patch.js.
  */
 
 import { ROBOT_BODY, installSimviewPatches, waitForSimView } from "./simview_patch.js";
@@ -57,8 +47,7 @@ let meta = null;
 let available = {};
 let lastFrame = -1;
 let lastUpdate = 0;
-/** The update a throttled `simview:frame` left pending, so the last frame of
- *  a burst is still shown when no further event follows it. */
+/** Pending trailing update, so the last frame of a burst is still shown. */
 let trailingUpdate = null;
 /** The handles returned by installSimviewPatches, once SimView is up. */
 let patches = null;
@@ -69,8 +58,7 @@ let attitude = null;
 const legendRows = new Map();
 let lastColorMode = null;
 
-/** Minimum ms between panel updates: playback runs far faster than the images
- *  can be fetched, and every frame is a separate HTTP request. */
+/** Minimum ms between panel updates: playback outruns the image fetches. */
 const UPDATE_INTERVAL_MS = 110;
 
 function fail(message) {
@@ -98,13 +86,8 @@ function startSimView() {
   document.body.appendChild(script);
 }
 
-// Bandwidth-adaptive per-frame tiles. Four images per frame, one request each,
-// served off contended storage: firing them every frame floods a slow link and
-// the panel lags playback until it drains ("it jumps to the current frame when
-// I pause"). At most ONE batch is in flight, and on finishing it jumps to the
-// latest wanted frame -- skipping intermediates, so the panel stays near-live
-// on a fast link and always lands on the frame you pause on. Frame numbers and
-// timestamps still update on every frame, so the readout is never behind.
+// At most one batch of tile requests in flight; when it finishes, jump to the
+// latest wanted frame. Keeps a slow link from lagging behind playback.
 let tileWantFrame = null;
 let tileShownFrame = null;
 let tileInFlight = false;
@@ -116,10 +99,7 @@ function applyTiles(frame) {
     const wrap = tile.querySelector(".dt-imgwrap");
     const img = tile.querySelector("img");
     const list = available[kind];
-    // `available` lists, per kind, exactly which frames have a file: a kind
-    // missing entirely (no height maps in this scene) has no list; one that has
-    // a list may still lack this frame (directories built in flight). Either
-    // way there is nothing to fetch -- a request would 404 per frame.
+    // No file for this frame (or kind): don't fetch, it would 404.
     if (!list || !list.has(frame)) {
       wrap.classList.add("absent");
       img.removeAttribute("src");
@@ -127,15 +107,12 @@ function applyTiles(frame) {
     }
     wrap.classList.remove("absent");
     const url = `${cfg.frameBase}/${frame}/${tile.dataset.endpoint}`;
-    // What the zoom dialog (zoom.js) opens for this tile, on this frame: a
-    // larger render for the top-down tiles, the cell probe's grid for the
-    // height-map ones; the camera image (neither) magnifies in place.
+    // What zoom.js opens for this tile: a larger render and/or the cell grid.
     const name = tile.querySelector("h3").firstChild.textContent.trim();
     img.alt = `${name} for frame ${frame}`;
     if (tile.dataset.zoomSize) img.dataset.zoom = `${url}?size=${tile.dataset.zoomSize}`;
     if (tile.dataset.probe !== undefined) img.dataset.grid = `${cfg.frameBase}/${frame}/grid.json`;
-    // The camera image with this frame's cloud projected onto it, for the
-    // dialog's "Cloud on image" -- only where the frame has a cloud.
+    // "Cloud on image" in the zoom dialog, only where the frame has a cloud.
     if (tile.dataset.cloud !== undefined) {
       if (available.clouds && available.clouds.has(frame)) img.dataset.cloud = `${cfg.frameBase}/${frame}/overlay.jpg?w=1920`;
       else delete img.dataset.cloud;
@@ -158,16 +135,14 @@ function pumpTiles() {
 }
 
 function requestTiles(frame) {
-  // A collapsed panel shows no tiles, so it fetches none; expanding it
-  // calls update(true), which asks for the frame shown then.
+  // Collapsed panel fetches nothing; expanding calls update(true).
   if (els.panel && els.panel.classList.contains("collapsed")) return;
   tileWantFrame = frame;
   pumpTiles();
 }
 
-/* The playhead's frame in the address (?frame=N), so a reload or a copied
- * link opens where the view is -- at most once a second, since browsers
- * refuse a page that rewrites its history faster than that for long. */
+/* Mirror the playhead into ?frame=N, at most once a second: browsers throttle
+ * faster history rewrites. */
 const URL_WRITE_MS = 1000;
 let lastUrlWrite = 0;
 let urlTimer = null;
@@ -230,12 +205,8 @@ function setAttitudeText(el, text, cls) {
   if (cls) el.classList.add(cls);
 }
 
-/* The window's standing verdict, from the whole window rather than a frame.
- *
- * A single frame's gap can be large for an honest reason -- a jolt the IMU
- * catches and the interpolated ground truth smooths over -- so what says
- * whether the ground truth is usable is the level it holds across the window.
- */
+/* Window-wide GT-vs-IMU verdict: a single frame's gap can be large for an
+ * honest reason (a jolt the interpolated GT smooths over). */
 function setupAttitude() {
   attitude = meta.attitude || null;
   if (!attitude || !attitude.error || attitude.error.length === 0) return;
@@ -265,21 +236,15 @@ function showAttitude(index) {
     `${attitude.gt_pitch[index].toFixed(1)}\u00b0 GT / ${attitude.imu_pitch[index].toFixed(1)}\u00b0 IMU`;
 }
 
-/* Wire the ghost toggle to SimView, once it exists. The point cloud has
- * SimView's own "Show Point Clouds" checkbox; see simview_patch.js.
- */
+/* Wire the ghost toggle to SimView, once it exists. */
 function setupViewToggles() {
   if (!patches) return;
   if (patches.hasGhost) els.ghost.addEventListener("change", () => patches.setGhostVisible(els.ghost.checked));
   els.view.hidden = !patches.hasGhost;
 }
 
-/* Render the terrain colour-mode legend from the build metadata.
- *
- * SimView's "Color Mode" dropdown lists the scene's properties by bare name and
- * explains none of them. The names are ours (build.py), so the descriptions
- * travel with them in meta.json and are shown here rather than guessed at.
- */
+/* Terrain colour-mode legend: SimView lists the modes by bare name, the
+ * descriptions come from build.py via meta.json. */
 function setupLegend() {
   const modes = (meta.build && meta.build.terrain_color_modes) || [];
   if (modes.length === 0) return;
@@ -311,15 +276,8 @@ function syncLegendHighlight() {
 
 /* -------------------------------------------------------------------- notes
  *
- * Notes are written here because here is where a bad stretch is actually
- * noticed -- scrubbing a segment and seeing the ground truth walk off the
- * terrain. The two range buttons pin either end to the frame showing now, so
- * marking "frames 1204-1388 have wrong odometry" is two clicks and a sentence.
- *
- * They are fetched from their own endpoint, never from the window bundle: a
- * bundle URL carries a content stamp and its meta.json is cached per window on
- * disk, so a note folded in there would be invisible until the next code
- * change, or would rebuild the window every time someone typed one.
+ * Fetched from their own endpoint, not the window bundle: the bundle is cached
+ * per window, so a note in it would be stale or force a rebuild.
  */
 
 /** Seek the playhead to a frame of this window, if it holds it. */
@@ -328,21 +286,12 @@ function seekToFrame(frame) {
   if (!app || !app.animationController || !meta || !meta.frames) return;
   const local = meta.frames.indexOf(frame);
   if (local < 0 || !meta.times || local >= meta.times.length) return;
-  // goToTime, not `currentTime =`: nothing reads that field until playback
-  // advances it, so an assignment leaves the view where it was (openInitialView).
+  // goToTime, not `currentTime =`, which is ignored until playback advances.
   app.animationController.goToTime(meta.times[local]);
   update(true);
 }
 
-/**
- * The range a pair of fields names, both ends inclusive.
- *
- * Read out of the fields rather than kept in a variable beside them, so a
- * number typed by hand and one pinned with `now` are the same thing. A blank
- * or unparseable field falls back to the given default -- a half-filled form
- * still means something -- and the ends are ordered, so typing them the other
- * way round is not an error.
- */
+/** Inclusive [lo, hi] from two fields; blanks fall back to defaults, ends ordered. */
 function rangeOf(fromEl, toEl, fallbackLo, fallbackHi) {
   const from = parseInt(fromEl.value, 10);
   const to = parseInt(toEl.value, 10);
@@ -368,12 +317,7 @@ function frameShowingNow() {
   return frame === undefined ? null : frame;
 }
 
-/**
- * Wire a `now` button to one end of a range.
- *
- * Pinning one end past the other means the two were meant the other way round,
- * so both are written back ordered rather than the click being refused.
- */
+/** Wire a `now` button to one end of a range; both ends are written back ordered. */
 function wireNowButton(button, field, fromEl, toEl, fallbackLo, fallbackHi) {
   button.addEventListener("click", () => {
     const frame = frameShowingNow();
@@ -401,15 +345,7 @@ function renderNotes(all) {
   for (const note of here) els.noteList.appendChild(renderNote(note));
 }
 
-/**
- * One note as it reads: its range (which seeks), its topic, its text.
- *
- * The note is a row -- what it says, then the buttons that change it in a
- * column down its right edge. Spelled `edit` and `delete` on the head they
- * took a third of a panel that is only as wide as the sidebar, and the range
- * and topic were squeezed into wrapping; two icons stacked beside the note
- * cost the text nothing.
- */
+/** One note: its range (click to seek), topic and text, tools on the right. */
 function renderNote(note) {
   const item = document.createElement("div");
   item.className = "dt-note";
@@ -432,20 +368,11 @@ function renderNote(note) {
   body.textContent = note.text;
   main.append(head, body);
   item.append(main);
-  // A read-only root shows its notes and no way to change them, the same way
-  // it shows the compose form's reason instead of the form.
   if ((cfg.notes || {}).writable) item.append(noteTools(item, note));
   return item;
 }
 
-/**
- * The edit / delete pair, stacked down the note's right edge.
- *
- * Icons, so each is one glyph wide, and coloured to say which is which without
- * being read: amber for the one that opens a form, red for the one that throws
- * the note away. Neither is only its colour -- the pen and the bin carry the
- * meaning, and both carry a title and an aria-label besides.
- */
+/** The edit / delete icon pair. */
 function noteTools(item, note) {
   const tools = document.createElement("span");
   tools.className = "dt-notetools";
@@ -473,22 +400,11 @@ function noteTools(item, note) {
 function noteToolButton(glyph, className, label) {
   const button = makeButton(glyph, `dt-notebtn ${className}`);
   button.title = label;
-  // The glyph is decoration to a screen reader, which reads the label instead.
   button.setAttribute("aria-label", label);
   return button;
 }
 
-/**
- * A note opened for editing, in place, over every field it has.
- *
- * The same shape as the compose form -- two range fields with a `now` button
- * each, a topic and the text -- because a note is corrected where and how it
- * was written: scrubbing to the frame the bad stretch really starts on and
- * pinning that end to it is the whole point of writing notes from here.
- *
- * Its own range falls back to the note's stored ends rather than the window's,
- * so clearing a field and saving leaves that end where it was.
- */
+/** In-place editor shaped like the compose form; blank ends keep the note's own. */
 function noteEditor(note) {
   const wrap = document.createElement("div");
   wrap.className = "dt-note dt-noteediting";
@@ -539,11 +455,8 @@ function noteEditor(note) {
         topic: topic.value,
         text: body,
       });
-      // Reload rather than patch this one row: a range moved off this window
-      // takes the note off the list with it, and the list is the only thing
-      // that knows whether it still belongs here. Which is also why the
-      // confirmation goes to the section's own line and not to `msg` -- the
-      // editor holding `msg` is about to be replaced, possibly by nothing.
+      // Reload the list (the note may have left this window); `msg` is about
+      // to be replaced, so confirm on the section's line.
       els.noteMsg.textContent = `saved on ${rangeText(lo, hi)}`;
       await loadNotes();
     } catch (error) {
@@ -556,9 +469,7 @@ function noteEditor(note) {
 }
 
 function rangeField(value, label) {
-  // The scene's last frame, borrowed from the compose form rather than
-  // restated: the server renders it there from the probe, and one bound that
-  // is wrong in one place only is worse than none.
+  // Upper bound borrowed from the compose form, which the server renders.
   return frameField(value, label, els.noteFrom && els.noteFrom.max);
 }
 
@@ -575,11 +486,7 @@ async function loadNotes() {
   renderNotes(data.notes || []);
 }
 
-/**
- * Wire up the notes section. The template has already rendered it as the
- * root allows (hidden, read-only with the reason, or the form); this loads the
- * list and makes the form work.
- */
+/** Load the notes list and wire the compose form, if the root allows. */
 async function setupNotes() {
   const status = cfg.notes || {};
   if (!status.enabled) return;
@@ -619,23 +526,9 @@ async function setupNotes() {
 }
 
 /**
- * Open the window where it should open: on the right frame, robot in shot.
- *
- * Both are the wrapper's to do: SimView never frames the scene it loaded.
- *
- *   1. Seek via `goToTime` when reached from a frame's page (`?frame=N`).
- *      Assigning `currentTime` instead looks equivalent and is not: nothing
- *      reads that field until playback advances it, so the view stayed on the
- *      first frame until play was pressed.
- *   2. Centre the camera on the robot with SimView's `focusBody` -- a window
- *      does not always start it at the origin, the only place the stock
- *      camera looks: a later part of a split segment carries on from the
- *      previous part, and `?frame=N` seeks into the middle of a traverse.
- *      It keeps the camera's angle and distance, and is false until the
- *      robot has a resolved position, so it is retried.
- *
- * Failure here (no such frame, SimView slow) leaves the window at its start
- * under the stock camera: normal behaviour, never an error.
+ * Seek to ?frame=N (via goToTime) and centre the camera on the robot.
+ * `focusBody` is false until the robot has a position, so it is retried.
+ * Failure just leaves the stock view.
  */
 async function openInitialView() {
   if (!meta) return;
@@ -671,24 +564,12 @@ async function openInitialView() {
   attempt();
 }
 
-/**
- * A focused field in the panel owns the keyboard.
- *
- * SimView's own shortcuts leave text fields alone since simview 6.1, but the
- * orbit camera's arrow keys are bound to `window` with no such check, so an
- * arrow pressed to move the caret in a note would also pan the view. It
- * listens in the bubble phase, so stopping the event on our own panel is
- * enough to keep it out, and the field still gets it -- the target is reached
- * first.
- */
-/** Is this node something a person types into? Shared by the two key handlers. */
+/** Is this node a form field or editable content? */
 function editable(node) {
-  // isContentEditable, not [contenteditable]: it is false for
-  // contenteditable="false" and true inside an editable host.
   return Boolean(node?.matches?.("input, textarea, select") || node?.isContentEditable);
 }
 
-/** The subset of `editable` one types text into: a space there is a space. */
+/** The subset of `editable` one types text into. */
 function typing(node) {
   return Boolean(
     node?.matches?.("textarea, input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit])") ||
@@ -696,6 +577,8 @@ function typing(node) {
   );
 }
 
+// SimView's orbit camera binds arrow keys on `window` (bubble phase), so stop
+// key events from panel fields from panning the view.
 function claimKeyboardForFields() {
   for (const type of ["keydown", "keyup", "keypress"]) {
     els.panel.addEventListener(type, (event) => {
@@ -705,16 +588,9 @@ function claimKeyboardForFields() {
 }
 
 /**
- * Space is play/pause whatever was clicked last.
- *
- * A click leaves its button, checkbox, select or <summary> focused, and the
- * browser then makes space activate that again -- the ghost toggle flipped,
- * the legend folded. Worse, lil-gui stops keydown inside SimView's own control
- * panel, so with one of its controls focused the key never reached SimView's
- * play/pause at all. So: capture phase on the document, which runs before any
- * of that; prevent the activation (on keyup too, where buttons fire), toggle
- * playback through SimView's button, drop the focus, and stop the event so
- * SimView does not toggle it back. A field one types text into keeps its space.
+ * Space is play/pause whatever has focus (except text fields). Capture phase,
+ * because a focused button would re-activate and lil-gui swallows keydown;
+ * keyup is prevented too, since buttons fire on it.
  */
 function setupSpaceIsPlay() {
   for (const type of ["keydown", "keyup"]) {
@@ -734,23 +610,13 @@ function setupSpaceIsPlay() {
   }
 }
 
-/**
- * `[` / `]` page to the previous / next window of this scene.
- *
- * The two keys are SimView's own episode shortcuts, which do nothing here --
- * a dataset scene declares no episodes -- so they are free, and they already
- * mean "the segment either side of this one" to anyone who knows SimView.
- * A key pressed while typing is left alone (the panel's fields stop their own
- * events, but this listens on the document, which a note textarea does not
- * cover), and so is one carrying a modifier, which is a browser shortcut.
- */
+/** `[` / `]` page to the previous / next window (SimView's unused episode keys). */
 function setupWindowNav() {
   document.addEventListener("keydown", (event) => {
     if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
     if (editable(event.target) || editable(document.activeElement)) return;
     const link = event.key === "[" ? els.prevWindow : event.key === "]" ? els.nextWindow : null;
-    // Absent at either end of the scene: the template renders a disabled
-    // <span> with no id rather than a link that goes nowhere.
+    // Absent at either end of the scene.
     if (!link) return;
     event.preventDefault();
     link.click();
@@ -760,25 +626,16 @@ function setupWindowNav() {
   }
 }
 
-/* The view setup carried from one window to the next by `[` / `]`.
- *
- * Paging is a full page load, so without this every jump reset the camera,
- * the tracked body, the playback speed and every toggle to SimView's defaults.
- * Play state is deliberately not carried: a new window always opens paused.
- * Saved only on a jump and read once, so an ordinary load still opens stock.
- * sessionStorage keeps it to this tab. The camera travels as its offset from
- * the orbit target: each window is its own world, so absolute coordinates
- * mean nothing in the next one, but "this far behind the robot" does.
- */
+/* View setup carried across a `[` / `]` page load, read once (sessionStorage).
+ * The camera travels as an offset from the orbit target, since each window has
+ * its own coordinates. Play state is not carried. */
 const CARRY_KEY = "dt.carriedView";
 
 function saveCarriedView() {
   const app = window.simview;
   if (!app || !app.scene) return;
   try {
-    // SimView's own view state: modes, toggles, point clouds, tracked body,
-    // colormap, speed. Minus the time (a new window starts at its start) and
-    // the absolute camera, which travels as an offset instead; the FOV stays.
+    // SimView's view state minus time and absolute camera (kept: FOV).
     const { time, camera, ...view } = app.getViewState();
     const state = {
       view: { ...view, camera: { fov: camera.fov } },
@@ -808,8 +665,7 @@ function restoreCarriedView(app) {
     /* read-once is a nicety: a stuck key only re-applies the same setup */
   }
   try {
-    // Through SimView's controls, so its panel shows what is applied; a body
-    // or colormap this window does not offer is skipped by SimView itself.
+    // Through SimView's controls, so its panel reflects what is applied.
     if (state.view) app.setViewState(state.view);
     if (Array.isArray(state.offset) && state.offset.length === 3) {
       const { camera, controls } = app.scene;
@@ -831,19 +687,15 @@ function setupPanel() {
   claimKeyboardForFields();
   setupSpaceIsPlay();
   setupWindowNav();
-  // A single tab on the panel's own edge, so it slides out with the panel and
-  // is always reachable at the middle of the window edge -- the old pair of
-  // buttons put the "show again" one under SimView's control panel.
   els.edge.addEventListener("click", () => {
     const collapsed = els.panel.classList.toggle("collapsed");
     els.edge.setAttribute("aria-expanded", String(!collapsed));
     els.edge.title = collapsed ? "Show this panel" : "Hide this panel";
-    // Lets SimView's own control panel reclaim the full width (see overlay.css).
+    // Lets SimView's control panel reclaim the width (overlay.css).
     document.body.classList.toggle("dt-collapsed", collapsed);
     if (!collapsed) update(true);
   });
-  // Broken/absent per-frame artefacts must read as "absent", not as a broken
-  // image icon: a scene legitimately has gaps in any per-frame directory.
+  // A missing per-frame file reads as "absent", not a broken image icon.
   for (const tile of els.tiles) {
     const img = tile.querySelector("img");
     const wrap = tile.querySelector(".dt-imgwrap");
@@ -865,14 +717,11 @@ async function main() {
   for (const [kind, frames] of Object.entries(meta.available || {})) {
     available[kind] = new Set(frames);
   }
-  // A tile whose directory this scene lacks entirely is dimmed rather than
-  // removed, so the panel still says what the scene does not have.
+  // A kind the scene lacks is dimmed, so the panel still says it's missing.
   for (const tile of els.tiles) {
     const kind = tile.dataset.kind;
     if (!(kind in available)) {
-      // A tile marked optional is for a product most roots never carry
-      // (DRIFT's driven-similarity maps); saying "not present" would be the
-      // panel's own noise, so it is removed instead of dimmed.
+      // Optional tiles (rarely-present products) are hidden instead.
       if (tile.dataset.optional !== undefined) {
         tile.hidden = true;
         continue;
@@ -892,32 +741,26 @@ async function main() {
   if (build.height_maps && build.height_maps.used) parts.push(`${build.height_maps.used} height maps`);
   if (build.clouds && build.clouds.used) parts.push(`${build.clouds.used} clouds / ${build.clouds.points} pts`);
   if (build.seconds) parts.push(`built in ${build.seconds}s`);
-  // What the scene does not have, as the probe saw it: the first thing to
-  // check when a view looks sparser than expected.
   if (build.missing_files && build.missing_files.length) parts.push(`absent: ${build.missing_files.join(", ")}`);
   els.buildInfo.textContent = parts.join(" · ");
 
   setupLegend();
   setupAttitude();
-  // Never fatal: the panel and the 3D view are the point of this page, and
-  // notes are a thing you can add on top of them.
+  // Never fatal.
   setupNotes().catch((error) => console.warn("notes are unavailable:", error));
 
   els.build.classList.add("done");
   // Before SimView exists: its first frame event must find the panel listening.
   window.addEventListener("simview:frame", () => update(false));
-  // The colour mode changes through SimView's own dropdown (a bubbling
-  // "change") or a view link (the hash); nothing else sets it.
-  // Read on the next frame: SimView applies either after this hears of it.
+  // Colour mode changes via SimView's dropdown or the hash; read it a frame
+  // later, after SimView has applied it.
   const syncLegendSoon = () => requestAnimationFrame(syncLegendHighlight);
   document.addEventListener("change", syncLegendSoon);
   window.addEventListener("hashchange", syncLegendSoon);
   startSimView();
   openInitialView();
 
-  // Corrections to SimView's own UI can only be applied once it has built it.
-  // A failure here must never take the panel down with it: the per-frame data
-  // is the point of this page, the patches are a better 3D view on top of it.
+  // Patches need SimView's UI built; a failure must not take the panel down.
   try {
     patches = installSimviewPatches(await waitForSimView());
     setupViewToggles();

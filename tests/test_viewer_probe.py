@@ -1,9 +1,4 @@
-"""Viewer: probing a root and its scenes (dataset_tools.viewer.probe).
-
-Every test builds a synthetic dataset root (``helpers_viewer``), so nothing
-here touches a real dataset or the network. The end-to-end HTTP tests skip
-cleanly when the viewer extra (SimView + torch) is not installed.
-"""
+"""Viewer: probing a root and its scenes (dataset_tools.viewer.probe)."""
 
 from __future__ import annotations
 
@@ -152,18 +147,13 @@ def test_a_scene_added_after_startup_is_found_without_a_restart(tmp_path):
 
 
 def test_files_added_inside_a_scene_reach_the_probe_even_across_a_restart(tmp_path):
-    """The scene directory's own mtime does not move when a file appears in
-    height_maps/ or a file is rewritten in place; the persisted probe used to
-    keep the old counts for good."""
+    """The persisted probe notices changes inside per-frame dirs, not just the scene dir."""
     from helpers_viewer import make_root
 
     root_path = make_root(tmp_path, scenes=("0000",), frames=6)
     cache = tmp_path / "cache"
     maps = root_path / "0000" / "height_maps"
-    # The kernel stamps mtimes from a coarse clock (a few ms per tick), so an
-    # unlink right after make_root wrote the directory usually leaves its
-    # mtime where it was. Backdating it first makes the unlink's own update
-    # observable -- which is the thing under test -- on every run.
+    # Backdate first: mtimes tick coarsely, so the unlink's update would often be invisible.
     os.utime(maps, ns=(0, maps.stat().st_mtime_ns - 10_000_000_000))
     before = probe.DatasetRoot(root_path, cache_dir=cache).probe("0000")
     victim = sorted(maps.iterdir())[0]

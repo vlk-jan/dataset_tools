@@ -3,18 +3,10 @@
 
     survey_gt_coverage.py <root> [--min-gap 1.0] [--min-frozen 1.0]
 
-Three tables: per-scene coverage of the frame window by odometry segments; every
-gap over ``--min-gap`` with how far the recorded ``/odom`` says the wheels moved
-through it (a gap the robot drove through is lost data, one it stood through is
-not); and every frozen run -- consecutive poses at an identical position -- with
-the same wheel distance, which is how a stuck estimator or an over-eager ZUPT
-shows up.
-
-The frozen scan runs INSIDE each segment, never across a seam. Segments are
-re-anchored at the identity, so a scan over the whole file reports the anchor
-change as a fake multi-minute freeze; that trap cost a day on v1.3.
-
-Reads only.
+Read-only. Prints per-scene coverage, every gap over ``--min-gap``, and every
+frozen run (identical consecutive positions), each with the /odom wheel distance
+through it. Frozen runs are scanned per segment: segments are re-anchored, so a
+scan across a seam would report fake freezes.
 """
 
 import argparse

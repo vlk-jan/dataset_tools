@@ -17,9 +17,7 @@
           aria-hidden="true"><path d="M2 2l8 9-8 9"/></svg></span></button>
   <div class="dt-panel-head">
     <div>
-      {# The window's own name, plus how many segments the scene has: "Segment
-         3/17" answers where in the scene this is without a trip back to the
-         scene page. Non-segment windows keep the label they were built with. #}
+      {# Window label plus the segment count ("Segment 3/17"). #}
       <div class="dt-title">Scene {{ scene_id }} &middot;
         {%- if window.kind == "segment" %} Segment {{ window.segment_index }}
           {%- if n_segments %}/{{ n_segments }}{% endif %}
@@ -35,8 +33,7 @@
         {% endif %}
       </div>
     </div>
-    {# Paging through the scene's segments without going back to the scene
-       page. An end of the scene is a disabled span, not a dead link. #}
+    {# Segment paging; a scene end is a disabled span. #}
     <nav class="dt-winnav" aria-label="segment navigation">
       {% if prev_window %}
       <a class="dt-winstep" id="dt-prev-window"
@@ -75,10 +72,8 @@
     <div class="dt-hint" id="dt-att-verdict"></div>
   </details>
 
-  {# Notes are never fatal: a root whose notes are read-only still shows them,
-     with the reason instead of the form. The range opens as the whole window:
-     the common case is "this whole segment is wrong", and either end is then
-     narrowed by hand or by `now`. #}
+  {# Read-only roots show the reason instead of the form. The range opens
+     as the whole window. #}
   <details class="dt-legend dt-notes" id="dt-notes"{% if not notes.enabled %} hidden{% endif %}>
     <summary><span class="dt-k">notes</span>
       <span class="dt-legend-now" id="dt-notes-count"></span></summary>
@@ -166,9 +161,8 @@
   </div>
 </div>
 
-{# Click a tile for a bigger copy: the frame page's zoom dialog and zoom.js,
-   unchanged. overlay.js keeps each tile's data-zoom / data-grid on the frame
-   it is showing; the height-map grids open with the cell probe. #}
+{# The frame page's zoom dialog; overlay.js keeps each tile's data-zoom /
+   data-grid on the frame shown. #}
 {% with zoom_cloud = cloud_on_image, zoom_class = "dt-zoom" %}{% include "_zoom.html" %}{% endwith %}
 <script src="/viewer-static/depthlegend.js"></script>
 <script src="/viewer-static/zoom.js" defer></script>

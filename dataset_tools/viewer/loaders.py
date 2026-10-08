@@ -1,18 +1,8 @@
 """Readers for the per-scene files an extracted dataset root carries.
 
-Every reader is defensive: a malformed or absent file yields ``None`` (or an
-empty result) rather than raising, because the viewer's whole contract is that
-it must render whatever subset of the files a scene happens to have.
-
-Geometry conventions used throughout:
-
-* Poses are ``(4, 4)`` homogeneous matrices, ``p_world = T @ p_body``.
-* Quaternions are ``[w, x, y, z]`` (scalar-first), matching SimView.
-* Per-frame BEV height maps are ``height_map[row, col]`` with ``row`` indexing
-  **x** (forward) and ``col`` indexing **y** (left) -- the layout
-  ``scipy.stats.binned_statistic_2d(points[:, 0], points[:, 1], ...)`` produces
-  in the generator these files come from. SimView's terrain wants the opposite
-  (``[row=y, col=x]``), so anything handed to it is transposed.
+Readers never raise on a malformed or absent file; they return ``None`` or empty.
+Poses are ``(4, 4)`` with ``p_world = T @ p_body``; quaternions are ``[w, x, y, z]``.
+Height maps are ``[row=x, col=y]``; SimView's terrain wants ``[row=y, col=x]``, so transpose.
 """
 
 from __future__ import annotations
@@ -31,30 +21,14 @@ logger = logging.getLogger("dataset_tools.viewer.loaders")
 
 __all__ = ["Segment"]
 
-# Per-frame BEV height map geometry. These are the values the DRIFT height-map
-# generator uses; they are re-derived per file from the array shape where
-# possible so a differently-sized map still lands in the right place.
+# Per-frame BEV height map geometry, as DRIFT's height-map generator writes it.
 HM_RES = 0.1
 HM_EXTENT = (-6.4, 6.4)
 
-# HELHEST geometry from DRIFT's robot model (simulator/utils.py,
-# helhest_robot_model, sourced from the robot URDF): base_link IS the front
-# axle -- front wheels at (0, +-0.36), the rear wheel at (-0.697, 0), radius
-# 0.334 m, hubs at z=0. The hubs and the radius are ``gt_map``'s, which the
-# wheel-contact check reads them from, so the drawn robot and the checked one
-# are one robot. Until 2026-09-25 this was a stale copy that put the front
-# axle at x=+0.4 and the chassis box out to x=+0.5, which drew the robot 0.4 m
-# ahead of where it is: the Odin1 (0.10 m ahead of the axle) landed in the
-# middle of the box and every return looked 0.4 m too close.
-#
-# The chassis box is the body the view centres on and the wheels hang off, so
-# it carries base_link's trajectory; its visual centre is pushed back by
-# CHASSIS_CENTER (a body-frame offset) so the box spans the real chassis, from
-# behind the rear-wheel fork to the sensor face just ahead of the axle
-# (tf_static: front sensors at x = +0.10..+0.17, wheel holders at -0.477).
-#
-# Kept here rather than in build so that render, which build imports, draws
-# the tile robot from the same numbers as the 3D one.
+# HELHEST geometry (DRIFT's robot model): base_link IS the front axle. Hubs and
+# radius come from ``gt_map`` so the drawn robot is the one the contact check uses.
+# The chassis box carries base_link's trajectory, its centre shifted back by
+# CHASSIS_CENTER (body frame) to span the real chassis. Shared by build and render.
 CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
 CHASSIS_CENTER = (-0.15, 0.0, 0.0)
 WHEEL_RADIUS = gt_map.WHEEL_RADIUS
@@ -76,17 +50,9 @@ VALIDITY_LABELS = {
     3: "anchored",
 }
 
-#: "How founded in lidar returns is this cell", indexed by validity code.
-#:
-#: The codes are a provenance, not a scale: state 3 (a cell decided by a
-#: wheel-contact anchor, in a root built with DRIFT's
-#: ``build_heightmaps.py --anchors``) is invention with a kinematic basis, not
-#: a better measurement, so it ranks with the extrapolation. Anything that
-#: averages or thresholds validity has to go through this first -- taking the
-#: raw code would read the anchors as the best-founded cells in the map. The
-#: lookup is the identity on the three states every published root ships, so
-#: it changes nothing for existing data. Mirrors ``utils.pcd.VALIDITY_RANK``
-#: in DRIFT, which is where the masks are written.
+#: "How founded in lidar returns is this cell", indexed by validity code. Codes are
+#: provenance, not a scale: 3 (wheel-contact anchor) ranks with extrapolation, so
+#: average/threshold through this, never the raw code. Mirrors DRIFT's ``utils.pcd.VALIDITY_RANK``.
 VALIDITY_RANK = np.array([0, 1, 2, 0], dtype=np.uint8)
 
 
@@ -96,8 +62,7 @@ VALIDITY_RANK = np.array([0, 1, 2, 0], dtype=np.uint8)
 
 
 def _unreadable(what: str, path: Path, exc: Exception) -> None:
-    """Log a failed read. A file that is simply not there is the ordinary
-    shape of an optional artefact and gets debug; anything else is a warning."""
+    """Log a failed read: debug for a missing (optional) file, warning otherwise."""
     level = logger.debug if isinstance(exc, FileNotFoundError) else logger.warning
     level("cannot %s %s: %s", what, path, exc)
 
@@ -185,10 +150,8 @@ def _scalar(text: str) -> Any:
 def read_camera_info(path: Path) -> dict[str, Any] | None:
     """The flat subset of a ROS ``camera_info.yaml``.
 
-    Hand-rolled rather than a YAML dependency: the file is machine-written by
-    the extractor and is always flat scalars plus ``data: [...]`` rows. Nested
-    blocks collapse to ``<parent>`` (the data list) and ``<parent>_rows`` /
-    ``<parent>_cols``. Anything unparseable is simply left out.
+    Hand-rolled (no YAML dependency) for the extractor's flat output. Nested
+    blocks become ``<parent>`` (the data list) and ``<parent>_rows`` / ``_cols``.
     """
     text = read_text(path, 200_000)
     if not text:
@@ -225,9 +188,7 @@ def read_camera_info(path: Path) -> dict[str, Any] | None:
 def read_gps(path: Path) -> np.ndarray | None:
     """``gps.npy`` as ``(M, >= 4)`` sorted by time, or None if it is unusable.
 
-    Rows whose latitude or longitude is not finite are dropped rather than
-    drawn: a receiver reporting no position at all is a hole in the track, and
-    a hole is not a place the robot was.
+    Rows with non-finite time/lat/lon are dropped.
     """
     arr = load_npy(path)
     if arr is None:
@@ -259,11 +220,8 @@ def read_odometry(path: Path) -> tuple[np.ndarray, np.ndarray] | None:
     return ts, poses
 
 
-# ``Segment`` is :class:`dataset_tools.gt_io.SegmentRow`: one independently
-# anchored stretch of ground truth. Poses from different segments share **no**
-# common frame -- each is re-anchored to identity at its own first pose -- so
-# nothing (trajectory, aggregated cloud, terrain) may ever be built across a
-# segment boundary.
+# Segments share no common frame (each is anchored at its own first pose), so
+# nothing may ever be built across a segment boundary.
 
 
 def read_segments(path: Path) -> list[Segment]:
@@ -317,10 +275,8 @@ def load_cloud(path: Path) -> np.ndarray | None:
 def height_map_cell_centers(shape: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
     """Local (x, y) cell-centre coordinates of a BEV height map.
 
-    ``shape`` is ``(rows, cols)`` with row -> x (forward) and col -> y (left).
-    The extent is assumed symmetric about the robot at :data:`HM_RES`
-    resolution, which is what a square map of the documented size implies; a
-    map of a different size keeps the same resolution and grows its extent.
+    ``shape`` is ``(rows, cols)`` with row -> x (forward) and col -> y (left),
+    starting at ``HM_EXTENT[0]`` with :data:`HM_RES` spacing.
     """
     rows, cols = shape
     x = HM_EXTENT[0] + HM_RES * (np.arange(rows) + 0.5)

@@ -1,11 +1,5 @@
-/* The file inventory on a scene page: an entry opens in place.
- *
- * Progressive on purpose. The server renders every panel expanded, so a page
- * with no JavaScript (or one that failed to load this module) is a readable
- * list of what each artefact is; this collapses them and turns the strip into
- * a set of toggles. One panel is open at a time -- the card sits beside the
- * map in a two-column pair, and stacking panels would push the map's height
- * around every click.
+/* File inventory: panels are server-rendered expanded (no-JS fallback); this
+ * collapses them and makes the chips toggle one open panel at a time.
  */
 
 const chips = document.getElementById("filechips");

@@ -1,11 +1,4 @@
-"""The frame-clock estimator, on scenes whose latency is known by construction.
-
-A synthetic drive past a fixed world of points: every cloud is that world seen
-from the pose the robot really held, and ``data_ts`` is then written *late* by
-a known amount, exactly as a unit that stamps at publish writes it. What
-:mod:`dataset_tools.time_align` measures has to be that amount back -- and when
-the amount changes during the drive, the curve has to change with it.
-"""
+"""The frame-clock estimator on synthetic scenes whose ``data_ts`` is stamped late by a known amount."""
 
 from __future__ import annotations
 
@@ -24,11 +17,7 @@ T0 = 1_700_000_000.0
 
 
 def _pose(t: float) -> np.ndarray:
-    """A curve driven at a speed that changes, which is what fixes the offset.
-
-    A constant velocity would not: shifting the clock would then displace every
-    cloud by the same vector, which moves the map without blurring it.
-    """
+    """A curve at varying speed; constant velocity would make the offset unobservable."""
     yaw = 0.22 * t
     dist = 0.9 * t - (0.5 / 0.55) * (np.cos(0.55 * t) - 1.0)  # 0.4 - 1.4 m/s
     T = np.eye(4)
@@ -51,13 +40,8 @@ def world() -> np.ndarray:
 
 
 def build_scene(root: Path, world: np.ndarray, latency) -> tuple[Path, np.ndarray]:
-    """A scene stamped late by ``latency`` seconds (a number, or a function of t).
-
-    The clouds are built from the true pose at ``tau``; the clock then claims
-    the frame happened at ``tau + latency``, which is what a unit stamping at
-    publish does. Reading a pose at ``data_ts - latency`` is what puts the
-    cloud back where it belongs, so the profile must come out negative.
-    """
+    """A scene stamped late by ``latency`` seconds (a number, or a function of t);
+    the recovered profile must come out negative."""
     scene = root / "0000"
     (scene / "clouds").mkdir(parents=True)
     tau = T0 + np.arange(FRAMES) / FRAME_RATE
@@ -95,12 +79,7 @@ def test_a_constant_latency_comes_back(tmp_path, world, latency):
 
 
 def test_a_latency_that_changes_is_followed(tmp_path, world):
-    """The case a single number cannot express, and the reason for a curve.
-
-    Half the drive is stamped 0.70 s late and half is not, as HELHEST v2 beta's
-    scene 0000 is. Away from the transition the curve has to sit on each value;
-    a constant fitted to this scene would be wrong by 0.35 s everywhere.
-    """
+    """Half the drive 0.70 s late, half not (v2 beta 0000): the curve follows both."""
     edge = 25.0  # seconds into the drive
 
     scene, want = build_scene(tmp_path / "step", world, lambda t: 0.70 if t < edge else 0.0)
@@ -126,13 +105,7 @@ def test_an_aligned_scene_is_left_alone(tmp_path, world):
 
 
 def test_the_estimate_does_not_scale_with_speed(tmp_path, world):
-    """What separates a latency from a spatial error.
-
-    A lidar mounted 0.5 m off would smear the map too, but the sweep would
-    trade that displacement for however many seconds of travel it takes to
-    cover it -- so its answer would grow as the drive slows. A real latency
-    does not care how fast the robot went.
-    """
+    """A real latency is recovered independent of drive speed (unlike a spatial offset)."""
     scene, _ = build_scene(tmp_path / "speeds", world, 0.50)
     data_ts = np.loadtxt(scene / "data_ts.txt")
     from dataset_tools.gt_io import read_trajectory
@@ -175,13 +148,7 @@ def test_a_backwards_clock_is_forced_into_order(tmp_path):
 
 
 def test_a_long_scene_is_measured_to_its_end(tmp_path):
-    """Thinning must span the scene, not stop partway along it.
-
-    More candidate windows than the cap allows has to mean *sparser* coverage,
-    never *shorter*: a scene whose tail is never measured inherits whatever the
-    last knot said, which is how a stretch with no latency keeps the latency of
-    the stretch before it.
-    """
+    """Thinning windows makes coverage sparser, never shorter."""
     n = 14_000
     frame_ts = T0 + np.arange(n) / FRAME_RATE
     t = np.arange(2000) / 2.0  # 1000 s of pose at 2 Hz
@@ -203,9 +170,7 @@ def test_a_long_scene_is_measured_to_its_end(tmp_path):
 
 
 def test_a_small_but_consistent_offset_is_a_measurement_not_noise():
-    """Scene 0011 of v2.2: four windows at +0.040..+0.048 s with modest gain
-    were once read as 'already aligned'. Knots scattered about zero are noise;
-    knots all on one side are an offset, however small."""
+    """Small knots all on one side are an offset, not 'already aligned' (v2.2 0011)."""
     from dataset_tools.time_align import ZERO_TOL, already_aligned
 
     weak = [{"gain": 9.0}, {"gain": 12.0}, {"gain": 10.0}, {"gain": 6.0}]
