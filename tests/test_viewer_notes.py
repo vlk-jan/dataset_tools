@@ -334,8 +334,7 @@ def test_the_notes_page_lists_every_note_in_the_root_by_topic(tmp_path):
 
     only = client.get("/notes?topic=camera")
     assert only.text.count("<li>") == 1 and "dropped out" in only.text
-    data = client.get("/api/notes?topic=camera").json()
-    assert data["n_notes"] == 1 and data["groups"][0]["notes"][0]["view_url"] == "/view/0001/seg000?frame=5"
+    assert 'href="/view/0001/seg000?frame=5"' in only.text
     assert 'href="/notes"' in client.get("/").text
     assert 'href="/notes"' in client.get("/scene/0000").text
 
@@ -344,7 +343,6 @@ def test_the_notes_page_says_so_when_notes_are_off(tmp_path):
     _, client = _notes_client(tmp_path, notes=False)
     page = client.get("/notes")
     assert page.status_code == 200 and "Notes are off" in page.text
-    assert client.get("/api/notes").json()["n_notes"] == 0
     assert 'href="/notes"' not in client.get("/").text
 
 

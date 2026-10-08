@@ -22,6 +22,7 @@ import numpy as np
 from .. import image_format
 from .loaders import count_lines, read_segments, read_text
 from .splits import DECLARED_FILES, NO_SPLITS, SceneSplits, read_splits
+from .windows import span_fractions
 
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
@@ -369,8 +370,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
     if segments and probe.start_ts is not None and probe.duration and probe.duration > 0:
         base, span = probe.start_ts, probe.duration
         for seg in segments:
-            lo = min(1.0, max(0.0, (seg.start_ts - base) / span))
-            hi = min(1.0, max(0.0, (seg.end_ts - base) / span))
+            lo, hi = span_fractions(seg, base, span)
             if hi <= lo:
                 continue
             pair = [round(lo, 5), round(hi, 5)]
@@ -609,7 +609,7 @@ class DatasetRoot:
 
     # -- probing -----------------------------------------------------------
 
-    def probe(self, scene_id: str, refresh: bool = False, persist: bool = True) -> SceneProbe:
+    def probe(self, scene_id: str, persist: bool = True) -> SceneProbe:
         """Probe one scene, reusing the on-disk cache while its fingerprint holds.
 
         ``persist=False`` records the result without writing the cache file;
@@ -617,7 +617,7 @@ class DatasetRoot:
         """
         scene_dir = self.scene_dir(scene_id)
         cached = self._probe_cache.get(scene_id)
-        if cached is not None and not refresh and cached.fingerprint:
+        if cached is not None and cached.fingerprint:
             try:
                 if scene_fingerprint(scene_dir) == cached.fingerprint:
                     return cached
@@ -684,6 +684,8 @@ class DatasetRoot:
 #: only these, since ``--cache-dir`` can point anywhere.
 PROBE_CACHE_NAME = "probe_cache.json"
 BUNDLE_DIR_NAME = "bundles"
+#: Default ceiling on the built 3D windows kept under ``BUNDLE_DIR_NAME``.
+DEFAULT_CACHE_MAX_GB = 5.0
 
 
 def clear_cache_dir(cache_dir: Path) -> tuple[int, int]:

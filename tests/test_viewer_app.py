@@ -578,7 +578,8 @@ def test_probing_a_root_writes_its_cache_once_not_once_per_scene(tmp_path):
         assert len(writes) == 1
         root.probe_all()  # everything cached and unchanged: nothing to write
         assert len(writes) == 1
-        root.probe("0000", refresh=True)  # a fresh probe still gets persisted
+        root._probe_cache.clear()
+        root.probe("0000")  # a fresh probe still gets persisted
         assert len(writes) == 2
     finally:
         probe.DatasetRoot.save_probe_cache = original
@@ -590,9 +591,8 @@ def test_the_bundle_stamp_covers_every_module_that_shapes_a_bundle(client):
 
     from dataset_tools.viewer import app as appmod
 
-    source = inspect.getsource(appmod.create_app)
-    for module in ("build.py", "wire.py", "app.py", "windows.py", "loaders.py", "render.py"):
-        assert f'"{module}"' in source, module
+    assert "stamp = _static_fingerprint(HERE)" in inspect.getsource(appmod.create_app)
+    assert appmod.HERE.name == "viewer" and (appmod.HERE / "windows.py").is_file()
 
 
 def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(client, tmp_path):
@@ -607,15 +607,15 @@ def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(cli
     window = windows.Window("seg000", "segment", "", stored["frame_start"], stored["frame_end"], "odometry")
     data = json.loads(meta.read_text())["build"]["data"]
     assert data
-    assert _bundle_is_current(meta.parent, window, data)
-    assert not _bundle_is_current(meta.parent, window, "another scene state")
-    assert not _bundle_is_current(meta.parent, None, data)
-    assert not _bundle_is_current(tmp_path / "nowhere", window, data)
+    assert _bundle_is_current(meta.parent, window, data, {})
+    assert not _bundle_is_current(meta.parent, window, "another scene state", {})
+    assert not _bundle_is_current(meta.parent, None, data, {})
+    assert not _bundle_is_current(tmp_path / "nowhere", window, data, {})
 
     stale = json.loads(meta.read_text())
     stale["meta_version"] = 0
     meta.write_text(json.dumps(stale))
-    assert not _bundle_is_current(meta.parent, window, data)
+    assert not _bundle_is_current(meta.parent, window, data, {})
 
 
 def test_changed_data_reaches_every_page_without_a_restart(client, tmp_path):

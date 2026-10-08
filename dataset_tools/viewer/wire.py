@@ -74,6 +74,8 @@ def render_viewer_page(
 
     Read from the installed package at request time so it always matches that
     SimView version; adds ``__simviewStaticBase`` (before the module script) and our markup.
+    SimView's ``main.js`` tag becomes ``window.__dtSimviewEntry``, its URL, for the
+    overlay to insert once the bundle is built (it fetches data as soon as it runs).
     """
     from importlib.resources import files
 
@@ -88,4 +90,12 @@ def render_viewer_page(
     injection = f'<script>window.__simviewStaticBase = "{data_base.rstrip("/")}";</script>\n' f"{head_html}\n</head>"
     page = page.replace("</head>", injection, 1)
     page = page.replace("</body>", f"{body_html}\n</body>", 1)
+    page, found = re.subn(
+        r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>',
+        lambda m: f'<script>window.__dtSimviewEntry = "{m.group(1)}";</script>',
+        page,
+        count=1,
+    )
+    if not found:
+        logger.warning("could not find simview's main.js script tag; loading it inline")
     return page

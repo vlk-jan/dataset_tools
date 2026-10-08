@@ -10,7 +10,7 @@ from collections import Counter
 from typing import Any
 from urllib.parse import urlencode
 
-from .probe import DatasetRoot, SceneProbe
+from .probe import COUNTED_DIRS, DatasetRoot, SceneProbe
 from .splits import SPLIT_NAMES, SPLIT_ORDER, SPLIT_TITLES, split_warning
 
 #: Thumbnail slots and their fallback position in a scene when the atlas names no frame.
@@ -22,7 +22,7 @@ COVERAGE_HIGH = 0.85
 COVERAGE_MID = 0.5
 
 #: Modalities with their own disk-bar colour (style.css ``.dk-*``); the rest are "other".
-DISK_MODALITIES: tuple[str, ...] = ("images", "clouds", "height_maps", "height_masks", "driven_similarity", "other")
+DISK_MODALITIES: tuple[str, ...] = (*COUNTED_DIRS, "other")
 
 
 def band(value: float | None, high: float, mid: float) -> str:
@@ -193,19 +193,27 @@ def thumb_index(atlas_entry: dict, slot: str, n_frames: int) -> int:
     return min(max(0, index), max(0, n_frames - 1))
 
 
-def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[str, str]]:
-    """Three thumbnail URLs for a scene, stored ones preferred.
+def shown_slots(probe: SceneProbe, atlas_entry: dict) -> list[str]:
+    """The thumbnail slots a scene shows: the curated ones, else all three when it has images."""
+    return thumb_slots(atlas_entry) or (list(THUMB_SLOTS) if probe.has("images") and probe.n_frames else [])
 
-    One endpoint serves the curated file or renders a live frame.
-    """
-    stored = thumb_slots(atlas_entry)
-    slots = stored or (list(THUMB_SLOTS) if probe.has("images") and probe.n_frames else [])
+
+def thumb(scene_id: str, index: int, url: str, slot: str, at: str | None = None, link: bool = True) -> dict[str, Any]:
+    """One thumbnail: the picture, the frame it opens, and its caption."""
+    return {
+        "url": url,
+        "href": f"/scene/{scene_id}/frame/{index}" if link else None,
+        "alt": f"scene {scene_id} frame {index}",
+        "label": f"{THUMB_FRACTIONS[slot] * 100:.0f}%",
+        "sub": f"frame {index}" + (f" · {at}" if at else ""),
+    }
+
+
+def _thumbs(scene_id: str, probe: SceneProbe, atlas_entry: dict) -> list[dict[str, Any]]:
+    """A scene's thumbnails; one endpoint serves the curated file or renders a live frame."""
     return [
-        {
-            "url": f"/api/scene/{scene_id}/thumb/{slot}.jpg",
-            "alt": f"scene {scene_id} frame {thumb_index(atlas_entry, slot, probe.n_frames)}",
-        }
-        for slot in slots
+        thumb(scene_id, thumb_index(atlas_entry, slot, probe.n_frames), f"/api/scene/{scene_id}/thumb/{slot}.jpg", slot)
+        for slot in shown_slots(probe, atlas_entry)
     ]
 
 

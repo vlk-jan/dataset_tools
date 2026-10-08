@@ -14,13 +14,14 @@ from dataclasses import astuple, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
 from .. import image_format
 from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat
 from . import loaders as L
 from .loaders import CHASSIS, CHASSIS_CENTER, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
-from .probe import OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
+from .probe import ARTEFACTS_BY_KEY, COUNTED_DIRS, OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
 from .render import unit_colors
 from .windows import (
     DEFAULT_MAX_FRAMES,
@@ -43,9 +44,6 @@ HM_BLEND_SIGMA = 3.0
 TERRAIN_MARGIN = 7.0
 
 WHEEL_LABELS = ("left", "rear", "right")
-
-#: File suffix of each per-frame directory (images: see `SceneAccess.frame_suffix`).
-FRAME_SUFFIX = {"clouds": ".npy", "height_maps": ".npz", "height_masks": ".npz", "driven_similarity": ".npz"}
 
 #: Threads reading a window's ~200 per-frame files: overlaps network-storage
 #: round trips (file reads release the GIL).
@@ -170,14 +168,26 @@ def budgets_for_window(opts: BuildOptions, n_frames: int) -> BuildOptions:
 
 class SceneAccess:
     """Lazily-loaded, cached handle on one scene's small per-scene files (poses,
-    timestamps, proprioception); clouds, images and height maps are read per frame."""
+    timestamps, proprioception); clouds, images and height maps are read per frame.
 
-    def __init__(self, root: DatasetRoot, scene_id: str, probe: SceneProbe | None = None) -> None:
+    ``max_frames`` and ``max_seconds`` cap the length of the windows it cuts.
+    """
+
+    def __init__(
+        self,
+        root: DatasetRoot,
+        scene_id: str,
+        probe: SceneProbe | None = None,
+        max_frames: int = DEFAULT_MAX_FRAMES,
+        max_seconds: float = DEFAULT_MAX_SECONDS,
+    ) -> None:
         self.root = root
         self.scene_id = scene_id
         self.dir = root.scene_dir(scene_id)
         # A caller that just probed passes it in; probing again re-walks the scene directory.
         self.probe: SceneProbe = probe if probe is not None else root.probe(scene_id)
+        self.max_frames = max_frames
+        self.max_seconds = max_seconds
         self._cache: dict[str, object] = {}
 
     def cached(self, key: str, fn):
@@ -239,6 +249,10 @@ class SceneAccess:
     def segments(self) -> list[L.Segment]:
         return self._optional("segments", "odometry_segments", lambda: L.read_segments(self.dir / "odometry_segments.txt")) or []  # type: ignore[return-value]
 
+    def segment(self, number: int | None) -> L.Segment | None:
+        """The segment *numbered* ``number`` in ``odometry_segments.txt`` (as window keys are), or None."""
+        return next((s for s in self.segments if s.index == number), None)
+
     @property
     def transforms(self) -> np.ndarray | None:
         return self._optional("transforms", "transforms", lambda: L.load_npy(self.dir / "transforms.npy"))  # type: ignore[return-value]
@@ -298,7 +312,7 @@ class SceneAccess:
     def frame_suffix(self, kind: str) -> str:
         """The extension of a per-frame file; images may be JPEG or (older roots) PNG."""
         if kind != "images":
-            return FRAME_SUFFIX[kind]
+            return ARTEFACTS_BY_KEY[kind].suffix
 
         def held() -> str:
             try:
@@ -323,21 +337,21 @@ class SceneAccess:
 
     # -- windows -----------------------------------------------------------
 
-    def windows(self, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS) -> list[Window]:
+    def windows(self) -> list[Window]:
         return self.cached(
-            f"windows_{max_frames}_{max_seconds}",
+            "windows",
             lambda: windows_for_scene(
                 self.frame_ts,
                 self.segments,
                 self.probe.n_frames,
                 self.probe.has("transforms"),
-                max_frames=max_frames,
-                max_seconds=max_seconds,
+                max_frames=self.max_frames,
+                max_seconds=self.max_seconds,
             ),
         )  # type: ignore[return-value]
 
-    def window(self, key: str, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS) -> Window | None:
-        for w in self.windows(max_frames, max_seconds):
+    def window(self, key: str) -> Window | None:
+        for w in self.windows():
             if w.key == key:
                 return w
         # One-frame windows are addressable but not enumerated.
@@ -431,7 +445,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         if odom is None:
             return _identity_track(n, "none", "odometry.txt could not be read")
         ts, poses = odom
-        seg = next((s for s in access.segments if s.index == window.segment_index), None)
+        seg = access.segment(window.segment_index)
         if seg is not None:
             lo = np.searchsorted(ts, seg.start_ts, side="left")
             hi = np.searchsorted(ts, seg.end_ts, side="right")
@@ -816,22 +830,6 @@ def _fill_coarse_nans(coarse: np.ndarray, max_passes: int = 400) -> np.ndarray:
     return out
 
 
-def _upsample_bilinear(coarse: np.ndarray, ny: int, nx: int, by: int, bx: int) -> np.ndarray:
-    """Bilinearly expand a block-reduced grid back to full resolution."""
-    cy, cx = coarse.shape
-    y = (np.arange(ny) + 0.5) / by - 0.5
-    x = (np.arange(nx) + 0.5) / bx - 0.5
-    y0 = np.clip(np.floor(y), 0, cy - 1).astype(int)
-    x0 = np.clip(np.floor(x), 0, cx - 1).astype(int)
-    y1 = np.clip(y0 + 1, 0, cy - 1)
-    x1 = np.clip(x0 + 1, 0, cx - 1)
-    wy = np.clip(y - y0, 0.0, 1.0)[:, None]
-    wx = np.clip(x - x0, 0.0, 1.0)[None, :]
-    top = coarse[np.ix_(y0, x0)] * (1 - wx) + coarse[np.ix_(y0, x1)] * wx
-    bottom = coarse[np.ix_(y1, x0)] * (1 - wx) + coarse[np.ix_(y1, x1)] * wx
-    return top * (1 - wy) + bottom * wy
-
-
 def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 56) -> np.ndarray:
     """A smooth trend surface through the observed cells, to fill the unobserved
     ones (a heightfield has no holes; a constant would cut through slopes)."""
@@ -848,7 +846,8 @@ def _background_surface(height: np.ndarray, covered: np.ndarray, blocks: int = 5
     count = blocks_c.sum(axis=(1, 3))
     coarse = np.where(count > 0, total / np.maximum(count, 1.0), np.nan)
     coarse = _fill_coarse_nans(coarse)
-    return _upsample_bilinear(coarse, ny, nx, by, bx)
+    # Bilinear back to full resolution (half-pixel centres), cropped of the padding.
+    return cv2.resize(coarse, (gx * bx, gy * by), interpolation=cv2.INTER_LINEAR)[:ny, :nx]
 
 
 def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.ndarray, dict, dict]:
@@ -937,14 +936,11 @@ def build_scalars(
 
     ga = access.gravity_align
     if ga is not None:
-        idx = np.clip(np.arange(window.frame_start, window.frame_end), 0, len(ga) - 1)
-        R_imu = np.asarray(ga)[idx][: len(times)]
+        R_gt, R_imu = _attitudes(ga, window, gt)
         roll, pitch = L.roll_pitch_from_gravity_align(R_imu)
         scalars["roll_deg_imu"] = np.degrees(roll)
         scalars["pitch_deg_imu"] = np.degrees(pitch)
         if gt.source != "none":
-            # The window is levelled, so GT attitude is absolute and comparable.
-            R_gt = poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
             roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
             scalars["roll_deg_gt"] = np.degrees(roll)
             scalars["pitch_deg_gt"] = np.degrees(pitch)
@@ -979,6 +975,13 @@ def build_scalars(
     return scalars, notes
 
 
+def _attitudes(ga: np.ndarray, window: Window, gt: PoseTrack) -> tuple[np.ndarray, np.ndarray]:
+    """``(R_gt, R_imu)`` per frame of the window. The window is levelled, so GT
+    attitude is absolute and comparable with the IMU's gravity alignment."""
+    idx = np.clip(np.arange(window.frame_start, window.frame_end), 0, len(ga) - 1)[: len(gt.positions)]
+    return poses_from_quat(gt.positions, gt.quats)[:, :3, :3], np.asarray(ga)[idx]
+
+
 #: GT-vs-IMU tilt disagreement (deg) bands. Healthy GT stays under ~11 deg even
 #: on steep slopes; failed GT sits above 40.
 ATTITUDE_BANDS = {"ok": 10.0, "warn": 20.0}
@@ -993,11 +996,14 @@ def attitude_error_deg(R_gt: np.ndarray, R_imu: np.ndarray) -> np.ndarray:
     return np.degrees(np.arccos(cos))
 
 
-def attitude_band(median_deg: float) -> str:
-    """``ok`` / ``warn`` / ``bad`` for a window's median tilt gap (:data:`ATTITUDE_BANDS`)."""
-    if median_deg < ATTITUDE_BANDS["ok"]:
-        return "ok"
-    return "warn" if median_deg < ATTITUDE_BANDS["warn"] else "bad"
+def _attitude_summary(err: np.ndarray) -> dict | None:
+    """Median, 95th percentile and band (:data:`ATTITUDE_BANDS`) of the finite tilt gaps, or None."""
+    finite = err[np.isfinite(err)]
+    if not finite.size:
+        return None
+    median = float(np.median(finite))
+    band = "ok" if median < ATTITUDE_BANDS["ok"] else "warn" if median < ATTITUDE_BANDS["warn"] else "bad"
+    return {"median": round(median, 2), "p95": round(float(np.percentile(finite, 95)), 2), "band": band}
 
 
 def window_attitude(access: SceneAccess, window: Window) -> dict | None:
@@ -1018,15 +1024,7 @@ def window_attitude(access: SceneAccess, window: Window) -> dict | None:
         gt = resolve_poses(access, window, frame_ts[frames])
         if gt.source != "odometry":
             return None
-        R_gt = poses_from_quat(gt.positions, gt.quats)[:, :3, :3]
-        R_imu = np.asarray(ga)[np.clip(frames, 0, len(ga) - 1)]
-        err = attitude_error_deg(R_gt, R_imu)
-        median = float(np.median(err))
-        return {
-            "median": round(median, 2),
-            "p95": round(float(np.percentile(err, 95)), 2),
-            "band": attitude_band(median),
-        }
+        return _attitude_summary(attitude_error_deg(*_attitudes(ga, window, gt)))
 
     return access.cached(f"attitude_{window.key}", work)
 
@@ -1040,21 +1038,20 @@ def attitude_vs_imu(scalars: dict[str, np.ndarray]) -> dict | None:
     if not all(k in scalars for k in need):
         return None
     err = np.asarray(scalars["attitude_error_deg"], dtype=np.float64)
-    finite = err[np.isfinite(err)]
-    if not finite.size:
+    summary = _attitude_summary(err)
+    if summary is None:
         return None
     # JSON has no NaN (a resample gap, an IMU dropout): null, as every other series.
-    median = float(np.median(finite))
     return {
         "gt_roll": _json_floats(scalars["roll_deg_gt"]),
         "gt_pitch": _json_floats(scalars["pitch_deg_gt"]),
         "imu_roll": _json_floats(scalars["roll_deg_imu"]),
         "imu_pitch": _json_floats(scalars["pitch_deg_imu"]),
         "error": _json_floats(err),
-        "median_error": round(median, 2),
-        "p95_error": round(float(np.percentile(finite, 95)), 2),
+        "median_error": summary["median"],
+        "p95_error": summary["p95"],
         "bands": ATTITUDE_BANDS,
-        "band": attitude_band(median),
+        "band": summary["band"],
     }
 
 
@@ -1074,13 +1071,6 @@ def wheel_angles(access: SceneAccess, times: np.ndarray) -> np.ndarray | None:
 # --------------------------------------------------------------------------
 # the build
 # --------------------------------------------------------------------------
-
-
-def _rotate(q: np.ndarray, v: np.ndarray) -> np.ndarray:
-    """Rotate one body-frame vector ``v`` (3,) by each [w,x,y,z] quaternion in ``q`` (T, 4)."""
-    w, u = q[:, :1], q[:, 1:]
-    uv = np.cross(u, v[None, :])
-    return v[None, :] + 2.0 * w * uv + 2.0 * np.cross(u, uv)
 
 
 def _quat_mul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -1118,14 +1108,7 @@ def viewer_defaults(single_frame: bool) -> dict:
     return defaults
 
 
-def build_scene(
-    root: DatasetRoot,
-    scene_id: str,
-    window_key: str,
-    opts: BuildOptions,
-    max_frames: int = DEFAULT_MAX_FRAMES,
-    max_seconds: float = DEFAULT_MAX_SECONDS,
-):
+def build_scene(access: SceneAccess, window_key: str, opts: BuildOptions):
     """Build (but do not save) the SimView scene for one window.
 
     Returns ``(scene, meta)``; ``meta`` is the per-frame index the side panel
@@ -1135,8 +1118,8 @@ def build_scene(
     from simview.state import BodyTrajectory
 
     opts = opts.sanitized()
-    access = SceneAccess(root, scene_id)
-    window = access.window(window_key, max_frames, max_seconds)
+    root, scene_id = access.root, access.scene_id
+    window = access.window(window_key)
     if window is None:
         raise KeyError(f"scene {scene_id} has no window {window_key!r}")
 
@@ -1249,7 +1232,7 @@ def build_scene(
     T = len(times)
     # The box is drawn about the body origin, so the body rides CHASSIS_CENTER
     # ahead of/behind base_link, rotated with the pose; the wheels below undo it.
-    chassis_pos = gt.positions + _rotate(gt.quats, np.array(CHASSIS_CENTER, dtype=np.float64))
+    chassis_pos = gt.positions + poses[:, :3, :3] @ np.array(CHASSIS_CENTER, dtype=np.float64)
     trajectories = [BodyTrajectory("robot", positions=chassis_pos, orientations=gt.quats)]
 
     angles = wheel_angles(access, abs_times)
@@ -1291,7 +1274,7 @@ def build_scene(
         "build": metadata,
         "available": {
             kind: sorted(int(f) for f in access.available_frames(kind) & set(frames.tolist()))
-            for kind in ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
+            for kind in COUNTED_DIRS
             if access.probe.has(kind)
         },
     }

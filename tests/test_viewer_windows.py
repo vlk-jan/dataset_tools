@@ -213,8 +213,8 @@ def test_a_frame_with_no_timestamp_has_no_single_frame_window(tmp_path):
     from dataset_tools.viewer.build import SceneAccess
 
     access = SceneAccess(root, "0000")
-    assert access.window(windows.frame_window_key(3), 1500) is not None
-    assert access.window(windows.frame_window_key(10), 1500) is None
+    assert access.window(windows.frame_window_key(3)) is not None
+    assert access.window(windows.frame_window_key(10)) is None
 
 
 def test_an_untimestamped_frame_is_a_404_and_its_page_says_why(tmp_path):
@@ -247,7 +247,7 @@ def test_every_offered_window_actually_builds(tmp_path):
 
     root_path = _root_with_untimestamped_frames(tmp_path)
     c = viewer_client(root_path, tmp_path / "cache", max_frames=4)
-    offered = SceneAccess(DatasetRoot(root_path, cache_dir=tmp_path / "cache"), "0000").windows(4)
+    offered = SceneAccess(DatasetRoot(root_path, cache_dir=tmp_path / "cache"), "0000", max_frames=4).windows()
     assert offered
     for w in offered:
         assert c.get(f"/view/0000/{w.key}").status_code == 200, w.key

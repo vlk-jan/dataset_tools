@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import re
 import time
 from collections import Counter
@@ -21,8 +20,6 @@ import numpy as np
 from . import geo
 from .build import SceneAccess
 from .index_page import (
-    THUMB_FRACTIONS,
-    THUMB_SLOTS,
     content_bytes,
     coverage_class,
     disk_parts,
@@ -33,17 +30,18 @@ from .index_page import (
     fmt_share,
     images_clouds_stat,
     segment_timeline,
+    shown_slots,
     split_mark,
     stat,
+    thumb,
     thumb_index,
-    thumb_slots,
     validation_mark,
 )
 from .loaders import read_text, roll_pitch_from_gravity_align
 from .probe import ARTEFACTS_BY_KEY, DatasetRoot, _npy_shape
 from .signals import _speed, signal_charts
 from .splits import DECLARED_FILES
-from .windows import describe_marks, describe_reason
+from .windows import describe_marks, describe_reason, span_fractions
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
 
@@ -215,8 +213,7 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
     base, span = p.start_ts, p.duration
     marks: list[dict[str, Any]] = []
     for seg in segments:
-        lo = min(1.0, max(0.0, (seg.start_ts - base) / span))
-        hi = min(1.0, max(0.0, (seg.end_ts - base) / span))
+        lo, hi = span_fractions(seg, base, span)
         width = min(max(hi - lo, MIN_MARK_FRAC), 1.0 - lo)
         # The hover names where filled poses came from, not why the segment ended.
         described = describe_reason(seg.reason)
@@ -744,26 +741,14 @@ def hero_thumbs(access: SceneAccess, a: dict) -> list[dict[str, Any]]:
     Same endpoint and ``thumb_index`` as the index; each links to its frame.
     """
     p = access.probe
-    stored = thumb_slots(a)
-    slots = stored or (list(THUMB_SLOTS) if p.has("images") and p.n_frames else [])
+    slots = shown_slots(p, a)
     ts = access.frame_ts if slots else None
-    t0 = float(ts[0]) if ts is not None and len(ts) else None
-
     out = []
     for slot in slots:
         index = thumb_index(a, slot, p.n_frames)
-        at = None
-        if ts is not None and t0 is not None and index < len(ts):
-            at = f"{float(ts[index]) - t0:.0f} s"
-        out.append(
-            {
-                "url": f"/api/scene/{p.scene_id}/thumb/{slot}.jpg",
-                "href": f"/scene/{p.scene_id}/frame/{index}" if p.has("images") else None,
-                "alt": f"scene {p.scene_id} frame {index}",
-                "label": f"{THUMB_FRACTIONS[slot] * 100:.0f}%",
-                "sub": f"frame {index}" + (f" · {at}" if at else ""),
-            }
-        )
+        at = f"{float(ts[index]) - float(ts[0]):.0f} s" if ts is not None and index < len(ts) else None
+        url = f"/api/scene/{p.scene_id}/thumb/{slot}.jpg"
+        out.append(thumb(p.scene_id, index, url, slot, at, link=p.has("images")))
     return out
 
 
@@ -818,11 +803,9 @@ _TIME_SERIES = ("joint_states", "joint_setpoints", "cmd_vel", "gps")
 _STATE_WORD = {"yes": "present", "partial": "partial", "no": "missing", "optional": "not written"}
 
 
-def frame_gaps(names: list[str], n_frames: int) -> list[tuple[int, int]]:
-    """The runs of frame indices ``[first, last]`` with no file among ``names`` (``00123.npz``)."""
-    have = np.array(
-        [int(stem) for stem in (n.split(".", 1)[0] for n in names) if stem.isascii() and stem.isdigit()], dtype=int
-    )
+def frame_gaps(have: set[int], n_frames: int) -> list[tuple[int, int]]:
+    """The runs of frame indices ``[first, last]`` not in ``have``."""
+    have = np.array(sorted(have), dtype=int)
     missing = np.ones(n_frames, dtype=np.int8)
     missing[have[have < n_frames]] = 0
     # Where "missing" switches on and off: each run's first index, then one past its last.
@@ -842,10 +825,7 @@ def _coverage(access: SceneAccess, art: Any, count: int) -> dict[str, Any] | Non
     Lists the directory; only called for partial ones.
     """
     n = access.probe.n_frames
-    try:
-        gaps = frame_gaps(os.listdir(access.dir / art.relpath), n)
-    except OSError:
-        return None
+    gaps = frame_gaps(access.available_frames(art.key), n)
     if not gaps:
         return None
     # Merge runs closer than ~a pixel; CSS gives marks a minimum width.

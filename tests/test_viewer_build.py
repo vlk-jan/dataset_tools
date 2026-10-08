@@ -70,7 +70,7 @@ def test_a_window_is_levelled_by_the_attitude_its_segment_anchor_discarded(tmp_p
     root_path = make_root(tmp_path, frames=12)
     _tilt_gravity(root_path, "0000", 12, 30.0)
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
 
@@ -87,7 +87,7 @@ def test_a_single_frame_stands_at_its_own_attitude(tmp_path):
     root_path = make_root(tmp_path, frames=12)
     _tilt_gravity(root_path, "0000", 12, -20.0)
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window(windows.frame_window_key(3), 1500)
+    window = access.window(windows.frame_window_key(3))
     track = build.resolve_poses(access, window, access.frame_ts[3:4])
     assert np.allclose(track.positions, 0.0)  # still at the origin
     roll, _ = _roll_pitch(track.quats[0])
@@ -100,7 +100,7 @@ def test_a_scene_without_gravity_alignment_is_left_unlevelled(tmp_path):
 
     root_path = make_root(tmp_path, frames=12, with_gravity=False)
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     assert np.allclose(track.quats[0], [1.0, 0.0, 0.0, 0.0], atol=1e-6)
@@ -126,7 +126,7 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
         np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), float(i)))
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)
@@ -171,7 +171,7 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
         )
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)
@@ -213,7 +213,7 @@ def test_wheel_anchored_cells_do_not_read_as_measured(tmp_path):
         )
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)
@@ -255,7 +255,7 @@ def test_a_nan_in_a_height_map_does_not_poison_the_terrain(tmp_path):
         np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=hm)
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)
@@ -295,7 +295,7 @@ def _attitude_of(root_path: Path, scene: str = "0000") -> dict | None:
     from dataset_tools.viewer import probe as probe_mod
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), scene)
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     times = access.frame_ts[frames]
     gt = build.resolve_poses(access, window, times)
@@ -396,7 +396,7 @@ def test_wheel_slip_is_the_commanded_speed_minus_the_measured_one(tmp_path):
     np.save(scene / "joint_setpoints.npy", setpoints)
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     times = access.frame_ts[np.arange(window.frame_start, window.frame_end)]
     gt = build.resolve_poses(access, window, times)
     scalars, _ = build.build_scalars(access, window, times, gt, None)
@@ -414,7 +414,7 @@ def _window_attitude_of(root_path: Path, key: str = "seg000") -> dict | None:
     from dataset_tools.viewer import probe as probe_mod
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    return build.window_attitude(access, access.window(key, 1500))
+    return build.window_attitude(access, access.window(key))
 
 
 def test_the_window_verdict_is_ok_when_the_ground_truth_tracks_the_imu(tmp_path):

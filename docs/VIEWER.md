@@ -14,7 +14,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 
 The viewer pulls in
 [SimView](https://pypi.org/project/simview/) (`>=6.1.1`, with its `authoring`
-extra: torch + einops), FastAPI, uvicorn, Jinja2 and Pillow. Torch is the heavy
+extra: torch + einops), FastAPI, uvicorn and Jinja2. Torch is the heavy
 one, so the viewer lives in its own virtualenv next to the extraction one:
 
 ```bash
@@ -599,8 +599,8 @@ narrowing it to one topic: a review campaign's to-do list. Each entry links to
 its scene, to its first frame and, where the frame sits in a window, to the 3D
 view opened on it. A notes file whose scene is no longer in the root is listed
 and marked as such rather than dropped: it is a person's work, and a scene
-renumbered out from under it is exactly the case worth seeing. `/api/notes`
-returns the same as JSON. With `--no-notes` the page says notes are off.
+renumbered out from under it is exactly the case worth seeing. `/api/notes.csv`
+exports the same as one table. With `--no-notes` the page says notes are off.
 
 Notes are served from their own endpoint and are never folded into a window
 bundle. A bundle URL carries a content stamp and its `meta.json` is cached per
@@ -801,7 +801,7 @@ Dataset roots usually live on contended network storage, so:
 | `/view/{scene}/{window}` | the 3D view: SimView's page plus the overlay panel |
 | `/api/scene/{scene}/gps.json` | the GNSS track, thinned for drawing (`?segment=`, `?frame=`, `?max_points=`) |
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`, a JSON body `{"frames": [first, last], "text", "topic", "verdict"}`) |
-| `/notes`, `/api/notes` | every note in the root by topic (`?topic=`), as a page and as JSON |
+| `/notes` | every note in the root by topic (`?topic=`) |
 | `/api/notes.csv` | every note as one table: scene, frame range, frame times, topic, verdict, author, date, text |
 | `/segments` | every ground-truth window of the root in one table, sortable (`?sort=scene\|att\|rate\|duration`), with the notes and verdicts touching each |
 | `/?status=ok\|warn\|fail`, `/?verdict=keep\|drop\|fix` | the index, only the scenes `validation.csv` gave that status, or that carry a note with that verdict |

@@ -45,10 +45,10 @@ def test_a_segment_is_found_by_its_own_number_not_its_position(tmp_path):
     )
     access = access_for(tmp_path, root_path)
 
-    assert segment_page.find(access, 0) is None
-    position, seg = segment_page.find(access, 9)
-    assert position == 1 and seg.index == 9
-    assert segment_page.frame_range(access, position) == (6, 12)
+    assert access.segment(0) is None
+    seg = access.segment(9)
+    assert seg.index == 9 and access.segments.index(seg) == 1
+    assert segment_page.frame_range(access, 1) == (6, 12)
 
 
 def test_a_segments_frames_are_the_frames_its_windows_carry(tmp_path):
@@ -56,7 +56,7 @@ def test_a_segments_frames_are_the_frames_its_windows_carry(tmp_path):
     access = access_for(tmp_path, make_root(tmp_path))
     for position, seg in enumerate(access.segments):
         lo, hi = segment_page.frame_range(access, position)
-        windows = segment_page.segment_windows(access, seg, max_frames=1500)
+        windows = segment_page.segment_windows(access, seg)
         assert windows, "the fixture's segments are long enough to build"
         assert (windows[0].frame_start, windows[-1].frame_end) == (lo, hi)
 
@@ -68,8 +68,8 @@ def test_a_segments_frames_are_the_frames_its_windows_carry(tmp_path):
 
 def test_the_segment_card_states_the_range_the_rate_and_the_gaps(tmp_path):
     access = access_for(tmp_path, make_root(tmp_path))
-    position, seg = segment_page.find(access, 1)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(1)
+    page = segment_page.build_segment_page(access, seg)
 
     card = card_of(page, "Segment")
     assert value_of(card, "frames") == "6 - 11"
@@ -89,8 +89,8 @@ def test_a_segment_never_covers_more_than_the_whole_scene(tmp_path):
         f"# id start_ts end_ts n_poses reason\n0 {ts[0] - 3.0:.6f} {ts[-1] + 3.0:.6f} 12 filtered:end_of_run\n"
     )
     access = access_for(tmp_path, root_path)
-    position, seg = segment_page.find(access, 0)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(0)
+    page = segment_page.build_segment_page(access, seg)
     assert value_of(card_of(page, "Segment"), "of the scene") == "100%"
 
 
@@ -103,8 +103,8 @@ def test_a_thinly_anchored_segment_says_so(tmp_path):
         f"# id start_ts end_ts n_poses reason\n0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n"
     )
     access = access_for(tmp_path, root_path)
-    position, seg = segment_page.find(access, 0)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(0)
+    page = segment_page.build_segment_page(access, seg)
 
     card = card_of(page, "Segment")
     assert card["badge_class"] == "lo"
@@ -114,8 +114,8 @@ def test_a_thinly_anchored_segment_says_so(tmp_path):
 def test_motion_is_measured_inside_the_segment_only(tmp_path):
     """The fixture drives 0.3 m per frame; a six-frame segment is five steps."""
     access = access_for(tmp_path, make_root(tmp_path))
-    position, seg = segment_page.find(access, 0)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(0)
+    page = segment_page.build_segment_page(access, seg)
 
     card = card_of(page, "Path & motion")
     assert value_of(card, "path") == "2 m"  # 5 steps of ~0.3 m
@@ -127,8 +127,8 @@ def test_a_scene_without_ground_truth_poses_still_renders_its_cards(tmp_path):
     root_path = make_root(tmp_path)
     (root_path / "0000" / "odometry.txt").unlink()
     access = access_for(tmp_path, root_path)
-    position, seg = segment_page.find(access, 0)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(0)
+    page = segment_page.build_segment_page(access, seg)
 
     assert card_of(page, "Segment") is not None
     motion = card_of(page, "Path & motion")
@@ -138,8 +138,8 @@ def test_a_scene_without_ground_truth_poses_still_renders_its_cards(tmp_path):
 
 def test_the_hero_frames_come_from_inside_the_segment(tmp_path):
     access = access_for(tmp_path, make_root(tmp_path))
-    position, seg = segment_page.find(access, 1)
-    page = segment_page.build_segment_page(access, position, seg, max_frames=1500)
+    seg = access.segment(1)
+    page = segment_page.build_segment_page(access, seg)
 
     indices = [int(t["sub"].split()[1]) for t in page["hero"]]
     assert indices == [6, 8, 10]  # 10 / 50 / 90 % of frames 6..11
@@ -148,14 +148,14 @@ def test_the_hero_frames_come_from_inside_the_segment(tmp_path):
 
 def test_the_map_is_absent_without_gps_and_scoped_to_the_segment_with_it(tmp_path):
     access = access_for(tmp_path, make_root(tmp_path))
-    position, seg = segment_page.find(access, 1)
-    assert segment_page.build_segment_page(access, position, seg, 1500)["map"] is None
+    seg = access.segment(1)
+    assert segment_page.build_segment_page(access, seg)["map"] is None
 
     (tmp_path / "gps").mkdir()
     gps_root = make_root(tmp_path / "gps", with_gps=True)
     access = access_for(tmp_path, gps_root)
-    position, seg = segment_page.find(access, 1)
-    page = segment_page.build_segment_page(access, position, seg, 1500)
+    seg = access.segment(1)
+    page = segment_page.build_segment_page(access, seg)
     assert page["map"]["src"].endswith("gps.json?segment=1")
     # The fixes inside frames 6..11, not the scene's 48: the numbers beside the
     # map are the segment's, not just the drawn track.
@@ -213,8 +213,8 @@ def test_a_gnss_track_that_disagrees_with_the_ground_truth_flags_the_segment(tmp
     """The fixture's fixes walk ~1 m a frame while the odometry drives 0.3 m,
     so the receiver describes three times the path the poses do."""
     access = access_for(tmp_path, make_root(tmp_path, frames=40, with_gps=True))
-    position, seg = segment_page.find(access, 0)
-    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    seg = access.segment(0)
+    card = card_of(segment_page.build_segment_page(access, seg), "Path & motion")
     track = next(s for s in card["stats"] if s["label"] == "GNSS track")
     assert track["sub"].endswith("% of the GT path")
     assert "disagree" in card["note"]
@@ -232,8 +232,8 @@ def test_a_gnss_track_that_matches_the_ground_truth_is_a_quiet_check(tmp_path):
     gps[:, 4] = 2
     np.save(scene / "gps.npy", gps)
     access = access_for(tmp_path, root_path)
-    position, seg = segment_page.find(access, 0)
-    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    seg = access.segment(0)
+    card = card_of(segment_page.build_segment_page(access, seg), "Path & motion")
     assert value_of(card, "GNSS track") == value_of(card, "path")
     assert "disagree" not in card["note"]
     assert "not ground truth" in card["note"]
@@ -241,8 +241,8 @@ def test_a_gnss_track_that_matches_the_ground_truth_is_a_quiet_check(tmp_path):
 
 def test_a_segment_without_fixes_says_nothing_about_gnss(tmp_path):
     access = access_for(tmp_path, make_root(tmp_path))
-    position, seg = segment_page.find(access, 0)
-    card = card_of(segment_page.build_segment_page(access, position, seg, 1500), "Path & motion")
+    seg = access.segment(0)
+    card = card_of(segment_page.build_segment_page(access, seg), "Path & motion")
     assert value_of(card, "GNSS track") is None
 
 

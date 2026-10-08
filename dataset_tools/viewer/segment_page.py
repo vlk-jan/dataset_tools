@@ -12,11 +12,12 @@ import numpy as np
 
 from . import geo
 from .build import ATTITUDE_BANDS, SceneAccess, window_attitude
-from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, band, fmt_count, fmt_duration, stat
+from .index_page import THUMB_FRACTIONS, THUMB_SLOTS, band, fmt_count, fmt_duration, stat, thumb
 from .loaders import Segment
+from .probe import COUNTED_DIRS, OPTIONAL_ARTEFACTS
 from .scene_page import MOVING_M_S, map_card, path_motion, poses_between, roll_pitch_stat, small_odometry, utc_stamp
 from .signals import signal_charts
-from .windows import DEFAULT_MAX_SECONDS, Window, describe_reason, frames_within, segment_bounds
+from .windows import Window, describe_reason, frames_within, segment_bounds
 
 #: GT poses per second below which the trajectory is a guess between anchors.
 THIN_POSE_RATE = 2.0
@@ -54,17 +55,6 @@ COLUMN_TITLES: dict[str, str] = {
 #: this many metres (the fraction alone cries wolf on short paths).
 GNSS_MISMATCH_FRAC = 0.25
 GNSS_MISMATCH_M = 5.0
-
-
-def find(access: SceneAccess, index: int) -> tuple[int, Segment] | None:
-    """``(position, segment)`` for the segment *numbered* ``index``, or None.
-
-    By the file's own number, as window keys (``seg003``) are.
-    """
-    for position, seg in enumerate(access.segments):
-        if seg.index == index:
-            return position, seg
-    return None
 
 
 def frame_range(access: SceneAccess, position: int) -> tuple[int, int]:
@@ -105,9 +95,9 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
     if position + 1 < len(segments):
         stats.append(stat("gap after", f"{max(0.0, segments[position + 1].start_ts - seg.end_ts):.1f} s"))
 
-    # Only listed for per-frame directories known to be incomplete.
+    # Only listed for per-frame directories known to be incomplete; optional ones are sparse by design.
     missing: list[str] = []
-    for kind in ("images", "clouds", "height_maps", "height_masks"):
+    for kind in (k for k in COUNTED_DIRS if k not in OPTIONAL_ARTEFACTS):
         if not p.has(kind):
             continue
         if p.counts.get(kind, 0) == p.n_frames:
@@ -215,15 +205,9 @@ def hero_thumbs(access: SceneAccess, frames: tuple[int, int]) -> list[dict[str, 
     out = []
     for slot in THUMB_SLOTS:
         index = min(hi - 1, lo + int(round((hi - 1 - lo) * THUMB_FRACTIONS[slot])))
-        at = f"{float(ts[index]) - float(ts[lo]):.0f} s" if ts is not None and index < len(ts) else None
+        at = f"{float(ts[index]) - float(ts[lo]):.0f} s in" if ts is not None and index < len(ts) else None
         out.append(
-            {
-                "url": f"/api/scene/{access.scene_id}/frame/{index}/image.jpg?w=384",
-                "href": f"/scene/{access.scene_id}/frame/{index}",
-                "alt": f"scene {access.scene_id} frame {index}",
-                "label": f"{THUMB_FRACTIONS[slot] * 100:.0f}%",
-                "sub": f"frame {index}" + (f" · {at} in" if at else ""),
-            }
+            thumb(access.scene_id, index, f"/api/scene/{access.scene_id}/frame/{index}/image.jpg?w=384", slot, at)
         )
     return out
 
@@ -253,23 +237,16 @@ def attitude_per_window(access: SceneAccess, windows: list[Window]) -> dict[str,
     return out
 
 
-def segment_windows(
-    access: SceneAccess, seg: Segment, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS
-) -> list[Window]:
+def segment_windows(access: SceneAccess, seg: Segment) -> list[Window]:
     """The buildable windows this segment offers -- its chunks, in order."""
-    return [w for w in access.windows(max_frames, max_seconds) if w.kind == "segment" and w.segment_index == seg.index]
+    return [w for w in access.windows() if w.kind == "segment" and w.segment_index == seg.index]
 
 
-def build_segment_page(
-    access: SceneAccess,
-    position: int,
-    seg: Segment,
-    max_frames: int,
-    max_seconds: float = DEFAULT_MAX_SECONDS,
-) -> dict[str, Any]:
+def build_segment_page(access: SceneAccess, seg: Segment) -> dict[str, Any]:
     """Everything the segment page renders, cached on the scene handle."""
 
     def work() -> dict[str, Any]:
+        position = access.segments.index(seg)
         frames = frame_range(access, position)
         segments = access.segments
         cards = [segment_card(access, seg, position, frames), motion_card(access, seg, frames)]
@@ -278,7 +255,7 @@ def build_segment_page(
             "hero": hero_thumbs(access, frames),
             "cards": [c for c in cards if c],
             "map": map_card(access, segment=seg),
-            "windows": segment_windows(access, seg, max_frames, max_seconds),
+            "windows": segment_windows(access, seg),
             "signals": signal_charts(access, seg.start_ts, seg.end_ts, shade=False),
             "prev": segments[position - 1] if position > 0 else None,
             "next": segments[position + 1] if position + 1 < len(segments) else None,
@@ -286,4 +263,4 @@ def build_segment_page(
             "n_segments": len(segments),
         }
 
-    return access.cached(f"segment_page_{seg.index}_{max_frames}_{max_seconds}", work)
+    return access.cached(f"segment_page_{seg.index}", work)

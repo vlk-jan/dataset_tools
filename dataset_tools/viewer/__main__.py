@@ -8,6 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
+from .probe import DEFAULT_CACHE_MAX_GB
 from .windows import DEFAULT_MAX_FRAMES, DEFAULT_MAX_SECONDS
 
 #: Bind addresses that mean "this machine only", and the Host names a browser
@@ -81,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--cache-max-gb",
         type=float,
-        default=5.0,
+        default=DEFAULT_CACHE_MAX_GB,
         help="keep at most this much of built 3D windows on disk, oldest removed first (default: %(default)s)",
     )
     parser.add_argument("--open", action="store_true", help="open a browser at the index page")

@@ -6,7 +6,6 @@ piecewise-linear LUTs built at import.
 
 from __future__ import annotations
 
-import io
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -68,7 +67,7 @@ def _build_lut(anchors: np.ndarray, n: int = 256) -> np.ndarray:
     return (anchors[lo] * (1 - frac) + anchors[hi] * frac).astype(np.uint8)
 
 
-#: Named LUTs; ``colorize`` falls back to turbo for an unknown name.
+#: Named LUTs for ``colorize``.
 LUTS = {"turbo": _build_lut(_TURBO_ANCHORS), "ember": _build_lut(DRIVEN_SIM_ANCHORS)}
 
 
@@ -83,7 +82,7 @@ def colorize(
     NaNs (and an empty value range) map to the LUT's low end rather than
     producing garbage.
     """
-    lut = LUTS.get(cmap, LUTS["turbo"])
+    lut = LUTS[cmap]
     vals = np.asarray(values, dtype=np.float64)
     finite = np.isfinite(vals)
     if vmin is None:
@@ -108,16 +107,32 @@ def unit_colors(values: np.ndarray) -> np.ndarray:
 # --------------------------------------------------------------------------
 
 
-def _image(rgb: np.ndarray):
-    from PIL import Image
-
-    return Image.fromarray(np.ascontiguousarray(rgb), mode="RGB")
+#: JPEG quality of the camera and overlay renders.
+JPEG_QUALITY = 78
 
 
-def _png(img) -> bytes:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=False, compress_level=3)
-    return buf.getvalue()
+def _png(rgb: np.ndarray) -> bytes:
+    return cv2.imencode(".png", np.ascontiguousarray(rgb[..., ::-1]), [cv2.IMWRITE_PNG_COMPRESSION, 3])[1].tobytes()
+
+
+def _jpeg(bgr: np.ndarray, quality: int = JPEG_QUALITY) -> bytes:
+    return cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])[1].tobytes()
+
+
+def _decode(data: bytes) -> np.ndarray:
+    """An image file's bytes as 8-bit BGR."""
+    bgr = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ValueError("not a decodable image")
+    return bgr
+
+
+def _shrink(bgr: np.ndarray, width: int) -> np.ndarray:
+    """``bgr`` downscaled to at most ``width`` pixels across; INTER_AREA antialiases."""
+    h, w = bgr.shape[:2]
+    if not width or w <= width:
+        return bgr
+    return cv2.resize(bgr, (width, max(1, round(h * width / w))), interpolation=cv2.INTER_AREA)
 
 
 def _bev_to_display(grid: np.ndarray) -> np.ndarray:
@@ -134,14 +149,10 @@ def _bev_png(rgb: np.ndarray, size: int) -> bytes:
 
     The silhouette is drawn after the nearest-neighbour upscale, at display resolution.
     """
-    from PIL import Image
-
-    img = _image(rgb)
-    scale = max(1, size // max(img.width, img.height))
+    scale = max(1, size // max(rgb.shape[:2]))
     if scale > 1:
-        img = img.resize((img.width * scale, img.height * scale), Image.NEAREST)
-    draw_robot_silhouette(img, px_per_m=scale / HM_RES)
-    return _png(img)
+        rgb = cv2.resize(rgb, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+    return _png(draw_robot_silhouette(np.ascontiguousarray(rgb), px_per_m=scale / HM_RES))
 
 
 def render_height_map(hm: np.ndarray, size: int = 384) -> bytes:
@@ -174,27 +185,27 @@ def render_driven_similarity(driven: np.ndarray, max_sim: np.ndarray, threshold:
     return _bev_png(rgb, size)
 
 
-def draw_robot_silhouette(img, px_per_m: float):
-    """Draw HELHEST top-down at the centre of a robot-centred, forward-up tile.
+def draw_robot_silhouette(rgb: np.ndarray, px_per_m: float) -> np.ndarray:
+    """Draw HELHEST top-down, in place, at the centre of a robot-centred, forward-up tile.
 
     Footprint to scale, with a heading wedge. ``px_per_m`` is the scale after upscaling.
     """
-    from PIL import ImageDraw
+    cy, cx = rgb.shape[0] / 2.0, rgb.shape[1] / 2.0
 
-    draw = ImageDraw.Draw(img, "RGBA")
-    cx, cy = img.width / 2.0, img.height / 2.0
-
-    def pt(x: float, y: float) -> tuple[float, float]:
+    def poly(corners, rgba, outline: bool = False) -> None:
         # Screen: +x (forward) is up, +y (left) is left.
-        return (cx - y * px_per_m, cy - x * px_per_m)
+        pts = np.round([(cx - y * px_per_m, cy - x * px_per_m) for x, y in corners]).astype(np.int32)
+        layer = rgb.copy()
+        if outline:
+            cv2.polylines(layer, [pts], True, rgba[:3], 1)
+        else:
+            cv2.fillPoly(layer, [pts], rgba[:3])
+        cv2.addWeighted(layer, rgba[3] / 255, rgb, 1 - rgba[3] / 255, 0, dst=rgb)
 
-    def box(x0: float, x1: float, y0: float, y1: float, fill, outline, width=1):
-        draw.polygon([pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1)], fill=fill)
-        draw.line(
-            [pt(x0, y0), pt(x1, y0), pt(x1, y1), pt(x0, y1), pt(x0, y0)],
-            fill=outline,
-            width=width,
-        )
+    def box(x0: float, x1: float, y0: float, y1: float, fill, outline) -> None:
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        poly(corners, fill)
+        poly(corners, outline, outline=True)
 
     r, half_w = WHEEL_RADIUS, WHEEL_WIDTH / 2.0
     for wx, wy, *_ in WHEELS.values():
@@ -206,9 +217,8 @@ def draw_robot_silhouette(img, px_per_m: float):
 
     # Heading wedge: the box alone does not show which end is the front.
     front = cx0 + hx
-    nose = [pt(front + 0.30, 0.0), pt(front + 0.02, 0.16), pt(front + 0.02, -0.16)]
-    draw.polygon(nose, fill=(255, 255, 255, 235))
-    return img
+    poly([(front + 0.30, 0.0), (front + 0.02, 0.16), (front + 0.02, -0.16)], (255, 255, 255, 235))
+    return rgb
 
 
 #: Half the side of the cloud tile (m): it shows ``[-12, 12]`` m about the robot.
@@ -225,12 +235,12 @@ def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
     n = size
     rgb = np.zeros((n, n, 3), dtype=np.uint8)
     if cloud.size == 0:
-        return _png(_image(rgb))
+        return _png(rgb)
 
     x, y, z = cloud[:, 0], cloud[:, 1], cloud[:, 2]
     keep = (np.abs(x) < extent) & (np.abs(y) < extent)
     if not keep.any():
-        return _png(_image(rgb))
+        return _png(rgb)
     x, y, z = x[keep], y[keep], z[keep]
 
     # Screen: +x forward -> up (row 0 at top), +y left -> left (col 0 at left).
@@ -258,28 +268,19 @@ def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
     for radius in range(5, int(extent) + 1, 5):
         ring = np.abs(dist - radius) < (extent / n)
         rgb[ring] = np.maximum(rgb[ring], [70, 70, 70])
-    img = _image(rgb)
-    draw_robot_silhouette(img, px_per_m=n / (2 * extent))
-    return _png(img)
+    return _png(draw_robot_silhouette(rgb, px_per_m=n / (2 * extent)))
 
 
-def render_camera_image(path: Path, width: int = 640, quality: int = 78) -> bytes:
+def render_camera_image(path: Path, width: int = 640, quality: int = JPEG_QUALITY) -> bytes:
     """JPEG of a camera frame, downscaled to at most ``width`` pixels across.
 
     A JPEG source that needs no downscale is served as is (no re-encode loss).
     """
-    from PIL import Image
-
-    with Image.open(path) as img:
-        if img.format == "JPEG" and not (width and img.width > width):
-            return path.read_bytes()
-        img = img.convert("RGB")
-        if width and img.width > width:
-            height = max(1, round(img.height * width / img.width))
-            img = img.resize((width, height), Image.BILINEAR)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality, optimize=False)
-    return buf.getvalue()
+    data = path.read_bytes()
+    bgr = _decode(data)
+    if data[:3] == b"\xff\xd8\xff" and not (width and bgr.shape[1] > width):
+        return data
+    return _jpeg(_shrink(bgr, width), quality)
 
 
 #: Returns closer than this (m, along the optical axis) are the robot itself or behind the lens.
@@ -305,21 +306,16 @@ def _project_points(
     K_scaled[:2, :] *= scale
     D = np.asarray(distortion_coeffs, dtype=np.float64).ravel() if distortion_coeffs is not None else None
 
-    project = None
     if distortion_model in ("equidistant", "fisheye") and D is not None and len(D) == 4:
         project = cv2.fisheye.projectPoints
-    elif distortion_model in ("plumb_bob", "rational_polynomial") and D is not None and len(D) in (4, 5, 8, 12, 14):
+    else:
         project = cv2.projectPoints
-    if project is not None:
-        pts = cam.reshape(-1, 1, 3).astype(np.float64)
-        proj, _ = project(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
-        proj = proj.reshape(-1, 2)
-        return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
-
-    fx, fy, cx, cy = K_scaled[0, 0], K_scaled[1, 1], K_scaled[0, 2], K_scaled[1, 2]
-    u = np.round(fx * cam[:, 0] / cam[:, 2] + cx).astype(np.int64)
-    v = np.round(fy * cam[:, 1] / cam[:, 2] + cy).astype(np.int64)
-    return u, v
+        if distortion_model not in ("plumb_bob", "rational_polynomial") or D is None or len(D) not in (4, 5, 8, 12, 14):
+            D = None  # plain pinhole
+    pts = cam.reshape(-1, 1, 3).astype(np.float64)
+    proj, _ = project(pts, np.zeros((3, 1)), np.zeros((3, 1)), K_scaled, D)
+    proj = proj.reshape(-1, 2)
+    return np.round(proj[:, 0]).astype(np.int64), np.round(proj[:, 1]).astype(np.int64)
 
 
 def render_cloud_on_image(
@@ -328,7 +324,6 @@ def render_cloud_on_image(
     K: np.ndarray,
     T_cam_to_base: np.ndarray,
     width: int = 1280,
-    quality: int = 78,
     distortion_model: str | None = None,
     distortion_coeffs: Sequence[float] | np.ndarray | None = None,
 ) -> tuple[bytes, tuple[float, float] | None]:
@@ -338,16 +333,10 @@ def render_cloud_on_image(
     dots coloured by depth. Returns the JPEG and the colour depth span (2nd-98th
     percentile, m), or ``None`` when no return landed.
     """
-    from PIL import Image
-
-    with Image.open(image_path) as src:
-        img = src.convert("RGB")
-    scale = 1.0
-    if width and img.width > width:
-        scale = width / img.width
-        img = img.resize((width, max(1, round(img.height * scale))), Image.BILINEAR)
-    rgb = np.asarray(img).copy()
-    h, w = rgb.shape[:2]
+    full = _decode(image_path.read_bytes())
+    bgr = _shrink(full, width)
+    scale = bgr.shape[1] / full.shape[1]
+    h, w = bgr.shape[:2]
 
     span = None
     pts = np.asarray(cloud, dtype=np.float64)
@@ -366,14 +355,13 @@ def render_cloud_on_image(
             near, far = (float(q) for q in np.percentile(z, (2, 98)))
             far = max(far, near + 0.1)
             u, v, colors = u[order], v[order], colorize(z[order], near, far, cmap="turbo")
-            # 3x3 dots in nine vectorised strokes, not one Pillow call per point.
+            colors = colors[:, ::-1]  # BGR
+            # 3x3 dots in nine vectorised strokes, not one draw call per point.
             for dy in (-1, 0, 1):
                 for dx in (-1, 0, 1):
                     vv, uu = v + dy, u + dx
                     ok = (uu >= 0) & (uu < w) & (vv >= 0) & (vv < h)
-                    rgb[vv[ok], uu[ok]] = colors[ok]
+                    bgr[vv[ok], uu[ok]] = colors[ok]
             span = (near, far)
 
-    buf = io.BytesIO()
-    Image.fromarray(rgb, mode="RGB").save(buf, format="JPEG", quality=quality, optimize=False)
-    return buf.getvalue(), span
+    return _jpeg(bgr), span

@@ -96,7 +96,7 @@ def test_the_driven_layer_is_one_under_the_robot_s_path_and_zero_beside_it(tmp_p
 
     root_path = make_root(tmp_path, with_driven_similarity=True)
     access = build.SceneAccess(probe.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)
@@ -129,7 +129,7 @@ def test_a_root_without_the_modality_attaches_no_such_layer(tmp_path):
 
     root_path = make_root(tmp_path)
     access = build.SceneAccess(probe.DatasetRoot(root_path), "0000")
-    window = access.window("seg000", 1500)
+    window = access.window("seg000")
     frames = np.arange(window.frame_start, window.frame_end)
     track = build.resolve_poses(access, window, access.frame_ts[frames])
     poses = poses_from_quat(track.positions, track.quats)

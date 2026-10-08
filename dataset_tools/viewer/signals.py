@@ -16,6 +16,7 @@ import numpy as np
 from . import geo
 from .build import WHEEL_LABELS, SceneAccess
 from .loaders import roll_pitch_from_gravity_align
+from .windows import span_fractions
 
 #: Columns a chart is resampled onto. About one per pixel of a card's width.
 BINS = 600
@@ -318,9 +319,8 @@ def signal_charts(
                 [{"label": "altitude", "cls": "s1", "values": resample(gps[:, geo.T], gps[:, geo.ALT], t0, t1)}],
             )
         )
-        if gps.shape[1] >= geo.COV.stop:
-            horiz = gps[:, geo.COV.start] + gps[:, geo.COV.start + 1]
-            sigma = np.where(horiz > 0, np.sqrt(np.abs(horiz)), np.nan)
+        if (var := geo.horizontal_var(gps)) is not None:
+            sigma = np.sqrt(var)
             charts.append(
                 _chart(
                     "gnss_sigma",
@@ -358,9 +358,10 @@ def signal_charts(
         left = np.clip(right - 1, 0, len(ts) - 1)
         frames = np.where(np.abs(ts[left] - centres) <= np.abs(ts[right] - centres), left, right).tolist()
     spans = [
-        [(max(s.start_ts, t0) - t0) / (t1 - t0) * 100, (min(s.end_ts, t1) - max(s.start_ts, t0)) / (t1 - t0) * 100]
-        for s in access.segments
-        if shade and s.end_ts > t0 and s.start_ts < t1
+        [lo * 100, (hi - lo) * 100]
+        for lo, hi in (
+            span_fractions(s, t0, t1 - t0) for s in access.segments if shade and s.end_ts > t0 and s.start_ts < t1
+        )
     ]
     return {
         "charts": charts,

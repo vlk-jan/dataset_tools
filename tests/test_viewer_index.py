@@ -88,7 +88,7 @@ def test_probe_records_segment_spans_as_fractions_and_marks_filled_ones(tmp_path
         fh.write(f"0 {ts[0]:.6f} {ts[3]:.6f} 4 filtered:pose_jump\n")
         fh.write(f"1 {ts[6]:.6f} {ts[9]:.6f} 4 v11_fill\n")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
-    p = root.probe("0000", refresh=True)
+    p = root.probe("0000")
     assert len(p.segment_spans) == 2
     assert p.fill_spans == [p.segment_spans[1]]
     lo, hi = p.segment_spans[0]

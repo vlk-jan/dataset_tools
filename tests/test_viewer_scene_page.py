@@ -244,9 +244,8 @@ def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
 
 
 def test_frame_gaps_are_runs_of_missing_indices():
-    names = ["00000.npz", "00001.npz", "00004.npz", "notes.txt", "00006.npz"]
-    assert frame_gaps(names, 8) == [(2, 3), (5, 5), (7, 7)]
-    assert frame_gaps(names[:2], 2) == []
+    assert frame_gaps({0, 1, 4, 6}, 8) == [(2, 3), (5, 5), (7, 7)]
+    assert frame_gaps({0, 1}, 2) == []
 
 
 def test_the_card_never_claims_more_raw_poses_than_the_scene_has(tmp_path):

@@ -94,7 +94,7 @@ def test_probe_warns_when_per_frame_counts_disagree(tmp_path):
     root_path = make_root(tmp_path)
     (root_path / "0000" / "clouds" / "00011.npy").unlink()
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
-    p = root.probe("0000", refresh=True)
+    p = root.probe("0000")
     assert any("counts disagree" in w for w in p.warnings)
 
 

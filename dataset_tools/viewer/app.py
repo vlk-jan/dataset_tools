@@ -53,10 +53,9 @@ from .loaders import (
     roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
-from .probe import BUNDLE_DIR_NAME, DatasetRoot, _npy_shape, scene_fingerprint
-from .scene_page import build_scene_page, map_card
+from .probe import BUNDLE_DIR_NAME, COUNTED_DIRS, DEFAULT_CACHE_MAX_GB, DatasetRoot, _npy_shape, scene_fingerprint
+from .scene_page import build_scene_page, map_card, poses_between
 from .segment_page import COLUMN_TITLES, attitude_per_window, build_segment_page, segment_windows
-from .segment_page import find as find_segment
 from .signals import MAX_GT_SPEED, signal_charts
 from .splits import SPLIT_NAMES, SPLIT_ORDER
 from .windows import (
@@ -96,8 +95,6 @@ WINDOW_KEY_RE = re.compile(r"^(seg\d+(\.\d+)?|raw(\.\d+)?|frame\d+)$")
 OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 #: Scene handles kept at once, least recently used dropped first.
 CACHE_SCENES = 4
-#: Default ceiling on the built 3D windows kept on disk.
-DEFAULT_CACHE_MAX_GB = 5.0
 
 
 def _warm_build_imports() -> None:
@@ -114,13 +111,7 @@ def _warm_build_imports() -> None:
 class ViewerState:
     """Shared, per-process state: the dataset root, caches and build locks."""
 
-    def __init__(
-        self,
-        root: DatasetRoot,
-        max_frames: int,
-        max_seconds: float = DEFAULT_MAX_SECONDS,
-        cache_max_bytes: float = DEFAULT_CACHE_MAX_GB * 1e9,
-    ) -> None:
+    def __init__(self, root: DatasetRoot, max_frames: int, max_seconds: float, cache_max_bytes: float) -> None:
         self.root = root
         self.max_frames = max_frames
         self.max_seconds = max_seconds
@@ -137,7 +128,7 @@ class ViewerState:
         cached = self._access.pop(scene_id, None)
         probe = self.root.probe(scene_id)
         if cached is None or probe is not cached.probe:
-            cached = SceneAccess(self.root, scene_id, probe)
+            cached = SceneAccess(self.root, scene_id, probe, self.max_frames, self.max_seconds)
         self._access[scene_id] = cached
         while len(self._access) > CACHE_SCENES:
             self._access.popitem(last=False)
@@ -221,22 +212,9 @@ def create_app(
 
     # ------------------------------------------------------------------ pages
 
-    # Stamp in every /api/data URL, from the mtimes of every module whose output
-    # ends up in a bundle: a code change makes old browser-cached responses unaddressable.
-    _h = hashlib.sha1()
-    for _f in (
-        "build.py",
-        "wire.py",
-        "app.py",
-        "windows.py",
-        "loaders.py",
-        "render.py",
-    ):
-        try:
-            _h.update(str((Path(__file__).parent / _f).stat().st_mtime_ns).encode())
-        except OSError:  # pragma: no cover - a zipped/partial install
-            _h.update(_f.encode())
-    stamp = _h.hexdigest()[:8]
+    # Stamp in every /api/data URL, from every file of the package: a code change
+    # makes old browser-cached responses unaddressable.
+    stamp = _static_fingerprint(HERE)
 
     @app.middleware("http")
     async def revalidate_scene_assets(request: Request, call_next):
@@ -292,10 +270,6 @@ def create_app(
         page = await run_in_threadpool(_notes_index, state, notes_store, topic)
         return templates.TemplateResponse(request=request, name="notes.html", context=page)
 
-    @app.get("/api/notes")
-    async def api_notes_index(topic: str | None = Query(None, max_length=32)):
-        return await run_in_threadpool(_notes_index, state, notes_store, topic)
-
     #: How the segments table can be ordered: key -> (label, sort key, descending).
     segment_sorts = {
         "scene": ("scene", lambda r: (r["scene"], r["window"].frame_start), False),
@@ -316,12 +290,12 @@ def create_app(
 
         def work() -> list[dict]:
             ids = root.scene_ids(refresh=True)
-            key = tuple((sid, root.probe(sid).fingerprint) for sid in ids) + (state.max_frames, state.max_seconds)
+            key = tuple((sid, root.probe(sid).fingerprint) for sid in ids)
             if key not in segment_rows:
                 rows = []
                 for sid in ids:
                     access = state.access(sid)
-                    wins = [w for w in access.windows(state.max_frames, state.max_seconds) if w.kind == "segment"]
+                    wins = [w for w in access.windows() if w.kind == "segment"]
                     att = attitude_per_window(access, wins)
                     rows += [{"scene": sid, "window": w, "att": att.get(w.key)} for w in wins]
                 segment_rows.clear()
@@ -357,6 +331,18 @@ def create_app(
             },
         )
 
+    def scene_context(access: SceneAccess) -> dict[str, Any]:
+        """What every scene, segment and frame page shows: the clock warning and the notes."""
+        notes, stale = notes_store.read(access.scene_id)
+        return {
+            "data_problem": access.clock_problem,
+            "scene_id": access.scene_id,
+            "probe": access.probe,
+            "notes": notes,
+            "notes_status": notes_store.status(),
+            "notes_stale": stale,
+        }
+
     @app.get("/scene/{scene_id}", response_class=HTMLResponse)
     async def scene_page(
         request: Request,
@@ -365,31 +351,24 @@ def create_app(
         page: int = Query(0, ge=0),
     ):
         access = await _access_or_404(state, scene_id)
-        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
-        card_page = await run_in_threadpool(build_scene_page, root, access)
-        # Only on its own tab: it may list a directory.
-        frames = await run_in_threadpool(_frame_page, access, page) if tab == "frames" else None
-        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="scene.html",
-            context={
-                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
-                "scene_id": scene_id,
+
+        def work() -> dict[str, Any]:
+            context = scene_context(access)
+            windows = access.windows()
+            return {
+                **context,
                 "scene_ids": root.scene_ids(),
-                "probe": access.probe,
                 "windows": windows,
                 "tab": tab,
-                "frames": frames,
-                "page": card_page,
+                # Only on its own tab: it may list a directory.
+                "frames": _frame_page(access, page) if tab == "frames" else None,
+                "page": build_scene_page(root, access),
                 "atlas": root.atlas_scene(scene_id),
-                "notes": scene_notes,
-                "notes_status": notes_store.status(),
-                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
-                "notes_per_window": _notes_per_window(scene_notes, windows),
-                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, windows),
-            },
-        )
+                "notes_per_window": _notes_per_window(context["notes"], windows),
+                "attitude_per_window": attitude_per_window(access, windows),
+            }
+
+        return templates.TemplateResponse(request=request, name="scene.html", context=await run_in_threadpool(work))
 
     @app.get("/scene/{scene_id}/segment/{segment_index}", response_class=HTMLResponse)
     async def segment_detail(
@@ -400,31 +379,25 @@ def create_app(
     ):
         """One ground-truth segment, by its number in ``odometry_segments.txt``."""
         access = await _access_or_404(state, scene_id)
-        found = await run_in_threadpool(find_segment, access, segment_index)
-        if found is None:
-            raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
-        position, seg = found
-        detail = await run_in_threadpool(build_segment_page, access, position, seg, state.max_frames, state.max_seconds)
-        lo, hi = detail["frames"]
-        frames = await run_in_threadpool(_frame_page, access, page, (lo, hi))
-        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="segment.html",
-            context={
-                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
-                "scene_id": scene_id,
+
+        def work() -> dict[str, Any]:
+            seg = access.segment(segment_index)
+            if seg is None:
+                raise HTTPException(404, f"scene {scene_id} has no segment {segment_index}")
+            context = scene_context(access)
+            detail = build_segment_page(access, seg)
+            lo, hi = detail["frames"]
+            return {
+                **context,
                 "seg": seg,
-                "probe": access.probe,
                 "page": detail,
-                "frames": frames,
+                "frames": _frame_page(access, page, (lo, hi)),
                 # Only the notes that touch this segment.
-                "notes": [n for n in scene_notes if n.overlaps(lo, hi)],
-                "notes_status": notes_store.status(),
-                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
-                "attitude_per_window": await run_in_threadpool(attitude_per_window, access, detail["windows"]),
-            },
-        )
+                "notes": [n for n in context["notes"] if n.overlaps(lo, hi)],
+                "attitude_per_window": attitude_per_window(access, detail["windows"]),
+            }
+
+        return templates.TemplateResponse(request=request, name="segment.html", context=await run_in_threadpool(work))
 
     @app.get("/scene/{scene_id}/jump")
     async def frame_jump(scene_id: str, index: int = Query(0, ge=0)):
@@ -438,42 +411,37 @@ def create_app(
         access = await _access_or_404(state, scene_id)
         if index < 0 or index >= access.probe.n_frames:
             raise HTTPException(404, f"scene {scene_id} has no frame {index}")
-        details = await run_in_threadpool(_frame_details, access, index, state.max_frames, state.max_seconds)
-        # None past the end of data_ts.txt: no window to offer.
-        single = await run_in_threadpool(access.window, frame_window_key(index), state.max_frames, state.max_seconds)
-        # None without gps.npy.
-        frame_map = await run_in_threadpool(map_card, access, None, index)
-        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
-        return templates.TemplateResponse(
-            request=request,
-            name="frame.html",
-            context={
-                "data_problem": await run_in_threadpool(lambda: access.clock_problem),
-                "scene_id": scene_id,
+
+        def work() -> dict[str, Any]:
+            context = scene_context(access)
+            details = _frame_details(access, index)
+            # None past the end of data_ts.txt: no window to offer.
+            single = access.window(frame_window_key(index))
+            return {
+                **context,
                 "index": index,
-                "probe": access.probe,
                 "details": details,
                 "frame_window": single.key if single is not None else None,
-                "map": frame_map,
-                "signals": await run_in_threadpool(_frame_signals, access, details.get("timestamp")),
+                # None without gps.npy.
+                "map": map_card(access, None, index),
+                "signals": _frame_signals(access, details.get("timestamp")),
                 # Only the notes whose range holds this frame.
-                "notes": [n for n in scene_notes if n.overlaps(index, index + 1)],
-                "notes_status": notes_store.status(),
-                "notes_stale": await run_in_threadpool(notes_store.stale_version, scene_id),
-            },
-        )
+                "notes": [n for n in context["notes"] if n.overlaps(index, index + 1)],
+            }
+
+        return templates.TemplateResponse(request=request, name="frame.html", context=await run_in_threadpool(work))
 
     @app.get("/view/{scene_id}/{window_key}", response_class=HTMLResponse)
     async def viewer_page(request: Request, scene_id: str, window_key: str):
         access = await _access_or_404(state, scene_id)
-        window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
+        window = await run_in_threadpool(access.window, window_key)
         if window is None:
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
 
         opts = _options_from_query(request.query_params)
         bundle_key = f"{scene_id}/{window_key}/{opts.cache_key()}"
         # Neighbours, for paging through the scene from the panel.
-        windows = await run_in_threadpool(access.windows, state.max_frames, state.max_seconds)
+        windows = await run_in_threadpool(access.windows)
         prev_window, next_window = neighbour_windows(windows, window)
         # ?frame=N opens the playhead on that frame.
         try:
@@ -521,8 +489,6 @@ def create_app(
             head,
             f"Scene {scene_id} {window_key} - 3D view",
         )
-        # Defer SimView's entry point until the overlay reports the bundle built.
-        page = _defer_main_script(page)
         if prefetch and next_window is not None:
             # Prebuild the next window under the same per-bundle lock; errors are swallowed.
             asyncio.ensure_future(_prefetch(state, scene_id, next_window.key, opts.cache_key()))
@@ -708,13 +674,13 @@ def create_app(
     @app.get("/api/scene/{scene_id}/notes")
     async def api_notes(scene_id: str):
         access = await _access_or_404(state, scene_id)
-        scene_notes = await run_in_threadpool(notes_store.list, scene_id)
+        scene_notes, stale = await run_in_threadpool(notes_store.read, scene_id)
         return {
             "scene": scene_id,
             "n_frames": access.probe.n_frames,
             "notes": [n.to_json() for n in scene_notes],
             "status": notes_store.status(),
-            "stale_version": await run_in_threadpool(notes_store.stale_version, scene_id),
+            "stale_version": stale,
         }
 
     @app.post("/api/scene/{scene_id}/notes", status_code=201)
@@ -725,7 +691,7 @@ def create_app(
             scene_id,
             notes_store.add,
             scene_id,
-            *_frames_from_payload(payload),
+            payload.get("frames"),
             payload.get("text", ""),
             topic=payload.get("topic", "other"),
             author=payload.get("author", ""),
@@ -745,7 +711,7 @@ def create_app(
             note_id,
             text=payload.get("text"),
             topic=payload.get("topic"),
-            frames=_frames_from_payload(payload, required=False),
+            frames=payload.get("frames"),
             n_frames=access.probe.n_frames,
             verdict=payload.get("verdict"),
         )
@@ -805,20 +771,6 @@ def create_app(
 # ---------------------------------------------------------------- helpers
 
 
-def _frames_from_payload(payload: dict, required: bool = True) -> tuple[int, int] | None:
-    """The inclusive ``{"frames": [a, b]}`` range of a note request; None when
-    absent and not ``required`` (an edit keeping its range)."""
-    frames = payload.get("frames")
-    if frames is None and not required:
-        return None
-    try:
-        if not isinstance(frames, list | tuple) or len(frames) != 2:
-            raise ValueError(frames)
-        return int(frames[0]), int(frames[1])
-    except (TypeError, ValueError, OverflowError):  # json reads 1e999 as inf
-        raise HTTPException(400, "a note needs a frame range: frames [first, last]") from None
-
-
 async def _notes_write(state: ViewerState, scene_id: str, fn, *args, **kwargs):
     """Run one note mutation in a worker thread under the scene's lock (every
     write replaces the whole file)."""
@@ -859,20 +811,6 @@ async def _access_or_404(state: ViewerState, scene_id: str) -> SceneAccess:
         raise HTTPException(404, f"unknown scene {scene_id!r}") from None
 
 
-def _defer_main_script(page: str) -> str:
-    """Replace SimView's ``main.js`` tag with its URL, for the overlay to insert
-    once the bundle is built (it fetches data as soon as it runs)."""
-    match = re.search(r'<script\s+type="module"\s+src="([^"]*main\.js[^"]*)"\s*></script>', page)
-    if not match:
-        logger.warning("could not find simview's main.js script tag; loading it inline")
-        return page
-    return page.replace(
-        match.group(0),
-        f'<script>window.__dtSimviewEntry = "{match.group(1)}";</script>',
-        1,
-    )
-
-
 def _options_from_query(params) -> BuildOptions:
     def get_int(name: str, default: int) -> int:
         try:
@@ -908,9 +846,7 @@ def _options_from_key(opts_key: str) -> BuildOptions:
         return BuildOptions()
 
 
-def _bundle_is_current(
-    dest: Path, window: Window | None, data: str = "", memo: dict[Path, tuple[int, tuple]] | None = None
-) -> bool:
+def _bundle_is_current(dest: Path, window: Window | None, data: str, memo: dict[Path, tuple[int, tuple]]) -> bool:
     """Is this cached bundle complete and still valid?
 
     It must match ``META_VERSION``, the window's current frame range (a key can
@@ -925,7 +861,7 @@ def _bundle_is_current(
         mtime = (dest / "meta.json").stat().st_mtime_ns
     except OSError:
         return False
-    hit = memo.get(dest) if memo is not None else None
+    hit = memo.get(dest)
     if hit is not None and hit[0] == mtime:
         summary = hit[1]
     else:
@@ -940,8 +876,7 @@ def _bundle_is_current(
             cached.get("frame_end"),
             (meta.get("build") or {}).get("data", ""),
         )
-        if memo is not None:
-            memo[dest] = (mtime, summary)
+        memo[dest] = (mtime, summary)
     return summary == (META_VERSION, window.frame_start, window.frame_end, data)
 
 
@@ -950,7 +885,7 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
     lock per bundle key, so concurrent fetches share one build)."""
     dest = _bundle_path(state, scene_id, window_key, opts_key)
     access = await _access_or_404(state, scene_id)
-    window = await run_in_threadpool(access.window, window_key, state.max_frames, state.max_seconds)
+    window = await run_in_threadpool(access.window, window_key)
     data = access.probe.fingerprint
     if _bundle_is_current(dest, window, data, state.meta_memo):
         return dest
@@ -962,9 +897,7 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
         def work() -> Path:
             started = time.time()
-            scene, meta = build_scene(
-                state.root, scene_id, window_key, opts, max_frames=state.max_frames, max_seconds=state.max_seconds
-            )
+            scene, meta = build_scene(access, window_key, opts)
             doc = scene_document(scene)
             info = write_static_bundle(doc, dest)
             meta["build"]["seconds"] = round(time.time() - started, 2)
@@ -1149,7 +1082,7 @@ def _gps_payload(
 
     track = gps
     if segment_index is not None:
-        seg = next((s for s in access.segments if s.index == segment_index), None)
+        seg = access.segment(segment_index)
         if seg is None:
             raise HTTPException(404, f"scene {access.scene_id} has no segment {segment_index}")
         track = geo.slice_time(gps, seg.start_ts, seg.end_ts)
@@ -1232,9 +1165,7 @@ def _frame_page(access: SceneAccess, page: int, frame_range: tuple[int, int] | N
     }
 
 
-def _frame_details(
-    access: SceneAccess, index: int, max_frames: int, max_seconds: float = DEFAULT_MAX_SECONDS
-) -> dict[str, Any]:
+def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
     """Everything the per-frame page states about one frame. Cheap: no cloud,
     image or height map is decoded here."""
     probe = access.probe
@@ -1255,7 +1186,7 @@ def _frame_details(
             details["camera_lidar_offset_ms"] = round((details["timestamp"] - float(pcd[index])) * 1000, 2)
 
     present: dict[str, bool] = {}
-    for kind in ("images", "clouds", "height_maps", "height_masks", "driven_similarity"):
+    for kind in COUNTED_DIRS:
         present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
     details["present"] = present
     # The cloud-on-image check needs both per-frame files and the calibration.
@@ -1287,7 +1218,7 @@ def _frame_details(
     seg = access.segment_of_frame(index)
     if seg is not None:
         # The segment page's strip covers the frames of the segment's windows.
-        wins = segment_windows(access, seg, max_frames, max_seconds)
+        wins = segment_windows(access, seg)
         strip = _frame_indices(access, (wins[0].frame_start, wins[-1].frame_end)) if wins else []
         details["segment"] = {
             "index": seg.index,
@@ -1307,7 +1238,7 @@ def _frame_details(
     if "timestamp" in details:
         details["motion"] = _frame_motion(access, index, details["timestamp"], seg)
 
-    best = _window_of_frame(access, index, max_frames, max_seconds)
+    best = _window_of_frame(access, index)
     if best is not None:
         details["window"] = {
             "key": best.key,
@@ -1349,20 +1280,20 @@ def _frame_motion(access: SceneAccess, index: int, t: float, seg) -> dict[str, A
     anchor); missing sources leave their numbers out.
     """
     out: dict[str, Any] = {}
-    odom = access.odometry
-    if odom is not None and seg is not None:
-        ots, poses = odom
-        take = (ots >= max(seg.start_ts, t - FRAME_MOTION_HALF)) & (ots <= min(seg.end_ts, t + FRAME_MOTION_HALF))
-        if take.sum() >= 2:
-            order = np.argsort(ots[take], kind="stable")
-            st, sp = ots[take][order], poses[take][order]
-            dt = float(st[-1] - st[0])
-            speed = float(np.linalg.norm(sp[-1, :2, 3] - sp[0, :2, 3])) / dt if dt > 0.05 else None
-            if speed is not None and speed <= MAX_GT_SPEED:
-                yaw = np.arctan2(sp[[0, -1], 1, 0], sp[[0, -1], 0, 0])
-                dyaw = (yaw[1] - yaw[0] + np.pi) % (2 * np.pi) - np.pi
-                out["gt_speed"] = round(speed, 2)
-                out["gt_yaw_rate"] = round(float(np.degrees(dyaw)) / dt, 1)
+    if seg is not None and (
+        stretch := poses_between(
+            access.odometry, max(seg.start_ts, t - FRAME_MOTION_HALF), min(seg.end_ts, t + FRAME_MOTION_HALF)
+        )
+    ):
+        order = np.argsort(stretch[0], kind="stable")
+        st, sp = stretch[0][order], stretch[1][order]
+        dt = float(st[-1] - st[0])
+        speed = float(np.linalg.norm(sp[-1, :2, 3] - sp[0, :2, 3])) / dt if dt > 0.05 else None
+        if speed is not None and speed <= MAX_GT_SPEED:
+            yaw = np.arctan2(sp[[0, -1], 1, 0], sp[[0, -1], 0, 0])
+            dyaw = (yaw[1] - yaw[0] + np.pi) % (2 * np.pi) - np.pi
+            out["gt_speed"] = round(speed, 2)
+            out["gt_yaw_rate"] = round(float(np.degrees(dyaw)) / dt, 1)
     tf, ts = access.transforms, access.frame_ts
     if tf is not None and ts is not None and np.ndim(tf) == 3:
         lo, hi = max(0, index - 1), min(len(tf), len(ts)) - 1
@@ -1375,17 +1306,16 @@ def _frame_motion(access: SceneAccess, index: int, t: float, seg) -> dict[str, A
         if abs(gps[k, geo.T] - t) <= geo.MAX_INTERP_GAP:
             status = int(gps[k, geo.STATUS])
             fix = {"status": geo.FIX_LABELS.get(status, str(status)), "alt": round(float(gps[k, geo.ALT]), 1)}
-            if gps.shape[1] >= geo.COV.stop:
-                horiz = float(gps[k, geo.COV.start] + gps[k, geo.COV.start + 1])
-                if horiz > 0:
-                    fix["sigma"] = round(float(np.sqrt(horiz)), 2)
+            var = geo.horizontal_var(gps[k : k + 1])
+            if var is not None and np.isfinite(var[0]):
+                fix["sigma"] = round(float(np.sqrt(var[0])), 2)
             out["gnss"] = fix
     return out
 
 
-def _window_of_frame(access: SceneAccess, index: int, max_frames: int, max_seconds: float) -> Window | None:
+def _window_of_frame(access: SceneAccess, index: int) -> Window | None:
     """The enumerated window a frame sits in, preferring a ground-truth one."""
-    containing = [w for w in access.windows(max_frames, max_seconds) if w.frame_start <= index < w.frame_end]
+    containing = [w for w in access.windows() if w.frame_start <= index < w.frame_end]
     return next((w for w in containing if w.kind == "segment"), None) or (containing[0] if containing else None)
 
 
@@ -1398,7 +1328,7 @@ def _notes_index(state: ViewerState, notes_store: NoteStore, topic: str | None) 
     for scene_id, notes in by_scene.items():
         access = state.access(scene_id) if scene_id in known else None
         for note in notes:
-            window = _window_of_frame(access, note.frame_start, state.max_frames, state.max_seconds) if access else None
+            window = _window_of_frame(access, note.frame_start) if access else None
             rows.append(
                 {
                     **note.to_json(),

@@ -28,7 +28,8 @@ dependencies = [
 [project.optional-dependencies]
 # httpx is what starlette's TestClient imports, so the viewer's route tests
 # error at fixture setup without it even though nothing imports it directly.
-test = ["pytest>=7", "httpx>=0.27"]
+# Pillow writes the viewer tests' fixture images.
+test = ["pytest>=7", "httpx>=0.27", "pillow>=10.0"]
 # The dataset viewer (dataset_tools.viewer). SimView provides the 3D front-end
 # and the scene format; the viewer reads its page template, its columnar state
 # packer and its debug handle, none of which a major release promises to keep,
@@ -38,7 +39,6 @@ viewer = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "jinja2>=3.1",
-    "pillow>=10.0",
     "simview[authoring]>=6.1.1",
     # Listed directly only so the index below applies: uv honours an index
     # override for direct dependencies, not for simview's transitive torch.

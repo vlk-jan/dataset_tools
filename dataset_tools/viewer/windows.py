@@ -161,6 +161,11 @@ def segment_bounds(frame_ts: np.ndarray | None, segments: list[Segment]) -> list
     return bounds
 
 
+def span_fractions(seg: Segment, base: float, span: float) -> tuple[float, float]:
+    """``seg``'s start and end as fractions of ``[base, base + span]``, clamped to ``[0, 1]``."""
+    return tuple(min(1.0, max(0.0, (t - base) / span)) for t in (seg.start_ts, seg.end_ts))  # type: ignore[return-value]
+
+
 def frames_within(frame_ts: np.ndarray, lo_ts: float, hi_ts: float) -> tuple[int, int]:
     """The ``[start, end)`` frames whose stamps fall inside ``[lo_ts, hi_ts]``."""
     return int(np.searchsorted(frame_ts, lo_ts, side="left")), int(np.searchsorted(frame_ts, hi_ts, side="right"))

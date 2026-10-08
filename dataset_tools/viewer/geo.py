@@ -87,16 +87,20 @@ def fix_shares(track: np.ndarray) -> list[tuple[str, float]]:
     return sorted(shares, key=lambda kv: -kv[1])
 
 
-def sigma_m(track: np.ndarray) -> float | None:
-    """Median horizontal one-sigma radius ``sqrt(cov_ee + cov_nn)`` in metres, or None.
-
-    Fixes with unknown (NaN) covariance drop out.
-    """
-    if not len(track) or track.shape[1] < COV.stop:
+def horizontal_var(gps: np.ndarray) -> np.ndarray | None:
+    """Per-fix horizontal variance ``cov_ee + cov_nn`` (m^2), NaN where not positive;
+    None without the covariance columns. Its square root is the one-sigma radius."""
+    if gps.shape[1] < COV.stop:
         return None
-    horizontal = track[:, COV.start] + track[:, COV.start + 1]
-    good = horizontal[np.isfinite(horizontal) & (horizontal > 0)]
-    return float(np.sqrt(np.median(good))) if good.size else None
+    var = gps[:, COV.start] + gps[:, COV.start + 1]
+    return np.where(var > 0, var, np.nan)
+
+
+def sigma_m(track: np.ndarray) -> float | None:
+    """Median horizontal one-sigma radius in metres, or None. Unknown covariances drop out."""
+    var = horizontal_var(track) if len(track) else None
+    good = var[np.isfinite(var)] if var is not None else []
+    return float(np.sqrt(np.median(good))) if len(good) else None
 
 
 def locate(gps: np.ndarray, t: float) -> list[float] | None:

@@ -113,23 +113,16 @@ def _clean_verdict(value: object) -> str:
 def _note_from_json(entry: dict) -> Note | None:
     """One stored entry, or None when malformed (the rest still load)."""
     try:
-        frames = entry.get("frames")
-        if isinstance(frames, list | tuple) and len(frames) == 2:
-            start, end = int(frames[0]), int(frames[1])
-        else:
-            start = int(entry["frame_start"])
-            end = int(entry["frame_end"])
-    except (KeyError, TypeError, ValueError, OverflowError):  # json reads 1e999 as inf
+        start, end = _clamp_range(entry.get("frames"), None)
+    except ValueError:
         return None
-    if start > end:
-        start, end = end, start
     text = _clean_text(entry.get("text"))
     if not text:
         return None
     return Note(
         id=str(entry.get("id") or secrets.token_hex(3)),
-        frame_start=max(0, start),
-        frame_end=max(0, end),
+        frame_start=start,
+        frame_end=end,
         topic=_clean_topic(entry.get("topic")),
         text=text,
         author=_clean_author(entry.get("author")),
@@ -244,35 +237,42 @@ class NoteStore:
         (every write path) it raises :class:`NotesUnreadable` instead, so a
         write never replaces notes it could not read; only a missing file is empty.
         """
+        return self.read(scene_id, strict)[0]
+
+    def read(self, scene_id: str, strict: bool = False) -> tuple[list[Note], str | None]:
+        """:meth:`list`, plus the dataset version the notes were written against
+        when it is not the root's (a re-extraction can move frame numbers), else None."""
         if not self.enabled:
-            return []
+            return [], None
         try:
             path = self.path_for(scene_id)
         except ValueError:
-            return []
+            return [], None
         try:
             if path.stat().st_size > MAX_FILE_BYTES:
                 raise NotesUnreadable(path, "is implausibly large")
             with open(path, encoding="utf-8", errors="replace") as fh:
                 data = json.load(fh)
         except FileNotFoundError:
-            return []
+            return [], None
         except (OSError, json.JSONDecodeError) as exc:
             if strict:
                 raise NotesUnreadable(path, f"is unreadable ({exc})") from exc
             logger.warning("cannot read notes for scene %s: %s", scene_id, exc)
-            return []
+            return [], None
+        written = str(data.get("dataset_version") or "") if isinstance(data, dict) else ""
+        stale = written if written and self.dataset_version and written != self.dataset_version else None
         entries = data.get("notes") if isinstance(data, dict) else data
         if not isinstance(entries, list):
             if strict:
                 raise NotesUnreadable(path, "holds no list of notes")
-            return []
+            return [], stale
         parsed = [_note_from_json(e) if isinstance(e, dict) else None for e in entries]
         if strict and None in parsed:
             raise NotesUnreadable(path, "has entries this viewer cannot read")
         notes = [n for n in parsed if n]
         notes.sort(key=lambda n: (n.frame_start, n.frame_end))
-        return notes
+        return notes, stale
 
     def list_all(self) -> dict[str, list[Note]]:
         """Every scene's notes, keyed by scene id, in scene order.
@@ -294,26 +294,6 @@ class NoteStore:
             if notes:
                 out[stem] = notes
         return out
-
-    def stale_version(self, scene_id: str) -> str | None:
-        """The dataset version a scene's notes were written against, if not the root's.
-
-        A re-extraction can move frame numbers, so the page warns.
-        """
-        if not self.enabled or not self.dataset_version:
-            return None
-        try:
-            path = self.path_for(scene_id)
-            with open(path, encoding="utf-8", errors="replace") as fh:
-                data = json.load(fh)
-        except (OSError, ValueError):
-            return None
-        if not isinstance(data, dict):
-            return None
-        written = str(data.get("dataset_version") or "")
-        if written and written != self.dataset_version:
-            return written
-        return None
 
     # -- writing -----------------------------------------------------------
 
@@ -346,8 +326,7 @@ class NoteStore:
     def add(
         self,
         scene_id: str,
-        frame_start: int,
-        frame_end: int,
+        frames: object,
         text: str,
         topic: str = "other",
         author: str = "",
@@ -356,14 +335,15 @@ class NoteStore:
     ) -> Note:
         """Add one note and return it as stored.
 
-        ``n_frames`` (the scene's frame count) clamps the range.
+        ``frames`` is the inclusive ``[first, last]`` pair; ``n_frames`` (the
+        scene's frame count) clamps it.
         """
         self._require_writable()
         text = _clean_text(text)
         if not text:
             raise ValueError("a note needs some text")
         verdict = _clean_verdict(verdict)
-        start, end = _clamp_range(frame_start, frame_end, n_frames)
+        start, end = _clamp_range(frames, n_frames)
         notes = self.list(scene_id, strict=True)
         taken = {n.id for n in notes}
         note = Note(
@@ -387,7 +367,7 @@ class NoteStore:
         note_id: str,
         text: str | None = None,
         topic: str | None = None,
-        frames: tuple[int, int] | None = None,
+        frames: object = None,
         n_frames: int | None = None,
         verdict: str | None = None,
     ) -> Note | None:
@@ -410,7 +390,7 @@ class NoteStore:
             if verdict is not None:
                 note.verdict = _clean_verdict(verdict)
             if frames is not None:
-                note.frame_start, note.frame_end = _clamp_range(*frames, n_frames)
+                note.frame_start, note.frame_end = _clamp_range(frames, n_frames)
             note.updated = _now()
             notes.sort(key=lambda n: (n.frame_start, n.frame_end))
             self._save(scene_id, notes)
@@ -433,12 +413,15 @@ def _fresh_id(taken: set[str]) -> str:
     return candidate
 
 
-def _clamp_range(start: int, end: int, n_frames: int | None) -> tuple[int, int]:
-    """A usable inclusive frame range: ordered, non-negative, inside the scene."""
+def _clamp_range(frames: object, n_frames: int | None) -> tuple[int, int]:
+    """A usable inclusive frame range from a ``[first, last]`` pair: ordered,
+    non-negative, inside the scene. ValueError for anything else."""
     try:
-        start, end = int(start), int(end)
-    except (TypeError, ValueError, OverflowError):
-        raise ValueError("frame range must be two integers") from None
+        if not isinstance(frames, list | tuple) or len(frames) != 2:
+            raise ValueError(frames)
+        start, end = int(frames[0]), int(frames[1])
+    except (TypeError, ValueError, OverflowError):  # json reads 1e999 as inf
+        raise ValueError("a note needs a frame range: frames [first, last]") from None
     if start > end:
         start, end = end, start
     start = max(0, start)
