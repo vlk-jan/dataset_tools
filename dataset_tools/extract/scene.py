@@ -19,6 +19,7 @@ import numpy as np
 
 from dataset_tools import (  # noqa: F401  (rosbags_compat patches rosbags)
     gnss_guard,
+    idle_trim,
     rosbags_compat,
     tf_pins,
     time_align,
@@ -435,6 +436,16 @@ def _select_frames(p1: _Pass1, args, bag: str):
                 return "no frame of this bag has a pose the dataset can stand behind"
         else:
             LOG.info("%s: pose guard -- %s", bag, guard_verdict.summary(float(frame_ts[0])))
+
+    # Long stops cut to their start (--trim_idle), here for the same reason as
+    # the guard: before any frame is written, so the indices stay contiguous.
+    if getattr(args, "trim_idle", None) and p1.odom:
+        max_s, keep_s = args.trim_idle
+        keep, idle = idle_trim.trim(frame_ts, sorted(p1.odom, key=lambda x: x[0]), max_s, keep_s)
+        p1.counts["idle_trim"] = idle.report(float(frame_ts[0]))
+        LOG.info("%s: idle trim -- %s", bag, idle_trim.describe(idle, float(frame_ts[0])))
+        if not keep.all():
+            valid_cam_ts, valid_pcd_ts, frame_ts = valid_cam_ts[keep], valid_pcd_ts[keep], frame_ts[keep]
     return valid_cam_ts, valid_pcd_ts, frame_ts, guard_verdict
 
 

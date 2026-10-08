@@ -28,3 +28,10 @@ scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msg
 0026,26-10-02-temesvar,/data/helhest/26-10-02-temesvar/helhest_2026_10_02-11_32_54_merged,10.6,2026-10-02T09:32:52Z,291,4215,4214
 0027,26-10-02-temesvar,/data/helhest/26-10-02-temesvar/helhest_2026_10_02-11_38_10_merged,7.2,2026-10-02T09:38:08Z,247,3577,3577
 0028,26-10-02-temesvar,/data/helhest/26-10-02-temesvar/helhest_2026_10_02-11_42_51_merged,13.9,2026-10-02T09:42:50Z,479,6929,6929
+0029,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-12_20_40_merged,6.5,2026-10-07T10:20:40Z,225,3033,3031
+0030,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-13_43_24_merged,31.8,2026-10-07T11:43:17Z,1023,14754,14749
+0031,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-14_05_15_merged,10.7,2026-10-07T12:05:16Z,376,5270,5267
+0032,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-14_12_38_merged,14.7,2026-10-07T12:12:31Z,487,6975,6972
+0033,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-14_28_34_merged,20.0,2026-10-07T12:28:34Z,639,9179,9182
+0034,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-14_54_52_merged,8.4,2026-10-07T12:54:52Z,458,6521,6521
+0035,26-10-07-stromovka,/data/helhest/26-10-07-stromovka/helhest_2026_10_07-15_04_33_merged,2.0,2026-10-07T13:04:33Z,128,1639,1640

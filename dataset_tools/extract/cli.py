@@ -247,6 +247,16 @@ def build_parser() -> argparse.ArgumentParser:
         "orientation source, leaving that stream in its own frame. Without it such a scene fails: clouds, poses "
         "or gravity in the wrong frame look plausible and are found late. Recorded in extract_meta.json",
     )
+    parser.add_argument(
+        "--trim_idle",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MAX_S", "KEEP_S"),
+        help="Cut every stop longer than MAX_S seconds (odometry under 0.15 m/s and 5 deg/s) to its first KEEP_S "
+        "seconds of frames; the odometry is kept whole. Off by default. Recorded in extract_meta.json "
+        "(frames.idle_trim)",
+    )
     parser.add_argument("--jobs", type=int, default=4, help="Worker processes")
     parser.add_argument(
         "--overwrite",

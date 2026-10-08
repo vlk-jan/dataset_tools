@@ -82,6 +82,8 @@ if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
 fi
 EXTRA=""
 [ "$FORCE" = "1" ] && EXTRA="--overwrite"
+# Extra extractor options for this submission, e.g. EXTRACT_ARGS="--trim_idle 60 10".
+EXTRA="$EXTRA ${EXTRACT_ARGS:-}"
 
 # Needs room for the bag (<= 44 GB) and the extracted scene (<= 90 GB).
 make_scratch v2
