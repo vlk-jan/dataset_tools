@@ -7,6 +7,14 @@
 @import url("theme.css");
 @import url("zoom.css");
 
+/* Nothing on this page scrolls the document: the canvas fills the window and
+   everything else is fixed. SimView sizes the canvas to innerWidth/Height,
+   which round a fractional viewport (1.25x scaling: 1906.4 px) up, so it
+   overflowed by a fraction of a pixel -- and with classic scrollbars the
+   first one took width off the viewport, the canvas then overflowed the
+   other axis too, and both stuck. Overlay scrollbars never showed it. */
+html, body { overflow: hidden; }
+
 #dt-panel, .dt-build {
   font: var(--fs-sm)/1.45 var(--sans);
   color: var(--fg);
