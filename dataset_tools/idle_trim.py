@@ -79,10 +79,10 @@ def trim(frame_ts: np.ndarray, odom, max_s: float, keep_s: float) -> tuple[np.nd
         return keep, verdict
     idle = idle_frames(frame_ts, np.array([t for t, _ in odom]), np.array([T for _, T in odom]))
     edges = np.diff(np.r_[0, idle.astype(np.int8), 0])
-    for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)):
+    for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True):
         # a run broken by a hole in the frame clock is two runs
         cuts = np.flatnonzero(np.diff(frame_ts[a:b]) > MAX_FRAME_GAP_S) + 1
-        for lo, hi in zip(np.r_[0, cuts] + a, np.r_[cuts, b - a] + a):
+        for lo, hi in zip(np.r_[0, cuts] + a, np.r_[cuts, b - a] + a, strict=True):
             t_lo, t_hi = frame_ts[lo], frame_ts[hi - 1]
             if t_hi - t_lo <= max_s:
                 continue
