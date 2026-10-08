@@ -15,19 +15,9 @@ from pathlib import Path
 
 import numpy as np
 
+from dataset_tools import image_format
 from dataset_tools import time_align as ta
 from dataset_tools.gt_io import read_trajectory
-
-
-def describe(profile: ta.Profile) -> str:
-    """One line: what the scene's clock is doing, and how firmly that is known."""
-    if profile.is_identity:
-        return f"no correction wanted -- {profile.note}"
-    lo, hi = profile.knot_delta.min(), profile.knot_delta.max()
-    knots = f"{len(profile.knot_ts)}/{len(profile.windows)} windows"
-    if hi - lo < 0.05:
-        return f"{float(np.median(profile.knot_delta)):+.3f} s, flat ({knots})"
-    return f"{lo:+.3f} .. {hi:+.3f} s, VARYING by {hi - lo:.3f} s over the scene ({knots})"
 
 
 def measure(scene: Path, limit: int, span: float) -> ta.Profile | None:
@@ -50,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     scenes: list[Path] = []
     for p in args.scenes:
         if (p / "scenes.csv").is_file():
-            scenes.extend(sorted(q for q in p.iterdir() if (q / "data_ts.txt").is_file()))
+            scenes.extend(image_format.scenes(p))
         else:
             scenes.append(p)
 
@@ -61,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{scene.name}: not an extracted scene with ground truth, skipped")
             continue
         t0 = float(np.loadtxt(scene / "data_ts.txt")[0])
-        print(f"{scene.name}: {describe(profile)}")
+        print(f"{scene.name}: {profile.summary}")
         if args.per_window:
             for t, delta, gain, depth in profile.rows(t0):
                 knot = "K" if depth >= ta.MIN_DEPTH and abs(delta) <= ta.MAX_ABS_OFFSET else " "

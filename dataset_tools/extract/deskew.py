@@ -39,7 +39,6 @@ def deskew(
     t_ref: float,
     track: PoseTrack,
     gyro: GyroTrack | None = None,
-    gyro_tol_deg: float = GYRO_TOL_DEG,
 ) -> tuple[np.ndarray, str, str | None]:
     """``points`` (N, 3) taken at ``stamp + offsets``, re-expressed at ``t_ref``.
 
@@ -70,7 +69,7 @@ def deskew(
         if R_gyro is not None:
             # Check agreement at the farthest bin.
             far = int(np.argmax(np.abs(times - t_ref)))
-            if rotation_angle_deg(R_rel[far].T @ R_gyro[far]) <= gyro_tol_deg:
+            if rotation_angle_deg(R_rel[far].T @ R_gyro[far]) <= GYRO_TOL_DEG:
                 R_rel, method = R_gyro, "gyro"
     t_rel = (pos_u - pos_r[0]) @ R_ref_T.T  # (U, 3)
     out = np.einsum("nij,nj->ni", R_rel[inv], pts.astype(np.float64)) + t_rel[inv]

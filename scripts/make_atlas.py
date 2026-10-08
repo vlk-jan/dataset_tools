@@ -16,7 +16,6 @@ import argparse
 import csv
 import json
 import logging
-import os
 import shutil
 import statistics
 import sys
@@ -24,8 +23,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 
+from dataset_tools.disk_usage import dir_usage
 from dataset_tools.gt_gaps import window_errors as scan_windows
 from dataset_tools.gt_io import _replace_atomically, read_trajectory
 from dataset_tools.viewer import render
@@ -344,22 +345,9 @@ def totals(entries: dict[str, dict], size_gb: float | None, previous: list | Non
 
 
 def root_size_gb(root: Path) -> float:
-    """Size of the root in GB, following symlinks (a symlinked scene is still
-    part of what the root ships), each real directory counted once."""
-    seen: set[str] = set()
-    total = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=True):
-        real = os.path.realpath(dirpath)
-        if real in seen:
-            dirnames[:] = []
-            continue
-        seen.add(real)
-        for name in filenames:
-            try:
-                total += os.stat(os.path.join(dirpath, name)).st_size
-            except OSError:
-                continue
-    return total / 1e9
+    """Size of the root in GB, symlinked content included, each real directory counted once."""
+    use = dir_usage(root)
+    return (use["bytes"] + use["linked_bytes"]) / 1e9
 
 
 # --------------------------------------------------------------------------
@@ -373,13 +361,9 @@ def thumb_path(atlas_dir: Path, spec: dict, scene_id: str, slot: str) -> Path:
 
 
 def stored_width(path: Path) -> int | None:
-    try:
-        from PIL import Image
-
-        with Image.open(path) as img:
-            return img.width
-    except Exception:  # noqa: BLE001 - a corrupt or missing file just gets rewritten
-        return None
+    """Width of a stored thumbnail; None for a missing or corrupt file (it just gets rewritten)."""
+    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    return None if img is None else img.shape[1]
 
 
 def write_thumbs(

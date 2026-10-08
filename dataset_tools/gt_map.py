@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from dataset_tools.gnss_guard import Span, _merge
+
 #: Tag written into ``odometry_segments.txt`` for a run that ends at a mismatch cut.
 TAG_MAP = "map_mismatch"
 
@@ -54,11 +56,5 @@ def window_offset(T_window, R_align, height_map, validity, min_cells: int = 5):
 
 def mismatch_intervals(hits, horizon: float, margin: float):
     """Merge flagged windows into absolute-time intervals to cut, with a margin either side."""
-    iv = sorted((h.t0 - margin, h.t0 + horizon + margin) for h in hits)
-    out = []
-    for a, b in iv:
-        if out and a <= out[-1][1]:
-            out[-1][1] = max(out[-1][1], b)
-        else:
-            out.append([a, b])
-    return [(a, b) for a, b in out]
+    spans = _merge([Span(h.t0 - margin, h.t0 + horizon + margin, TAG_MAP) for h in hits])
+    return [(s.start, s.end) for s in spans]

@@ -845,16 +845,16 @@ def _tool() -> dict:
     }
 
 
-def _coverage(ts, t0: float, max_gap: float = 1.0, max_listed: int = 100) -> dict:
-    """Count, extent and holes of one topic's stamps, in seconds since the bag began."""
+def _coverage(ts, t0: float) -> dict:
+    """Count, extent and holes over 1 s (the first 100) of one topic's stamps, in seconds since the bag began."""
     t = np.sort(np.asarray(ts, dtype=float))
-    gaps = np.flatnonzero(np.diff(t) > max_gap)
+    gaps = np.flatnonzero(np.diff(t) > 1.0)
     return {
         "messages": len(t),
         "first_s": round(float(t[0] - t0), 3),
         "last_s": round(float(t[-1] - t0), 3),
         "gaps_over_1s": len(gaps),
-        "gaps": [[round(float(t[i] - t0), 3), round(float(t[i + 1] - t0), 3)] for i in gaps[:max_listed]],
+        "gaps": [[round(float(t[i] - t0), 3), round(float(t[i + 1] - t0), 3)] for i in gaps[:100]],
     }
 
 

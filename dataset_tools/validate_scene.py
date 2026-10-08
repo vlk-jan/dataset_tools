@@ -63,6 +63,12 @@ ERROR = "ERROR"
 WARNING = "WARN"
 INFO = "INFO"
 
+#: Clouds under MIN_POINTS are sparse; frame or proprio holes over MAX_GAP_S are listed; a proprio stream
+#: starting or ending over MAX_SHORT_S inside the frames is short; mounts over MAX_EXTRINSIC_M from the median differ.
+MIN_POINTS, MAX_GAP_S, MAX_SHORT_S, MAX_EXTRINSIC_M = 100, 1.0, 2.0, 0.005
+#: Slack, s, on segment bounds.
+TS_TOL = 1e-6
+
 #: The file a root lists its known findings in.
 EXPECT_FILE = "validation_expect.json"
 
@@ -112,10 +118,6 @@ class SceneReport:
     @property
     def warnings(self) -> list[str]:
         return self._texts(WARNING)
-
-    @property
-    def infos(self) -> list[str]:
-        return [m.text for m in self.messages if m.severity == INFO or m.expected]
 
     def status(self, strict: bool = False) -> str:
         if self.errors:
@@ -261,18 +263,15 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
 
 
 def _npy_rows(path: Path) -> int | None:
-    """Rows of a ``.npy`` file, read from its header alone; None if unreadable."""
+    """Rows of a ``.npy`` file, without reading its data; None if unreadable (or truncated)."""
     try:
-        with path.open("rb") as fh:
-            major, _ = np.lib.format.read_magic(fh)
-            read = np.lib.format.read_array_header_1_0 if major == 1 else np.lib.format.read_array_header_2_0
-            shape, _, _ = read(fh)
+        shape = np.load(path, mmap_mode="r").shape
     except (OSError, ValueError):
         return None
     return int(shape[0]) if shape else None
 
 
-def check_cloud_sizes(report: SceneReport, clouds: Sequence[Path], min_points: int = 100) -> None:
+def check_cloud_sizes(report: SceneReport, clouds: Sequence[Path]) -> None:
     """Every cloud's point count, read from headers only (sampling misses the odd empty frame)."""
     rows = [_npy_rows(p) for p in clouds]
     bad = [p.name for p, n in zip(clouds, rows, strict=True) if n is None]
@@ -285,20 +284,20 @@ def check_cloud_sizes(report: SceneReport, clouds: Sequence[Path], min_points: i
         return
     report.stats["points_min_all"] = int(sizes.min())
     empty = [p.stem for p, n in zip(clouds, rows, strict=True) if n == 0]
-    sparse = int(np.count_nonzero((sizes > 0) & (sizes < min_points)))
+    sparse = int(np.count_nonzero((sizes > 0) & (sizes < MIN_POINTS)))
     report.stats["clouds_empty"] = len(empty)
     if empty:
         report.add(WARNING, "CLOUD_EMPTY", f"clouds: {len(empty)} empty ({', '.join(empty[:10])})")
     if sparse:
-        report.add(INFO, "CLOUD_SPARSE", f"clouds: {sparse} with fewer than {min_points} points")
+        report.add(INFO, "CLOUD_SPARSE", f"clouds: {sparse} with fewer than {MIN_POINTS} points")
 
 
-def check_frame_gaps(report: SceneReport, data_ts: np.ndarray, max_gap: float = 1.0) -> None:
+def check_frame_gaps(report: SceneReport, data_ts: np.ndarray) -> None:
     """Holes in the frame clock (INFO: a sensor went quiet, or the guard dropped frames)."""
     if data_ts.size < 2:
         return
     dt = np.diff(data_ts)
-    gaps = np.flatnonzero(dt > max_gap)
+    gaps = np.flatnonzero(dt > MAX_GAP_S)
     report.stats["max_frame_gap_s"] = float(dt.max())
     report.stats["hole_time_s"] = float(dt[gaps].sum())
     for i in gaps:
@@ -310,9 +309,7 @@ def check_frame_gaps(report: SceneReport, data_ts: np.ndarray, max_gap: float = 
 PROPRIO = (("joint_states.npy", WARNING), ("joint_setpoints.npy", WARNING), ("cmd_vel.npy", INFO))
 
 
-def check_proprio(
-    report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None, max_gap: float = 1.0, max_short: float = 2.0
-) -> None:
+def check_proprio(report: SceneReport, scene_dir: Path, data_ts: np.ndarray | None) -> None:
     """Proprioception streams are wall-clock stamped, sorted, and cover the frames.
 
     ``cmd_vel`` exists only while autonomy drives, so its coverage findings are INFO.
@@ -346,14 +343,14 @@ def check_proprio(
         f0, f1 = float(data_ts[0]), float(data_ts[-1])
         late, early = t[0] - f0, f1 - t[-1]
         # The guard keeps frames up to a second past the pose stream, so allow some slack.
-        if late > max_short or early > max_short:
-            parts = ([f"starts {late:.1f} s after the first frame"] if late > max_short else []) + (
-                [f"ends {early:.1f} s before the last"] if early > max_short else []
+        if late > MAX_SHORT_S or early > MAX_SHORT_S:
+            parts = ([f"starts {late:.1f} s after the first frame"] if late > MAX_SHORT_S else []) + (
+                [f"ends {early:.1f} s before the last"] if early > MAX_SHORT_S else []
             )
             report.add(severity, "PROPRIO_COVERAGE", f"{name}: {', '.join(parts)}")
         inside = t[(t >= f0) & (t <= f1)]
         dt = np.diff(inside)
-        for i in np.flatnonzero(dt > max_gap):
+        for i in np.flatnonzero(dt > MAX_GAP_S):
             a, b = float(inside[i] - f0), float(inside[i + 1] - f0)
             n = int(np.count_nonzero((data_ts > inside[i]) & (data_ts < inside[i + 1])))
             if n:
@@ -419,7 +416,6 @@ def check_odometry(
     transforms: np.ndarray,
     max_jump: float,
     ts: np.ndarray | None = None,
-    max_speed: float = MAX_SPEED,
 ) -> None:
     positions = transforms[:, :3, 3]
     if len(positions) < 2:
@@ -445,12 +441,12 @@ def check_odometry(
         return
     speed = steps[moving] / dt[moving]
     report.stats["max_speed_mps"] = float(np.max(speed))
-    n_fast = int(np.sum(speed > max_speed))
+    n_fast = int(np.sum(speed > MAX_SPEED))
     if n_fast:
         report.add(
             WARNING,
             "ODO_SPEED",
-            f"transforms.npy: {n_fast} frame-to-frame steps imply > {max_speed} m/s "
+            f"transforms.npy: {n_fast} frame-to-frame steps imply > {MAX_SPEED} m/s "
             f"(max {np.max(speed):.1f} m/s) -- a pose from another moment, not motion",
         )
 
@@ -484,7 +480,7 @@ def check_extrinsic(report: SceneReport, path: Path) -> None:
         report.add(ERROR, "EXTRINSIC", f"{path.name}: not a rigid transform")
 
 
-def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6) -> None:
+def check_ground_truth(report: SceneReport, scene_dir: Path) -> None:
     """``odometry.txt`` and ``odometry_segments.txt`` agree: counts match, no
     overlap, each segment starts at identity; poses outside segments are a warning."""
     odometry = scene_dir / "odometry.txt"
@@ -523,11 +519,11 @@ def check_ground_truth(report: SceneReport, scene_dir: Path, atol: float = 1e-6)
         report.add(ERROR, "GT_SEG_DUP", "odometry_segments.txt: segment numbers are not unique")
     ordered = sorted(rows, key=lambda r: r.start_ts)
     for prev, cur in zip(ordered, ordered[1:], strict=False):
-        if cur.start_ts < prev.end_ts - atol:
+        if cur.start_ts < prev.end_ts - TS_TOL:
             report.add(ERROR, "GT_SEG_OVERLAP", f"odometry_segments.txt: segments {prev.index} and {cur.index} overlap")
     covered = np.zeros(ts.size, dtype=bool)
     for row in rows:
-        inside = (ts >= row.start_ts - atol) & (ts <= row.end_ts + atol)
+        inside = (ts >= row.start_ts - TS_TOL) & (ts <= row.end_ts + TS_TOL)
         covered |= inside
         n = int(inside.sum())
         if row.n_poses and n != row.n_poses:
@@ -723,7 +719,7 @@ def validate_scene(
 # ---------------------------------------------------------------------------
 # Across the scenes of a root
 # ---------------------------------------------------------------------------
-def validate_root(root: Path, reports: Sequence[SceneReport], max_extrinsic_m: float = 0.005) -> list[Message]:
+def validate_root(root: Path, reports: Sequence[SceneReport]) -> list[Message]:
     """Cross-scene checks: duplicate bags, manifest drift, keyframe lists, camera mount consistency."""
     out: list[Message] = []
     by_bag: dict[str, list[str]] = {}
@@ -818,7 +814,7 @@ def validate_root(root: Path, reports: Sequence[SceneReport], max_extrinsic_m: f
         names = sorted(mounts)
         xyz = np.array([mounts[n] for n in names])
         off = np.linalg.norm(xyz - np.median(xyz, axis=0), axis=1)
-        if off.max() > max_extrinsic_m:
+        if off.max() > MAX_EXTRINSIC_M:
             worst = names[int(off.argmax())]
             out.append(
                 Message(

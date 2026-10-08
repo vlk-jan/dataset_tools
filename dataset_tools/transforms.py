@@ -46,11 +46,19 @@ def euler_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
     return T
 
 
-def roll_pitch_from_matrix(R: np.ndarray) -> tuple[float, float]:
-    """Roll and pitch ('sxyz') of a rotation matrix (3x3 or 4x4)."""
-    roll = math.atan2(R[2, 1], R[2, 2])
-    pitch = math.asin(float(np.clip(-R[2, 0], -1.0, 1.0)))
+def roll_pitch_from_matrix(R: np.ndarray):
+    """Roll and pitch ('sxyz') of a rotation matrix (3x3 or 4x4), or arrays of them for a stack."""
+    R = np.asarray(R, dtype=np.float64)
+    roll = np.arctan2(R[..., 2, 1], R[..., 2, 2])
+    pitch = -np.arctan2(R[..., 2, 0], np.hypot(R[..., 2, 1], R[..., 2, 2]))
     return roll, pitch
+
+
+def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
+    """Roll, pitch, yaw in degrees of a matrix from `euler_matrix` ('sxyz')."""
+    roll, pitch = roll_pitch_from_matrix(M)
+    yaw = math.atan2(M[1, 0], M[0, 0])
+    return tuple(math.degrees(a) for a in (roll, pitch, yaw))
 
 
 def rotation_angle_deg(R: np.ndarray) -> float:
@@ -158,9 +166,9 @@ def quat_slerp(q0: np.ndarray, q1: np.ndarray, t: np.ndarray) -> np.ndarray:
 
 
 def interpolate_poses(
-    src_ts: np.ndarray, src_poses: np.ndarray, query_ts: np.ndarray, tol: float = 0.0
+    src_ts: np.ndarray, src_poses: np.ndarray, query_ts: np.ndarray, tol: float = 0.0, quats: np.ndarray | None = None
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Interpolate a pose track at arbitrary times (lerp + slerp).
+    """Interpolate a pose track at arbitrary times (lerp + slerp); ``quats``: the track's, if precomputed.
 
     Returns ``(positions (M, 3), quaternions (M, 4), valid (M,))``; outside
     ``[src_ts[0] - tol, src_ts[-1] + tol]`` the pose is clamped and ``valid`` False.
@@ -174,7 +182,10 @@ def interpolate_poses(
     alpha = np.clip(alpha, 0.0, 1.0)
 
     pos = src_poses[lo, :3, 3] + alpha[:, None] * (src_poses[hi, :3, 3] - src_poses[lo, :3, 3])
-    quat = quat_slerp(mat_to_quat(src_poses[lo, :3, :3]), mat_to_quat(src_poses[hi, :3, :3]), alpha)
+    if quats is None:
+        quat = quat_slerp(mat_to_quat(src_poses[lo, :3, :3]), mat_to_quat(src_poses[hi, :3, :3]), alpha)
+    else:
+        quat = quat_slerp(quats[lo], quats[hi], alpha)
     return pos, quat, valid
 
 

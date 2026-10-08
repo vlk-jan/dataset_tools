@@ -22,8 +22,7 @@ from dataset_tools import rosbags_compat  # noqa: F401  (patches rosbags)
 from dataset_tools.extract.pointcloud import cloud_to_xyzit, header_stamp_from_cdr, valid_returns_mask
 from dataset_tools.extract.tf_graph import build_tf_graph, get_transform
 from dataset_tools.gnss_guard import MAX_SPEED
-from dataset_tools.tf_pins import rpy_deg
-from dataset_tools.transforms import quaternion_matrix
+from dataset_tools.transforms import quaternion_matrix, rpy_deg
 
 CAM = "/odin1/image/compressed"
 CLOUD = "/odin1/cloud_filtered/cloudini"

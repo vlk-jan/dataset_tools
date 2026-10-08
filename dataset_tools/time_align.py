@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_tools.transforms import mat_to_quat, poses_from_quat, quat_slerp
+from dataset_tools.transforms import interpolate_poses, mat_to_quat, poses_from_quat
 
 #: Voxel edge, m: separates a 0.1 s error at walking pace, coarser than lidar noise.
 VOXEL = 0.12
@@ -53,27 +53,23 @@ class PoseTrack:
     """A pose track prepared once, so a sweep does not re-derive it per delta."""
 
     ts: np.ndarray
-    xyz: np.ndarray
+    poses: np.ndarray
     quat: np.ndarray
 
     @classmethod
     def build(cls, ts: np.ndarray, poses: np.ndarray) -> PoseTrack:
         order = np.argsort(ts)
         ts, poses = np.asarray(ts, float)[order], np.asarray(poses, float)[order]
-        return cls(ts, poses[:, :3, 3].copy(), mat_to_quat(poses[:, :3, :3]))
+        return cls(ts, poses, mat_to_quat(poses[:, :3, :3]))
 
     def at(self, query: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Pose at each query time: lerp in translation, SLERP in rotation."""
-        j = np.clip(np.searchsorted(self.ts, query), 1, len(self.ts) - 1)
-        i = j - 1
-        span = self.ts[j] - self.ts[i]
-        u = np.clip(np.where(span > 0, (query - self.ts[i]) / np.where(span > 0, span, 1.0), 0.0), 0.0, 1.0)
-        pos = self.xyz[i] + u[:, None] * (self.xyz[j] - self.xyz[i])
-        return pos, poses_from_quat(pos, quat_slerp(self.quat[i], self.quat[j], u))[:, :3, :3]
+        pos, quat, _ = interpolate_poses(self.ts, self.poses, query, quats=self.quat)
+        return pos, poses_from_quat(pos, quat)[:, :3, :3]
 
 
-def load_clouds(scene_dir: Path, frames: np.ndarray, stride: int = 2) -> list[np.ndarray]:
-    """The window's clouds, cropped to the band that carries the geometry."""
+def load_clouds(scene_dir: Path, frames: np.ndarray) -> list[np.ndarray]:
+    """The window's clouds, cropped to the band that carries the geometry, every second point."""
     out = []
     for f in frames:
         path = scene_dir / "clouds" / f"{int(f):05d}.npy"
@@ -82,14 +78,14 @@ def load_clouds(scene_dir: Path, frames: np.ndarray, stride: int = 2) -> list[np
         c = np.load(path)[:, :3].astype(np.float64)
         r = np.hypot(c[:, 0], c[:, 1])
         keep = (r > R_MIN) & (r < R_MAX) & (c[:, 2] > Z_MIN) & (c[:, 2] < Z_MAX)
-        out.append(c[keep][::stride])
+        out.append(c[keep][::2])
     return out
 
 
-def occupied(clouds: list[np.ndarray], pos: np.ndarray, rot: np.ndarray, voxel: float = VOXEL) -> int:
+def occupied(clouds: list[np.ndarray], pos: np.ndarray, rot: np.ndarray) -> int:
     """Voxels the window fills once every cloud is put in the world frame."""
     pts = np.vstack([c @ rot[k].T + pos[k] for k, c in enumerate(clouds)])
-    g = np.floor(pts / voxel).astype(np.int64)
+    g = np.floor(pts / VOXEL).astype(np.int64)
     g -= g.min(axis=0)
     key = (g[:, 0] * np.int64(1 << 21) + g[:, 1]) * np.int64(1 << 21) + g[:, 2]
     return int(np.unique(key).size)
@@ -151,13 +147,13 @@ def _depth(coarse: np.ndarray, cc: np.ndarray, fine: np.ndarray, fc: np.ndarray,
     return float(100.0 * (1.0 - fc.min() / np.median(shoulder)))
 
 
-def pick_windows(frame_ts: np.ndarray, track: PoseTrack, limit: int, step_s: float = TARGET_STEP_S) -> list[np.ndarray]:
-    """Windows every ``step_s`` seconds where the robot moved and turned enough, at most ``limit``."""
+def pick_windows(frame_ts: np.ndarray, track: PoseTrack, limit: int) -> list[np.ndarray]:
+    """Windows every ``TARGET_STEP_S`` seconds where the robot moved and turned enough, at most ``limit``."""
     pos, rot = track.at(frame_ts)
     yaw = np.unwrap(np.arctan2(rot[:, 1, 0], rot[:, 0, 0]))
     step = np.r_[0.0, np.hypot(np.diff(pos[:, 0]), np.diff(pos[:, 1]))]
     dt = float(np.median(np.diff(frame_ts))) if len(frame_ts) > 1 else 0.1
-    stride = max(1, int(round(step_s / max(dt, 1e-3))))
+    stride = max(1, int(round(TARGET_STEP_S / max(dt, 1e-3))))
 
     scored = []
     for start in range(0, len(frame_ts) - WINDOW, stride):

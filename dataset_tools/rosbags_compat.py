@@ -12,14 +12,11 @@ _KNOWN_ENCODINGS = {"ros2msg", "ros2idl", "omgidl", ""}
 
 def _patch_schema() -> None:
     orig = storage_mcap.Schema
-    if getattr(orig, "_helhest_patched", False):
-        return
 
     class Schema(orig):  # type: ignore[misc,valid-type]
         """``rosbags`` Schema that tolerates unknown encodings."""
 
         __slots__ = ()
-        _helhest_patched = True
 
         def __new__(cls, id: int, name: str, encoding: str, data: str):  # noqa: A002
             if encoding not in _KNOWN_ENCODINGS:

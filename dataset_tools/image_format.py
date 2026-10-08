@@ -131,16 +131,13 @@ def of_root(root) -> str | None:
     return next(iter(found), None)
 
 
-def declare(root, ext=None) -> str | None:
+def declare(root) -> str | None:
     """Write what the scenes hold into ``<root>/manifest.json`` and return it.
 
     Other keys are kept; an undeclared PNG root stays undeclared. Refuses a mismatch.
     """
     root = Path(root)
-    have = of_root(root)
-    ext = have if ext is None else _normalise(ext, "images")
-    if have is not None and ext != have:
-        raise ImageFormatError(f"{root}: the scenes hold {have}, not {ext}")
+    ext = of_root(root)
     was = declared(root)
     if ext is None or (was is None and ext == DEFAULT):
         return was or ext

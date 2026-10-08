@@ -13,6 +13,7 @@ import argparse
 
 import numpy as np
 
+from dataset_tools.gnss_guard import _runs
 from dataset_tools.gt_io import read_segments, read_trajectory
 from dataset_tools.image_format import scenes
 
@@ -24,20 +25,13 @@ def frozen_runs(t, P, lo, hi, min_frozen, frame_ts, odom_p):
         return []
     tt, pp = t[idx], P[idx, :3, 3]
     same = np.linalg.norm(np.diff(pp, axis=0), axis=1) == 0.0
-    out, i = [], 0
-    while i < len(same):
-        if not same[i]:
-            i += 1
-            continue
-        j = i
-        while j < len(same) and same[j]:
-            j += 1
+    out = []
+    for i, j in _runs(same):
         dur = tt[j] - tt[i]
         if dur >= min_frozen:
             m = (frame_ts >= tt[i]) & (frame_ts <= tt[j])
             wheel = np.linalg.norm(np.diff(odom_p[m], axis=0), axis=1).sum() if m.sum() >= 2 else np.nan
             out.append((tt[i], dur, j - i + 1, wheel))
-        i = j
     return out
 
 

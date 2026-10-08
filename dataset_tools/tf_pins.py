@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix, rotation_angle_deg
+from dataset_tools.transforms import euler_matrix, rotation_angle_deg, rpy_deg
 
 #: The record written beside a scene.
 FILE = "tf_pins.txt"
@@ -81,13 +81,6 @@ class Record:
     @property
     def far(self) -> bool:
         return self.translation_m > WARN_TRANSLATION_M or self.rotation_deg > WARN_ROTATION_DEG
-
-
-def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
-    """Roll, pitch, yaw in degrees of a matrix from `euler_matrix` ('sxyz')."""
-    roll, pitch = roll_pitch_from_matrix(M)
-    yaw = math.atan2(M[1, 0], M[0, 0])
-    return tuple(math.degrees(a) for a in (roll, pitch, yaw))
 
 
 def apply(G: dict[str, dict[str, np.ndarray]]) -> list[Record]:

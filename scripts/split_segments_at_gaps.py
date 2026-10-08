@@ -16,21 +16,13 @@ regen/*_pregapsplit.txt; re-runs start from that backup, so the pass is idempote
 from __future__ import annotations
 
 import argparse
-import shutil
 import sys
 from pathlib import Path
 
 import numpy as np
 
 from dataset_tools.gt_gaps import ReferencePath, cut_reason, cut_segments, gap_seams
-from dataset_tools.gt_io import (
-    changed_since_written,
-    read_segments,
-    read_trajectory,
-    record_written,
-    write_segments,
-    write_trajectory,
-)
+from dataset_tools.gt_io import changed_since_written, publish_with_backup, read_segments, read_trajectory
 from dataset_tools.image_format import scenes as scene_dirs
 
 BACKUP_TRAJ = "odometry_pregapsplit.txt"
@@ -71,18 +63,7 @@ def split_scene(scene: Path, max_gap: float, max_err: float, min_poses: int, che
     stats = dict(segments_in=len(segs), poses_in=len(t), **st, **seams, segments_out=len(rows))
 
     if not check:
-        if src_traj == scene / "odometry.txt" and not regen.is_symlink():
-            regen.mkdir(exist_ok=True)
-            for name in (BACKUP_TRAJ, BACKUP_SEGS):
-                # A derived root links its parent's regen/ files: unlink, don't write through.
-                if (regen / name).is_symlink():
-                    (regen / name).unlink()
-            shutil.copy2(scene / "odometry.txt", regen / BACKUP_TRAJ)
-            shutil.copy2(scene / "odometry_segments.txt", regen / BACKUP_SEGS)
-        write_trajectory(scene / "odometry.txt", out_t, out_T)
-        write_segments(scene / "odometry_segments.txt", rows)
-        if not regen.is_symlink():
-            record_written(scene, BACKUP_TRAJ)
+        publish_with_backup(scene, src_traj, (BACKUP_TRAJ, BACKUP_SEGS), out_t, out_T, rows)
     return stats
 
 

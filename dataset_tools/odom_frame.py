@@ -21,8 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
-from dataset_tools.gt_io import _write_trajectory, read_trajectory
-from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix
+from dataset_tools.gt_io import _write_trajectory, read_trajectory, write_tmp
+from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix, rotation_angle_deg, rpy_deg
 
 RECORD = "odom_frame.txt"
 FILES = ("odometry.txt", "transforms.npy", "gravity_align.npy")
@@ -32,11 +32,8 @@ ROLL_MAX_SD_DEG = 0.15
 PAIR_GAP = (20, 45)
 MIN_TRAVEL_M = 1.5
 MIN_TURN_DEG = 15.0
-
-
-def rpy_deg(R: np.ndarray) -> list[float]:
-    roll, pitch = roll_pitch_from_matrix(R)
-    return [math.degrees(roll), math.degrees(pitch), math.degrees(math.atan2(R[1, 0], R[0, 0]))]
+#: Translation and rotation-axis vectors to collect for the fit.
+N_VECTORS = 600
 
 
 def _kabsch(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
@@ -50,7 +47,7 @@ def _axis(R: np.ndarray) -> np.ndarray:
     return 0.5 * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
 
 
-def measure(scene_dir: Path, n_vectors: int = 600, seed: int = 0) -> dict:
+def measure(scene_dir: Path) -> dict:
     """ICP between cloud pairs against the poses; returns the fit and the correction ``C``."""
     import open3d as o3d
 
@@ -59,7 +56,7 @@ def measure(scene_dir: Path, n_vectors: int = 600, seed: int = 0) -> dict:
     pts = np.loadtxt(scene_dir / "pcd_ts.txt", ndmin=1)
     pts = pts if pts.ndim == 1 else pts[:, -1]
     seg = np.loadtxt(scene_dir / "odometry_segments.txt", ndmin=2, usecols=(1, 2))
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(0)
     reg = o3d.pipelines.registration
 
     def pose(f: int):
@@ -75,7 +72,7 @@ def measure(scene_dir: Path, n_vectors: int = 600, seed: int = 0) -> dict:
 
     P, Q, elev = [], [], []
     tries = 0
-    while len(P) < n_vectors and tries < 8000:
+    while len(P) < N_VECTORS and tries < 8000:
         tries += 1
         a = int(rng.integers(len(pts)))
         b = a + int(rng.integers(*PAIR_GAP))
@@ -87,7 +84,7 @@ def measure(scene_dir: Path, n_vectors: int = 600, seed: int = 0) -> dict:
             continue
         Tp = np.linalg.inv(Ta) @ Tb
         dist = float(np.linalg.norm(Tp[:3, 3]))
-        turn = math.degrees(math.acos(np.clip((np.trace(Tp[:3, :3]) - 1) / 2, -1, 1)))
+        turn = rotation_angle_deg(Tp[:3, :3])
         if dist < MIN_TRAVEL_M and turn < MIN_TURN_DEG:
             continue
         ca, cb = cloud(a), cloud(b)
@@ -144,16 +141,6 @@ def corrected_gravity(gravity: np.ndarray, C: np.ndarray) -> np.ndarray:
     return out
 
 
-def _write_tmp(dest: Path, write, mode: str = "wb") -> Path:
-    """``dest``'s content in a sibling temp file, fsynced; the caller ``os.replace``s it in."""
-    tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-    with open(tmp, mode) as fh:
-        write(fh)
-        fh.flush()
-        os.fsync(fh.fileno())
-    return tmp
-
-
 def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
     """Rotate the poses and levelling of ``scene_dir`` by ``fit["C"]``, once.
 
@@ -168,18 +155,18 @@ def apply(scene_dir: Path, fit: dict, note: str = "") -> None:
         if (scene_dir / name).is_symlink() or not (scene_dir / name).is_file():
             raise RuntimeError(f"{scene_dir / name}: missing or a symlink; apply where the file lives")
     C = np.asarray(fit["C"], dtype=np.float64)
-    if abs(math.degrees(math.acos(np.clip((np.trace(C) - 1) / 2, -1, 1)))) > 3.0:
+    if rotation_angle_deg(C) > 3.0:
         raise RuntimeError(f"{scene_dir}: a {rpy_deg(C)} deg correction is not a calibration residual")
     ts, poses = read_trajectory(scene_dir / "odometry.txt")
     rel = np.load(scene_dir / "transforms.npy")
     gravity = np.load(scene_dir / "gravity_align.npy")
     tmp = {
-        "odometry.txt": _write_tmp(
+        "odometry.txt": write_tmp(
             scene_dir / "odometry.txt", lambda fh: _write_trajectory(fh, ts, corrected(poses, C)), "w"
         ),
-        "transforms.npy": _write_tmp(scene_dir / "transforms.npy", lambda fh: np.save(fh, corrected(rel, C))),
-        "gravity_align.npy": _write_tmp(
-            scene_dir / "gravity_align.npy", lambda fh: np.save(fh, corrected_gravity(gravity, C))
+        "transforms.npy": write_tmp(scene_dir / "transforms.npy", lambda fh: np.save(fh, corrected(rel, C)), "wb"),
+        "gravity_align.npy": write_tmp(
+            scene_dir / "gravity_align.npy", lambda fh: np.save(fh, corrected_gravity(gravity, C)), "wb"
         ),
     }
     stamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%SZ")

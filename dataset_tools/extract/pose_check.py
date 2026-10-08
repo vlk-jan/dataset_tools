@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from dataset_tools.time_align import refine
 from dataset_tools.transforms import roll_pitch_from_matrix
 
 WINDOWS_S = (1.0, 2.0, 5.0)
@@ -50,14 +51,7 @@ def _lag(tm_p, r_p, tm_r, r_r) -> tuple[float | None, float | None]:
     cs = np.array([np.corrcoef(r_p[m], np.interp(tm_p[m] + L, tm_r, r_r))[0, 1] for L in LAGS_S])
     if not np.all(np.isfinite(cs)):
         return None, None
-    i = int(np.argmax(cs))
-    lag = float(LAGS_S[i])
-    if 0 < i < len(cs) - 1:
-        a, b, c = cs[i - 1 : i + 2]
-        den = a - 2 * b + c
-        if den < 0:
-            lag += 0.5 * (a - c) / den * (LAGS_S[1] - LAGS_S[0])
-    return lag, float(cs[i])
+    return refine(LAGS_S, -cs), float(cs.max())
 
 
 def _at(ts: np.ndarray, pos: np.ndarray, q: np.ndarray) -> np.ndarray:
@@ -118,9 +112,9 @@ def compare(ts_p, poses_p, ts_r, poses_r, max_speed: float, step_s: float = 0.5)
     m = (ts_p >= lo) & (ts_p <= hi)
     if m.sum() >= 3:
         j = np.clip(np.searchsorted(ts_r, ts_p[m]), 0, len(ts_r) - 1)
-        rp_p = np.array([roll_pitch_from_matrix(T) for T in poses_p[m]])
-        rp_r = np.array([roll_pitch_from_matrix(T) for T in poses_r[j]])
-        diff = np.degrees(np.median(rp_p - rp_r, axis=0))
+        diff = np.degrees(
+            np.median(np.subtract(roll_pitch_from_matrix(poses_p[m]), roll_pitch_from_matrix(poses_r[j])), axis=1)
+        )
         out["tilt_diff_deg"] = {"roll": round(float(diff[0]), 2), "pitch": round(float(diff[1]), 2)}
     out["warnings"] = warnings(out)
     return out

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -65,19 +66,24 @@ def read_trajectory(path: Path | str) -> tuple[np.ndarray, np.ndarray]:
     return raw[order, 0], raw[order, 1:].reshape(-1, 4, 4)
 
 
-def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> None:
-    """Write through a temp file and ``os.replace`` it in, so concurrent readers never see a partial file."""
+def write_tmp(dest: Path | str, writer: Callable[[TextIO], None], mode: str = "w") -> Path:
+    """``dest``'s content in a sibling temp file, fsynced; the caller ``os.replace``s it in."""
     dest = Path(dest)
     tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
     try:
-        with open(tmp, "w") as fh:
+        with open(tmp, mode) as fh:
             writer(fh)
             fh.flush()
             os.fsync(fh.fileno())
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
-    os.replace(tmp, dest)
+    return tmp
+
+
+def _replace_atomically(dest: Path | str, writer: Callable[[TextIO], None]) -> None:
+    """Write through a temp file and ``os.replace`` it in, so concurrent readers never see a partial file."""
+    os.replace(write_tmp(dest, writer), dest)
 
 
 def write_trajectory(dest: Path | str, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
@@ -182,3 +188,18 @@ def changed_since_written(scene: Path, backup: str) -> bool:
     if not record.is_file():
         return False
     return record.read_text().strip() != published_digest(scene)
+
+
+def publish_with_backup(scene: Path, src_traj: Path, backups: tuple[str, str], ts, poses, rows) -> None:
+    """Publish odometry + segments, first copying the inputs to ``regen/<backups>`` unless read from there."""
+    scene = Path(scene)
+    regen = scene / "regen"
+    if src_traj == scene / "odometry.txt" and not regen.is_symlink():
+        regen.mkdir(exist_ok=True)
+        for src, name in zip(("odometry.txt", "odometry_segments.txt"), backups, strict=True):
+            (regen / name).unlink(missing_ok=True)  # a derived root links its parent's: don't write through
+            shutil.copy2(scene / src, regen / name)
+    write_trajectory(scene / "odometry.txt", ts, poses)
+    write_segments(scene / "odometry_segments.txt", rows)
+    if not regen.is_symlink():
+        record_written(scene, backups[0])

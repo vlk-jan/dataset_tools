@@ -16,6 +16,7 @@ import numpy as np
 
 from .. import gt_io, gt_map
 from ..gt_io import SegmentRow as Segment
+from ..transforms import roll_pitch_from_matrix
 
 logger = logging.getLogger("dataset_tools.viewer.loaders")
 
@@ -245,16 +246,8 @@ def read_segments(path: Path) -> list[Segment]:
 
 
 def roll_pitch_from_gravity_align(R_ga: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Roll/pitch (radians) implied by the per-frame gravity-alignment rotation.
-
-    ``R_ga`` maps base-frame points into the gravity-aligned frame, so the
-    world's up axis expressed in the base frame is ``R_ga.T @ [0, 0, 1]``.
-    """
-    R_ga = np.asarray(R_ga, dtype=np.float64)
-    up_base = R_ga[:, 2, :]  # == (R_ga.T @ e_z) per frame
-    roll = np.arctan2(up_base[:, 1], up_base[:, 2])
-    pitch = -np.arctan2(up_base[:, 0], np.hypot(up_base[:, 1], up_base[:, 2]))
-    return roll, pitch
+    """Roll/pitch (radians) of each per-frame gravity-alignment rotation."""
+    return roll_pitch_from_matrix(R_ga)
 
 
 # --------------------------------------------------------------------------

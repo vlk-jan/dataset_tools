@@ -139,7 +139,7 @@ def test_odometry_jump_is_info_and_its_speed_a_warning(scene: Path):
     np.save(scene / "transforms.npy", transforms)
     report = vs.validate_scene(scene, max_jump=1.0)
     assert report.errors == []
-    assert any("jumps > 1.0 m" in w for w in report.infos)
+    assert any("jumps > 1.0 m" in m.text for m in report.messages if m.severity == vs.INFO)
     assert any("m/s" in w for w in report.warnings)
     assert report.stats["max_step_m"] == pytest.approx(5.2, abs=1e-6)
 
