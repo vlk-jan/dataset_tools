@@ -35,14 +35,14 @@
           aria-hidden="true"><path d="M2 2l8 9-8 9"/></svg></span></button>
   <div class="dt-panel-head">
     <div>
-      {# The segment's own number from the file (not its position), as on its page. #}
+      {# The segment's own number from the file, then its position in the scene. #}
       <div class="dt-title">Scene {{ scene_id }} &middot;
         {%- if window.kind == "segment" %} Segment {{ window.segment_index }}
+          {%- if segment_position is not none %} &middot; {{ segment_position + 1 }}/{{ n_segments }}{% endif %}
           {%- if window.n_chunks > 1 %} ({{ window.chunk + 1 }}/{{ window.n_chunks }}){% endif %}
         {%- else %} {{ window.label }}{% endif %}</div>
       {# Widest to narrowest, so the links read as the path down to this view. #}
       <div class="dt-sub">
-        {% if window.kind == "segment" and n_segments %}<span>one of {{ n_segments }} segments</span>{% endif %}
         <span>{{ window.n_frames }} frames</span>
         <a href="/">index</a>
         <a href="{{ scene_url }}">scene</a>

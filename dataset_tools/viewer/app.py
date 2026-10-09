@@ -458,6 +458,7 @@ def create_app(
             probe=access.probe,
             cloud_on_image=_overlay_possible(access),
             n_segments=len(access.segments),
+            segment_position=next((i for i, s in enumerate(access.segments) if s.index == window.segment_index), None),
             scene_url=f"/scene/{scene_id}",
             notes=notes_store.status(),
         )
