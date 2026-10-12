@@ -9,7 +9,7 @@
 #SBATCH --output=slurm/slurm_out/v2_%A_%a.out
 #
 # HELHEST v2 (Odin1 + Fixposition) extraction, one bag per array task, through
-# to the height maps. Staged on node-local NVMe; NFS is touched only for the sif,
+# odom_frame, the height maps and validation: a finished scene leaves this task. Staged on node-local NVMe; NFS is touched only for the sif,
 # the repo and the final rsync. Timing (--time_align auto) and the GNSS guard
 # (--gnss_guard auto) are the extractor's defaults; see docs/NEW_RIG_READINESS.md.
 #
@@ -44,8 +44,9 @@ if [ "$FORCE" != "1" ] && [ -e "$OUT/$scene/source_bag.txt" ]; then
 fi
 EXTRA=""
 [ "$FORCE" = "1" ] && EXTRA="--overwrite"
-# Extra extractor options for this submission, e.g. EXTRACT_ARGS="--trim_idle 60 10".
-EXTRA="$EXTRA ${EXTRACT_ARGS:-}"
+# Extractor options: the bag list's own (its extract_args column, e.g.
+# "--trim_idle 60 10"), then this submission's EXTRACT_ARGS.
+EXTRA="$EXTRA $row_args ${EXTRACT_ARGS:-}"
 
 # Needs room for the bag (<= 44 GB) and the extracted scene (<= 90 GB).
 make_scratch v2
@@ -61,20 +62,14 @@ rc=$?
 echo "[$(date '+%F %T')] $scene extract rc=$rc"
 [ -e "$local_out/$scene/source_bag.txt" ] || { echo "$scene: no scene produced"; exit 11; }
 
-# Height maps are built in this task so they always match this run's clouds and
-# gravity_align.npy. DRIFT owns the generator; its batch takes the root as $1 and
-# the scene from SLURM_ARRAY_TASK_ID, writing into $local_out/$scene.
-DRIFT=${DRIFT:-$HOME/projects/DRIFT}
-
-# Odometry onto the cloud frame (dataset_tools.odom_frame) before the height maps.
-# Needs open3d from DRIFT's venv, run inside the image: its wheel needs a newer
-# glibc than the cpu nodes have. A scene it cannot measure keeps its odometry;
-# a measured fit that fails to apply fails the scene (apply is crash-safe, so
-# that is a real error, not a half-written scene to publish).
-O3D_PY=${O3D_PY:-$DRIFT/.venv/bin/python}
+# Odometry onto the cloud frame (dataset_tools.odom_frame) before the height maps,
+# which level the clouds with gravity_align.npy. Needs open3d (the "build" extra),
+# whose wheel needs a newer glibc than the cpu nodes have -- inside the image it
+# loads. A scene it cannot measure keeps its odometry; a measured fit that fails
+# to apply fails the scene (apply is crash-safe, so that is a real error).
 if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ]; then
     echo "[$(date '+%F %T')] $scene odometry onto the cloud frame"
-    of() { singularity exec $BINDS --bind "$HOME" "$SIF" env PYTHONPATH="$REPO" OMP_NUM_THREADS=8 "$O3D_PY" -m dataset_tools.odom_frame "$@"; }
+    of() { singularity exec $BINDS "$SIF" env OMP_NUM_THREADS=8 "$PY" -m dataset_tools.odom_frame "$@"; }
     if of measure "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json"; then
         of apply "$local_out" --scenes "$scene" --fits "$SCRATCH/odom_frame_fit.json" --note "applied in extract_v2.batch"
         arc=$?
@@ -84,9 +79,19 @@ if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ];
     fi
 fi
 
+# Height maps and masks (dataset_tools.heightmap, the v2 settings), in this task,
+# from the clouds and the gravity_align.npy just written, so a re-extraction can
+# never leave maps of the run before it.
+echo "[$(date '+%F %T')] $scene height maps"
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.heightmap "$local_out" \
+    --scenes "$scene" --workers "${SLURM_CPUS_PER_TASK:-16}" --overwrite
+hmrc=$?
+echo "[$(date '+%F %T')] $scene height maps rc=$hmrc"
+[ $hmrc -eq 0 ] || { echo "$scene: HEIGHT MAPS FAILED (rc=$hmrc) -- not published"; exit 16; }
+
 mkdir -p "$OUT/.validation"
-# Validated after odom_frame, on the files that get published. A scene failing
-# validation is not published unless FORCE_PUBLISH=1.
+# Validated last, on the files that get published. A scene failing validation
+# is not published unless FORCE_PUBLISH=1.
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.validate_scene \
     "$local_out/$scene" --csv "$SCRATCH/validation.csv"
 vrc=$?
@@ -96,18 +101,6 @@ if [ $vrc -ne 0 ]; then
         exit 14
     fi
     echo "$scene: validation failed (rc=$vrc), published anyway (FORCE_PUBLISH=1)"
-fi
-
-HM=$DRIFT/slurm/build_heightmaps_v2_beta.batch
-if [ -x "$HM" ] || [ -f "$HM" ]; then
-    echo "[$(date '+%F %T')] $scene height maps"
-    bash "$HM" "$local_out"
-    hmrc=$?
-    nmaps=$(find "$local_out/$scene/height_maps" -name '*.npz' 2>/dev/null | wc -l)
-    echo "[$(date '+%F %T')] $scene height maps rc=$hmrc, $nmaps built"
-    [ $hmrc -eq 0 ] || { echo "$scene: HEIGHT MAPS FAILED (rc=$hmrc) -- scene published without them"; }
-else
-    echo "$scene: WARNING no height-map builder at $HM; scene published without maps"
 fi
 
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene ($(du -sh "$local_out/$scene" | cut -f1))"

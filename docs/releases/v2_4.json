@@ -1,0 +1,475 @@
+{
+ "_note": "HELHEST v2.4: what only a person can say about the release; the rest is measured from the scenes by dataset_tools.release. Migrated 2026-10-12 from HELHEST_v2_4/manifest.json and atlas/curation.json.",
+ "inherit": "helhest_v2.json",
+ "dataset_version": "2.4",
+ "title": "HELHEST v2.4",
+ "summary": "HELHEST robot (three-wheeled skid steer, Odin1 lidar-camera-IMU and Fixposition GNSS/INS) driven at three sites in September-October 2026: Stromovka park in Prague (made paths, then lawn, woodland and tall weeds off the paths), the Lipník army test polygon (ploughed field, mud, banks) and Temešvár (tall-grass meadow, reed bed, pine and mixed forest). Per frame: the deskewed lidar sweep in base_link, the camera JPEG, the Odin1 odometry as ground truth, gravity alignment, a height map and its validity mask; per scene: wheel states, GNSS and the extraction records. Long stops (over 60 s) are trimmed in 0029-0035 only.",
+ "bags": "docs/v2_4_bags.csv",
+ "held_out": {
+  "scenes": [
+   "0001",
+   "0019",
+   "0020",
+   "0024",
+   "0025",
+   "0026",
+   "0027",
+   "0034",
+   "0035"
+  ],
+  "decision": "2026-10-02 (user): split A of a whole-root redesign after 0022-0028 were added -- validation is one scene per kind of ground, each on ground the training scenes do not drive: Stromovka 0001, the Temesvar meadow edge 0019/0020/0027, and the 2026-10-02 forest 0024/0025/0026. No spatial buffer (user). Replaces the 2026-09-29 hold-out of 0016-0021. 2026-10-08 (user): the seven 2026-10-07 Stromovka bags appended as 0029-0035; 0034 and 0035 (14_54_52, 15_04_33) are validation. They are their own patch of tall weeds and steep grass banks about 150 m north-east of the rest of the day, and no training track comes within 96 m of them. The woodland corridor of 0030-0033 cannot give a clean validation scene: its four bags retrace one strip (94 % of 0031's track lies within 10 m of 0032's), so it trains whole, with the lawn loop 0029. None of the day's tracks comes within 400 m of 0000-0002.",
+  "support": {
+   "what_it_supports": "an UNSEEN-GROUND claim for each kind of terrain it holds, not unseen sites: every validation scene was driven on a day and at a site that also trains, but on ground the training scenes do not drive",
+   "method": "1 Hz GNSS track of each scene (gps.npy); a validation track point 'leaks' when it lies within 5 / 10 m of any training scene's track. scratch: /mnt/personal/vlkjan6/scratch_v2_3_add/split_eval.py",
+   "leak_within_10m": {
+    "0001": 0.03,
+    "0019": 0.37,
+    "0020": 0.58,
+    "0024": 0.05,
+    "0025": 0.0,
+    "0026": 0.0,
+    "0027": 0.16,
+    "0034": 0.0,
+    "0035": 0.0
+   },
+   "leak_within_5m": {
+    "0001": 0.02,
+    "0019": 0.2,
+    "0020": 0.41,
+    "0024": 0.04,
+    "0025": 0.0,
+    "0026": 0.0,
+    "0027": 0.06,
+    "0034": 0.0,
+    "0035": 0.0
+   },
+   "where_it_leaks": "0019 and 0020 touch the track of 0028 (training), which crosses the whole meadow; 0027 touches 0020's ground and 0028. A 10 m buffer would have removed 2,962 training frames (0028 1,849, 0002 509, 0021 256, 0008 246, 0023 102); the user chose no buffer.",
+   "not_in_validation": "Lipník (0003-0006 drive one course, so they cannot be split) and the meadow core (0007-0012, 0016-0018, 0021 and 0028 share ground with each other), the reed bed 0014, and the forest tracks 0013 and 0015 (re-driven by 0022/0023) -- their terrain is validated only by its neighbours.",
+   "why_not_the_previous_hold_out": "with 0028 training, 0017 lies 100 % and 0016/0021 82-88 % within 10 m of training ground: an unseen-session claim, not unseen ground",
+   "frames": {
+    "validation": 41689,
+    "all": 225137
+   },
+   "v2_4": "The four new scenes are training and none comes within 10 m of a validation track (0003/0004 are Lipník; 0007 and 0013 measured through the Odin1 frame, see defects.gnss_ins_not_initialised), so the leak figures above are unchanged from v2.3."
+  }
+ },
+ "sessions": [
+  {
+   "id": "26-09-14-stromovka-robotour-prep",
+   "scenes": "0000-0001",
+   "date": "2026-09-14",
+   "site": "Stromovka park, Prague -- Robotour test runs driven by the autonomy stack: cobbles, flagstones, gravel, asphalt, the open paved plaza"
+  },
+  {
+   "id": "26-09-19-stromovka-robotour",
+   "scenes": "0002",
+   "date": "2026-09-19",
+   "site": "Stromovka park, Prague -- the Robotour 2026 finals, autonomous driving on cobbles, asphalt and gravel"
+  },
+  {
+   "id": "26-09-22-lipnik",
+   "scenes": "0003-0006",
+   "date": "2026-09-22",
+   "site": "Lipník nad Bečvou -- Czech Army UGV testing polygon: ploughed field, rutted mud, grass mounds and banks, gravel and railway ballast, a felled log 0003 and 0004 (11_42_40, 13_11_17, uploaded 2026-10-05) drive the same course as 0005/0006: the Odin1 recorded only their first 377 s (with a 59 s hole and a 34.6 m relocalisation across it, two segments) and 290 s; the robot side ran on and is not in the scenes. Raindrops on the lens in 0003."
+  },
+  {
+   "id": "26-09-28-temesvar",
+   "scenes": "0007-0015",
+   "date": "2026-09-28",
+   "site": "Temešvár -- field testing: a meadow of tall grass, weeds and thistles with sprints up to 5.4 m/s, wheel-slip tests and two roll-overs, a forest gravel track between pines, a reed bed taller than the robot 0007 (16_12_11, the meadow edge, tall weeds, the lane) and 0013 (16_52_16, the forest gravel track) were dropped in v2.0 because the Fixposition fusion was not initialised; their Odin1 odometry is whole (same Odin1 boot as 0007-0012). 0013 has no gps.npy and 0007 GNSS for its last seconds only."
+  },
+  {
+   "id": "26-09-29-temesvar",
+   "scenes": "0016-0021",
+   "date": "2026-09-29",
+   "site": "Temešvár -- the same meadow a day later, late afternoon into dusk: tall grass and weeds beside an asphalt lane, old fruit trees, open grass; driven almost without stopping, one tip onto the side"
+  },
+  {
+   "id": "26-10-02-temesvar",
+   "scenes": "0022-0028",
+   "date": "2026-10-02",
+   "site": "Temešvár -- the forest east of the meadow and the meadow itself: pine and mixed forest on gravel and dirt tracks, leaf litter, dry grass and undergrowth, a clearing with a hunting shelter, two tip-overs (0024, 0025); the open meadow by a raised hide (0027); a drive across the whole meadow and down the lane to the base (0028). Driven from the joystick: no /cmd_vel. Two bags under 60 s (11_01_17, 11_01_43) were not extracted (user: drop bags under 60 s, as on 09-29). The bags also carry a thermal camera (/camera_front_thermo/*), not extracted (user, 2026-10-02)."
+  },
+  {
+   "id": "26-10-07-stromovka",
+   "scenes": "0029-0035",
+   "date": "2026-10-07",
+   "site": "Stromovka park, Prague -- off the paths this time, driven from the joystick and partly by the autonomy stack: a mown lawn loop (0029), a woodland corridor along an embankment on leaf litter, dirt paths and slopes (0030-0033, ending on an asphalt path with people in 0033), and a patch of tall weeds, long grass and steep grass banks (0034, 0035; validation)."
+  }
+ ],
+ "excluded": {
+  "old_firmware": "every bag of 2026-09-02, 2026-09-08 and 2026-09-11: recorded with the previous Odin1 firmware (self-returns of the front wheels at r 0.5-0.6 m, ~4000 points per frame; every camera image published twice; a different, load-dependent publish latency). 2026-09-08 additionally has all-zero wheel states. Those sessions were in HELHEST_v2_beta, which was deleted on 2026-09-30; the list of what it held is /mnt/personal/vlkjan6/HELHEST_v2_beta_record.",
+  "monotone": "the rest of 2026-09-14, all of 2026-09-16 and 2026-09-18, and finals 2-4: Robotour preparation on made surfaces (gravel, asphalt, setts), much of it stationary, routes repeated across sessions. Candidates and their measurements: docs/V2_0_SELECTION.md.",
+  "no_proprioception": "2026-09-08 robotour-stack bags and helhest_2026_09_08-14_18_12 (no Odin), as in the beta.",
+  "sub_minute": "2026-09-28 robotour_merged_2026_09_28-18_02_56 (18 s) and -18_03_45 (33 s), a lawn at dusk: too short to be scenes.",
+  "history_ins_not_initialised": "v2.0-v2.3 excluded 2026-09-28 16_52_16 and 16_12_11 because the Fixposition fusion was not initialised (it published the ENU origin with an identity attitude). With the Odin1 odometry as ground truth they are now scenes 0013 and 0007.",
+  "static_2026_10_07": "2026-10-07 13_36_47 (141 s) and 13_39_43 (60 s): the robot parked by a bench, 0 m driven, wheels never turning, identical frames (user: no purely static bags).",
+  "idle_frames_2026_10_07": "Stops longer than 60 s in 0029-0035 were cut to their first 10 s at extraction (--trim_idle 60 10; user 2026-10-08): 0030 8076 frames; 0031 1579 frames; 0032 743 frames; 0033 2952 frames. The odometry covers the stops whole; per scene in scenes.*.idle_trim. Earlier scenes were not trimmed."
+ },
+ "terrain_notes": {
+  "note": "Carried over from v2.2 unchanged (same bags, same sites); heights differ slightly where the sweep was deskewed.",
+  "vegetation_canopy": {
+   "scenes": "0007-0012, 0016-0021 and 0027-0028 (meadow), 0014 (reed bed), the grass and undergrowth of 0022-0026",
+   "what": "Not a defect: these scenes are what the root is for. The lidar sees the top of the vegetation, not the surface that carries the robot. In the meadow the lowest returns sit 0.10-0.20 m below base_link where firm ground reads about 0.27 m; in the reed bed they sit 0.32 m ABOVE base_link and 95 % of returns are within 2.2 m. Height maps are therefore maps of the canopy -- the input a model has to see through -- and the wheel-contact anchors, shifted onto the lidar ground by the relevel, sit on the canopy too, so validity 3 does not mark supporting ground here. The supporting terrain is recorded only where the robot drove: the pose and the wheel geometry give the height under each wheel along the track. Frames where the plants swallowed the beams have no map (frames without a map per scene: 0002 (79), 0008 (664), 0009 (5), 0010 (6), 0011 (15), 0012 (14), 0014 (605), 0016 (150), 0017 (84), 0018 (74), 0019 (37), 0020 (56), 0021 (359))."
+  }
+ },
+ "defects": {
+  "note": "The rest carried over from v2.2 unchanged: measured on v2.2's clouds, maps and Fixposition poses; not re-surveyed on v2.3. Where a defect concerned the Fixposition pose coverage it no longer applies to odometry.txt, which is the Odin1 odometry here (see pose_check.txt per scene).",
+  "gnss_no_rtk": {
+   "scenes": "0001 (100 % of rows on plain FIX, horizontal 1-sigma ~7.6 m)",
+   "what": "No RTK corrections (field LTE). The fused solution is still locally consistent: against the wheel odometry over 1 s windows it matches the RTK scenes (speed correlation 0.93, GT/wheel ratio 0.99, 0.5 % of moving windows off by more than 0.2 m/s). Absolute position is metres off; the local trajectory is not."
+  },
+  "pose_coverage_0006": {
+   "what": "The Fixposition stream covers 1241 s of the 1766 s bag; 7557 synced frames had no pose and are not exported; one 294 s hole inside the scene. RTK held for every fix that exists."
+  },
+  "gnss_solution_reset_0002": {
+   "what": "One fabricated stretch of 2.9 s at t+1957.5 s (frozen, island, no fix, teleport) removed by the pose guard: 30 poses, 70 frames."
+  },
+  "roll_overs_0011_0012": {
+   "what": "The robot tipped and rolled over in the meadow. 0011: the receiver reset after each event and the guard removed 130.9-133.9 s, 169.6-182.7 s (290 of 2758 frames); the scene has 3 segments and keeps 34 frames past 45 deg (max 177 deg). 0012: the roll-over is in the scene (17 frames past 45 deg, max 177 deg); the receiver reset after it and the guard removed 67.1-72.4 s (71 of 1030 frames); 1 segment(s). After the roll-over RTK held for only 54 % of the bag's fixes (horizontal 1-sigma 0.22 m)."
+  },
+  "pose_coverage_0015": {
+   "what": "Every robot-side topic (Fixposition, wheels) stops 60.9 s into the 102.5 s bag while the Odin1 records on: the on-board computer shut down after the robot flipped. 586 of 1482 synced frames have no pose and are not exported, so the flip itself is not in the scene. The guard removed nothing."
+  },
+  "session_2026_09_29": {
+   "what": "Per scene, what the pose guard removed and what had no pose: 0016: guard removed nothing (0 of 4395 frames), 0 frames without a pose, 1 segment(s), max speed 2.8 m/s, max tilt 23 deg; 0017: guard removed nothing (0 of 3498 frames), 0 frames without a pose, 1 segment(s), max speed 2.6 m/s, max tilt 99 deg; 0018: guard removed nothing (0 of 3500 frames), 0 frames without a pose, 1 segment(s), max speed 2.5 m/s, max tilt 18 deg; 0019: guard removed nothing (0 of 3885 frames), 20 frames without a pose, 1 segment(s), max speed 2.9 m/s, max tilt 33 deg; 0020: guard removed nothing (0 of 2614 frames), 0 frames without a pose, 1 segment(s), max speed 2.3 m/s, max tilt 25 deg; 0021: guard removed nothing (0 of 5507 frames), 0 frames without a pose, 1 segment(s), max speed 2.6 m/s, max tilt 22 deg."
+  },
+  "blind_frames": {
+   "what": "Clouds with no return beyond 1 m of base_link (planar range), per scene: 0002 (62), 0008 (276), 0009 (1), 0011 (17), 0012 (10), 0014 (400), 0016 (66), 0017 (22), 0018 (28), 0019 (15), 0020 (15), 0021 (143). In the reed bed and the meadow the plants swallow the beams, in 0002 something stood 0.3 m in front of the lidar. Empty clouds: 0014/01867, 0020/01480. Counts per scene are under scenes.*.frames_blind_within_1m; a loader that crops or voxelises has to survive a frame with nothing left."
+  },
+  "joint_setpoints_inf": "Only velocities are commanded; the position and effort columns are inf in every row of the extracted arrays (every session). Read the velocity columns only.",
+  "gnss_null_island": "The Fixposition publishes lat = lon = alt = 0 with position_covariance_type UNKNOWN while status still claims GBAS_FIX, so the status field cannot be used to reject those rows. Rejected at extraction (gps_row).",
+  "inverted_robot_labels_0011": {
+   "what": "16 proprio labels in 0011 were written from frames where the robot was more than 60 deg from level (frames 1857, 1865, 2343 and 2353-2365, up to 177 deg): DRIFT's generator has no tilt gate, and on an inverted base the wheel contacts land above the ground, so the labels' compression is negative (median -0.41 to -0.46 m against +0.17 to +0.27 m on level frames), a value the model cannot emit. 120 cells in all.",
+   "decision": "2026-10-01 (user): NOTE ONLY, the files stay. Negligible for any arm trained so far; a loader that gates on tilt (arccos(gravity_align[:, 2, 2]) > 60 deg) or on segment excludes them. v2.3's keyframe lists drop such frames before labels are generated.",
+   "found_by": "Fix DRIFT session, 2026-10-01, while checking v2.3/0015's flipped stretch"
+  },
+  "gravity_align_pitch": {
+   "what": "gravity_align.npy (from the Fixposition attitude, as in v2 beta-v2.1) leaves the paved ground of scene 0000 climbing +1.77 deg of pitch after levelling, where the Odin1 odometry's attitude (v2.3) leaves +0.03. Measured 2026-10-01 by a heading-separated fit that passes a +-2 deg control; the standstill accelerometer of /odin1/imu puts the Fixposition 1.45 deg off gravity in two bags. The two attitude streams track each other frame by frame (pitch correlation +0.995 in 0000 and 0009, difference sd 0.1-0.3 deg), so the error is a RIGID OFFSET PER SCENE: the Fixposition's pitch differs from the Odin1's by 1.68 deg in 0000 and 1.16 deg in 0009 (roll by 0.2 deg, opposite signs in the two), in the direction that makes the levelled ground climb, varying between sessions. Every height map and compression label of a scene in this root is therefore tilted by the same constant angle, 1.2-1.7 deg of pitch, 2.0-2.9 cm per metre ahead, 13-19 cm at the map edge: a known, constant, correctable distortion, not a per-frame one. Supersedes the '-2.2 deg plaza figure' of the v2.0 selection doc. Per-scene values for all 18 scenes: HELHEST_v2_3/manifest.json -> scenes.*.gravity_pitch_bias_v2_2_deg = roll/pitch angle of v2.2's gravity_align minus v2.3's, time-matched (pitch_mean negative = the v2.2 levelling climbs by that much).",
+   "decision": "not corrected in this root; v2.3 levels from the Odin1 attitude (see /mnt/personal/vlkjan6/HELHEST_v2_3 and dataset_tools docs/NEW_RIG_READINESS.md)",
+   "found_by": "dataset_extraction and Fix DRIFT sessions, 2026-10-01"
+  },
+  "gnss_ins_not_initialised": {
+   "what": "The Fixposition fusion was not initialised in 0007 (the first 216 s of 223) and 0013 (all of it): no georeference there. 0013 has no gps.npy; 0007's gps.npy covers its last seconds only; pose_check has nothing to compare against. The ground truth (Odin1) is unaffected.",
+   "scenes": [
+    "0007",
+    "0013"
+   ],
+   "georeference_by_other_means": "Both lie in the Odin1 frame of the boot that also recorded 0008-0012 (its odometry runs on across the bags). Fitting that frame to the GNSS of 0008, 0009 and 0011 (0.37 m p50) places 0007 on the meadow of 0016-0018 and 0021 and 0013 on the forest track of 0022/0023; neither comes within 10 m of a validation scene (dataset_extraction session, 2026-10-05)."
+  },
+  "reverse_driving_few_labels": {
+   "what": "0013 is driven in reverse for 62 % of its moving frames (0015, v2.3's 0011, 64 %): the wheels then run over ground behind the forward-looking lidar, so most of its keyframes have no measured cell under the driven track and get no proprio label (DRIFT: 'no measured driven cell'). Expected, not a fault.",
+   "scenes": [
+    "0013",
+    "0015"
+   ]
+  },
+  "relocalisations_2026_10_07": {
+   "what": "0033 rolls over three times on the weedy bank (124-131 s, 225-243 s, 379-388 s past 60 deg); during the second the Odin1 relocalised by 147 m and the GNSS dropped out for 14 s, which is the seam between its two segments. 0034 rolls over once (301-308 s), with a 5 s GNSS dropout. The keyframe lists drop the frames whose next 4 s hold a frame past 45 deg (0033: 555, 0034: 83).",
+   "scenes": [
+    "0033",
+    "0034"
+   ]
+  }
+ },
+ "open_items": [
+  "Wheel centres: front (0, +-0.36), rear (-0.697, 0) in base_link are what the robot itself publishes -- /robot_description in the 2026-09-14, 09-22 and 09-28 bags (continuous joints left_wheel_j, right_wheel_j, rear_wheel_j; hence absent from tf_static). Those are the anchor positions the height maps use. The same URDF gives the wheels r = 0.36 and base_footprint at z = -0.36, which is the part known to be inherited from a previous HELHEST.",
+  "Wheel radius: OPEN. The URDF's 0.36 m was written on 2025-04-02 (helhest-common 04daac0, the same commit that set the wheel centres) and never edited since, so it carries no information about the wheels fitted for the 2026 rebuild; the user confirms the current wheels are different and the robot was not accessible to measure. What the recordings give: (1) metres of ground per radian of /joint_states wheel rate = 0.334 on made surfaces (driven path over integrated front-wheel rotation: 0000 0.334, 0001 0.329, 0002 0.334; ground-truth speed over wheel rate gives 0.336), lower on deformable ground where the wheels slip (Lipník 0.31, meadow 0.30-0.33), 0.327 pooled over the root -- the URDF's 0.36 over-predicts the driven path by 10 %. That is the constant anything driven by joint_states needs, whatever sits between wheel and encoder. (2) The physical radius, which sets where the wheel bottom is: the lidar ground at -0.317 m on the flat plaza is the only evidence; whether /joint_states is wheel-side, which would make 0.334 a physical rolling radius too, is not verified. Closing it needs the firmware's encoder or gear scaling, or a tape measure. The height-map anchors use 0.36 with the shift relevel, which puts them on the lidar ground regardless of the radius; a simulator or a contact-label generator has no such relevel and needs the real number.",
+  "The lidar ground reads about 0.27 m below base_link on flat made surfaces (2026-09-30, body-frame plane fits over 17 scenes of v2.1) while the wheel bottoms at r 0.334 are 0.334 m below it: a 6-7 cm gap. With the pinned chain the lidar sits 0.106 m above base_link; the user measured the housing centre at about 0.136 m, which would lower the ground by up to 3 cm and leaves 4-5 cm unexplained. Not in the tf chain: needs the axle height above flat ground and the Odin centre above the axle measured on the robot.",
+  "The height-map anchors are the tilted contact plane at r 0.36 shifted onto the lidar ground of the 0.65-2.5 m annulus (DRIFT shift relevel), which hides that gap and copies the height from ahead of the robot, wrong by the annulus's rise at a slope break. Plain contacts at -r with a measured constant would remove both; the constant is the item above.",
+  "Fixposition mounting pitch (~2 deg): see gravity_align.",
+  "Members of the public are in frame throughout; no anonymisation.",
+  "Odin1 vs GNSS clock: the Odin1 stamps run 5-15 ms behind GNSS time, scene by scene (pose_check clock_lag_s). Everything in a scene shares the Odin1 clock, so it only matters when gps.npy is related to frames.",
+  "Scenes whose pose_check carries a WARNING (relocalisation jumps of the Odin1 odometry) are segmented at the jumps; the segment contract is what protects a consumer.",
+  "Stromovka (0000-0002): after the odom_frame correction the lidar ground 1-4 m ahead still slopes 0.35-0.75 deg below the driven path along travel (Lipník: 0); no frame rotation removes it, since pose and cloud frames now agree by ICP. Unexplained (2026-10-06): crowned paths, or a range-dependent bias of the Odin1 on that site's surfaces."
+ ],
+ "curation": {
+  "schema": "dataset_tools.viewer/curation@1",
+  "note": "Hand-edited: everything here has to be written by someone who looked at the data. atlas.json is generated from this file plus the root -- run scripts/make_atlas.py after editing, and never edit atlas.json.",
+  "title": "HELHEST v2.4",
+  "kicker": "HELHEST · new rig (Odin1 + Fixposition) · Stromovka, Lipník and Temešvár, 2026-09/10",
+  "intro": "36 scenes from the HELHEST jr. The scenes are composed of: two Robotour test runs in Stromovka, one autonomous Robotour finals run also in Stromovka, the UGV testing polygon at Lipník, the Temešvár field tests of 2026-09-28, 09-29 and 10-02, and Stromovka again on 2026-10-07, off the paths. Each card shows three sample frames (10 / 50 / 90 % of the scene) and a green bar marking where ground truth exists.",
+  "root_note": "This dataset shows a mix of the possible terrains the Helhest robot might encounter - from more urban places, roads and footpaths in the Stromovka park, to heavier terrain and tall grass and forested areas in Lipník and Temešvár. The dataset was created with the use case of navigation and driving in rough environments in mind, and the data pool was selected accordingly. The data captured contain RGB images, LiDAR point-clouds, GNSS, odometry, wheel states, and more.",
+  "footer": "Extracted from the raw bags on subtdata.felk.cvut.cz with dataset_tools (slurm/extract_v2.batch, CSV=docs/v2_4_bags.csv, Odin1 odometry as ground truth, each sweep deskewed). 25 scenes are v2.3's, linked; 0003, 0004, 0007, 0013 and 0029-0035 are new in v2.4. Selection and survey in docs/V2_0_SELECTION.md.",
+  "groups": [
+   {
+    "title": "2026-09-14 — cobbles, gravel and the open plaza",
+    "blurb": "Two scenes from the Stromovka park: the cobbled approach and the wide paved plaza with its pavilions (0000), and a cobbled and gravel route across the park (0001). No RTK for the scene 0001. Both runs were driven with autonomy stack, and as a part of testing for the Robotour competition.",
+    "scenes": [
+     "0000",
+     "0001"
+    ]
+   },
+   {
+    "title": "2026-09-19 — Robotour finals",
+    "blurb": "The first finals run, driven by the autonomy stack: 1.5 km of cobbles, worn asphalt, gravel and leaf litter through the park at around 1 m/s, with the crowd and other robots at the start, and during the run.",
+    "scenes": [
+     "0002"
+    ]
+   },
+   {
+    "title": "2026-09-22 — Lipník, the UGV testing polygon",
+    "blurb": "250 km east of Prague: a ploughed field, rutted mud tracks, grass mounds and banks, gravel and railway ballast, a felled log, and other obstacles worthy of a testing polygon for military grade UGVs. Tilt reaches 27 deg, the roughest upright driving in any HELHEST v2 root. A Bluetooth antenna for follow-me scenarios sits in front of the chassis, green in every frame. RTK throughout; the receiver was silent for 525 s of 0006, which v2.3 keeps on the Odin1 odometry. Two more drives of the same course from that morning (0003, 0004) were added in v2.4; the Odin1 recorded only their first five to six minutes.",
+    "scenes": [
+     "0003",
+     "0004",
+     "0005",
+     "0006"
+    ]
+   },
+   {
+    "title": "2026-09-28 — Temešvár",
+    "blurb": "Nine short scenes from one afternoon. A meadow of knee-high grass, weeds and thistles driven into a low sun, where the lidar sees the grass tops rather than the soil, the robot is sprinted at over 5 m/s and rolls over twice (0011, 0012). Then a reed bed taller than the robot (0014) and a forest gravel track between pines, which ends with the robot flipped onto its roof (0015). 0007 (the meadow edge) and 0013 (the forest track) were added in v2.4: the GNSS/INS had not initialised during them, which no longer matters with the Odin1 odometry as ground truth.",
+    "scenes": [
+     "0007",
+     "0008",
+     "0009",
+     "0010",
+     "0011",
+     "0012",
+     "0013",
+     "0014",
+     "0015"
+    ]
+   },
+   {
+    "title": "2026-09-29 — Temešvár",
+    "blurb": "Six scenes, late afternoon into dusk, driven almost without stopping: tight loops in knee-high grass beside an asphalt lane, old fruit trees, open grass under a white evening sky. 90 % of the track lies more than 10 m from anything driven the day before; only 0020 and 0021 cross that patch.",
+    "scenes": [
+     "0016",
+     "0017",
+     "0018",
+     "0019",
+     "0020",
+     "0021"
+    ]
+   },
+   {
+    "title": "2026-10-02 — Temešvár, the forest and the meadow",
+    "blurb": "Seven scenes from one morning, driven from the joystick. Most of it is forest east of the meadow: pine and mixed woodland on gravel and dirt tracks, leaf litter, dry grass and undergrowth, a clearing with a hunting shelter, two tip-overs (0024, 0025). 0022 and 0023 re-drive the forest track and reed-bed edge of 09-28; 0027 is the open meadow by a raised hide, and 0028 crosses the whole meadow and runs down the lane to the base. Four of these scenes are validation (0024-0027).",
+    "scenes": [
+     "0022",
+     "0023",
+     "0024",
+     "0025",
+     "0026",
+     "0027",
+     "0028"
+    ]
+   },
+   {
+    "title": "2026-10-07 — Stromovka off the paths",
+    "blurb": "Back in Stromovka, this time off the made paths: a lawn loop (0029), a woodland corridor along an embankment on leaf litter, dirt and slopes (0030-0033, driven out and back, ending on an asphalt path), and a patch of tall weeds and steep grass banks (0034, 0035), held out for validation. Stops longer than a minute were cut to their first 10 s; two parked bags of that day are not in the dataset.",
+    "scenes": [
+     "0029",
+     "0030",
+     "0031",
+     "0032",
+     "0033",
+     "0034",
+     "0035"
+    ]
+   }
+  ],
+  "scenes": {
+   "0000": {
+    "description": "Stromovka: Asphalt and cobbles under tall trees into the wide treeless paved plaza with pavilions; walkers and cyclists about",
+    "thumbs": {
+     "a": 2009,
+     "b": 10039,
+     "c": 18070
+    }
+   },
+   "0001": {
+    "description": "Stromovka: Cobbled and flagstone paths, gravel avenues and lawn edges on the park's western loop; late-afternoon sun",
+    "thumbs": {
+     "a": 1203,
+     "b": 6011,
+     "c": 10821
+    }
+   },
+   "0002": {
+    "description": "Stromovka: Robotour finals run 1, the start line with other robots and spectators, cobbles, cracked asphalt, gravel and leaf litter through the park, autonomous",
+    "thumbs": {
+     "a": 2866,
+     "b": 14325,
+     "c": 25785
+    }
+   },
+   "0003": {
+    "description": "Lipník: from the hardstanding past a felled log and a rubble heap, over ploughed soil and a mound onto the grass of the polygon; raindrops on the lens"
+   },
+   "0004": {
+    "description": "Lipník: the dirt track between logs, ploughed ground, the rubble ramp and a grassy bank, then the open grass past the spectators"
+   },
+   "0005": {
+    "description": "Lipník: off the gravel hardstanding onto a ploughed field and rutted mud, grass mounds, a railway-ballast crossing, spectators and tents at the edge",
+    "thumbs": {
+     "a": 1601,
+     "b": 7495,
+     "c": 13390
+    }
+   },
+   "0006": {
+    "description": "Lipník: the same field and mud ruts, steep grass banks, a felled log across the track, ballast and rails, the finish gate",
+    "thumbs": {
+     "a": 1718,
+     "b": 7202,
+     "c": 12680
+    }
+   },
+   "0007": {
+    "description": "Temešvár: the meadow edge into a low sun -- tall weeds and thistles, knee-high grass, the gravel path and the asphalt lane"
+   },
+   "0008": {
+    "description": "Temešvár: across the meadow through knee-high grass, thistles and dry weeds, past marker signs",
+    "thumbs": {
+     "a": 654,
+     "b": 3243,
+     "c": 5831
+    }
+   },
+   "0009": {
+    "description": "Temešvár: the long-grass meadow driven straight into the low sun, tilt to 23 deg",
+    "thumbs": {
+     "a": 442,
+     "b": 2207,
+     "c": 3972
+    }
+   },
+   "0010": {
+    "description": "Temešvár: the meadow edge in tall weeds with people standing by; half of it stationary",
+    "thumbs": {
+     "a": 166,
+     "b": 832,
+     "c": 1498
+    }
+   },
+   "0011": {
+    "description": "Temešvár: sprints across the meadow, roll-over of the robot; tests of wheel slip",
+    "thumbs": {
+     "a": 244,
+     "b": 1216,
+     "c": 2260
+    }
+   },
+   "0012": {
+    "description": "Temešvár: sprinting again at over 5 m/s, second roll-over, kept in the scene; degraded fix afterwards (RTK 54 %)",
+    "thumbs": {
+     "a": 99,
+     "b": 481,
+     "c": 863
+    }
+   },
+   "0013": {
+    "description": "Temešvár: a forest gravel and dirt track between pines, dappled light"
+   },
+   "0014": {
+    "description": "Temešvár: off the forest track into a reed bed over the robot's head, many frames have no map",
+    "thumbs": {
+     "a": 365,
+     "b": 1823,
+     "c": 3281
+    }
+   },
+   "0015": {
+    "description": "Temešvár: a gravel track between pines in low sun with one sprint; testing wheel spin on sand at high speed; flips onto its roof at 80 s and lies there to the end",
+    "thumbs": {
+     "a": 90,
+     "b": 448,
+     "c": 806
+    }
+   },
+   "0016": {
+    "description": "Temešvár: along the asphalt lane and its verge, then tight loops through knee-high grass and weeds beside it; low sun",
+    "thumbs": {
+     "a": 440,
+     "b": 2198,
+     "c": 3956
+    }
+   },
+   "0017": {
+    "description": "Temešvár: loops through the meadow by a lone tree with people standing by; the robot tips onto its side once",
+    "thumbs": {
+     "a": 351,
+     "b": 1749,
+     "c": 3148
+    }
+   },
+   "0018": {
+    "description": "Temešvár: tall grass under old fruit trees, pushing into the low branches of one",
+    "thumbs": {
+     "a": 351,
+     "b": 1751,
+     "c": 3150
+    }
+   },
+   "0019": {
+    "description": "Temešvár: a long straight run and then loops over open mid-high grass at dusk, flat white sky",
+    "thumbs": {
+     "a": 406,
+     "b": 1952,
+     "c": 3498
+    }
+   },
+   "0020": {
+    "description": "Temešvár: open meadow at dusk towards a line of trees, over a grass bank",
+    "thumbs": {
+     "a": 262,
+     "b": 1307,
+     "c": 2353
+    }
+   },
+   "0021": {
+    "description": "Temešvár: across the patch driven the day before, past a large tree and tall weeds, onto the lane",
+    "thumbs": {
+     "a": 552,
+     "b": 2754,
+     "c": 4956
+    }
+   },
+   "0022": {
+    "description": "Temešvár: pine forest on gravel tracks, then off them over needles, leaf litter and dry grass tussocks to a stump on sandy ground"
+   },
+   "0023": {
+    "description": "Temešvár: from the stump along mixed-forest gravel roads with leaf-litter verges and clumps of tall grass; passes the forest track of 09-28"
+   },
+   "0024": {
+    "description": "Temešvár: forest gravel track into tall grass and reeds, a clearing with a hunting shelter, dry grass under trees; tips past 90 deg once"
+   },
+   "0025": {
+    "description": "Temešvár: deciduous forest off the gravel track into nettles, undergrowth and leaf litter over a stump; ends rolled over"
+   },
+   "0026": {
+    "description": "Temešvár: forest dirt and gravel roads with leaf-litter and dry-grass verges, ending on an asphalt road"
+   },
+   "0027": {
+    "description": "Temešvár: the open meadow of short and mid grass by a raised hunting hide, a sand patch, people standing by"
+   },
+   "0028": {
+    "description": "Temešvár: across the whole meadow, along the asphalt lane and onto the gravel yard of the base with vans and people"
+   },
+   "0029": {
+    "description": "Stromovka: a loop over mown lawn among old park trees, past a picnic bench with people"
+   },
+   "0030": {
+    "description": "Stromovka: woodland along an embankment, deep leaf litter, dirt paths and the foot of the slope; long stops trimmed"
+   },
+   "0031": {
+    "description": "Stromovka: the woodland dirt path past an operator, leaf litter under the trees, out onto the open lawn"
+   },
+   "0032": {
+    "description": "Stromovka: the woodland corridor out and back, leaf-strewn grass and dirt under the trees to the picnic area"
+   },
+   "0033": {
+    "description": "Stromovka: a gravel path, a steep weedy bank climbed at a strong tilt into the sun, then the asphalt path with people"
+   },
+   "0034": {
+    "description": "Stromovka: tall grass and weeds, a meadow edge under trees, into dead branches and brushwood; validation"
+   },
+   "0035": {
+    "description": "Stromovka: dense weeds and long grass over steep grass banks, people watching; validation"
+   }
+  }
+ }
+}

@@ -1,0 +1,54 @@
+#!/bin/bash
+#SBATCH --job-name=helhest_hm
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
+#SBATCH --time=6:00:00
+#SBATCH --partition=cpu
+#SBATCH --output=slurm/slurm_out/hm_%A_%a.out
+#
+# Rebuild the height maps and masks of existing scenes (dataset_tools.heightmap),
+# one scene per array task -- after anything that moves clouds or gravity_align.npy.
+# extract_v2.batch builds them for a new scene itself; this is for a root that is
+# already there.
+#
+#   sbatch --array=29-35 slurm/heightmaps.batch /mnt/personal/$USER/HELHEST_v2_4
+#
+# Array index = scene number. The maps are built on node-local scratch against the
+# scene's clouds read over NFS and replace the scene's two directories in one rsync
+# (--delete-after: a frame now too sparse loses its old map). Before writing, a
+# sample of the scene's own maps is rebuilt at its recorded settings and must match
+# (VERIFY=0 skips that, e.g. after the clouds changed). HM_ARGS passes settings,
+# e.g. HM_ARGS="--set statistic=median".
+set -uo pipefail
+
+ROOT=${1:?usage: sbatch --array=N-M slurm/heightmaps.batch ROOT}
+REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
+. "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
+scene=$(printf "%04d" "$SLURM_ARRAY_TASK_ID")
+src="$ROOT/$scene"
+[ -d "$src/clouds" ] || { echo "$scene: no clouds at $src"; exit 1; }
+[ -L "$src/height_maps" ] && { echo "$scene: height_maps is a symlink (a linked scene) -- refusing to write through it"; exit 2; }
+
+make_scratch hm
+stage="$SCRATCH/out/$scene"
+mkdir -p "$stage"
+ln -s "$src/clouds" "$stage/clouds"
+cp "$src/gravity_align.npy" "$stage/" || { echo "$scene: no gravity_align.npy"; exit 2; }
+VERIFY_ARGS=""
+if [ "${VERIFY:-1}" = "1" ] && [ -d "$src/height_maps" ]; then
+    mkdir -p "$SCRATCH/ref"; ln -s "$src" "$SCRATCH/ref/$scene"
+    VERIFY_ARGS="--verify_against $SCRATCH/ref"
+fi
+
+echo "[$(date '+%F %T')] $scene build"
+singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.heightmap "$SCRATCH/out" --scenes "$scene" \
+    --workers "${SLURM_CPUS_PER_TASK:-16}" $VERIFY_ARGS ${HM_ARGS:-} || { echo "$scene: build failed"; exit 3; }
+
+echo "[$(date '+%F %T')] $scene publish -> $src"
+for d in height_maps height_masks; do
+    rsync -a --delete-after "$stage/$d/" "$src/$d/" || { echo "$scene: publish $d failed"; exit 5; }
+done
+cp "$stage/height_maps.json" "$src/height_maps.json" || exit 5
+echo "[$(date '+%F %T')] $scene finished: $(find "$src/height_maps" -name '*.npz' | wc -l) maps"

@@ -10,11 +10,16 @@ SUBTDATA=${SUBTDATA:-$USER@subtdata.felk.cvut.cz}
 PY="$REPO/.venv/bin/python"
 
 # Row $SLURM_ARRAY_TASK_ID of $CSV (0-based, header skipped) into $row, its
-# third column -- the bag directory on subtdata -- into $bagdir.
+# third column -- the bag directory on subtdata -- into $bagdir, and its
+# extract_args column (if the header has one) into $row_args.
 read_row() {
     row=$(tail -n +2 "$CSV" | sed -n "$((SLURM_ARRAY_TASK_ID + 1))p")
     [ -n "$row" ] || { echo "no row $SLURM_ARRAY_TASK_ID in $CSV"; exit 1; }
     bagdir=$(echo "$row" | cut -d, -f3)
+    row_args=""
+    local col
+    col=$(head -1 "$CSV" | tr ',' '\n' | grep -nx 'extract_args' | cut -d: -f1)
+    [ -n "$col" ] && row_args=$(echo "$row" | cut -d, -f"$col")
 }
 
 # Node-local scratch for this job into $SCRATCH, removed on exit: /data (NVMe)

@@ -187,10 +187,18 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("action", choices=("measure", "apply"))
     p.add_argument("root", type=Path)
-    p.add_argument("--scenes", nargs="+", required=True)
+    p.add_argument(
+        "--scenes", nargs="+", default=None, help="default: every scene with clouds and no odom_frame.txt yet"
+    )
     p.add_argument("--fits", type=Path, required=True, help="JSON {scene: fit}: written by measure, read by apply")
     p.add_argument("--note", default="")
     a = p.parse_args(argv)
+    if a.scenes is None:
+        a.scenes = sorted(
+            d.name
+            for d in a.root.iterdir()
+            if d.name.isdigit() and (d / "clouds").is_dir() and not (d / RECORD).exists()
+        )
     if a.action == "measure":
         fits = json.loads(a.fits.read_text()) if a.fits.exists() else {}
         for s in a.scenes:

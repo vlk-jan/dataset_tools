@@ -15,6 +15,14 @@ library, so **no ROS installation is required**.
 | `dataset_tools/viewer/` | `helhest-viewer` | browse an extracted dataset root in a web viewer |
 | `dataset_tools/disk_usage.py` | `helhest-disk-usage` | bytes per scene, modality and file, for the viewer's disk-usage panels |
 | `dataset_tools/image_format.py` | `helhest-image-format` | declare (or read back) whether a root's images are the camera's JPEG or a PNG |
+| `dataset_tools/odom_frame.py` | `helhest-odom-frame` | measure and apply the rotation between the Odin1's pose frame and its clouds (needs the `build` extra) |
+| `dataset_tools/heightmap.py` | `helhest-heightmap` | height maps and validity masks from a scene's clouds |
+| `dataset_tools/keyframes.py` | `helhest-keyframes` | the root's keyframe lists (all / train / held out) |
+| `dataset_tools/release.py` | `helhest-release` | a release's root-level files (manifest, splits, lists, README) from its spec in `docs/releases/` and its scenes |
+
+A HELHEST root is built entirely from this repository: see
+[Building a release root](#building-a-release-root). Products other tools add
+to a root afterwards (DRIFT's proprio labels and driven similarity) are theirs.
 
 ## Quickstart: from a recording to the viewer
 
@@ -70,7 +78,10 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[test]"
 ```
 
-Python >= 3.12. Dependencies: `rosbags`, `numpy`, `opencv-python-headless`.
+Python >= 3.12. Dependencies: `rosbags`, `numpy`, `opencv-python-headless`,
+`scipy`. Building a root also needs the `build` extra (`open3d`, for
+`helhest-odom-frame`; its Linux wheel wants glibc >= 2.29, so on the cluster
+it runs inside the container): `pip install -e ".[test,build]"`.
 
 ### Container (CTU cluster)
 
@@ -81,7 +92,7 @@ default, so neither the bags nor the dataset are reachable without them.
 ```bash
 SIF=/mnt/data/vras/data/helhest-jazzy.sif
 singularity exec --bind /mnt/data $SIF python3 -m venv .venv
-singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[test]"
+singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[test,build]"
 singularity exec --bind /mnt/data $SIF \
     .venv/bin/python -m dataset_tools.extract <bags> <output> --jobs 8
 ```
@@ -151,6 +162,42 @@ The Odin1 mount extrinsic is not in the bags' TF tree; pass it once known:
 helhest-extract <bags> <out> \
     --lidar_extrinsic X Y Z ROLL PITCH YAW
 ```
+
+### Building a release root
+
+A release is a bag list (`docs/v2_<n>_bags.csv`: one row per scene, in scene
+order, with an optional `extract_args` column of extractor options for that
+bag) and a spec (`docs/releases/v2_<n>.json`: the held-out scenes and why, the
+sessions, what was left out, known defects, open items and the atlas prose; it
+`inherit`s the rig's shared prose from `docs/releases/helhest_v2.json`).
+Everything else is measured from the scenes. On the CTU cluster:
+
+```bash
+mkdir -p slurm/slurm_out
+CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
+slurm/finalize_v2.sh /mnt/personal/$USER/HELHEST_v2_4 docs/v2_4_bags.csv docs/releases/v2_4.json
+```
+
+Each array task fetches one bag and leaves a finished scene: extraction, then
+`helhest-odom-frame measure` + `apply` (the odometry and `gravity_align.npy`
+rotated onto the clouds' frame, recorded in `odom_frame.txt`), then
+`helhest-heightmap` (`height_maps/`, `height_masks/`, settings in
+`height_maps.json`), then validation. `finalize_v2.sh` runs `helhest-release`
+(`scenes.csv`, the three keyframe lists, `manifest.json`, `splits.json`,
+`atlas/curation.json`, `README.md`), validates the root and draws the atlas.
+The same steps by hand, without slurm:
+
+```bash
+helhest-extract <bags> <root> --jobs 8                 # per bag: --trim_idle 60 10 where the bag list says so
+helhest-odom-frame measure <root> --fits fits.json && helhest-odom-frame apply <root> --fits fits.json
+helhest-heightmap <root>
+helhest-release <root> --spec docs/releases/v2_4.json
+helhest-validate <root> --csv <root>/validation.csv
+```
+
+`helhest-release --out_dir DIR` writes the root-level files elsewhere, to
+compare against a root that exists. `slurm/heightmaps.batch` rebuilds the maps
+of scenes already in a root.
 
 ### Old bags (Livox + Luxonis OAK)
 
@@ -255,6 +302,12 @@ index-aligned.
 | `joint_names.txt` | J lines | text | — | the joint order of the `joint_states.npy` / `joint_setpoints.npy` columns: the first message's. Later messages are reordered to it; one naming other joints is skipped (counted in `extract_meta.json`); an empty column (no effort) is NaN |
 | `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping: messages, pairs, pairs over `--max_sync_dt`, what the guard removed and where, frames trimmed after the clock correction, frames written. Since 2026-10-01 |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
+| `odom_frame.txt` | — | text + JSON last line | rotation, degrees | written by `helhest-odom-frame apply`: the rotation `C` (cloud frame -> Odin1 pose frame) that `odometry.txt`, `transforms.npy` and `gravity_align.npy` were re-expressed by, and how it was measured (ICP between clouds 1.4-3 s apart). Absent where it was not applied |
+| `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: p90 of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated, filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns has none |
+| `height_masks/NNNNN.npz` | 128 x 128 | `uint8` (`validity`) | — | where each cell's value came from: 0 extrapolated, 1 interpolated, 2 measured, 3 a wheel-contact anchor |
+| `height_maps.json` | — | JSON | — | the settings the maps were built with and their counts; `helhest-heightmap` refuses to add maps at other settings to them |
+| `../keyframes.lst`, `../keyframes_train.lst`, `../keyframes_heldout.lst` | — | text | — | `helhest-keyframes`: `<scene>/clouds/NNNNN.npy <scene>/images/NNNNN.<ext>` per frame with a cloud, image, map and mask, minus frames within 4 s before a tilt past 45 deg; all scenes / all but `manifest.json` -> `held_out.scenes` / only those |
+| `../manifest.json`, `../splits.json`, `../README.md` | — | JSON, markdown | — | `helhest-release`: the spec's prose plus what was measured per scene |
 | `../scenes.csv` | — | text | — | dataset-level index: `scene,bag,start_time,frames` |
 
 Files whose source topic is missing from a bag are simply not written, and the
@@ -595,8 +648,10 @@ regenerating the ground truth and
 the estimator published nothing; [docs/README.md](docs/README.md) lists what
 else is there. Code comments and the campaign records refer to **DRIFT**: that
 is the downstream training code the roots are extracted for (a separate
-repository), which also owns the height-map generator and the train/validation
-split.
+repository). It adds its own per-frame products to a root (proprio labels,
+driven similarity); the height maps, the keyframe lists and the split are this
+repository's (until 2026-10-12 the maps and lists were built by DRIFT's code,
+which `dataset_tools.heightmap` and `dataset_tools.keyframes` reproduce).
 
 ## License
 

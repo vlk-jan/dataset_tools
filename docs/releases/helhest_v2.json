@@ -1,0 +1,56 @@
+{
+ "_note": "Prose shared by every HELHEST v2 release (Odin1 + Fixposition rig); a release spec names it with \"inherit\". Migrated 2026-10-12 from HELHEST_v2_4/manifest.json.",
+ "bag_host": "subtdata.felk.cvut.cz:/data/helhest",
+ "rig": "helhest_v2_odin1_fixposition",
+ "cloud_frame": {
+  "frame": "base_link: p_base = X @ p_odin1_lidar",
+  "chain": "base_link -> odin1_base_link (the robot URDF, (0.10, 0, 0.10), identity rotation, the same in every bag) -> imu_link (identity) -> odin1_lidar (PINNED, below)",
+  "pinned": "The Odin1 publishes imu_link -> odin1_lidar and odin1_lidar -> odin1_camera_link on /tf_static as a running estimate, not a calibration: across 42 bags of the 2026-09-14 firmware the lidar-to-IMU translation spans about 3 cm per axis between the 10th and 90th percentile and half a degree of pitch, and it changes within a bag. Since dataset_tools f90c4c5 the extractor replaces both edges with one constant for every bag, the per-axis median of what the driver published (dataset_tools/tf_pins.py; the per-bag survey is docs/odin_tf_static_2026-09-30.txt): lidar in IMU (0.011, 0.024, 0.006) m, roll/pitch/yaw (-0.29, -0.53, 0.12) deg; camera in lidar (-0.010, 0.039, 0.014) m, (0.40, 0.04, 0.06) deg. Each scene records under tf_pins.txt what its bag had published; the distance between that and the pin is under scenes.*.odin_tf_bag_vs_pin (largest lidar offset in this root: 35 mm; scenes flagged far, i.e. over 30 mm or 1 deg: 0014). So the lidar sits (0.111, 0.024, 0.106) m from base_link in every scene of this root. v2.0 and v2.1 used each bag's own value. The pin is the driver's estimate with its wandering removed, NOT a measurement: the user measured the centre of the Odin housing about 0.136 m above base_link, and the lidar ground still reads 4-5 cm above the wheel bottoms (open_items).",
+  "clouds": "what the Odin1 published, transformed by that chain; nothing removed but NaN rows and all-zero points",
+  "deskew": "Every sweep is motion-compensated onto data_ts: p_ref = R(t_ref)^T (R(t_p) p + x(t_p) - x(t_ref)), t_p = stamp + offset_time, poses from /odin1/odometry (lerp + slerp), the rotation inside the sweep from /odin1/imu where it agrees with the slerp to 1 deg (99.8 % of sweeps). Sweeps the odometry does not bracket (the first or last of a bag) are written as recorded and counted in extract_meta.json frames.deskew.no_pose."
+ },
+ "cloud_dtype": "float32 x, y, z, intensity; NaN rows and all-zero points dropped at extraction, nothing else -- the robot's own returns are in the clouds. 14-28k points per frame (Lipník the sparsest, the Temešvár forest track the densest).",
+ "odometry": {
+  "source": "/odin1/odometry: the Odin1's lidar-inertial odometry, 14.46 Hz, 6-DoF, stamped on the same clock as its clouds and images (stamp = image stamp), re-expressed at base_link through odin1_base_link -> base_link ((0.10, 0, 0.10), identity rotation)",
+  "frame": "base_link, anchored per segment at the identity",
+  "contract": "segments in odometry_segments.txt MUST NOT be bridged -- each is re-anchored to its own first pose",
+  "segmentation": "gaps > 1 s and jumps (the Odin1's relocalisations, max_speed 6.0 m/s); one-sample spikes are discarded rather than split. Each segment's reason names why THAT segment ended: gap, teleport, end_of_run. Segments are NUMBERED FROM 1.",
+  "check": "pose_check.txt per scene (and extract_meta.json frames.pose_check): the odometry against /fixposition/odometry_enu at base_link -- spans, path and jumps in each, z range, clock lag, roll/pitch difference, |displacement| disagreement over 1/2/5 s windows. Measured on 0009: 2.1 / 3.4 / 4.6 cm median over 1 / 2 / 5 s, scale 0.994, clock lag +14 ms (the Odin1 clock against GNSS time). Scenes whose check carries a WARNING are listed per scene below (pose_check_vs_fixposition.warnings).",
+  "history": "v2 beta to v2.2 took the ground truth from /fixposition/odometry_enu (GNSS/INS, 10 Hz); decision 2026-10-01 (user): the Odin1 odometry is the ground truth, the Fixposition the georeference and the check.",
+  "seams_added_2026_10_01": "Four relocalisation corrections of the Odin1 odometry too small for the 6 m/s gate were made segment seams after the extraction, the new segments re-anchored to the identity (odometry.txt rewritten atomically): 0000 pose 11199 (t+775.3 s, 26.9 cm kink in one 71 ms step), 0006 pose 10006 (t+986.9 s, 17.0 cm), 0016 poses 3381 (t+233.7 s, 14.6 cm) and 3710 (t+256.4 s, 9.3 cm, borderline). Found by odin_step_audit.txt (odometry vs the GNSS fixes per step) and attributed by the second difference of the Odin1's own track: a genuine correction is a kink in it, a GNSS blip leaves it smooth. About 45 of the ~50 flagged steps were the GNSS's (multipath, fix jitter, settling at a scene start) and are left as they are; the audit file stands as recorded. transforms.npy is unsegmented and unchanged. (Fix DRIFT session, DRIFT issues 38/39.)",
+  "frame_correction": "Rotated onto the cloud frame on 2026-10-06: corrections.odom_frame_2026_10_06."
+ },
+ "gravity_align": "Ry(pitch) @ Rx(roll) of the base from the /odin1/odometry attitude at each data_ts (v2.2: the Fixposition INS). pose_check.txt reports the median roll/pitch difference between the two per scene (0009: 0.25 / 1.13 deg); the Fixposition's ~2 deg pitch against base_link noted in v2.2 is therefore partly the receiver's. Since 2026-10-06 the attitude of the CLOUD frame: the Odin1 attitude rotated by the per-scene odom_frame correction (corrections.odom_frame_2026_10_06); pose_check.txt still reports the uncorrected difference.",
+ "camera": {
+  "resolution": "1600x1296",
+  "distortion_model": "equidistant (fisheye, 4 coefficients) -- v1 was rational_polynomial on a pinhole; anything that unprojects has to change",
+  "intrinsics": "fx 730.7, cx 835.1",
+  "extrinsic": "T_cam_to_base.txt, p_base = T @ p_cam_optical, from tf_static; taken against the image's own header.frame_id (odin1_camera_link)",
+  "extrinsic_caveat": "odin1_camera_link is already optical-convention; its child odin1_camera_link_optical_frame applies the optical rotation a second time and points 90 deg off. Never look up the _optical_frame. The extrinsic value itself is unvalidated -- a checkerboard at 1-2 m would settle it.",
+  "occlusion": "The robot's own front wheels permanently occlude roughly 10 % of every frame (two arcs, lower left and lower right) -- precisely the near-field terrain the wheels are about to cross. In the Lipník scenes a Bluetooth antenna (for follow-me scenarios, green in the images) sits in front of the chassis and the lidar sees it at r 0.2-0.5 m, ~900 points per frame; the height maps cut everything inside 0.65 m. In the Lipník scenes a Bluetooth antenna (for follow-me scenarios, green in the images) sits in front of the chassis and the lidar sees it at r 0.2-0.5 m, ~900 points per frame; the height maps cut everything inside 0.65 m.",
+  "exposure": "The Temešvár meadow was driven into a low sun (0008-0010, 0014): heavy flare and a washed-out sky in many frames. The 2026-09-29 session runs from late afternoon into dusk: low sun in 0016-0018, a flat white sky in 0019-0021.",
+  "frame_rate": "camera and lidar 1:1 at the Odin's nominal 15 Hz in every scene (median 69 ms between frames). This is the fixed driver of 2026-09-14; the doubled images of the beta's first two sessions do not occur here."
+ },
+ "gps": {
+  "file": "gps.npy, (M, 8): t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu",
+  "source": "/fixposition/odometry_llh (NavSatFix)",
+  "role": "present in every scene; comparison and mapping only",
+  "status_values": "-1 NO_FIX, 0 FIX, 2 GBAS_FIX (RTK). Most scenes are predominantly GBAS_FIX. Exceptions: see defects.gnss_no_rtk."
+ },
+ "images": {
+  "encoding": "camera JPEG bytes verbatim, msg.data unmodified",
+  "resolution": "1600x1296, baseline JPEG, 4:2:0, quality about 95, as the Odin1 publishes it; about 0.7 MB per frame",
+  "provenance": "Written by the extractor (--image_format camera, the default since ef1fce4): the bytes of the sensor_msgs/CompressedImage message, unmodified, under the extension their first bytes name. The extractor decodes each image once to check it. PIL and OpenCV decode them to the same pixels; a scene of v2.1 decodes to the same pixels frame for frame where the frame sets agree.",
+  "consumers": "a consumer reads images.extension and refuses a root whose files are not what it declares; a root without the key holds PNG"
+ },
+ "not_present": {
+  "regen": "no regen/ directory: no offline odometry stage on this rig"
+ },
+ "corrections": {
+  "odom_frame": {
+   "what": "odometry.txt, transforms.npy and gravity_align.npy of every scene rotated onto the frame of the scene's clouds (dataset_tools.odom_frame, dataset_tools 222d587); per scene in scenes.*.odom_frame_deg and <scene>/odom_frame.txt. Clouds, images and every other file of the extraction are unchanged.",
+   "why": "The Odin1 computes /odin1/odometry with its own running lidar-to-IMU estimate, not the pinned constant the clouds go through (tf_pins.txt), so the pose frame and the cloud frame of one scene sat apart by up to 0.8 deg. gravity_align.npy is the pose frame's attitude, so the clouds were levelled with the wrong tilt, and every height map tilted against the driven path: DRIFT's path-vs-map slope guard (scripts/analysis/check_path_vs_map_slope.py, limit 0.03 in dz/ds) read 0.056 on v2.3 (2026-10-06, reported by the DRIFT session).",
+   "how": "Clouds 1.4-3 s apart registered by point-to-plane ICP (open3d) in the cloud frame against the same motion in the pose frame, up to 600 pairs per scene. Pitch: the median difference in elevation of the direction of travel. Roll: Kabsch over translation directions and rotation axes, used when its bootstrap sd is under 0.15 deg (every scene but 0012). Yaw not applied. Poses T -> X^T T X (positions unchanged, the anchored first pose still the identity); gravity_align from the corrected attitude."
+  }
+ }
+}

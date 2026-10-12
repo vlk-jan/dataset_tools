@@ -31,6 +31,7 @@ from dataset_tools.extract.ground_truth import _auto, write_ground_truth
 from dataset_tools.extract.pointcloud import cloud_to_xyzit, header_stamp_from_cdr, valid_returns_mask
 from dataset_tools.extract.scene_io import (
     DERIVED_DIRS,
+    DERIVED_FILES,
     GNSS_GUARD_FILE,
     GROUND_TRUTH_FILES,
     JOINT_NAMES_FILE,
@@ -811,6 +812,7 @@ def _set_aside_stale(scene_dir: Path, old_clock: str | None, bag: str) -> None:
     present = [d for d in DERIVED_DIRS if (scene_dir / d).is_dir()]
     if not present or old_clock == _digest(scene_dir / "data_ts.txt"):
         return
+    present += [f for f in DERIVED_FILES if (scene_dir / f).is_file()]
     suffix = time.strftime("stale-%Y%m%d-%H%M%S")
     for d in present:
         (scene_dir / d).rename(scene_dir / f"{d}.{suffix}")
