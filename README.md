@@ -21,7 +21,7 @@ library, so **no ROS installation is required**.
 | `dataset_tools/release.py` | `helhest-release` | a release's root-level files (manifest, splits, lists, README) from its spec in `docs/releases/` and its scenes |
 
 A HELHEST root is built entirely from this repository: see
-[Building a release root](#building-a-release-root). Products other tools add
+[Extracting a dataset, step by step](#extracting-a-dataset-step-by-step). Products other tools add
 to a root afterwards (DRIFT's proprio labels and driven similarity) are theirs.
 
 ## Quickstart: from a recording to the viewer
@@ -33,10 +33,17 @@ python3 -m venv .venv && .venv/bin/pip install -e .                  # extractio
 .venv/bin/helhest-extract  /path/to/bags /path/to/dataset --jobs 8   # one scene per bag: 0000/, 0001/, ...
 .venv/bin/helhest-validate /path/to/dataset --csv /path/to/dataset/validation.csv
 
-python3 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer]"   # plus the viewer (pulls in torch)
-.venv-viewer/bin/helhest-viewer /path/to/dataset                     # then open http://127.0.0.1:8080/
+uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e ".[viewer]"   # plus the viewer
+.venv-viewer/bin/helhest-viewer /path/to/dataset --open              # http://127.0.0.1:8080/
 ```
 
+- That is a bare root: scenes with clouds, images and poses. A release root
+  also carries the odometry-frame rotation, height maps, keyframe lists and a
+  manifest -- see [Extracting a dataset, step by step](#extracting-a-dataset-step-by-step).
+- The viewer extra pulls in `torch`. `uv` takes it from the CPU-only index
+  configured in `pyproject.toml`; plain `pip` ignores that and fetches the
+  CUDA build (~3 GB), so with pip run
+  `pip install torch --index-url https://download.pytorch.org/whl/cpu` first.
 - The defaults are the current rig's topics; bags from the Livox + OAK-D robot
   need the flags under [Old bags](#old-bags-livox--luxonis-oak).
 - The Odin1 clouds are cloudini-compressed. The decoder ships prebuilt
@@ -61,8 +68,8 @@ topics. Everything else about the extraction is identical.
 | --- | --- | --- |
 | Lidar | Livox front lidar, `/livox/lidar_front` (`sensor_msgs/PointCloud2`) | Odin1, `/odin1/cloud_filtered/cloudini` (`point_cloud_interfaces/CompressedPointCloud2`) |
 | Camera | Luxonis OAK-D PoE, `/luxonis/oak/rgb/image_raw/compressed` | Odin1 camera, `/odin1/image/compressed` |
-| Odometry | `/odom` (live robot odometry; the published GT was FAST-LIO run offline) | `/fixposition/odometry_enu` (Fixposition GNSS/INS) |
-| Orientation (gravity) | `/ekf/imu/data` | `/fixposition/odometry_enu` |
+| Odometry | `/odom` (live robot odometry; the published GT was FAST-LIO run offline) | `/odin1/odometry` (Odin1 lidar-inertial odometry; v2 beta to v2.2 used `/fixposition/odometry_enu`, now the `--check_odom` reference) |
+| Orientation (gravity) | `/ekf/imu/data` | `/odin1/odometry` (v2 beta to v2.2: `/fixposition/odometry_enu`) |
 | Proprioception | `/joint_states`, `/cmd_vel` | `/joint_states`, `/joint_setpoints`, `/cmd_vel` |
 | GNSS position | Septentrio receiver (any `sensor_msgs/NavSatFix` topic) | `/fixposition/odometry_llh` (the ENU odometry, geodetically) |
 
@@ -79,9 +86,10 @@ python3 -m venv .venv
 ```
 
 Python >= 3.12. Dependencies: `rosbags`, `numpy`, `opencv-python-headless`,
-`scipy`. Building a root also needs the `build` extra (`open3d`, for
+`scipy`. Extras: `test` (`pytest`, `httpx`, `pillow`), `build` (`open3d`, for
 `helhest-odom-frame`; its Linux wheel wants glibc >= 2.29, so on the cluster
-it runs inside the container): `pip install -e ".[test,build]"`.
+it runs inside the container) and `viewer` (see [Viewer](#viewer)). Building
+a release root: `pip install -e ".[test,build]"`.
 
 ### Container (CTU cluster)
 
@@ -112,9 +120,147 @@ wrapper around [cloudini](https://github.com/facontidavide/cloudini):
 cloudini_shim/build_shim.sh          # clones cloudini, builds dataset_tools/libcloudini_shim.so
 ```
 
-Needs `cmake`, `g++` (C++20), `libzstd-dev`, `liblz4-dev` — all present in
-`helhest-jazzy.sif`, so run it inside the container if in doubt. Old bags do
-not need the shim.
+Needs `cmake` and `g++` (C++20); `libzstd-dev` / `liblz4-dev` are used where
+installed, otherwise cloudini's vendored copies are built. All of it is
+present in `helhest-jazzy.sif`, so run it inside the container if in doubt.
+The prebuilt `.so` needs GLIBC 2.32 and GLIBCXX 3.4.30. Old bags do not need
+the shim.
+
+## Extracting a dataset, step by step
+
+A release root is built entirely from this repository, in two stages: per
+bag (extract, rotate the odometry onto the clouds' frame, height maps,
+validate) and per root (manifest, splits, keyframe lists, README, validation,
+atlas). The scene contract is the same whether the steps run under Slurm or
+by hand.
+
+### 1. Describe the release
+
+Two files in `docs/`, both committed:
+
+- **The bag list**, `docs/v2_<n>_bags.csv`: one row per scene, in scene order,
+  with header
+  `scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msgs,camera_msgs[,extract_args]`.
+  The jobs read columns by position: `scene` must be the first and the bag
+  directory the third. The optional `extract_args` column holds extractor
+  options for that bag alone (`--trim_idle 60 10` in v2.4); it is cut on
+  commas, so it may hold none and must not be quoted. Lists are cumulative:
+  a release lists every scene of its root, earlier ones included.
+- **The spec**, `docs/releases/v2_<n>.json`. Required: `dataset_version`,
+  `bags` (the list above, relative to the repository root) and
+  `held_out.scenes`. Optional: `inherit` (a spec to merge under this one,
+  relative to the spec's directory; `helhest_v2.json` carries the rig's
+  shared prose), `title`, `summary`, `held_out.decision`, `sessions`
+  (`id`, `scenes`, `date`, `site`), `excluded`, `terrain_notes`, `defects`,
+  `open_items`, `curation` (becomes `atlas/curation.json`). Copy
+  `docs/releases/v2_4.json` as a template. Everything else in the manifest is
+  measured from the scenes.
+
+Candidate bags can be surveyed before choosing them
+(`slurm/survey_v2.batch` over `docs/v2_inventory.csv`, ~1 MB per bag, no
+extraction; see [docs/V2_0_SELECTION.md](docs/V2_0_SELECTION.md)).
+
+### 2. Extract every bag (CTU cluster)
+
+From the repository root on a login node, with `.venv` built inside the
+container as under [Container](#container-ctu-cluster):
+
+```bash
+mkdir -p slurm/slurm_out
+CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
+```
+
+The array range is the bag list's rows (`0` to rows - 1; `%4` caps the jobs
+running at once). **Always pass `CSV=` and the root**: their defaults are the
+v2 beta list and root, and a forgotten one extracts the wrong bags. A root
+that reuses an earlier release's scenes (linked in) is submitted with the
+range of its new rows only.
+
+Each array task leaves one finished scene:
+
+1. fetches its bag by `rsync` from `$SUBTDATA` (default
+   `$USER@subtdata.felk.cvut.cz`, key-based ssh) to node-local scratch;
+2. `helhest-extract <bag> <scratch> --start_index <scene> --jobs 1` plus the
+   row's `extract_args` and `$EXTRACT_ARGS`;
+3. `helhest-odom-frame measure` then `apply`: the odometry and
+   `gravity_align.npy` rotated onto the clouds' frame, recorded in
+   `odom_frame.txt` (inside the container: `open3d` needs its glibc);
+4. `helhest-heightmap --overwrite`: `height_maps/`, `height_masks/`,
+   `height_maps.json`;
+5. `helhest-validate` on the scene, then `rsync` to `<root>/<scene>/` and the
+   report to `<root>/.validation/<scene>.csv`.
+
+A scene already complete with the same bag is skipped, so resubmitting the
+same range resumes. A scene that holds a *different* bag stops the task
+(exit 13); `FORCE=1` re-extracts it. A scene that fails validation is not
+published unless `FORCE_PUBLISH=1`. Exit codes name the failing step: 10
+fetch, 11 extract, 12 publish, 14 validation, 15 the rotation, 16 the maps.
+The log is
+`slurm/slurm_out/`. `SIF` and `REPO` override the container image and the
+checkout; [slurm/README.md](slurm/README.md) lists every site-specific value.
+
+### 3. Finalise the root
+
+On the login node, not through `sbatch`:
+
+```bash
+slurm/finalize_v2.sh /mnt/personal/$USER/HELHEST_v2_4 docs/v2_4_bags.csv docs/releases/v2_4.json
+```
+
+It runs `helhest-release` (`scenes.csv`, `keyframes.lst`,
+`keyframes_train.lst`, `keyframes_heldout.lst`, `manifest.json` with the
+image format, `splits.json`, `atlas/curation.json`, `README.md`), validates
+the whole root into `<root>/validation.csv`, and draws the atlas
+(`scripts/make_atlas.py <root> --bags <list>`). Its exit code is the
+validation's. `helhest-release` refuses a root whose scenes do not match the
+bag list, either way round, or a held-out scene that is not on disk.
+
+### 4. Check it
+
+```bash
+helhest-validate <root> -v                      # INFO lines too
+helhest-disk-usage <root>                       # refresh disk_usage.json for the viewer
+helhest-viewer <root>                           # see Viewer below
+```
+
+### The same without Slurm
+
+`helhest-extract` numbers scenes by the sorted bag directory names, and
+`helhest-release` refuses a scene whose bag is not the list's, so the bag
+directory must sort in list order. Rows with `extract_args` take a call of
+their own on the single bag, with `--start_index <scene>`, as the batch job
+does:
+
+```bash
+helhest-extract <bags> <root> --jobs 8 --scenes 0-28                        # rows without extract_args
+helhest-extract <bags>/<bag_29> <root> --start_index 29 --trim_idle 60 10   # one per row with them
+helhest-odom-frame measure <root> --fits fits.json      # every scene with clouds and no odom_frame.txt
+helhest-odom-frame apply   <root> --fits fits.json
+helhest-heightmap <root>                                # --workers N, --scenes 0,3
+helhest-release   <root> --spec docs/releases/v2_4.json
+helhest-validate  <root> --csv <root>/validation.csv
+python scripts/make_atlas.py <root> --bags docs/v2_4_bags.csv
+```
+
+`helhest-odom-frame` needs the `build` extra. Re-extracting a scene removes
+its `odom_frame.txt`, so run `measure` + `apply` again after it.
+`helhest-release --out_dir DIR` writes the root-level files elsewhere (and
+leaves the root's `scenes.csv` alone), to compare against a root that exists.
+
+### Rebuilding the height maps only
+
+After the clouds or `gravity_align.npy` of a root changed:
+
+```bash
+sbatch --array=0-35 slurm/heightmaps.batch /mnt/personal/$USER/HELHEST_v2_4   # array index = scene
+helhest-heightmap <root> --scenes 3 --overwrite                                # or by hand
+```
+
+The batch job first checks a sample of the scene's existing maps against a
+rebuild (`VERIFY=0` skips), passes `HM_ARGS` through (e.g.
+`--set statistic=median`), and will not write through a linked scene's
+`height_maps` symlink. `helhest-heightmap` refuses to mix maps built at
+other settings than `height_maps.json` records.
 
 ## Usage
 
@@ -149,7 +295,7 @@ full rate, split into segments each re-anchored to the identity) and
 `odometry_segments.txt` (never interpolate across segment boundaries).
 Segments break at >1 s gaps, at jumps (the Odin1's relocalisations, GNSS
 teleports), and at the holes `--gnss_guard` leaves where a Fixposition had no
-solution (`fix_lost`); one-sample spikes are discarded. This matches the HELHEST v1.2 contract, so
+solution (`fix_lost`); a segment shorter than 20 poses is dropped. This matches the HELHEST v1.2 contract, so
 segment-aware consumers need no changes, with one difference: segments in a
 freshly written table are **numbered from 1**, so "segment 3 of 4" is the
 third one. Roots written before this (v1.2 through v1.5) are numbered from 0
@@ -163,41 +309,8 @@ helhest-extract <bags> <out> \
     --lidar_extrinsic X Y Z ROLL PITCH YAW
 ```
 
-### Building a release root
-
-A release is a bag list (`docs/v2_<n>_bags.csv`: one row per scene, in scene
-order, with an optional `extract_args` column of extractor options for that
-bag) and a spec (`docs/releases/v2_<n>.json`: the held-out scenes and why, the
-sessions, what was left out, known defects, open items and the atlas prose; it
-`inherit`s the rig's shared prose from `docs/releases/helhest_v2.json`).
-Everything else is measured from the scenes. On the CTU cluster:
-
-```bash
-mkdir -p slurm/slurm_out
-CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
-slurm/finalize_v2.sh /mnt/personal/$USER/HELHEST_v2_4 docs/v2_4_bags.csv docs/releases/v2_4.json
-```
-
-Each array task fetches one bag and leaves a finished scene: extraction, then
-`helhest-odom-frame measure` + `apply` (the odometry and `gravity_align.npy`
-rotated onto the clouds' frame, recorded in `odom_frame.txt`), then
-`helhest-heightmap` (`height_maps/`, `height_masks/`, settings in
-`height_maps.json`), then validation. `finalize_v2.sh` runs `helhest-release`
-(`scenes.csv`, the three keyframe lists, `manifest.json`, `splits.json`,
-`atlas/curation.json`, `README.md`), validates the root and draws the atlas.
-The same steps by hand, without slurm:
-
-```bash
-helhest-extract <bags> <root> --jobs 8                 # per bag: --trim_idle 60 10 where the bag list says so
-helhest-odom-frame measure <root> --fits fits.json && helhest-odom-frame apply <root> --fits fits.json
-helhest-heightmap <root>
-helhest-release <root> --spec docs/releases/v2_4.json
-helhest-validate <root> --csv <root>/validation.csv
-```
-
-`helhest-release --out_dir DIR` writes the root-level files elsewhere, to
-compare against a root that exists. `slurm/heightmaps.batch` rebuilds the maps
-of scenes already in a root.
+The full procedure for a release root is in
+[Extracting a dataset, step by step](#extracting-a-dataset-step-by-step).
 
 ### Old bags (Livox + Luxonis OAK)
 
@@ -215,13 +328,13 @@ lidar works.
 | Flag | Meaning |
 | --- | --- |
 | `--jobs N` | worker processes, one bag each (default 4; `1` runs in-process) |
-| `--overwrite` | re-extract scenes that are already complete (a scene's previous outputs are removed first) |
+| `--overwrite` | re-extract scenes that are already complete. Any scene that is extracted, complete or not, has its previous outputs removed first, `odom_frame.txt` included |
 | `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so for the Odin1 odometry and for Fixposition topics |
 | `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories |
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
-| `--gnss_guard auto\|on\|off` | drop stretches where the GNSS/INS published a reset solution instead of a pose, and every frame left without a real one -- both the frames those stretches strand and the frames the pose stream never covered. `auto` turns the full guard on for a Fixposition source, runs only the coverage part for `/odin1/odometry` (it fabricates nothing, but frames it never covered still go), and nothing for wheel odometry. Recorded per scene in `gnss_guard.txt` |
+| `--gnss_guard auto\|on\|off` | drop stretches where the GNSS/INS published a reset solution instead of a pose, and every frame left without a real one -- both the frames those stretches strand and the frames the pose stream never covered. `auto` turns the full guard on for a Fixposition source, runs only the coverage part for `/odin1/odometry` (it fabricates nothing, but frames it never covered still go), and nothing for wheel odometry; `on` forces the full guard on any source. Recorded per scene in `gnss_guard.txt` |
 | `--time_align auto\|off\|S` | how to put the frame clock on the pose clock. `auto` (default) measures the sensor unit's capture-to-publish latency against the clouds this run wrote, as a curve over the scene, and takes it off `data_ts.txt` / `pcd_ts.txt`; a number applies that constant; `off` leaves the stamps as recorded. Recorded per scene in `time_align.txt`. A constant is known before the clouds are written, so `--deskew` and `--trim_idle` already run on the corrected clock; under `auto` they run on the stamped clock, which is exact for the Odin1 odometry (same unit, same latency) but with `--odom /fixposition/odometry_enu` leaves the sweep's pose bracket off by the latency -- pass the measured number there |
 | `--cam_time_offset S` | seconds added to the camera header stamp, for a camera that stamps differently from the lidar beside it (default `0.0`) |
 | `--deskew_imu TOPIC` | the gyro that gives the rotation inside each sweep when deskewing (default `/odin1/imu`, 400 Hz; needs a TF path to `--base_frame`). Used per sweep only where it agrees with the pose track's slerp to 1 deg, else the slerp; `off` or a missing topic means slerp throughout. Counted in `extract_meta.json` |
@@ -232,6 +345,7 @@ lidar works.
 | `--allow_frame_fallback` | extract a bag whose TF does not reach `--base_frame` from the lidar (and no `--lidar_extrinsic`), the odometry child frame or the orientation frame, leaving that stream in its own frame. Without it such a scene **fails**: clouds, poses or gravity in the wrong frame look plausible and are found late. What fell back is listed in `extract_meta.json` |
 | `--max_sync_dt S` | largest camera/lidar stamp difference a frame may pair (default `0.1`); further-apart mutual nearest neighbours, an image across a camera stall, are dropped and counted in `extract_meta.json` |
 | `--tf_pins on\|off` | `on` (default): the two static transforms the Odin1 estimates online, `imu_link -> odin1_lidar` and `odin1_lidar -> odin1_camera_link`, are replaced by one constant for every bag (`dataset_tools.tf_pins.PINS`, the median of what 42 bags published), because the estimate wanders by 3 cm and half a degree between boots and even within a bag. What the bag said is recorded per scene in `tf_pins.txt`. `off` uses the bag's values, as every root before 2026-09-30 |
+| `--trim_idle MAX_S KEEP_S` | off by default. Every stop longer than `MAX_S` seconds (odometry under 0.15 m/s and 5 deg/s over a 1 s window around the frame; split at frame-clock gaps over 1 s) keeps only its first `KEEP_S` seconds of frames; the rest are dropped after the guard and before any frame is written, so indices stay contiguous. The odometry (`odometry.txt`) is kept whole. `KEEP_S` may not exceed `MAX_S`. Recorded in `extract_meta.json` -> `frames.idle_trim` (`max_s`, `keep_s`, `frames_dropped`, `seconds_dropped`, `runs` as `[start, end, frames]` in seconds from the first frame). v2.4 uses `60 10` for its idle-heavy bags |
 | `-v` | debug logging |
 
 Behaviour worth knowing:
@@ -249,9 +363,14 @@ Behaviour worth knowing:
   bag out while overwriting would renumber the root.
 - **Per-frame products follow the clock.** `height_maps/`, `height_masks/`,
   `proprio_labels/` and `driven_similarity/` are built after the extraction, one
-  file per frame index. A re-extraction keeps them when it writes the same
-  `data_ts.txt`, and renames them `<dir>.stale-<date>-<time>` when it does not,
-  since they would describe frames that are now other moments.
+  file per frame index. A re-extraction keeps them (and `height_maps.json`)
+  when it writes the same `data_ts.txt`, and renames them
+  `<name>.stale-<date>-<time>` when it does not, since they would describe
+  frames that are now other moments.
+- **Root bookkeeping after every run.** Besides `scenes.csv`, the run
+  refreshes `disk_usage.json` for the scenes it touched and declares the image
+  format in `manifest.json` -> `images` (other keys kept; an undeclared PNG
+  root stays undeclared). Both are best effort and only warn on failure.
 - **Stamps that were never set.** A header stamp before 2001 (zero, or time
   since boot from a driver that publishes before its clock syncs: the first
   51 `/joint_states` of HELHEST v2.1 scene 0000 say 0.12 s) is replaced by the
@@ -283,10 +402,11 @@ index-aligned.
 | Path | Shape | dtype | Units / frame | Notes |
 | --- | --- | --- | --- | --- |
 | `images/NNNNN.jpg` | H x W x 3 | `uint8` | the camera's own JPEG, `msg.data` unmodified | the compressed image topic, byte for byte. `.png` in a root made before 2026-09-29 or with `--image_format png`; `manifest.json` -> `images.extension` says which (no key: png). HELHEST v1.2-v1.5 (real files in v1.2, the others linked) and v2.1 were given their JPEGs back by `scripts/images_from_bag.py` (removed since, see git history) on 2026-09-29/30 and declare `jpg`; v2.0, v1.3_aux and v1_rear_archive still hold PNG |
-| `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows and all-zero points dropped, so `N` varies. Since 2026-10-01 each sweep is deskewed onto `data_ts` (`--deskew`): every return stands where the robot saw it at the frame's instant. Roots made before that hold the raw 67 ms sweep |
-| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`). With deskewed clouds this is the instant of the image and of every return alike; in roots made before 2026-10-01 the clouds' effective instant was the sweep's mean, and `time_align` had moved `data_ts` there, 27-52 ms after the image |
+| `clouds/NNNNN.npy` | (N, 4) | `float32` | x, y, z in m + intensity; `--base_frame` (`base_link`) | NaN rows, all-zero points and returns without a finite per-point time dropped, so `N` varies. Since 2026-10-01 each sweep is deskewed onto `data_ts` (`--deskew`): every return stands where the robot saw it at the frame's instant. Roots made before that hold the raw 67 ms sweep |
+| `data_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | midpoint of the camera (plus `--cam_time_offset`) and lidar stamps of the pair, less the measured capture-to-publish latency (`--time_align`). With deskewed clouds this is the instant of the image and of every return alike; in roots made before 2026-10-01 the clouds' effective instant was the sweep's mean, and `time_align` had moved `data_ts` there, 27-52 ms after the image |
 | `pcd_ts.txt` | (F,) | text `float64` | seconds, Unix epoch | lidar header stamps, on that same corrected clock |
-| `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`) |
+| `time_align.txt` | — | text | seconds | what the frame clock was corrected by and on what evidence: one row per window measured (`t`, `delta`, `gain`, `depth`); no rows under a constant `--time_align`, and no file under `off` or without odometry |
+| `odometry.txt`, `odometry_segments.txt` | — | text | `t` + row-major 4 x 4 SE(3), s and m | `--gt`: the base pose at the odometry's full rate, each segment re-anchored to the identity; the segment table (numbered from 1) gives each segment's span, pose count and why it ended (`gap`, `teleport`, `fix_lost`, `end_of_run`). See [Usage](#new-bags-2026-08-odin1--fixposition) |
 | `pose_check.txt` | — | text | s, m, deg | the scene's odometry (`--odom`) against `--check_odom`: spans and overlap, path length and jumps (steps over the segment gate, and the metres they carry) in each, z range, the clock lag of the odometry against the reference, the median roll/pitch difference, and the |displacement| disagreement over 1/2/5 s windows (median, p90, scale). Warnings at the end where a figure is out of bounds |
 | `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, how many further frames went for having no pose under them at all (since 2026-10-01 split into before the pose stream, after it and inside holes), and how many more once the clock was corrected; absent when the guard did not run |
 | `tf_pins.txt` | — | text | m, degrees | the static transforms pinned to a constant (`--tf_pins`): for each, the pin the scene was built with and what the bag's own `/tf_static` said, so a bag whose estimate sat far from the constant can be found; absent when nothing was pinned (a Livox bag, or `--tf_pins off`) |
@@ -298,20 +418,24 @@ index-aligned.
 | `joint_states.npy` | (M, 1 + 3J) | `float64` | `[t, positions..., velocities..., efforts...]` | full rate, sorted by `t`; not frame-aligned |
 | `joint_setpoints.npy` | (M, 1 + 3J) | `float64` | same layout | only if `/joint_setpoints` exists |
 | `cmd_vel.npy` | (M, 7) | `float64` | `[t, vx, vy, vz, wx, wy, wz]`, m/s and rad/s, base frame | only if `/cmd_vel` exists |
-| `gps.npy` | (M, 8) | `float64` | `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]`, degrees, m and m² | full rate, sorted by `t`, not frame-aligned; only if the bag carries a `NavSatFix` |
+| `gps.npy` | (M, 8) | `float64` | `[t, lat, lon, alt, status, cov_ee, cov_nn, cov_uu]`, degrees, m and m² | full rate, sorted by `t`, not frame-aligned; fixes at non-finite or (0, 0) positions skipped; absent without a usable `NavSatFix` or with `--gps off` |
 | `joint_names.txt` | J lines | text | — | the joint order of the `joint_states.npy` / `joint_setpoints.npy` columns: the first message's. Later messages are reordered to it; one naming other joints is skipped (counted in `extract_meta.json`); an empty column (no effort) is NaN |
-| `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping: messages, pairs, pairs over `--max_sync_dt`, what the guard removed and where, frames trimmed after the clock correction, frames written. Since 2026-10-01 |
+| `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping (`frames`): messages, pairs, pairs over `--max_sync_dt`, `deskew`, `pose_check`, `idle_trim`, what the guard removed and where, frames trimmed after the clock correction, frames written. Also `unset_stamps`, `malformed_joint_messages` and `frame_fallbacks`. Since 2026-10-01 |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
-| `odom_frame.txt` | — | text + JSON last line | rotation, degrees | written by `helhest-odom-frame apply`: the rotation `C` (cloud frame -> Odin1 pose frame) that `odometry.txt`, `transforms.npy` and `gravity_align.npy` were re-expressed by, and how it was measured (ICP between clouds 1.4-3 s apart). Absent where it was not applied |
+| `odom_frame.txt` | — | text + JSON last line | rotation, degrees | written by `helhest-odom-frame apply` (and removed by a re-extraction): the rotation `C` (cloud frame -> Odin1 pose frame) that `odometry.txt`, `transforms.npy` and `gravity_align.npy` were re-expressed by, and how it was measured (ICP between clouds 1.4-3 s apart). Absent where it was not applied |
 | `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: p90 of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated, filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns has none |
 | `height_masks/NNNNN.npz` | 128 x 128 | `uint8` (`validity`) | — | where each cell's value came from: 0 extrapolated, 1 interpolated, 2 measured, 3 a wheel-contact anchor |
 | `height_maps.json` | — | JSON | — | the settings the maps were built with and their counts; `helhest-heightmap` refuses to add maps at other settings to them |
 | `../keyframes.lst`, `../keyframes_train.lst`, `../keyframes_heldout.lst` | — | text | — | `helhest-keyframes`: `<scene>/clouds/NNNNN.npy <scene>/images/NNNNN.<ext>` per frame with a cloud, image, map and mask, minus frames within 4 s before a tilt past 45 deg; all scenes / all but `manifest.json` -> `held_out.scenes` / only those |
-| `../manifest.json`, `../splits.json`, `../README.md` | — | JSON, markdown | — | `helhest-release`: the spec's prose plus what was measured per scene |
+| `../manifest.json`, `../splits.json`, `../README.md`, `../atlas/curation.json` | — | JSON, markdown | — | `helhest-release`: the spec's prose plus what was measured per scene. The extractor itself only writes `manifest.json` -> `images` |
+| `../disk_usage.json` | — | JSON | bytes | bytes and files per scene and modality, for the viewer; refreshed by every extraction run and by `helhest-disk-usage <root>` |
+| `../validation.csv` | — | text | — | `helhest-validate <root> --csv <root>/validation.csv`, shown by the viewer |
+| `../atlas/` | — | JSON, JPEG | — | `scripts/make_atlas.py`: the curated index and thumbnails the viewer's index shows |
 | `../scenes.csv` | — | text | — | dataset-level index: `scene,bag,start_time,frames` |
 
 Files whose source topic is missing from a bag are simply not written, and the
-extractor logs a warning saying so. `helhest-validate` then reports the missing
+extractor logs it (a warning for odometry, orientation and `camera_info`;
+INFO for the proprioception and GNSS topics). `helhest-validate` then reports the missing
 `transforms.npy` / `gravity_align.npy` / `camera_intrinsics.txt` as errors: the
 scene contract requires them, and a bag without odometry or orientation is a
 recording to look into rather than a scene to ship.
@@ -330,9 +454,15 @@ Checks file presence, equal frame counts across images / clouds / timestamps /
 transforms / gravity alignment, contiguous frame numbering, monotonic
 timestamps, cloud shape and dtype, the non-finite fraction, valid rotation
 matrices, camera/lidar sync offset, frame-to-frame odometry jumps and tilt
-statistics. When a scene carries ground truth, `odometry.txt` and
+statistics, duplicate timestamps (warning), `camera_intrinsics.txt` (3 x 3,
+positive focal lengths) and `T_cam_to_base.txt` / `T_cam_to_lidar.txt` (a
+finite rigid 4 x 4). Images must all be in the one format the root declares
+(error otherwise). When a scene carries ground truth, `odometry.txt` and
 `odometry_segments.txt` are checked against each other: segment pose counts,
-no overlaps, each segment anchored at the identity.
+unique segment numbers, no overlaps (errors); poses outside every segment and
+a segment not anchored at the identity (warnings); a segment table without
+`odometry.txt` is an error. A ground-truth scene without `time_align.txt` is
+INFO.
 
 `gps.npy`, where a scene has one, is checked as an optional extra: column
 count, a sorted clock, coordinates on the globe, and a time span that overlaps
@@ -353,15 +483,21 @@ Also checked:
 - **Per-frame products** (`height_maps/`, `height_masks/`, `proprio_labels/`,
   `driven_similarity/`): every file names a frame of the scene, one loads, and
   directories a re-extraction set aside (`*.stale-*`) are listed.
-- **The root**, when a root is given: two scenes from one bag (error), a
-  `manifest.json` whose scenes, frame counts or bags no longer match the disk,
-  and a `T_cam_to_base.txt` that differs between scenes by more than 5 mm.
+- **The root**, when a root is given on the command line (over the scenes
+  directly below it): two scenes from one bag (error); a `manifest.json` that
+  is unreadable or whose scenes, frame counts or bags no longer match the disk,
+  and a `T_cam_to_base.txt` more than 5 mm from the median across scenes
+  (warnings); the keyframe lists (`ROOT_KEYFRAMES`): a held-out scene in
+  `keyframes_train.lst` is an error, a listed scene not on disk or a scene in
+  `keyframes_heldout.lst` that the manifest does not hold out a warning.
 
-Structural problems are **errors** (exit code `1`); data-quality observations
-(NaNs, implausible speed, extreme tilt, proprioception not covering the frames)
-are **warnings** — `--strict` makes them fail too. What is worth knowing but no
-defect is **INFO** (`-v` prints it): a hole in the frame clock, a long odometry
-step across one. Every message carries a stable code, printed in brackets.
+Structural problems are **errors** (exit code `1`; a missing path or an
+unreadable expect file exits `2`); data-quality observations (NaNs, implausible
+speed, extreme tilt, proprioception not covering the frames) are **warnings** —
+`--strict` makes them fail too. What is worth knowing but no defect is **INFO**
+(`-v` prints it): a hole in the frame clock, an odometry step over
+`--max-jump` (a step faster than 6 m/s warns, `ODO_SPEED`). Every message
+carries a stable code, printed in brackets.
 
 `--strict` is a usable gate once a root lists what it is known to contain in
 `<root>/validation_expect.json` (or `--expect FILE`):
@@ -371,46 +507,135 @@ step across one. Every message carries a stable code, printed in brackets.
 ```
 
 Those findings are still reported, marked expected, and no longer count; an
-entry that matches nothing is reported as `EXPECT_UNUSED`, so the list cannot
-silently outlive its reason. `--json PATH` writes every message (`scene`,
-`code`, `severity`, `msg`, and `t0`/`t1` in seconds from the first frame where
-the finding has a place) and every scene's stats.
+entry that matches nothing is reported as `EXPECT_UNUSED` (INFO), so the list
+cannot silently outlive its reason. Only scene-level warnings and errors can be
+listed; root findings cannot. `--json PATH` writes every message (`scene`,
+`code`, `severity`, `msg`, `t0`/`t1` in seconds from the first frame where
+the finding has a place, `expected` where listed) under `scenes.<name>` with
+its `status` and `stats`, and the root's under `root`.
 Written to `<root>/validation.csv`, the report is shown by the viewer: a chip
 per scene on the index and a card on the scene page.
 Thresholds: `--max-jump` (m), `--max-tilt` (deg), `--max-nan`, `--max-sync` (s);
 `--sample-clouds N` sets how many clouds are opened per scene (default 8; `0`
-also skips the header scan of every cloud, which is most of a run's time on slow
+turns the cloud checks off, the header scan of every cloud included, which is most of a run's time on slow
 storage -- 16 s warm, a minute cold, for HELHEST v2.1's 133k frames on a USB
 drive).
 
-The older dataset layout is supported: `odometry.txt`, `trajectory.txt`,
-`T_cam_to_lidar.txt`, `height_maps/`, `height_masks/` and `<scene>_full.npz`
-are reported as optional extras, and `float64` clouds are accepted.
+The older dataset layout is supported: `trajectory.txt` and
+`<scene>_full.npz` are reported as optional extras, `T_cam_to_lidar.txt` is
+checked as the extrinsic, and `float64` clouds are accepted.
 
 ## Viewer
 
-```bash
-pip install "dataset_tools[viewer]"     # Python >= 3.12
-helhest-viewer /path/to/dataset         # then open http://127.0.0.1:8080/
-```
-
 A web view of an extracted dataset root: an index of every scene and what each
-one actually contains, a per-scene inventory, and a 3D view of each odometry
-segment -- terrain from the height maps, the aggregated cloud, the robot's
-pose, the camera frame and the proprioception plots alongside.
+one actually contains, a per-scene inventory with the validation findings, a
+map and the signals over time, a per-frame page (camera, height map, cloud on
+the image), and a 3D view of each odometry segment -- terrain from the height
+maps, the aggregated cloud, the robot's pose and the camera frame, with the
+proprioception plots alongside. [docs/VIEWER.md](docs/VIEWER.md) describes
+every page and panel.
 
 It is driven by the file structure rather than by a sensor generation, so a
 scene missing any optional file still opens, with the absent files marked
 rather than hidden. A view never spans an `odometry_segments.txt` boundary,
-because segments are each re-anchored to their own first pose. The dataset root
-is only read; built scenes are cached elsewhere.
+because segments are each re-anchored to their own first pose. The scenes are
+only read: built 3D windows are cached elsewhere, and the one thing the viewer
+writes into the root is reviewer notes (`<root>/notes/`).
 
-See [docs/VIEWER.md](docs/VIEWER.md).
+### Install
+
+```bash
+uv venv --python 3.12 .venv-viewer
+uv pip install --python .venv-viewer -e ".[viewer]"     # fastapi, uvicorn, jinja2, simview >= 6.1.1, CPU torch
+```
+
+With plain pip, install the CPU torch first (see [Quickstart](#quickstart-from-a-recording-to-the-viewer)).
+The viewer refuses to start with SimView older than 6.1.1.
+
+### On your machine
+
+```bash
+.venv-viewer/bin/helhest-viewer /path/to/root --open     # serves http://127.0.0.1:8080/
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--host`, `--port` | `127.0.0.1`, `8080` | bind address. There is no authentication and notes are writes: keep it on loopback and tunnel, or pass `--no-notes` before binding `0.0.0.0` |
+| `--max-seconds`, `--max-frames` | `600`, `12000` | a segment longer than this is split into equal viewing windows |
+| `--cache-dir` | `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>` | probes and built 3D windows |
+| `--cache-max-gb` | `5.0` | built windows kept on disk, oldest evicted first |
+| `--clear-cache` | | drop this root's cached probes and windows before starting |
+| `--no-prefetch` | | do not build the next window in the background (for slow storage) |
+| `--notes-dir`, `--no-notes`, `--author` | `<root>/notes`, on, `$USER` | reviewer notes |
+| `--open`, `-v` | | open a browser; debug logging |
+
+### On the CTU cluster
+
+The viewer runs as a Slurm job next to the data; a tunnel brings it to the
+laptop.
+
+1. On the login node, from the repository root, with `.venv-viewer` built as
+   above:
+   ```bash
+   mkdir -p slurm/slurm_out
+   sbatch slurm/viewer.batch /mnt/personal/$USER/HELHEST_v2_4      # 8 h; -p cpulong -t 2-00:00:00 for longer
+   ```
+   The job picks a free port, caches under
+   `$VIEWER_CACHE/<root name>` (default `/mnt/personal/$USER/viewer_cache`)
+   and writes `slurm/slurm_out/viewer_<job>.conn` (node and port); its log
+   prints the manual `ssh -N -J ... -L ...` line.
+2. On the laptop:
+   ```bash
+   scripts/viewer_connect.sh            # [local_port=8080] [job_id]; newest running viewer job by default
+   ```
+   It finds the node and port and holds the tunnel open (`VIEWER_USER`,
+   `VIEWER_LOGIN`, `VIEWER_REPO` for a different account, login node or
+   checkout). Ctrl-C closes the tunnel; the viewer keeps running until the job
+   ends.
+3. Open http://127.0.0.1:8080/.
+
+### What it reads from a root
+
+Only the scene directories are needed. Each of these optional root files adds
+to the pages, and is re-read when it changes:
+
+| File | Shows as | Made by |
+| --- | --- | --- |
+| `validation.csv`, `validation.json` | status chips on the index (`/?status=fail`), the scene page's Validation card with each finding | `helhest-validate <root> --csv <root>/validation.csv --json <root>/validation.json` |
+| `disk_usage.json` | sizes and disk bars | every `helhest-extract` run; `helhest-disk-usage <root> [--all]` |
+| `manifest.json`, `splits.json`, `keyframes*.lst` | the dataset version, the VAL/TRAIN band and `?split=val\|train\|excluded` filters | `helhest-release` |
+| `atlas/` | the index's curated masthead and thumbnails | `scripts/make_atlas.py`, `atlas/curation.json` from the spec |
+| `notes/` | notes on scenes and frame ranges, with a verdict (`keep`, `drop`, `fix`) | the viewer itself |
+
+### Using it
+
+- **`/`**: one card per scene, filterable by validation status, note verdict
+  and split. **`/segments`** lists every ground-truth window in one table;
+  **`/notes`** every note.
+- **`/scene/<id>`**: the ground-truth timeline, the file inventory (each chip
+  opens that file's details), the map, the extraction, disk and validation
+  cards, the signals, the windows table with "Open 3D", and the notes.
+- **`/scene/<id>/frame/<n>`**: the image, the height map, validity and cloud
+  tiles, and the cloud projected onto the image (a check on the extrinsic).
+  Click a tile to zoom; in the zoom, hover or arrow keys read single cells.
+- **`/view/<scene>/<window>`**: the 3D view. Space plays and pauses, `[` and
+  `]` step to the previous and next window, and the notes panel takes a
+  frame range from the current frame ("now"). The first open of a window
+  builds it; later ones come from the cache, and the next window is
+  prefetched.
+
+After re-extracting scenes the viewer notices the changed files by itself;
+`--clear-cache` is only for a cache that went wrong.
+[docs/VIEWER.md](docs/VIEWER.md#troubleshooting) has the troubleshooting.
 
 ## Slurm
 
-`slurm/slurm_extract.batch` is a working example (16 CPUs, 8 workers). The essential
-part:
+The job files in `slurm/` are the ones the HELHEST releases were built with
+on the CTU RCI cluster: `extract_v2.batch` and `finalize_v2.sh` (see
+[Extracting a dataset, step by step](#extracting-a-dataset-step-by-step)),
+`heightmaps.batch`, `viewer.batch`, the surveys, and `slurm_extract.batch`,
+the simplest shape -- one job extracting a whole directory of bags (16 CPUs,
+8 workers):
 
 ```bash
 singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
@@ -419,9 +644,10 @@ singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \
 ```
 
 Because complete scenes are skipped, a re-queued job resumes where the previous
-one stopped. The job files in `slurm/` are the ones the HELHEST releases were
-built with on the CTU RCI cluster; [slurm/README.md](slurm/README.md) says what
-each does and which paths are site-specific.
+one stopped. Submit from the repository root (Slurm runs a spooled copy, so
+the jobs find the checkout through the submit directory).
+[slurm/README.md](slurm/README.md) says what each job does and which paths
+are site-specific.
 
 ## Tests
 
@@ -437,14 +663,20 @@ Covered: nearest-neighbour synchronisation against a brute-force reference,
 round-trips, bag discovery / scene selection / `scenes.csv` merging, a full
 extraction of a synthetic bag written with `rosbags` (GNSS fixes included), the
 frame-clock estimator against a synthetic drive whose latency is known by
-construction (constant, and changing halfway), the scene validator, and the
-viewer (probing, window enumeration, pose
-interpolation, the map's geodesy, the segment page, rendering and every route,
-against synthetic scene directories). `.github/workflows/ci.yml` runs
-the same with and without the viewer extra, plus `black` and `ruff`.
+construction (constant, and changing halfway), sweep deskew, idle trimming,
+the GNSS guard, ground-truth segmentation and I/O, pose interpolation and the
+pose check, TF pins, camera info and extrinsics, image formats, the
+odometry-frame rotation, height maps (against a stored parity sample of the
+DRIFT builder), keyframe lists, release assembly from a spec, the scene
+validator, disk usage, the atlas, `helhest-sort-bag`, and the viewer
+(probing, window enumeration, the map's geodesy, splits, notes, the segment
+page, rendering and every route, against synthetic scene directories).
 
-The viewer's tests need its extra too;
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the virtualenvs and the lint.
+`.github/workflows/ci.yml` runs three jobs: `lint` (`black` and `ruff`, pinned),
+`extraction` (`.[test]`, the extraction console scripts' `--help`, pytest with the
+viewer tests skipped) and `viewer` (`.[viewer,test]`, `helhest-viewer --help`,
+pytest). [CONTRIBUTING.md](CONTRIBUTING.md) covers the two virtualenvs
+(`.venv`, `.venv-viewer`) and the lint.
 
 ## Known caveats
 
@@ -468,16 +700,19 @@ The viewer's tests need its extra too;
   onto the image slid sideways in every fast turn. `--deskew auto` undoes the
   motion within the sweep; on such a root `time_align.txt` should read as
   already aligned. For a root made before, the image's instant is
-  `data_ts - delta` with `delta` the correction on line 2 of the scene's
-  `time_align.txt` (0 where none was applied), and the smear within the sweep
+  `data_ts - delta` with `delta` the correction the scene's `time_align.txt`
+  gives at that time (line 2 summarises it, a range where it varied; 0 where
+  none was applied), and the smear within the sweep
   cannot be undone without the bag.
 - **Cloudini clouds.** The Odin1 lidar publishes
   `point_cloud_interfaces/CompressedPointCloud2`; decoding needs
   `dataset_tools/libcloudini_shim.so` (see above).
 - **Missing Odin1 extrinsic.** The 2026-08 bags' TF tree does not connect
   `odin1_base_link` to `base_link` — the mount extrinsic was never published.
-  Without `--lidar_extrinsic` the identity is used and a warning is logged, so
-  those clouds are in the lidar frame.
+  Without `--lidar_extrinsic` such a scene fails; with
+  `--allow_frame_fallback` the identity is used, a warning is logged and the
+  fallback is listed in `extract_meta.json` -> `frame_fallbacks`, so those
+  clouds are in the lidar frame.
 - **The Odin1 re-estimates its own extrinsics.** From the 2026-09-14
   firmware the unit publishes `imu_link -> odin1_lidar` and
   `odin1_lidar -> odin1_camera_link` on `/tf_static`, but as a running
@@ -506,7 +741,8 @@ The viewer's tests need its extra too;
   `base_link` by static TF, so its poses cannot be re-expressed at the base.
 - **Do not use `/imu/data` for gravity alignment** on the new stack: that IMU
   is mounted tilted (~5 deg roll, ~11 deg pitch) and its frame (`imu`) has no
-  TF to `base_link`. The Fixposition orientation gives clean base roll/pitch.
+  TF to `base_link`. The default `--imu /odin1/odometry` (or the Fixposition
+  orientation) gives clean base roll/pitch.
 - **Dataset defect, 2026-08-21 bags:** `/joint_states` carries only efforts —
   positions and velocities are all zero. Commanded wheel velocities are in
   `/joint_setpoints` (`joint_setpoints.npy`).
@@ -578,8 +814,9 @@ The viewer's tests need its extra too;
   while the driver leans on a robot that will not move, with a continuous fix,
   the scene's best covariance and a GNSS latitude and longitude every bit as
   still as the odometry. A freeze is therefore believed only where something
-  independent agrees -- a jump implying four figures of metres per second into
-  or out of it, or a hole in the stream of fixes that carried a position. A
+  independent agrees -- a jump faster than 6 m/s into or out of it (the real
+  ones imply four figures of metres per second), a hole in the stream of fixes
+  that carried a position, or no usable fix under it at all. A
   short island fenced in by a jump at both ends is an excursion rather than a
   visit, and stands on its own. So does an outage with a jump inside it: an
   outage alone is a solution coasting, a lone jump says one of its two sides is
@@ -624,7 +861,7 @@ The viewer's tests need its extra too;
   a consumer of a pose-annotated dataset. The margin is spent the other way
   round from a span, though: a span drops a frame that *might* fall inside it,
   support keeps a frame that *might* sit on a pose, so a hole has to exceed
-  2.5 s before it costs anything. Across v2 beta this is 1,127 frames, 1.1%,
+  2 s (1 s of margin each side) before it costs anything. Across v2 beta this is 1,127 frames, 1.1%,
   two thirds of them 0016's last 57 s, where the receiver stops publishing while
   the camera runs on. With it, no scene in the root exports a step above
   3.2 m/s, and every one of those is driving.
