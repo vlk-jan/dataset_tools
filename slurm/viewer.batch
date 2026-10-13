@@ -26,7 +26,8 @@ ROOT=${1:-/mnt/personal/$USER/HELHEST_v1_3}
 VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 
 # Persistent cache, off $HOME (quota) and node-local disk (wiped). One subdir per
-# root: cache entries aren't keyed by root, so datasets must not share one.
+# root: an explicit --cache-dir is used as given, not keyed by root, so
+# datasets must not share one.
 CACHE_BASE=${VIEWER_CACHE:-/mnt/personal/$USER/viewer_cache}
 CACHE="$CACHE_BASE/$(basename "$ROOT")"
 

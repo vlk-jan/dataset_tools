@@ -32,7 +32,7 @@ python3 -m venv .venv-viewer
 | `--port` | port (default `8080`) |
 | `--max-seconds S` | seconds per viewing window; longer segments are split into parts of equal duration (default `600`) |
 | `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
-| `--cache-dir DIR` | where built scenes are cached (default: a per-root directory under `$XDG_CACHE_HOME/dataset_tools_viewer/`) |
+| `--cache-dir DIR` | where built scenes are cached (default: `<root name>-<hash>` under `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/`, one per root) |
 | `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
 | `--cache-max-gb GB` | keep at most this much of built 3D windows on disk, oldest build removed first (default `5`) |
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
@@ -214,15 +214,16 @@ widened, by two pixels either side; the tooltip says which one the pointer
 found. A scene whose segment file cannot be read (a curated-only root) falls
 back to the flat spans it always had, which name no segment and do not link.
 
-The **file inventory** is a set of toggles. Opening one says what the file
+The **file inventory** is a set of chips. Opening one says what the file
 holds and what the dataset does with it -- prose written per artefact in
 `probe.ARTEFACT_PURPOSE`, not the one-line shape that used to live in the
 `title` attribute -- along with whether this scene has it, how many rows,
 lines or files, and where it sits on disk. One is open at a time, because the
 card sits beside the map and stacking panels would push the map's height around
-on every click. The server renders every panel expanded and `static/files.js`
-collapses them, so with JavaScript off the card is a readable list of what each
-artefact is rather than a dead strip.
+on every click. Each panel is a native `popover`, opened by its chip's
+`popovertarget`: the browser keeps one open at a time and closes it on Escape
+or a click outside, with no script involved. The scene number in the header
+opens the same kind of popover, a list of the root's scenes to jump to.
 
 Segment reasons are translated before they are shown anywhere -- in these
 tooltips, in the window table, on the segment page. A reason accumulates tags
@@ -430,7 +431,11 @@ training scene and none is a validation scene, so there is nothing to colour.
 `scene_strat` is the fold that holds out whole scenes, and it is the one this
 reads.
 
-**It is declared, never derived.** The lists are decided in DRIFT
+**It is declared, never derived.** A release root gets its `splits.json` from
+`helhest-release` (`split_mode: held_out`, the manifest's `held_out.scenes` as
+`val_scenes`, every other scene as `train_scenes`, `labels_per_scene` where the
+scenes carry `proprio_labels/`), so it says exactly what the manifest says.
+A DRIFT fold such as `scene_strat` is decided in DRIFT
 (`datasets/helhest.py`, `SCENE_STRAT_VAL`) and *serialised* by its exporter —
 never retyped here. A hand-copied duplicate is how DRIFT's own `train.py` came
 to reject the mode name it had just gained, and mirroring the constant into this
@@ -759,7 +764,7 @@ Dataset roots usually live on contended network storage, so:
   the directory and every entry directly in it (about thirty `stat` calls), so
   a file added to `height_maps/` or `odometry.txt` rewritten in place is seen.
 - Scenes are built per window, on demand, and cached on disk under
-  `$XDG_CACHE_HOME/dataset_tools_viewer/`.
+  `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>/`.
 - One window aggregates a bounded number of clouds and height maps -- chosen
   evenly across the window rather than from its start -- and the terrain is
   coarsened rather than clipped when a long traverse would exceed the cell
@@ -803,8 +808,8 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/notes` | that scene's notes (`GET`), and where a new one is posted (`POST`, a JSON body `{"frames": [first, last], "text", "topic", "verdict"}`) |
 | `/notes` | every note in the root by topic (`?topic=`) |
 | `/api/notes.csv` | every note as one table: scene, frame range, frame times, topic, verdict, author, date, text |
-| `/segments` | every ground-truth window of the root in one table, sortable (`?sort=scene\|att\|rate\|duration`), with the notes and verdicts touching each |
-| `/?status=ok\|warn\|fail`, `/?verdict=keep\|drop\|fix` | the index, only the scenes `validation.csv` gave that status, or that carry a note with that verdict |
+| `/segments` | every ground-truth window of the root in one table, sortable (`?sort=scene\|att\|rate\|duration`), with the notes and verdicts touching each; `?split=` as on the index |
+| `/?status=ok\|warn\|fail`, `/?verdict=keep\|drop\|fix`, `/?split=val\|train\|excluded` | the index, only the scenes `validation.csv` gave that status, that carry a note with that verdict, or that the split puts on that side |
 | `/api/scene/{scene}/notes/{id}` | edit (`PATCH`, the same body; a field left out stays as it is) or remove (`DELETE`) one note |
 | `/api/scene/{scene}/frame/{n}/image.jpg` | that frame's camera image, downscaled (`?w=`); a root holding the camera's own JPEG is served the file as it is when no downscale is needed |
 | `/api/scene/{scene}/frame/{n}/overlay.jpg` | that frame's cloud projected into its camera image, coloured by depth (`?w=`); `404` without `T_cam_to_base.txt` and `K` |
@@ -813,8 +818,9 @@ Dataset roots usually live on contended network storage, so:
 | `/api/scene/{scene}/frame/{n}/validity.png` | that frame's validity mask |
 | `/api/scene/{scene}/frame/{n}/driven.png` | that frame's driven cells and feature similarity (`driven_similarity/`) |
 | `/api/scene/{scene}/frame/{n}/cloud.png` | that frame's cloud, top-down |
-| `/api/data/{scene}/{window}/{opts}/...` | the SimView static bundle: `model.json`, `states.json`, `blob/N`, plus `meta.json` |
-| `/healthz` | liveness, the root path and the scene count |
+| `/api/scene/{scene}/frame/{n}/grid.json` | that frame's BEV layers as numbers, for the zoomed tile's cell probe |
+| `/api/data/{scene}/{window}/{opts}/{stamp}/...` | the SimView static bundle: `model.json`, `states.json`, `blob/N`, plus `meta.json`; `{stamp}` changes with the viewer's code, so a browser never mixes an old cached bundle with a new page |
+| `/healthz` | liveness, the root path, the scene count and whether notes are on |
 
 A per-frame artefact the scene does not have returns `404` rather than a
 placeholder; one the scene has but that cannot be read (a truncated JPEG, a

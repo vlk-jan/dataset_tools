@@ -37,9 +37,10 @@ test = ["pytest>=7", "httpx>=0.27", "pillow>=10.0"]
 build = ["open3d>=0.18"]
 # The dataset viewer (dataset_tools.viewer). SimView provides the 3D front-end
 # and the scene format; the viewer reads its page template, its columnar state
-# packer and its debug handle, none of which a major release promises to keep,
-# hence the upper bound; its "authoring" extra (torch + einops) is what the
-# scene-building API needs, and it is what sets the project's 3.12 floor.
+# packer and its debug handle, none of which a major release promises to keep
+# (the viewer checks the version at start); its "authoring" extra (torch +
+# einops) is what the scene-building API needs, and it is what sets the
+# project's 3.12 floor.
 viewer = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

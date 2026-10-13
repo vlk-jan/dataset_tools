@@ -9,19 +9,19 @@
 #SBATCH --output=slurm/slurm_out/v2_%A_%a.out
 #
 # HELHEST v2 (Odin1 + Fixposition) extraction, one bag per array task, through
-# odom_frame, the height maps and validation: a finished scene leaves this task. Staged on node-local NVMe; NFS is touched only for the sif,
-# the repo and the final rsync. Timing (--time_align auto) and the GNSS guard
+# odom_frame, the height maps and validation: a finished scene leaves this
+# task. Staged on node-local NVMe; NFS is touched only for the sif, the repo
+# and the final rsync. Timing (--time_align auto) and the GNSS guard
 # (--gnss_guard auto) are the extractor's defaults; see docs/NEW_RIG_READINESS.md.
 #
-#   sbatch --array=0-8%4  slurm/extract_v2.batch [out_root]     # 26-09-02
-#   sbatch --array=9-16%4 slurm/extract_v2.batch [out_root]     # 26-09-08
-#   CSV=docs/v2_0_bags.csv sbatch --array=0-N%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_0
+#   CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 #
-# Array index = 0-based row of $CSV (docs/v2_bags.csv by default) = scene number.
-# A scene with source_bag.txt is skipped, so re-submitting resumes. %4: subtdata
-# sustains ~50 MB/s aggregate. FORCE=1 re-extracts (--overwrite):
+# Array index = 0-based row of $CSV = scene number; pass CSV and out_root every
+# time, their defaults are the v2 beta list and root. A scene with
+# source_bag.txt is skipped, so re-submitting resumes. %4: subtdata sustains
+# ~50 MB/s aggregate. FORCE=1 re-extracts (--overwrite):
 #
-#   FORCE=1 sbatch --array=0-16%4 slurm/extract_v2.batch
+#   FORCE=1 CSV=docs/v2_4_bags.csv sbatch --array=7 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 set -uo pipefail
 
 OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}

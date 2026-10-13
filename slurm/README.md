@@ -11,13 +11,14 @@ them for the *shape* of a run and change the handful of paths at the top.
 
 ```bash
 cd dataset_tools && mkdir -p slurm/slurm_out
-sbatch --array=0-25%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_beta
+CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 ```
 
 Slurm copies a batch file into its spool and runs it from there, so `$0` does
 not point at the checkout. Each job finds the repository through the submit
 directory (`$SLURM_SUBMIT_DIR`, or `REPO=...` to override) and refuses to run
-from anywhere that has no `pyproject.toml`. The `#SBATCH --output` paths are
+from anywhere that is not a checkout (`viewer.batch` looks for
+`pyproject.toml`, the others for `slurm/common.sh`). The `#SBATCH --output` paths are
 relative to the same directory, and `sbatch` fails outright when the directory
 they name is missing -- hence the `mkdir`.
 

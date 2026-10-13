@@ -28,7 +28,7 @@ jobs:
       - run: pip install -e ".[test]"
       # The console scripts are what a user installs for; make sure they resolve.
       - run: |
-          for cmd in helhest-extract helhest-validate helhest-sort-bag helhest-disk-usage helhest-image-format; do
+          for cmd in helhest-extract helhest-validate helhest-sort-bag helhest-disk-usage helhest-image-format helhest-odom-frame helhest-heightmap helhest-keyframes helhest-release; do
             $cmd --help > /dev/null
           done
       # The viewer tests skip themselves when its extra is absent.

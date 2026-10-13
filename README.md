@@ -673,7 +673,7 @@ validator, disk usage, the atlas, `helhest-sort-bag`, and the viewer
 page, rendering and every route, against synthetic scene directories).
 
 `.github/workflows/ci.yml` runs three jobs: `lint` (`black` and `ruff`, pinned),
-`extraction` (`.[test]`, the extraction console scripts' `--help`, pytest with the
+`extraction` (`.[test]`, every non-viewer console script's `--help`, pytest with the
 viewer tests skipped) and `viewer` (`.[viewer,test]`, `helhest-viewer --help`,
 pytest). [CONTRIBUTING.md](CONTRIBUTING.md) covers the two virtualenvs
 (`.venv`, `.venv-viewer`) and the lint.
