@@ -6,10 +6,12 @@ import functools
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -554,6 +556,41 @@ def _frame_fallback(p1: _Pass1, args, bag: str, what: str) -> None:
     p1.frame_fallbacks.append(what)
 
 
+def _write_image(np_arr: np.ndarray, image_path: Path, png: bool, img_idx: int, t: float) -> tuple[tuple, float]:
+    cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    if cv_img is None:
+        # A missing frame would break index alignment: fail, naming the frame.
+        raise ValueError(f"image {img_idx} (stamp {t:.6f}, {len(np_arr)} bytes) could not be decoded")
+    if png:
+        if not cv2.imwrite(str(image_path), cv_img):
+            raise ValueError(f"image {img_idx} could not be written to {image_path}")
+    else:
+        # The camera's own bytes (decoded above only to validate).
+        image_path.write_bytes(np_arr.tobytes())
+    return (), 0.0
+
+
+def _write_cloud(msg, t: float, frame_t: float, T_lidar_to_base, track, gyro, path: Path) -> tuple[tuple, float]:
+    """Write one base-frame cloud; returns the deskew counters to add and the sweep span."""
+    counted, span = (), 0.0
+    # Before T_lidar_to_base, never after -- see valid_returns_mask.
+    xyzi, offsets = cloud_to_xyzit(msg, t)
+    keep = valid_returns_mask(xyzi, offsets)
+    xyzi = xyzi[keep]
+    pcd = np.hstack((xyzi[:, :3], np.ones((len(xyzi), 1), dtype=np.float32)))
+    pcd = (pcd @ T_lidar_to_base.T.astype(np.float32))[:, :3]
+    if track is not None:
+        if offsets is None:
+            counted = ("no_time_field",)
+        else:
+            pcd, status, method = deskew.deskew(pcd, offsets[keep], t, frame_t, track, gyro)
+            counted = (status, method) if method else (status,)
+            if keep.any():
+                span = float(np.ptp(offsets[keep]))
+    np.save(path, np.hstack((pcd, xyzi[:, 3:4])))
+    return counted, span
+
+
 def _write_frames(
     reader,
     conns,
@@ -569,7 +606,13 @@ def _write_frames(
     args,
     bag: str,
 ) -> None:
-    """Pass 2: write each frame's image and base-frame cloud, deskewed onto ``frame_ts[k]`` where possible."""
+    """Pass 2: write each frame's image and base-frame cloud, deskewed onto ``frame_ts[k]`` where possible.
+
+    The bag is read and every per-scene decision made here, in order; decoding
+    and writing a frame runs on a thread pool (cv2, the cloudini shim and most
+    of numpy drop the GIL). Results are taken back in submission order, so the
+    first frame to fail is the one that raises.
+    """
     track = time_align.PoseTrack.build(*_columns(p1.odom)) if args.deskew != "off" and len(p1.odom) >= 2 else None
     gyro = deskew.GyroTrack.build(p1.gyro, p1.gyro_rot) if track is not None and p1.gyro else None
     sweeps = Counter()
@@ -586,76 +629,63 @@ def _write_frames(
     image_how = args.image_format
     image_ext = None  # one format per scene, and per root: decided by the first frame
 
-    for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
-        # Same stamp arithmetic as pass 1, so the lookups hit exactly.
-        is_cam = conn.topic == args.cam
-        shift = shift_cam if is_cam else 0.0
-        msg = None
-        t = header_stamp_from_cdr(raw) if id(conn) in verified else None
-        if t is None:
-            msg = reader.deserialize(raw, conn.msgtype)
-            t = header_stamp(msg, timestamp * 1e-9)
-        idx = pending[conn.topic].pop(t + shift, None)
-        if idx is None:
-            continue  # not a synchronised frame: never decoded at all
-        if msg is None:
-            msg = reader.deserialize(raw, conn.msgtype)
-        t += shift
+    workers = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    inflight = deque()
 
-        if is_cam:
-            img_idx = idx
-            np_arr = np.frombuffer(msg.data, np.uint8)
-            cv_img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            if cv_img is None:
-                # A missing frame would break index alignment: fail, naming the frame.
-                raise ValueError(f"image {img_idx} (stamp {t:.6f}, {len(np_arr)} bytes) could not be decoded")
-            ext = image_extension(np_arr, image_how, img_idx)
-            if image_ext is None:
-                held = root_image_extension(scene_dir)
-                if held is not None and held != ext:
-                    raise ValueError(
-                        f"{scene_dir.parent} holds {held} images and this bag would add {ext}: a root has one "
-                        f"image format. Extract into a new root"
-                        + (", or pass --image_format png to extend this one" if held == ".png" else "")
-                    )
-                image_ext = ext
-            elif ext != image_ext:
-                raise ValueError(f"image {img_idx} is {ext} where the scene so far is {image_ext}")
-            image_path = scene_dir / "images" / f"{img_idx:05d}{ext}"
-            if image_how == "png":
-                if not cv2.imwrite(str(image_path), cv_img):
-                    raise ValueError(f"image {img_idx} could not be written to {image_path}")
-            else:
-                # The camera's own bytes (decoded above only to validate).
-                image_path.write_bytes(np_arr.tobytes())
+    def drain(keep: int) -> None:
+        nonlocal span
+        while len(inflight) > keep:
+            counted, s = inflight.popleft().result()
+            sweeps.update(counted)
+            span = max(span, s)
 
-            if not intrinsics_saved:
-                save_intrinsics(reader, conns, args.cam, scene_dir)
-                save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
-                intrinsics_saved = True
+    with ThreadPoolExecutor(workers) as pool:
+        try:
+            for conn, timestamp, raw in reader.messages([cam_conn, lidar_conn]):
+                # Same stamp arithmetic as pass 1, so the lookups hit exactly.
+                is_cam = conn.topic == args.cam
+                shift = shift_cam if is_cam else 0.0
+                msg = None
+                t = header_stamp_from_cdr(raw) if id(conn) in verified else None
+                if t is None:
+                    msg = reader.deserialize(raw, conn.msgtype)
+                    t = header_stamp(msg, timestamp * 1e-9)
+                idx = pending[conn.topic].pop(t + shift, None)
+                if idx is None:
+                    continue  # not a synchronised frame: never decoded at all
+                if msg is None:
+                    msg = reader.deserialize(raw, conn.msgtype)
+                t += shift
 
-        else:
-            pcd_idx = idx
-            # Before T_lidar_to_base, never after -- see valid_returns_mask.
-            xyzi, offsets = cloud_to_xyzit(msg, t)
-            keep = valid_returns_mask(xyzi, offsets)
-            xyzi = xyzi[keep]
-            pcd = np.hstack((xyzi[:, :3], np.ones((len(xyzi), 1), dtype=np.float32)))
-            pcd = (pcd @ T_lidar_to_base.T.astype(np.float32))[:, :3]
-            if track is not None:
-                if offsets is None:
-                    sweeps["no_time_field"] += 1
+                if is_cam:
+                    np_arr = np.frombuffer(msg.data, np.uint8)
+                    ext = image_extension(np_arr, image_how, idx)
+                    if image_ext is None:
+                        held = root_image_extension(scene_dir)
+                        if held is not None and held != ext:
+                            raise ValueError(
+                                f"{scene_dir.parent} holds {held} images and this bag would add {ext}: a root has "
+                                f"one image format. Extract into a new root"
+                                + (", or pass --image_format png to extend this one" if held == ".png" else "")
+                            )
+                        image_ext = ext
+                    elif ext != image_ext:
+                        raise ValueError(f"image {idx} is {ext} where the scene so far is {image_ext}")
+                    image_path = scene_dir / "images" / f"{idx:05d}{ext}"
+                    job = pool.submit(_write_image, np_arr, image_path, image_how == "png", idx, t)
+
+                    if not intrinsics_saved:
+                        save_intrinsics(reader, conns, args.cam, scene_dir)
+                        save_camera_extrinsic(tf_graph, msg.header.frame_id, args.base_frame, scene_dir)
+                        intrinsics_saved = True
                 else:
-                    pcd, status, method = deskew.deskew(pcd, offsets[keep], t, float(frame_ts[pcd_idx]), track, gyro)
-                    sweeps[status] += 1
-                    if method:
-                        sweeps[method] += 1
-                    if keep.any():
-                        span = max(span, float(np.ptp(offsets[keep])))
-            np.save(
-                scene_dir / "clouds" / f"{pcd_idx:05d}.npy",
-                np.hstack((pcd, xyzi[:, 3:4])),
-            )
+                    path = scene_dir / "clouds" / f"{idx:05d}.npy"
+                    job = pool.submit(_write_cloud, msg, t, float(frame_ts[idx]), T_lidar_to_base, track, gyro, path)
+                inflight.append(job)
+                drain(2 * workers)  # bounded: a frame in flight holds its decoded message
+        finally:
+            # An earlier frame's failure outranks whatever stopped the loop.
+            drain(0)
 
     _report_deskew(p1, track, sweeps, span, len(valid_pcd_ts), args, bag)
 
