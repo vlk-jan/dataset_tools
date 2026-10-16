@@ -50,7 +50,12 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
+# One BLAS thread per pool worker: OpenBLAS otherwise starts one per core in
+# each of them, and the busy-waiting threads halved the build rate (19 s -> 9 s
+# a scene, maps identical). Only takes effect if numpy is not imported yet.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+import numpy as np  # noqa: E402
 from scipy.interpolate import LinearNDInterpolator, griddata
 from scipy.ndimage import gaussian_filter
 from scipy.spatial import Delaunay, cKDTree
