@@ -795,6 +795,28 @@ def test_opening_a_window_builds_the_next_one_in_the_background(tmp_path):
         assert not ready(tmp_path / "cache2", "seg001")
 
 
+def test_the_scene_page_builds_its_first_window_in_the_background(tmp_path):
+    import time
+
+    from helpers_viewer import make_root
+
+    def ready(cache):
+        return any(cache.rglob("0000/seg000/*/meta.json"))
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=12)
+    with viewer_client(root_path, tmp_path / "cache") as client:
+        assert client.get("/scene/0000").status_code == 200
+        deadline = time.time() + 30
+        while not ready(tmp_path / "cache") and time.time() < deadline:
+            time.sleep(0.2)
+        assert ready(tmp_path / "cache")
+
+    with viewer_client(root_path, tmp_path / "cache2", prefetch=False) as client:
+        assert client.get("/scene/0000").status_code == 200
+        time.sleep(1.0)
+        assert not ready(tmp_path / "cache2")
+
+
 def test_the_index_and_scene_page_show_the_validation_report(client, tmp_path):
     from test_viewer_index import VALIDATION_CSV
 

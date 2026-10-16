@@ -38,7 +38,7 @@ python3 -m venv .venv-viewer
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
-| `--no-prefetch` | do not build the next window in the background when one is opened (see [Performance](#performance)) |
+| `--no-prefetch` | do not build windows in the background (the next one when a window is opened, the first when a scene page is) (see [Performance](#performance)) |
 | `--open` | open a browser at the index page |
 | `-v` | debug logging |
 
@@ -788,7 +788,9 @@ Dataset roots usually live on contended network storage, so:
 - Camera frames are served one at a time as downscaled JPEG, not shipped with
   the scene.
 - Opening a window starts building the next one in the background, with the
-  same build options, so paging with <kbd>]</kbd> does not wait. It takes the
+  same build options, so paging with <kbd>]</kbd> does not wait. A scene page
+  likewise starts its first window (default options; one such build at a time),
+  so a first 3D open finds it built or under way. It takes the
   same per-window lock a request would, so paging early joins the build rather
   than starting a second one. `--no-prefetch` turns it off, for a root on
   storage slow enough that an unasked build competes with the one being looked

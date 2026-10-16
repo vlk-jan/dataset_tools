@@ -122,6 +122,9 @@ class ViewerState:
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
         #: Parsed meta.json per bundle path, keyed by mtime: re-parsing per blob was slow.
         self.meta_memo: dict[Path, tuple[int, tuple]] = {}
+        #: The scene page's prefetch of its first window; one at a time, so
+        #: clicking through scenes does not queue a build per page.
+        self.scene_prefetch: asyncio.Future | None = None
 
     def access(self, scene_id: str) -> SceneAccess:
         """A cached (LRU) per-scene handle, renewed when the scene directory changed."""
@@ -368,7 +371,15 @@ def create_app(
                 "attitude_per_window": attitude_per_window(access, windows),
             }
 
-        return templates.TemplateResponse(request=request, name="scene.html", context=await run_in_threadpool(work))
+        context = await run_in_threadpool(work)
+        busy = state.scene_prefetch is not None and not state.scene_prefetch.done()
+        if prefetch and context["windows"] and not busy:
+            # The first window is the likely next click: build it while the page is read.
+            first = context["windows"][0].key
+            state.scene_prefetch = asyncio.ensure_future(
+                _prefetch(state, scene_id, first, _options_from_query({}).cache_key())
+            )
+        return templates.TemplateResponse(request=request, name="scene.html", context=context)
 
     @app.get("/scene/{scene_id}/segment/{segment_index}", response_class=HTMLResponse)
     async def segment_detail(

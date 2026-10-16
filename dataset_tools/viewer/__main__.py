@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-prefetch",
         dest="prefetch",
         action="store_false",
-        help="do not build the next window in the background when one is opened: for a root on storage "
+        help="do not build windows nobody opened yet (the next one, a scene page's first): for a root on storage "
         "slow enough that an unasked build competes with the one being looked at",
     )
     parser.add_argument(

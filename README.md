@@ -565,7 +565,7 @@ The viewer refuses to start with SimView older than 6.1.1.
 | `--cache-dir` | `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>` | probes and built 3D windows |
 | `--cache-max-gb` | `5.0` | built windows kept on disk, oldest evicted first |
 | `--clear-cache` | | drop this root's cached probes and windows before starting |
-| `--no-prefetch` | | do not build the next window in the background (for slow storage) |
+| `--no-prefetch` | | do not build windows in the background (the next one, a scene page's first; for slow storage) |
 | `--notes-dir`, `--no-notes`, `--author` | `<root>/notes`, on, `$USER` | reviewer notes |
 | `--open`, `-v` | | open a browser; debug logging |
 
