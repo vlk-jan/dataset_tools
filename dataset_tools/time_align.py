@@ -12,6 +12,8 @@ become knots; with none, the clock is left alone.
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,7 +90,8 @@ def occupied(clouds: list[np.ndarray], pos: np.ndarray, rot: np.ndarray) -> int:
     g = np.floor(pts / VOXEL).astype(np.int64)
     g -= g.min(axis=0)
     key = (g[:, 0] * np.int64(1 << 21) + g[:, 1]) * np.int64(1 << 21) + g[:, 2]
-    return int(np.unique(key).size)
+    key.sort()  # np.unique, without the copy and the mask it does not need here
+    return int(1 + np.count_nonzero(key[1:] != key[:-1]))
 
 
 def sweep(clouds: list[np.ndarray], track: PoseTrack, query: np.ndarray, deltas: np.ndarray) -> np.ndarray:
@@ -254,8 +257,15 @@ def estimate(
     if not frames:
         return Profile([], np.zeros(0), np.zeros(0), "no window with enough motion")
 
-    windows = [w for w in (measure_window(scene_dir, f, track, frame_ts, span) for f in frames) if w]
-    windows = [_retry_if_shallow(scene_dir, w, track, frame_ts, span, len(frame_ts)) for w in windows]
+    def one(f):
+        w = measure_window(scene_dir, f, track, frame_ts, span)
+        return w and _retry_if_shallow(scene_dir, w, track, frame_ts, span, len(frame_ts))
+
+    # The windows are independent and numpy drops the GIL in the heavy parts
+    # (threads matched a process pool); map keeps their order, so the result
+    # does not depend on the thread count.
+    with ThreadPoolExecutor(getattr(os, "process_cpu_count", os.cpu_count)()) as pool:
+        windows = [w for w in pool.map(one, frames) if w]
     ts, d = _knots(windows)
     if not len(ts):
         typical = float(np.median([w["gain"] for w in windows])) if windows else 0.0
