@@ -187,7 +187,7 @@ Each array task leaves one finished scene:
    `odom_frame.txt` (inside the container: `open3d` needs its glibc);
 4. `helhest-heightmap --overwrite`: `height_maps/`, `height_masks/`,
    `height_maps.json`;
-5. `helhest-validate` on the scene, then `rsync` to `<root>/<scene>/` and the
+5. `helhest-validate` on the scene, then a copy swapped in as `<root>/<scene>/` and the
    report to `<root>/.validation/<scene>.csv`.
 
 A scene already complete with the same bag is skipped, so resubmitting the

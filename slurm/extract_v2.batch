@@ -11,7 +11,7 @@
 # HELHEST v2 (Odin1 + Fixposition) extraction, one bag per array task, through
 # odom_frame, the height maps and validation: a finished scene leaves this
 # task. Staged on node-local NVMe; NFS is touched only for the sif, the repo
-# and the final rsync. Timing (--time_align auto) and the GNSS guard
+# and the final copy. Timing (--time_align auto) and the GNSS guard
 # (--gnss_guard auto) are the extractor's defaults; see docs/NEW_RIG_READINESS.md.
 #
 #   CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
@@ -105,8 +105,16 @@ fi
 
 echo "[$(date '+%F %T')] $scene publish -> $OUT/$scene ($(du -sh "$local_out/$scene" | cut -f1))"
 mkdir -p "$OUT"
-# --delete: a re-extraction may have fewer frames; stale tail frames must go.
-rsync -a --delete "$local_out/$scene/" "$OUT/$scene/" || { echo "$scene: publish failed"; exit 12; }
+# Copied beside the scene, then swapped in whole: a re-extraction may have fewer
+# frames (no stale tail survives), and a failed copy leaves the old scene as it
+# was. cp, not rsync: rsync's per-file temp+rename+chmod cost 6x on WekaFS
+# (2000 clouds: 6.4 s vs 1.0 s).
+tmp="$OUT/.$scene.publish"; old="$OUT/.$scene.old"
+rm -rf "$tmp" "$old"
+cp -r "$local_out/$scene" "$tmp" || { rm -rf "$tmp"; echo "$scene: publish failed"; exit 12; }
+{ [ ! -e "$OUT/$scene" ] || mv "$OUT/$scene" "$old"; } && mv "$tmp" "$OUT/$scene" ||
+    { echo "$scene: publish failed (new copy in $tmp, any old scene in $old)"; exit 12; }
+rm -rf "$old"
 cp -f "$SCRATCH/validation.csv" "$OUT/.validation/$scene.csv" 2>/dev/null
 echo "[$(date '+%F %T')] $scene finished rc=$rc"
 exit $rc
