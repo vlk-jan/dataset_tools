@@ -886,6 +886,12 @@ def test_bad_data_is_said_so_not_hidden(client, tmp_path):
     assert client.get("/api/scene/0001/frame/1/image.jpg").status_code == 404
 
 
+def test_a_corrupt_image_under_the_overlay_is_unreadable_not_absent(client, tmp_path):
+    (image,) = (tmp_path / "root" / "0000" / "images").glob("00002.*")
+    image.write_bytes(b"\x89PNG\r\n\x1a\n garbage")
+    assert client.get("/api/scene/0000/frame/2/overlay.jpg").status_code == 422
+
+
 def test_a_mistyped_address_gets_a_page_with_a_way_back(client):
     page = client.get("/scene/9999", headers={"Accept": "text/html"})
     assert page.status_code == 404 and 'href="/"' in page.text and "<html" in page.text

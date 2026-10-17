@@ -552,15 +552,18 @@ def create_app(
             if cloud is None or not image.is_file():
                 return cloud_path if cloud is None else image
             info = access.camera_info or {}
-            return _safe_render(
-                render.render_cloud_on_image,
-                image,
-                cloud,
-                access.K,
-                access.T_cam,
-                w,
-                distortion_model=info.get("distortion_model"),
-                distortion_coeffs=info.get("distortion_coefficients"),
+            return (
+                _safe_render(
+                    render.render_cloud_on_image,
+                    image,
+                    cloud,
+                    access.K,
+                    access.T_cam,
+                    w,
+                    distortion_model=info.get("distortion_model"),
+                    distortion_coeffs=info.get("distortion_coefficients"),
+                )
+                or image  # a decode failure is "unreadable" (422), not "absent"
             )
 
         data = await run_in_threadpool(work)
