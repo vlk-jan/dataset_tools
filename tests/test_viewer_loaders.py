@@ -38,6 +38,12 @@ def test_resample_series_does_not_invent_values_across_a_long_gap():
     assert np.isnan(out[1, 0])
 
 
+def test_resample_series_of_an_empty_source_is_all_nan():
+    """A zero-row joint_states.npy used to raise in np.interp and 500 every window."""
+    out = loaders.resample_series(np.zeros(0), np.zeros((0, 3)), np.arange(5) * 0.1)
+    assert out.shape == (5, 3) and np.isnan(out).all()
+
+
 def test_odometry_reads_as_timestamps_and_poses(tmp_path):
     T = np.eye(4)
     T[:3, 3] = [1.0, 2.0, 3.0]

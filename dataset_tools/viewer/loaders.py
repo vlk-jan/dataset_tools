@@ -280,6 +280,8 @@ def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarr
     src_vals = np.asarray(src_vals, dtype=np.float64)
     if src_vals.ndim == 1:
         src_vals = src_vals[:, None]
+    if len(src_ts) == 0:  # a zero-row .npy passes the shape guard; np.interp would raise
+        return np.full((len(query_ts), src_vals.shape[1]), np.nan)
     order = np.argsort(src_ts, kind="stable")
     src_ts, src_vals = src_ts[order], src_vals[order]
 
