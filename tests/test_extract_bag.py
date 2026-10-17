@@ -829,18 +829,23 @@ def test_a_sweep_recorded_while_turning_is_deskewed_onto_the_frame_clock(tmp_pat
     assert json.loads((raw / "0000" / "extract_meta.json").read_text())["frames"]["deskew"] == {"mode": "off"}
 
 
-def test_a_given_time_align_deskews_onto_the_corrected_clock(tmp_path: Path):
-    """The sweep lands at the instant data_ts.txt ends up holding, not at the stamped one
-    (0.03 s at 60 deg/s is 1.8 deg: 0.19 m at the wall)."""
-    rate = math.radians(60.0)
-    write_bag(tmp_path / "bags" / "bag_a", frames=40, yaw_rate=rate, sweep_s=0.067)
-    out = tmp_path / "out"
-    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on", "--time_align", "0.03"]) == 0
-    scene = out / "0000"
-    frame_ts = np.loadtxt(scene / "data_ts.txt")
-    k = 7
-    cloud = np.load(scene / "clouds" / f"{k:05d}.npy")
-    assert np.abs(cloud[:, :3] - _wall_in_base(frame_ts[k], rate)).max() < 0.02
+def test_a_given_time_align_moves_the_sweep_and_its_reference_together(tmp_path: Path):
+    """``--time_align S`` says the sweep was taken S later than stamped, so both the
+    points and the frame instant move by S: on a straight line at 1 m/s the deskew is
+    the same 5 cm stretch as without it. Deskewing the stamped points onto the shifted
+    instant would instead undo the latency as motion (0.5 s at 1 m/s: a cloud 0.5 m off)."""
+    write_bag(tmp_path / "bags" / "bag_a", frames=40, sweep_s=0.067)
+    flags = [*COMMON, "--gt", "on", "--deskew_imu", "/imu"]
+    plain, shifted = tmp_path / "plain", tmp_path / "shifted"
+    assert main([str(tmp_path / "bags"), str(plain), *flags, "--time_align", "off"]) == 0
+    assert main([str(tmp_path / "bags"), str(shifted), *flags, "--time_align", "-0.5"]) == 0
+    k = 10  # far enough in that the pose track covers the shifted instant
+    a = np.load(plain / "0000" / "clouds" / f"{k:05d}.npy")
+    b = np.load(shifted / "0000" / "clouds" / f"{k:05d}.npy")
+    assert np.abs(a[:, :3] - _wall_in_base(np.loadtxt(plain / "0000" / "data_ts.txt")[k], 0.0)).max() < 0.005
+    assert np.abs(b - a).max() < 1e-3
+    meta = json.loads((shifted / "0000" / "extract_meta.json").read_text())["frames"]["deskew"]
+    assert meta["gyro"] == meta["deskewed"]  # the gyro clock moved with the clouds, so it still covers them
 
 
 def test_a_cloud_without_per_point_time_is_written_as_recorded(bags: Path, tmp_path: Path):

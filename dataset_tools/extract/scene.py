@@ -573,8 +573,12 @@ def _write_image(np_arr: np.ndarray, image_path: Path, png: bool, img_idx: int, 
     return (), 0.0
 
 
-def _write_cloud(msg, t: float, frame_t: float, T_lidar_to_base, track, gyro, path: Path) -> tuple[tuple, float]:
-    """Write one base-frame cloud; returns the deskew counters to add and the sweep span."""
+def _write_cloud(
+    msg, t: float, shift: float, frame_t: float, T_lidar_to_base, track, gyro, path: Path
+) -> tuple[tuple, float]:
+    """Write one base-frame cloud; returns the deskew counters to add and the sweep span.
+
+    ``shift`` puts the stamp ``t`` on the clock ``frame_t`` and the pose track are on."""
     counted, span = (), 0.0
     # Before T_lidar_to_base, never after -- see valid_returns_mask.
     xyzi, offsets = cloud_to_xyzit(msg, t)
@@ -586,7 +590,7 @@ def _write_cloud(msg, t: float, frame_t: float, T_lidar_to_base, track, gyro, pa
         if offsets is None:
             counted = ("no_time_field",)
         else:
-            pcd, status, method = deskew.deskew(pcd, offsets[keep], t, frame_t, track, gyro)
+            pcd, status, method = deskew.deskew(pcd, offsets[keep], t + shift, frame_t, track, gyro)
             counted = (status, method) if method else (status,)
             if keep.any():
                 span = float(np.ptp(offsets[keep]))
@@ -618,6 +622,10 @@ def _write_frames(
     """
     track = time_align.PoseTrack.build(*_columns(p1.odom)) if args.deskew != "off" and len(p1.odom) >= 2 else None
     gyro = deskew.GyroTrack.build(p1.gyro, p1.gyro_rot) if track is not None and p1.gyro else None
+    # The clouds and the gyro are stamped on the same (late) clock; frame_ts is already corrected.
+    clock_shift = _given_shift(args)
+    if gyro is not None:
+        gyro.ts = gyro.ts + clock_shift
     sweeps = Counter()
     span = 0.0
     shift_cam = args.cam_time_offset
@@ -683,7 +691,9 @@ def _write_frames(
                         intrinsics_saved = True
                 else:
                     path = scene_dir / "clouds" / f"{idx:05d}.npy"
-                    job = pool.submit(_write_cloud, msg, t, float(frame_ts[idx]), T_lidar_to_base, track, gyro, path)
+                    job = pool.submit(
+                        _write_cloud, msg, t, clock_shift, float(frame_ts[idx]), T_lidar_to_base, track, gyro, path
+                    )
                 inflight.append(job)
                 drain(2 * workers)  # bounded: a frame in flight holds its decoded message
         finally:
