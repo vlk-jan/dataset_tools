@@ -48,8 +48,9 @@ def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
     assert info["image_width"] == 640 and info["image_height"] == 400
     assert info["distortion_model"] == "plumb_bob"
     assert info["frame_id"] == "test_camera_optical_frame"
-    # A nested block collapses to its data list.
+    # A nested block collapses to its data list plus its declared shape.
     assert len(info["distortion_coefficients"]) == 5
+    assert info["camera_matrix_rows"] == 3
     assert info["camera_matrix"][0] == 700.0
 
 
