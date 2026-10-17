@@ -955,6 +955,29 @@ def test_eviction_skips_a_builds_staging_directory(tmp_path):
     assert not old.exists() and keep.exists() and staging.exists()
 
 
+def test_a_bundle_just_served_is_not_the_first_evicted(tmp_path):
+    """The directory's mtime is its build time; a hit must refresh it, or the
+    old window being streamed is what the next window's build removes."""
+    pytest.importorskip("simview")
+    import os
+
+    from dataset_tools.viewer.app import _bundle_is_current, _evict_bundles
+    from dataset_tools.viewer.build import META_VERSION
+
+    meta = {"meta_version": META_VERSION, "window": {"frame_start": 0, "frame_end": 5}, "build": {"data": "fp"}}
+    old, older, new = (tmp_path / "bundles" / "0000" / key / "a" for key in ("seg000", "seg001", "seg002"))
+    for age, d in ((1, old), (2, older), (3, new)):
+        d.mkdir(parents=True)
+        (d / "model.json").write_text("x" * 100)
+        (d / "meta.json").write_text(json.dumps(meta))
+        os.utime(d, (age, age))
+    window = windows.Window("seg000", "segment", "", 0, 5, "odometry")
+    assert _bundle_is_current(old, window, "fp", {})  # served now
+    total = sum(f.stat().st_size for f in tmp_path.rglob("*") if f.is_file())
+    _evict_bundles(tmp_path / "bundles", new, max_bytes=total - 1)
+    assert old.exists() and new.exists() and not older.exists()
+
+
 def test_a_bundle_key_with_a_nan_resolution_is_not_a_bundle(client):
     """float("nan") survives np.clip and spells itself back as "nan"."""
     assert client.get("/api/data/0000/seg000/40-160000-80-500000-nan-height/x/meta.json").status_code == 404

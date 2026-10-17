@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import shutil
 import threading
@@ -866,7 +867,10 @@ def _bundle_is_current(dest: Path, window: Window | None, data: str, memo: dict[
             (meta.get("build") or {}).get("data", ""),
         )
         memo[dest] = (mtime, summary)
-    return summary == (META_VERSION, window.frame_start, window.frame_end, data)
+    if summary != (META_VERSION, window.frame_start, window.frame_end, data):
+        return False
+    os.utime(dest)  # _evict_bundles reads the directory's mtime as last use
+    return True
 
 
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
@@ -919,8 +923,8 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
 
 
 def _evict_bundles(bundle_dir: Path, keep: Path, max_bytes: float) -> None:
-    """Delete the oldest built windows until the cache is under ``max_bytes``;
-    ``keep`` (the one just built) is never removed."""
+    """Delete the least recently used built windows until the cache is under
+    ``max_bytes``; ``keep`` (the one just built) is never removed."""
     ages, sizes = {}, {}
     for d in bundle_dir.glob("*/*/*"):
         if d.name.startswith(".") or not d.is_dir():
