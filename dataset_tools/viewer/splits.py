@@ -114,10 +114,14 @@ def _scene_set(data: dict, *keys: str) -> frozenset[str] | None:
         for item in raw:
             if isinstance(item, bool):
                 continue
+            if isinstance(item, str):
+                item = item.strip()
+                if item.isdecimal():
+                    item = int(item)  # "1" names the same directory 1 does
             if isinstance(item, int):
                 out.add(f"{item:04d}")
-            elif isinstance(item, str) and item.strip():
-                out.add(item.strip())
+            elif isinstance(item, str) and item:
+                out.add(item)
         return frozenset(out)
     return None
 

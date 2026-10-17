@@ -129,6 +129,12 @@ def test_scene_ids_written_as_integers_still_match_their_directories():
     assert parsed.of("0009") == "val"
 
 
+def test_scene_ids_written_as_digit_strings_match_like_integers_do():
+    """``["1"]`` used to match nothing where ``[1]`` matched 0001."""
+    parsed = splits.parse_splits({"val_scenes": ["1", "0009", " 15 "]})
+    assert parsed.val == frozenset({"0001", "0009", "0015"})
+
+
 def test_the_held_out_share_is_taken_over_frames():
     """Every root has frames; label and window counts exist only in an export."""
     parsed = splits.parse_splits(
