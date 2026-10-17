@@ -165,9 +165,10 @@ function update(force) {
   requestTiles(frame);
 }
 
-/** Class for a tilt gap, on the bands the build shipped with the window. */
+/** Class for a tilt gap, on the bands the build shipped with the window; none for a missing one. */
 function attitudeClass(deg) {
   const bands = attitude.bands || { ok: 10, warn: 20 };
+  if (deg === null) return "";
   if (deg < bands.ok) return "dt-att-ok";
   return deg < bands.warn ? "dt-att-warn" : "dt-att-bad";
 }
@@ -197,16 +198,19 @@ function setupAttitude() {
   if (cls !== "dt-att-ok") els.attitude.open = true;
 }
 
+/** Degrees as text; a dash where the build had no finite value (meta.json carries null). */
+function deg(value) {
+  return value === null ? "\u2013" : `${value.toFixed(1)}\u00b0`;
+}
+
 /** Per-frame half of the comparison, called from `update`. */
 function showAttitude(index) {
   if (!attitude || index < 0 || index >= attitude.error.length) return;
   const gap = attitude.error[index];
-  setAttitudeText(els.attNow, `${gap.toFixed(1)}\u00b0`, attitudeClass(gap));
-  setAttitudeText(els.attErr, `${gap.toFixed(1)}\u00b0`, attitudeClass(gap));
-  els.attRoll.textContent =
-    `${attitude.gt_roll[index].toFixed(1)}\u00b0 GT / ${attitude.imu_roll[index].toFixed(1)}\u00b0 IMU`;
-  els.attPitch.textContent =
-    `${attitude.gt_pitch[index].toFixed(1)}\u00b0 GT / ${attitude.imu_pitch[index].toFixed(1)}\u00b0 IMU`;
+  setAttitudeText(els.attNow, deg(gap), attitudeClass(gap));
+  setAttitudeText(els.attErr, deg(gap), attitudeClass(gap));
+  els.attRoll.textContent = `${deg(attitude.gt_roll[index])} GT / ${deg(attitude.imu_roll[index])} IMU`;
+  els.attPitch.textContent = `${deg(attitude.gt_pitch[index])} GT / ${deg(attitude.imu_pitch[index])} IMU`;
 }
 
 /* Wire the ghost toggle to SimView. The ghost is built hidden (build.py). */
