@@ -289,8 +289,10 @@ def build_frame(cloud: np.ndarray, R_align: np.ndarray, p: Params = Params()):
 
 
 def _write_npz(path: str, **arrays) -> None:
-    tmp = path + ".tmp.npz"
-    np.savez_compressed(tmp, **arrays)
+    # Not "*.npz": a crash mid-write must not leave a file the map listings count.
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        np.savez_compressed(fh, **arrays)
     os.replace(tmp, path)
 
 
@@ -329,6 +331,11 @@ def build_scene(scene_dir: Path, p: Params = Params(), workers: int = 8, overwri
             f"{scene_dir}: its maps were built with other settings ({SETTINGS_FILE}); "
             "--overwrite rebuilds all of them, mixing the two is refused"
         )
+    for name in ("height_maps", "height_masks", SETTINGS_FILE):
+        if (scene_dir / name).is_symlink():  # a derived root links its parent's: don't write through
+            raise SystemExit(
+                f"{scene_dir / name} -> {os.readlink(scene_dir / name)}: a symlink; build in the root that owns the files"
+            )
     for sub in ("height_maps", "height_masks"):
         (scene_dir / sub).mkdir(exist_ok=True)
     frames = sorted(int(f[:-4]) for f in os.listdir(scene_dir / "clouds") if f.endswith(".npy"))

@@ -59,6 +59,28 @@ def test_other_settings_need_overwrite_and_drop_maps_gone_sparse(tmp_path):
     assert not list((d / "height_masks").iterdir())
 
 
+def test_building_through_a_linked_scene_is_refused(tmp_path):
+    owner = _scene(tmp_path / "v2", n=1)
+    hmap.build_scene(owner, workers=1)
+    d = tmp_path / "v3" / "0000"
+    d.mkdir(parents=True)
+    for name in ("clouds", "gravity_align.npy", "height_maps", "height_masks", hmap.SETTINGS_FILE):
+        (d / name).symlink_to(Path("../../v2/0000") / name)
+    with pytest.raises(SystemExit, match="v2/0000/height_maps"):
+        hmap.build_scene(d, workers=1, overwrite=True)
+    assert (owner / "height_maps" / "00000.npz").exists() and (d / hmap.SETTINGS_FILE).is_symlink()
+
+
+def test_a_crashed_map_write_leaves_nothing_that_counts_as_a_map(tmp_path, monkeypatch):
+    def boom(*_):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(hmap.os, "replace", boom)
+    with pytest.raises(OSError):
+        hmap._write_npz(str(tmp_path / "00000.npz"), height_map=np.zeros(2))
+    assert not [f for f in tmp_path.iterdir() if f.name.endswith(".npz")]
+
+
 def test_verify_against_catches_a_changed_map(tmp_path):
     d = _scene(tmp_path, n=1)
     hmap.build_scene(d, workers=1)
