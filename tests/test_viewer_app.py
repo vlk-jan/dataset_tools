@@ -655,6 +655,21 @@ def test_a_loopback_viewer_answers_only_to_loopback_hosts(tmp_path):
     assert TestClient(app, base_url="http://localhost").get("/healthz").status_code == 200
 
 
+def test_an_ipv6_loopback_bind_answers_to_the_bracketed_host_a_browser_sends(tmp_path):
+    """``--host ::1`` passes the loopback check, but the browser's Host is ``[::1]:8080``."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from dataset_tools.viewer.__main__ import _allowed_hosts
+    from dataset_tools.viewer.app import create_app
+
+    root_path = make_root(tmp_path, scenes=("0000",), frames=4)
+    app = create_app(root_path, cache_dir=tmp_path / "cache", allowed_hosts=_allowed_hosts("::1"))
+    assert TestClient(app).get("/healthz", headers={"host": "[::1]:8080"}).status_code == 200
+    assert TestClient(app).get("/healthz", headers={"host": "evil.example"}).status_code == 400
+    assert _allowed_hosts("0.0.0.0") is None
+
+
 # --------------------------------------------------------------------------
 # GNSS: the track endpoint, and the map that is not there without it
 # --------------------------------------------------------------------------

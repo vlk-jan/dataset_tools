@@ -102,6 +102,17 @@ def _is_loopback(host: str) -> bool:
         return host in LOOPBACK_HOSTS
 
 
+def _allowed_hosts(host: str) -> list[str] | None:
+    """The Host names a loopback bind answers to; ``None`` (any) for other binds."""
+    if not _is_loopback(host):
+        return None
+    allowed = {*LOOPBACK_HOSTS, host}
+    if ":" in host:
+        # A browser sends "[::1]:8080", which Starlette splits on ":" and reads as "[".
+        allowed.add("[")
+    return sorted(allowed)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -157,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
         notes=args.notes,
         author=args.author,
         clear_cache=args.clear_cache,
-        allowed_hosts=sorted({*LOOPBACK_HOSTS, args.host}) if loopback else None,
+        allowed_hosts=_allowed_hosts(args.host),
         prefetch=args.prefetch,
         cache_max_gb=args.cache_max_gb,
     )
