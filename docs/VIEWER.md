@@ -560,9 +560,10 @@ keys from `window` with no such check, so an arrow moving the caret in a note
 would also move the view. It listens in the bubble phase, so the panel stops
 key events coming from a field it holds before they get that far. Space is the
 one exception:
-it is play/pause everywhere but inside a field one types text into, and it
-never re-activates whatever was clicked last (a toggle, a select, a legend's
-summary), which the browser would otherwise do to the focused control. The
+it is play/pause everywhere but inside a field one types text into, a select
+(which Space opens) or a button (which it presses, so a dialog's close button
+closes it), and it never re-activates whatever else was clicked last (a toggle,
+a legend's summary), which the browser would otherwise do to the focused control. The
 panel toggles playback itself rather than leaving it to SimView, because
 lil-gui stops key events inside SimView's control panel and a space pressed
 on one of its controls would otherwise do nothing.

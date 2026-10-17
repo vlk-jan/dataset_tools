@@ -505,9 +505,11 @@ function claimKeyboardForFields() {
 }
 
 /**
- * Space is play/pause whatever has focus (except text fields). Capture phase,
- * because a focused button would re-activate and lil-gui swallows keydown;
- * keyup is prevented too, since buttons fire on it.
+ * Space is play/pause whatever has focus, except a text field, a select or a
+ * button, which Space operates (a select cannot open otherwise, and a dialog's
+ * close button must close it). Capture phase, because a focused toggle would
+ * re-activate and lil-gui swallows keydown; keyup is prevented too, since
+ * buttons fire on it.
  */
 function setupSpaceIsPlay() {
   for (const type of ["keydown", "keyup"]) {
@@ -515,7 +517,7 @@ function setupSpaceIsPlay() {
       type,
       (event) => {
         if (event.key !== " " || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-        if (typing(event.target)) return;
+        if (typing(event.target) || event.target.matches?.("select, button")) return;
         event.preventDefault();
         if (type !== "keydown") return;
         event.stopPropagation();
