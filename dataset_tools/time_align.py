@@ -93,6 +93,8 @@ def load_clouds(scene_dir: Path, frames: np.ndarray) -> list[np.ndarray]:
 def occupied(clouds: list[np.ndarray], pos: np.ndarray, rot: np.ndarray) -> int:
     """Voxels the window fills once every cloud is put in the world frame."""
     pts = np.vstack([c @ rot[k].T + pos[k] for k, c in enumerate(clouds)])
+    if len(pts) == 0:  # every cloud empty after the crop
+        return 0
     g = np.floor(pts / VOXEL).astype(np.int64)
     g -= g.min(axis=0)
     key = (g[:, 0] * np.int64(1 << 21) + g[:, 1]) * np.int64(1 << 21) + g[:, 2]
@@ -242,8 +244,9 @@ def _knots(windows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
     d = np.array([w["delta"] for w in strong])
     order = np.argsort(ts)
     ts, d = ts[order], d[order]
-    if len(d) >= 3:  # a 3-tap median: one wild window cannot bend the curve
-        d = np.array([np.median(d[max(0, k - 1) : k + 2]) for k in range(len(d))])
+    if len(d) >= 3:  # a 3-tap median (the nearest three at the ends): one wild window cannot bend the curve
+        lo = np.clip(np.arange(len(d)) - 1, 0, len(d) - 3)
+        d = np.array([np.median(d[k : k + 3]) for k in lo])
     return ts, d
 
 

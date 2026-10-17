@@ -136,6 +136,20 @@ def test_a_wild_window_cannot_bend_the_curve(tmp_path, world):
     assert d == pytest.approx(np.full(len(good), -0.70), abs=1e-9)
 
 
+def test_a_wild_first_or_last_window_is_filtered_too():
+    """At the ends the median is of the nearest three, not a mean of two."""
+    good = [{"t": float(t), "delta": -0.70, "gain": 40.0, "depth": 40.0} for t in range(0, 100, 10)]
+    good[0]["delta"] = +1.90
+    good[-1]["delta"] = +1.90
+    _, d = ta._knots(good)
+    assert d == pytest.approx(np.full(len(good), -0.70), abs=1e-9)
+
+
+def test_a_window_whose_clouds_are_all_empty_fills_no_voxel():
+    """Clouds cropped to nothing must not fail the scene late with a ValueError."""
+    assert ta.occupied([np.zeros((0, 3))], np.zeros((1, 3)), np.eye(3)[None]) == 0
+
+
 def test_a_backwards_clock_is_forced_into_order(tmp_path):
     """A frame clock that ran backwards would break every consumer downstream."""
     frame_ts = T0 + np.arange(50) / 10.0
