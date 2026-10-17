@@ -6,7 +6,6 @@ import functools
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -629,7 +628,7 @@ def _write_frames(
     image_how = args.image_format
     image_ext = None  # one format per scene, and per root: decided by the first frame
 
-    workers = getattr(os, "process_cpu_count", os.cpu_count)() or 1
+    workers = time_align.usable_cpus()
     inflight = deque()
 
     def drain(keep: int) -> None:

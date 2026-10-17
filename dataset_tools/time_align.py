@@ -47,6 +47,12 @@ TARGET_STEP_S, MAX_WINDOWS = 3.0, 120
 LONG_WINDOW = 280
 
 
+def usable_cpus() -> int:
+    """CPUs this process may run on: a slurm job's share, not the node's
+    (``os.cpu_count`` is the node's; ``os.process_cpu_count`` is 3.13+)."""
+    return len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 1
+
+
 # ---------------------------------------------------------------------------
 # The objective
 # ---------------------------------------------------------------------------
@@ -264,7 +270,7 @@ def estimate(
     # The windows are independent and numpy drops the GIL in the heavy parts
     # (threads matched a process pool); map keeps their order, so the result
     # does not depend on the thread count.
-    with ThreadPoolExecutor(getattr(os, "process_cpu_count", os.cpu_count)()) as pool:
+    with ThreadPoolExecutor(usable_cpus()) as pool:
         windows = [w for w in pool.map(one, frames) if w]
     ts, d = _knots(windows)
     if not len(ts):
