@@ -467,7 +467,7 @@ def create_app(
             # Build options carry over when paging; ?frame= does not.
             view_query=_view_query(request.query_params),
             probe=access.probe,
-            cloud_on_image=_overlay_possible(access),
+            cloud_on_image=await run_in_threadpool(_overlay_possible, access),
             n_segments=len(access.segments),
             segment_position=next((i for i, s in enumerate(access.segments) if s.index == window.segment_index), None),
             scene_url=f"/scene/{scene_id}",
@@ -529,8 +529,12 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/image.jpg")
     async def api_frame_image(scene_id: str, index: int, w: int = Query(640, ge=64, le=1920)):
         access = await _access_or_404(state, scene_id)
-        path = access.frame_path("images", index)
-        data = await run_in_threadpool(_safe_render, render.render_camera_image, path, w)
+
+        def work():
+            path = access.frame_path("images", index)  # lists images/ once, for the suffix
+            return path, _safe_render(render.render_camera_image, path, w)
+
+        path, data = await run_in_threadpool(work)
         if data is None:
             return _absent_or_unreadable(path, f"image for frame {index}")
         return Response(data, media_type="image/jpeg")
@@ -542,10 +546,10 @@ def create_app(
         404 without ``T_cam_to_base.txt`` and ``K``, or without the image or cloud.
         """
         access = await _access_or_404(state, scene_id)
-        if not _overlay_possible(access):
-            raise HTTPException(404, f"scene {scene_id} has no camera calibration to project with")
 
         def work():
+            if not _overlay_possible(access):
+                raise HTTPException(404, f"scene {scene_id} has no camera calibration to project with")
             image = access.frame_path("images", index)
             cloud_path = access.frame_path("clouds", index)
             cloud = load_cloud(cloud_path)
@@ -885,11 +889,11 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
         window_key = window.key  # one bundle per window, however its key was spelled (frame3, frame00003)
     dest = _bundle_path(state, scene_id, window_key, opts_key)
     data = access.probe.fingerprint
-    if _bundle_is_current(dest, window, data, state.meta_memo):
+    if await run_in_threadpool(_bundle_is_current, dest, window, data, state.meta_memo):
         return dest
 
     async with state.lock(f"{scene_id}/{window_key}/{opts_key}"):
-        if _bundle_is_current(dest, window, data, state.meta_memo):
+        if await run_in_threadpool(_bundle_is_current, dest, window, data, state.meta_memo):
             return dest
         opts = _options_from_key(opts_key)
 
