@@ -13,6 +13,9 @@ from pathlib import Path
 
 import numpy as np
 
+from dataset_tools.gt_gaps import TAG_GAP, cut_segments
+from dataset_tools.gt_io import SegmentRow
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("filter_segments", REPO_ROOT / "scripts" / "filter_segments.py")
 filter_segments = importlib.util.module_from_spec(_spec)
@@ -196,3 +199,21 @@ def test_split_segments_at_gaps_never_writes_through_a_linked_regen(tmp_path):
 
     assert stats["segments_out"] == 2 and len(_segments(scene / "odometry_segments.txt")) == 2
     assert list(parent_regen.iterdir()) == []
+
+
+def test_a_stamp_two_segments_share_is_not_taken_twice():
+    """v1 odometry.txt is not strictly monotonic: a segment may start on the stamp the
+    previous one ended on. An inclusive time mask would give both poses to both segments."""
+    ts = np.r_[np.arange(0, 10.01, 0.1), np.arange(10, 20.01, 0.1)]  # 101 + 101, two poses at t = 10
+    T = np.tile(np.eye(4), (len(ts), 1, 1))
+    T[:, 0, 3] = np.r_[np.arange(101) * 0.1, 50 + np.arange(101) * 0.1]  # a jump between the two
+    segs = [SegmentRow(0, 0.0, 10.0, 101, "teleport"), SegmentRow(1, 10.0, 20.0, 101, "end_of_run")]
+
+    def no_cuts(t, _):
+        return np.zeros(len(t) - 1, bool), [TAG_GAP] * (len(t) - 1), None
+
+    out_t, out_T, rows, st = cut_segments(ts, T, segs, no_cuts, lambda reason, cut: reason, 20)
+
+    assert np.array_equal(out_t, ts) and st["poses_out"] == len(ts) and st["dropped_outside"] == 0
+    assert [r.n_poses for r in rows] == [101, 101]
+    assert np.allclose(out_T[101], np.eye(4))  # the second segment starts on its own pose, re-anchored

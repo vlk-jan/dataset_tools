@@ -323,9 +323,9 @@ def _collect(reader, conns, cam_conn, lidar_conn, args) -> _Pass1:
                 p1.gps_rows.append(row)
         elif conn.topic == "/tf_static":
             p1.tf_msgs.extend(msg.transforms)
-    # Bags may hold out-of-order messages.
+    # Bags may hold out-of-order messages, and republished stamps: the last republish stands.
     for rows in (p1.odom, p1.imu, p1.check_odom):
-        rows.sort(key=lambda x: x[0])
+        rows[:] = sorted({r[0]: r for r in rows}.values(), key=lambda x: x[0])
     return p1
 
 

@@ -208,6 +208,7 @@ def write_bag(
     boot_joints: int = 0,
     yaw_rate: float = 0.0,
     sweep_s: float = 0.0,
+    republish_odom: set[int] = frozenset(),
 ) -> Path:
     """A bag with everything the extractor reads, ``frames`` lidar sweeps long.
 
@@ -217,6 +218,8 @@ def write_bag(
     frame missing from TF. ``boot_joints``: joint states on a boot clock.
     ``yaw_rate`` (rad/s) turns the robot; ``sweep_s`` makes each cloud a raw
     bottom-to-top sweep of :data:`WALL` with per-point ``offset_time``.
+    ``republish_odom``: sweeps whose odometry stamp is published twice, a wild
+    pose first and the right one after it.
     """
     with Writer(bag_dir, version=8) as writer:
         conns = {
@@ -262,6 +265,8 @@ def write_bag(
                 put("/cam/camera_info", t + 0.03, _camera_info_msg(t + 0.03, cam_frame))
             lost = reset_from is not None and k >= reset_from
             if odom_until is None or k < odom_until:
+                if k in republish_odom:
+                    put("/odom", t, _odom_msg(t, 900.0))
                 # 1 m/s: under the GT teleport gate
                 put("/odom", t, _odom_msg(t, 900.0 if lost else 0.1 * k, yaw_rate * 0.1 * k))
             # The IMU at 100 Hz when there is a sweep to deskew, so its gyro covers it.
@@ -484,6 +489,20 @@ def test_a_regenerated_ground_truth_survives_a_bag_without_odometry(tmp_path: Pa
     assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on"]) == 0
     assert scene_is_complete(scene)
     assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+
+
+def test_a_republished_odometry_stamp_keeps_the_last_pose(tmp_path: Path):
+    """Two poses on one stamp would break the ground truth there (dt 0 reads as a
+    teleport) and double the pose wherever segments share the stamp."""
+    write_bag(tmp_path / "bags" / "bag_a", republish_odom={12})
+    out = tmp_path / "out"
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on"]) == 0
+    ts, poses = read_trajectory(out / "0000" / "odometry.txt")
+    assert len(ts) == FRAMES and np.all(np.diff(ts) > 0)
+    assert np.allclose(poses[:, 0, 3], 0.1 * np.arange(FRAMES))  # the wild first publish is gone
+    assert (
+        len([line for line in (out / "0000" / "odometry_segments.txt").read_text().splitlines() if line[0] != "#"]) == 1
+    )
 
 
 def test_a_png_that_cannot_be_written_fails_the_scene(bags: Path, tmp_path: Path, monkeypatch):

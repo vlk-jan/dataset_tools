@@ -172,7 +172,8 @@ def cut_segments(
     st = dict(span_in=0.0, span_out=0.0, poses_out=0, dropped_short=0)
     covered = np.zeros(len(t), bool)
     for seg in segs:
-        idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts))[0]
+        # v1 stamps are not strictly monotonic: a pose at a stamp two segments share goes to the first.
+        idx = np.where((t >= seg.start_ts) & (t <= seg.end_ts) & ~covered)[0][: seg.n_poses or None]
         covered[idx] = True
         if len(idx) == 0:
             continue
