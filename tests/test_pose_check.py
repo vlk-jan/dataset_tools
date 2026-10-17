@@ -61,3 +61,18 @@ def test_the_report_is_written_and_short_streams_are_a_note(tmp_path):
     assert "note" in short
     pose_check.write_report(tmp_path / "short.txt", short, "a", "b")
     assert "too few" in (tmp_path / "short.txt").read_text()
+
+
+def test_a_rolled_over_tilt_difference_is_not_a_full_turn():
+    """Roll near +180 in one stream and near -180 in the other differ by a degree, not 358."""
+
+    def rolled(poses, roll):
+        c, s = np.cos(roll), np.sin(roll)
+        out = poses.copy()
+        out[:, :3, :3] = out[:, :3, :3] @ np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+        return out
+
+    tp, pp = _track(np.arange(0.0, 60.0, 0.069))
+    tr, pr = _track(np.arange(0.0, 60.0, 0.1))
+    r = pose_check.compare(tp, rolled(pp, np.pi - 0.01), tr, rolled(pr, -np.pi + 0.01), max_speed=6.0)
+    assert r["tilt_diff_deg"]["roll"] == pytest.approx(np.degrees(-0.02), abs=0.3)

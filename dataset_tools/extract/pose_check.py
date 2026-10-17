@@ -112,9 +112,8 @@ def compare(ts_p, poses_p, ts_r, poses_r, max_speed: float, step_s: float = 0.5)
     m = (ts_p >= lo) & (ts_p <= hi)
     if m.sum() >= 3:
         j = np.clip(np.searchsorted(ts_r, ts_p[m]), 0, len(ts_r) - 1)
-        diff = np.degrees(
-            np.median(np.subtract(roll_pitch_from_matrix(poses_p[m]), roll_pitch_from_matrix(poses_r[j])), axis=1)
-        )
+        d = np.subtract(roll_pitch_from_matrix(poses_p[m]), roll_pitch_from_matrix(poses_r[j]))
+        diff = np.degrees(np.median(np.arctan2(np.sin(d), np.cos(d)), axis=1))  # wrapped: rolled over is not 360
         out["tilt_diff_deg"] = {"roll": round(float(diff[0]), 2), "pitch": round(float(diff[1]), 2)}
     out["warnings"] = warnings(out)
     return out
