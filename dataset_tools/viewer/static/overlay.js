@@ -253,11 +253,11 @@ function syncLegendHighlight() {
  * per window, so a note in it would be stale or force a rebuild.
  */
 
-/** Seek the playhead to a frame of this window, if it holds it. */
+/** Seek the playhead to a frame, or to the window's first frame past it (a note may start before the window). */
 function seekToFrame(frame) {
   const app = window.simview;
   if (!app || !app.animationController || !meta || !meta.frames) return;
-  const local = meta.frames.indexOf(frame);
+  const local = meta.frames.findIndex((f) => f >= frame);
   if (local < 0 || !meta.times || local >= meta.times.length) return;
   // goToTime, not `currentTime =`, which is ignored until playback advances.
   app.animationController.goToTime(meta.times[local]);
