@@ -450,7 +450,7 @@ def create_app(
             raise HTTPException(404, f"scene {scene_id} has no window {window_key!r}")
 
         opts = _options_from_query(request.query_params)
-        bundle_key = f"{scene_id}/{window_key}/{opts.cache_key()}"
+        bundle_key = f"{scene_id}/{window.key}/{opts.cache_key()}"
         # Neighbours, for paging through the scene from the panel.
         windows = await run_in_threadpool(access.windows)
         prev_window, next_window = neighbour_windows(windows, window)
@@ -876,9 +876,11 @@ def _bundle_is_current(dest: Path, window: Window | None, data: str, memo: dict[
 async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opts_key: str) -> Path:
     """Return the on-disk bundle for a window, building it if necessary (one
     lock per bundle key, so concurrent fetches share one build)."""
-    dest = _bundle_path(state, scene_id, window_key, opts_key)
     access = await _access_or_404(state, scene_id)
     window = await run_in_threadpool(access.window, window_key)
+    if window is not None:
+        window_key = window.key  # one bundle per window, however its key was spelled (frame3, frame00003)
+    dest = _bundle_path(state, scene_id, window_key, opts_key)
     data = access.probe.fingerprint
     if _bundle_is_current(dest, window, data, state.meta_memo):
         return dest

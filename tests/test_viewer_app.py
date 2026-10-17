@@ -242,6 +242,16 @@ def test_a_single_frame_bundle_builds_and_simview_can_read_it_back(client):
     assert scene.model.terrain is not None
 
 
+def test_a_frame_key_spelled_otherwise_shares_the_canonical_bundle(client, tmp_path):
+    """frame3 and frame000000000003 name frame00003: one build, one cache dir,
+    not one per spelling on an unauthenticated port."""
+    opts = "40-160000-80-500000-0.1-height"
+    page = client.get("/view/0000/frame3")
+    assert page.status_code == 200 and f"/api/data/0000/frame00003/{opts}/" in page.text
+    assert client.get(f"/api/data/0000/frame000000000003/{opts}/x/meta.json").status_code == 200
+    assert [d.name for d in (tmp_path / "cache" / "bundles" / "0000").iterdir()] == ["frame00003"]
+
+
 def test_a_single_frame_view_page_opens(client):
     r = client.get("/view/0000/frame00003")
     assert r.status_code == 200
