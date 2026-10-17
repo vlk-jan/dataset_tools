@@ -178,11 +178,6 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     clear_scene_outputs(scene_dir)
 
     p1 = _collect(reader, conns, cam_conn, lidar_conn, args)
-    # The ground truth goes only once pass 1 shows this run will rewrite it: with no
-    # odometry in the bag a regenerated odometry.txt would be deleted and not replaced.
-    if _auto(args.gt, args.odom) and p1.odom:
-        for name in GROUND_TRUTH_FILES:
-            (scene_dir / name).unlink(missing_ok=True)
     selected = _select_frames(p1, args, bag)
     if isinstance(selected, str):
         result.status = STATUS_EMPTY
@@ -768,7 +763,12 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     if guard_verdict is not None:
         gnss_guard.write_report(scene_dir / GNSS_GUARD_FILE, guard_verdict, float(frame_ts[0]))
 
+    # The ground truth goes only once this run is about to rewrite it: with no odometry
+    # in the bag, or a failure before this point, a regenerated odometry.txt would be
+    # deleted and not replaced.
     if _auto(args.gt, args.odom) and p1.odom:
+        for name in GROUND_TRUTH_FILES:
+            (scene_dir / name).unlink(missing_ok=True)
         if write_ground_truth(p1.odom, scene_dir, spans=guard_verdict.spans if guard_verdict else None):
             LOG.info("%s: ground truth written (odometry.txt + segments)", bag)
         else:

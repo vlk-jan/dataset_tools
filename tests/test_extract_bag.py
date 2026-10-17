@@ -505,6 +505,18 @@ def test_a_republished_odometry_stamp_keeps_the_last_pose(tmp_path: Path):
     )
 
 
+def test_a_regenerated_ground_truth_survives_a_run_that_fails_before_writing_its_own(tmp_path: Path, monkeypatch):
+    """--gt on replaces the regenerated odometry.txt only once it is about to write its own."""
+    write_bag(tmp_path / "bags" / "bag_a")
+    out = tmp_path / "out"
+    scene = out / "0000"
+    scene.mkdir(parents=True)
+    (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration\n")
+    monkeypatch.setattr(cv2, "imwrite", lambda *a, **k: False)
+    assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on", "--image_format", "png"]) == 1
+    assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+
+
 def test_a_png_that_cannot_be_written_fails_the_scene(bags: Path, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(cv2, "imwrite", lambda *a, **k: False)
     out = tmp_path / "out"
