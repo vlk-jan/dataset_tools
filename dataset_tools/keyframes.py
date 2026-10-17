@@ -34,6 +34,8 @@ from pathlib import Path
 import numpy as np
 
 from dataset_tools import image_format
+from dataset_tools.gt_io import _replace_atomically
+from dataset_tools.transforms import tilt_deg
 
 LISTS = ("keyframes.lst", "keyframes_train.lst", "keyframes_heldout.lst")
 MAX_TILT_DEG = 45.0
@@ -52,9 +54,7 @@ def held_out(root: Path) -> list[str]:
 
 def tilt_exposed(scene_dir: Path, max_tilt_deg: float, horizon_s: float) -> np.ndarray:
     """Per frame: whether ``[t, t + horizon_s]`` holds a frame tilted more than ``max_tilt_deg``."""
-    g = np.load(scene_dir / "gravity_align.npy", mmap_mode="r")
-    tilt = np.degrees(np.arccos(np.clip(np.asarray(g[:, 2, 2]), -1.0, 1.0)))
-    bad = tilt > max_tilt_deg
+    bad = tilt_deg(np.load(scene_dir / "gravity_align.npy", mmap_mode="r")) > max_tilt_deg
     if horizon_s <= 0 or not bad.any():
         return bad
     clock = scene_dir / "data_ts.txt"
@@ -115,18 +115,11 @@ def write_lists(
             f"{root}/manifest.json declares images.extension={ext!r} but no frame has an images/<stem>.{ext}; "
             "refusing to write lists that name nothing"
         )
-    chosen = {
-        "keyframes.lst": scenes,
-        "keyframes_train.lst": [s for s in scenes if s not in val],
-        "keyframes_heldout.lst": [s for s in scenes if s in val],
-    }
+    chosen = (scenes, [s for s in scenes if s not in val], [s for s in scenes if s in val])
     totals = {}
-    for name, ss in chosen.items():
+    for name, ss in zip(LISTS, chosen, strict=True):
         body = [ln for s in ss for ln in lines[s]]
-        path = out_dir / name
-        tmp = path.with_suffix(".lst.tmp")
-        tmp.write_text("\n".join(body) + "\n")
-        os.replace(tmp, path)
+        _replace_atomically(out_dir / name, lambda fh, body=body: fh.write("\n".join(body) + "\n"))
         totals[name] = len(body)
     return {"lists": totals, "scenes": per, "held_out": sorted(val), "extension": ext}
 

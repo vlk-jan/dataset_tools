@@ -28,7 +28,9 @@ import numpy as np
 
 from dataset_tools.disk_usage import dir_usage
 from dataset_tools.gt_gaps import window_errors as scan_windows
-from dataset_tools.gt_io import _replace_atomically, read_trajectory
+from dataset_tools.gt_io import read_trajectory
+from dataset_tools.release import _write_json as write_json
+from dataset_tools.validate_scene import _npy_rows
 from dataset_tools.viewer import render
 from dataset_tools.viewer.build import SceneAccess
 from dataset_tools.viewer.index_page import (
@@ -117,17 +119,6 @@ def as_float(value: Any) -> float | None:
 # --------------------------------------------------------------------------
 
 
-def windows(t, T, rt, rT, segs, w):
-    """Translation error of every ``w``-second window of ``T`` against ``rT``, inside one of ``segs``."""
-    return np.array(
-        [
-            err
-            for i, j, err in scan_windows(t, T, rt, rT, w)
-            if not segs or any(a <= t[i] and t[j] <= b for a, b in segs)
-        ]
-    )
-
-
 def window_errors(access: SceneAccess) -> tuple[float, float] | None:
     """``(median, p95)`` of the 2 s window error against the live /odom, in m.
 
@@ -148,8 +139,13 @@ def window_errors(access: SceneAccess) -> tuple[float, float] | None:
         return None
     if not len(rt):
         return None
-    bounds = [(s.start_ts, s.end_ts) for s in access.segments] or None
-    errs = windows(np.asarray(ts), np.asarray(poses), rt, rT, bounds, WINDOW_S)
+    t = np.asarray(ts)
+    bounds = [(s.start_ts, s.end_ts) for s in access.segments]
+    errs = [
+        err
+        for i, j, err in scan_windows(t, np.asarray(poses), rt, rT, WINDOW_S)
+        if not bounds or any(a <= t[i] and t[j] <= b for a, b in bounds)
+    ]
     if not len(errs):
         return None
     return float(np.median(errs)), float(np.percentile(errs, 95))
@@ -164,14 +160,8 @@ def sampled_points(access: SceneAccess) -> int | None:
     if not available:
         return None
     step = max(1, len(available) // CLOUD_SAMPLES)
-    counts = []
-    for index in available[::step][:CLOUD_SAMPLES]:
-        try:
-            shape = np.load(access.frame_path("clouds", index), mmap_mode="r").shape
-        except (OSError, ValueError):
-            continue
-        if shape:
-            counts.append(int(shape[0]))
+    rows = (_npy_rows(access.frame_path("clouds", index)) for index in available[::step][:CLOUD_SAMPLES])
+    counts = [n for n in rows if n is not None]
     return round(statistics.mean(counts)) if counts else None
 
 
@@ -355,11 +345,6 @@ def root_size_gb(root: Path) -> float:
 # --------------------------------------------------------------------------
 
 
-def thumb_path(atlas_dir: Path, spec: dict, scene_id: str, slot: str) -> Path:
-    pattern = spec.get("pattern") or "{scene}{slot}.jpg"
-    return atlas_dir / (spec.get("dir") or "thumbs") / pattern.format(scene=scene_id, slot=slot)
-
-
 def stored_width(path: Path) -> int | None:
     """Width of a stored thumbnail; None for a missing or corrupt file (it just gets rewritten)."""
     img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
@@ -369,7 +354,6 @@ def stored_width(path: Path) -> int | None:
 def write_thumbs(
     access: SceneAccess,
     atlas_dir: Path,
-    spec: dict,
     indexes: dict[str, int],
     previous: dict,
 ) -> tuple[int, int]:
@@ -380,7 +364,7 @@ def write_thumbs(
     old = previous.get("thumbs") if isinstance(previous.get("thumbs"), dict) else {}
     written = skipped = 0
     for slot, index in indexes.items():
-        out = thumb_path(atlas_dir, spec, access.scene_id, slot)
+        out = atlas_dir / "thumbs" / f"{access.scene_id}{slot}.jpg"
         if out.is_file() and old.get(slot) == index and stored_width(out) == THUMB_WIDTH:
             skipped += 1
             continue
@@ -467,7 +451,7 @@ def build_atlas(root: DatasetRoot, args, curation: dict, previous: dict) -> dict
         entry = scene_entry(root, access, curated, bags)
         entries[probe.scene_id] = entry
         if not args.no_thumbs and not args.check and entry.get("thumbs"):
-            w, s = write_thumbs(access, root.atlas_dir, spec, entry["thumbs"], old_scenes.get(probe.scene_id, {}))
+            w, s = write_thumbs(access, root.atlas_dir, entry["thumbs"], old_scenes.get(probe.scene_id, {}))
             written += w
             skipped += s
         logger.info("%s  %s", probe.scene_id, summarise(entry))
@@ -552,50 +536,37 @@ def diff_atlas(new: dict, old: dict, only: list[str] | None = None) -> list[str]
     return out
 
 
-def write_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    _replace_atomically(path, lambda fh: fh.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n"))
+def resolve_atlas_dir(atlas_dir: Path, materialize: bool) -> None:
+    """Refuse to write through a symlinked ``atlas/`` or ``atlas/thumbs/`` (another release's).
 
-
-def resolve_thumbs_dir(atlas_dir: Path, materialize: bool) -> None:
-    """The same refusal for a linked ``atlas/thumbs/``; ``--materialize`` copies the files across."""
-    thumbs = atlas_dir / "thumbs"
-    if not thumbs.is_symlink():
+    ``--materialize`` replaces the link with a real directory, copying across
+    ``curation.json`` or the thumbnails.
+    """
+    is_atlas = atlas_dir.is_symlink()
+    link = atlas_dir if is_atlas else atlas_dir / "thumbs"
+    if not link.is_symlink():
         return
-    target = thumbs.resolve()
+    target = link.resolve()
     if not materialize:
+        what, copied = ("atlas", "curation.json is") if is_atlas else ("thumbnails", "the thumbnails are")
         raise SystemExit(
-            f"{thumbs} is a symlink to {target}\n"
-            "Generating here would overwrite that root's thumbnails. Re-run with --materialize "
-            "to replace the link with a real directory (the thumbnails are copied across)."
+            f"{link} is a symlink to {target}\n"
+            f"Generating here would overwrite that root's {what}. Re-run with --materialize "
+            f"to replace the link with a real directory ({copied} copied across)."
         )
-    thumbs.unlink()
-    if target.is_dir():
-        shutil.copytree(target, thumbs)
+    if is_atlas:
+        curation = read_json(target / "curation.json")
+        link.unlink()
+        link.mkdir()
+        if curation:
+            write_json(link / "curation.json", curation)
     else:
-        thumbs.mkdir()
-    logger.info("materialised %s (was a symlink to %s)", thumbs, target)
-
-
-def resolve_atlas_dir(root: DatasetRoot, materialize: bool) -> None:
-    """Refuse to write through a symlinked ``atlas/`` (it is another release's); ``--materialize`` breaks it."""
-    atlas_dir = root.atlas_dir
-    if not atlas_dir.is_symlink():
-        resolve_thumbs_dir(atlas_dir, materialize)
-        return
-    target = atlas_dir.resolve()
-    if not materialize:
-        raise SystemExit(
-            f"{atlas_dir} is a symlink to {target}\n"
-            "Generating here would overwrite that root's atlas. Re-run with --materialize "
-            "to replace the link with a real directory (curation.json is copied across)."
-        )
-    curation = read_json(target / "curation.json")
-    atlas_dir.unlink()
-    atlas_dir.mkdir()
-    if curation:
-        write_json(atlas_dir / "curation.json", curation)
-    logger.info("materialised %s (was a symlink to %s)", atlas_dir, target)
+        link.unlink()
+        if target.is_dir():
+            shutil.copytree(target, link)
+        else:
+            link.mkdir()
+    logger.info("materialised %s (was a symlink to %s)", link, target)
 
 
 def main() -> int:
@@ -625,7 +596,7 @@ def main() -> int:
         )
     previous = read_json(root.atlas_dir / "atlas.json")
     if not args.check:
-        resolve_atlas_dir(root, args.materialize)
+        resolve_atlas_dir(root.atlas_dir, args.materialize)
 
     atlas = build_atlas(root, args, curation, previous)
 

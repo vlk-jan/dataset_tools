@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -130,29 +131,25 @@ def main() -> int:
             return 1
     with Pool(a.jobs) as pool:
         scanned = pool.map(scan_scene, [(str(a.root / sc), a.horizon, a.max_off, use_backups) for sc in scenes])
-    report, tot = {}, {}
+    report, tot = {}, Counter()
+
+    def row(name, s):
+        return (
+            f"{name:5s} {s['windows']:7d} {s['flagged']:7d} {s['segments_in']:3d}->{s['segments_out']:<4d} "
+            f"{s['poses_in']:6d}->{s['poses_out']:<6d} {s['span_in']:6.0f}->{s['span_out']:<7.0f} "
+            f"{s['cut_s']:6.0f} {s['dropped_short']:5d} {s['dropped_outside']:7d}"
+        )
+
     print(
         f"{'scene':5s} {'windows':>7s} {'flagged':>7s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'cut_s':>6s} {'short':>5s} {'outside':>7s}"
     )
     for sc, n_win, hits in scanned:
         st = cut_scene(a.root / sc, hits, a.horizon, a.margin, a.min_poses, a.check, use_backups)
         report[sc] = [dict(frame=h.frame, t0=h.t0, offset=round(h.offset, 3), n=h.n) for h in hits]
-        for k, v in st.items():
-            tot[k] = tot.get(k, 0) + v
-        tot["windows"] = tot.get("windows", 0) + n_win
-        tot["flagged"] = tot.get("flagged", 0) + len(hits)
-        print(
-            f"{sc:5s} {n_win:7d} {len(hits):7d} {st['segments_in']:3d}->{st['segments_out']:<4d} "
-            f"{st['poses_in']:6d}->{st['poses_out']:<6d} {st['span_in']:6.0f}->{st['span_out']:<7.0f} "
-            f"{st['cut_s']:6.0f} {st['dropped_short']:5d} {st['dropped_outside']:7d}",
-            flush=True,
-        )
-    print(
-        f"TOTAL {int(tot['windows']):7d} {int(tot['flagged']):7d} {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} "
-        f"{int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} {tot['span_in']:6.0f}->{tot['span_out']:<7.0f} "
-        f"{tot['cut_s']:6.0f} {int(tot['dropped_short']):5d} {int(tot['dropped_outside']):7d}"
-        + ("  (check only, nothing written)" if a.check else "")
-    )
+        s = {**st, "windows": n_win, "flagged": len(hits)}
+        tot.update(s)
+        print(row(sc, s), flush=True)
+    print(row("TOTAL", tot) + ("  (check only, nothing written)" if a.check else ""))
     if a.report:
         with open(a.report, "w") as fh:
             json.dump(report, fh, indent=1)

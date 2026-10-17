@@ -26,10 +26,11 @@ from pathlib import Path
 import numpy as np
 
 from dataset_tools import image_format
-from dataset_tools.extract.scene_io import DERIVED_DIRS
+from dataset_tools.extract.scene_io import DERIVED_DIRS, source_bag
 from dataset_tools.gnss_guard import MAX_SPEED
 from dataset_tools.gt_io import read_segments, read_trajectory
-from dataset_tools.transforms import MIN_VALID_STAMP
+from dataset_tools.keyframes import LISTS
+from dataset_tools.transforms import MIN_VALID_STAMP, tilt_deg
 
 #: Files every extracted scene must have.
 REQUIRED_FILES = (
@@ -452,8 +453,7 @@ def check_odometry(
 
 
 def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) -> None:
-    cos_tilt = np.clip(gravity[:, 2, 2], -1.0, 1.0)
-    tilt = np.degrees(np.arccos(cos_tilt))
+    tilt = tilt_deg(gravity)
     report.stats["tilt_mean_deg"] = float(np.mean(tilt))
     report.stats["tilt_max_deg"] = float(np.max(tilt))
     n_extreme = int(np.sum(tilt > max_tilt_deg))
@@ -724,9 +724,8 @@ def validate_root(root: Path, reports: Sequence[SceneReport]) -> list[Message]:
     out: list[Message] = []
     by_bag: dict[str, list[str]] = {}
     for r in reports:
-        sentinel = r.path / "source_bag.txt"
-        if sentinel.is_file():
-            by_bag.setdefault(sentinel.read_text().strip(), []).append(r.name)
+        if (bag := source_bag(r.path)) is not None:
+            by_bag.setdefault(bag, []).append(r.name)
     for bag, scenes in sorted(by_bag.items()):
         if len(scenes) > 1:
             out.append(Message(ERROR, "ROOT_DUP_BAG", f"{bag} was extracted into {', '.join(scenes)}"))
@@ -772,7 +771,7 @@ def validate_root(root: Path, reports: Sequence[SceneReport]) -> list[Message]:
             scenes = held.get("scenes") if isinstance(held, dict) else held if isinstance(held, list) else []
             held_out = {str(x).zfill(4) if str(x).isdigit() else str(x) for x in scenes or []}
     on_disk_names = {r.name for r in reports}
-    for name in ("keyframes.lst", "keyframes_train.lst", "keyframes_heldout.lst"):
+    for name in LISTS:
         path = root / name
         if not path.is_file():
             continue

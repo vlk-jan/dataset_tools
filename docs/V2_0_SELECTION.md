@@ -2,11 +2,12 @@
 
 Written 2026-09-25 from a survey of every new-rig bag on
 `subtdata:/data/helhest` (`docs/v2_inventory.csv`, 54 bags, 7 sessions,
-1.14 TB), without extracting any of them: `slurm/survey_v2.batch` runs
-`scripts/survey_v2_bag.py` over one bag per array task and leaves ~1 MB per
+1.14 TB), without extracting any of them: `slurm/survey_v2.batch` ran
+`scripts/survey_v2_bag.py` over one bag per array task and left ~1 MB per
 bag under `/mnt/personal/vlkjan6/HELHEST_v2_survey/<session>/<bag>/`
 (summary.json, a 1 Hz GNSS track, 12 thumbnails). RCI job 11704468. The
-sessions already in `HELHEST_v2_beta` were read from that root instead.
+sessions already in `HELHEST_v2_beta` were read from that root instead. Both
+files were removed after the selection (last in commit 94955ed).
 
 v2.0 is a **fresh extraction into its own root**, `HELHEST_v2_0`, with its own
 bag list (`docs/v2_0_bags.csv`, row = scene number, numbered from 0000 again)

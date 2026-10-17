@@ -61,6 +61,8 @@ from scipy.ndimage import gaussian_filter
 from scipy.spatial import Delaunay, cKDTree
 from scipy.stats import binned_statistic_2d
 
+from dataset_tools.gt_io import _replace_atomically
+
 #: Outside the hull of returns: filled, not measured.
 VALIDITY_EXTRAPOLATED = 0
 #: No return in the cell, but inside the hull: interpolated from returns nearby.
@@ -69,8 +71,6 @@ VALIDITY_INTERPOLATED = 1
 VALIDITY_MEASURED = 2
 #: The value comes from a wheel-contact anchor, not from a return.
 VALIDITY_ANCHORED = 3
-#: "Founded in returns" rank per code, for ``rank >= k`` gates: anchors rank with extrapolation.
-VALIDITY_RANK = np.array([0, 1, 2, 0], dtype=np.uint8)
 
 #: Re-levelling and the ground fill need at least this many measured cells, else they keep the plain value.
 ANCHOR_MIN_GROUND_CELLS = 8
@@ -78,11 +78,6 @@ ANCHOR_MIN_GROUND_CELLS = 8
 STATISTICS = {"median": None, "max": 1.0, "p90": 0.9, "p75": 0.75}
 
 SETTINGS_FILE = "height_maps.json"
-
-
-def founded_in_returns(validity):
-    """Cells whose height lidar returns decided (``validity >= 1`` would accept anchors)."""
-    return (validity == VALIDITY_INTERPOLATED) | (validity == VALIDITY_MEASURED)
 
 
 @dataclass(frozen=True)
@@ -367,9 +362,7 @@ def build_scene(scene_dir: Path, p: Params = Params(), workers: int = 8, overwri
         "too_sparse": len(frames) - n_maps,
         "errors": len(errors),
     }
-    tmp = scene_dir / (SETTINGS_FILE + ".tmp")
-    tmp.write_text(json.dumps(record, indent=1) + "\n")
-    os.replace(tmp, scene_dir / SETTINGS_FILE)
+    _replace_atomically(scene_dir / SETTINGS_FILE, lambda fh: fh.write(json.dumps(record, indent=1) + "\n"))
     return {**counts, "errors": errors, "maps": n_maps, "frames": len(frames)}
 
 

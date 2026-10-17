@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from make_atlas import resolve_thumbs_dir  # noqa: E402
+from make_atlas import resolve_atlas_dir  # noqa: E402
 
 
 def _linked(tmp_path):
@@ -27,13 +27,13 @@ def _linked(tmp_path):
 def test_a_linked_thumbs_directory_is_refused(tmp_path):
     atlas, _ = _linked(tmp_path)
     with pytest.raises(SystemExit, match="symlink"):
-        resolve_thumbs_dir(atlas, materialize=False)
+        resolve_atlas_dir(atlas, materialize=False)
     assert (atlas / "thumbs").is_symlink()
 
 
 def test_materialize_copies_the_thumbnails_and_leaves_the_older_root_alone(tmp_path):
     atlas, older = _linked(tmp_path)
-    resolve_thumbs_dir(atlas, materialize=True)
+    resolve_atlas_dir(atlas, materialize=True)
 
     thumbs = atlas / "thumbs"
     assert thumbs.is_dir() and not thumbs.is_symlink()
@@ -45,5 +45,5 @@ def test_materialize_copies_the_thumbnails_and_leaves_the_older_root_alone(tmp_p
 def test_a_real_thumbs_directory_is_left_as_it_is(tmp_path):
     atlas = tmp_path / "atlas"
     (atlas / "thumbs").mkdir(parents=True)
-    resolve_thumbs_dir(atlas, materialize=False)
+    resolve_atlas_dir(atlas, materialize=False)
     assert (atlas / "thumbs").is_dir()

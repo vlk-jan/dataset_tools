@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -81,25 +82,23 @@ def main() -> int:
     a = ap.parse_args()
 
     scenes = a.scenes or [p.name for p in scene_dirs(a.root)]
-    tot: dict[str, float] = {}
+    tot: Counter = Counter()
+
+    def row(name, s):
+        return (
+            f"{name:5s} {s['segments_in']:3d}->{s['segments_out']:<4d} {s['poses_in']:6d}->{s['poses_out']:<6d} "
+            f"{s['span_in']:6.0f}->{s['span_out']:<7.0f} {s['seams_wheel_gap']:5d} {s['seams_gap']:4d} "
+            f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d} {s['dropped_outside']:7d}"
+        )
+
     print(
         f"{'scene':5s} {'segs':>9s} {'poses':>13s} {'span_s':>15s} {'wheel':>5s} {'gap':>4s} {'hole_s':>7s} {'ref_m':>6s} {'short':>5s} {'outside':>7s}"
     )
     for sc in scenes:
         s = split_scene(a.root / sc, a.max_gap, a.max_err, a.min_poses, a.check, a.force)
-        for k, v in s.items():
-            tot[k] = tot.get(k, 0) + v
-        print(
-            f"{sc:5s} {s['segments_in']:3d}->{s['segments_out']:<4d} {s['poses_in']:6d}->{s['poses_out']:<6d} "
-            f"{s['span_in']:6.0f}->{s['span_out']:<7.0f} {s['seams_wheel_gap']:5d} {s['seams_gap']:4d} "
-            f"{s['hole_s']:7.0f} {s['ref_m_in_holes']:6.0f} {s['dropped_short']:5d} {s['dropped_outside']:7d}"
-        )
-    print(
-        f"TOTAL {int(tot['segments_in']):3d}->{int(tot['segments_out']):<4d} {int(tot['poses_in']):6d}->{int(tot['poses_out']):<6d} "
-        f"{tot['span_in']:6.0f}->{tot['span_out']:<7.0f} {int(tot['seams_wheel_gap']):5d} {int(tot['seams_gap']):4d} "
-        f"{tot['hole_s']:7.0f} {tot['ref_m_in_holes']:6.0f} {int(tot['dropped_short']):5d} {int(tot['dropped_outside']):7d}"
-        + ("  (check only, nothing written)" if a.check else "")
-    )
+        tot.update(s)
+        print(row(sc, s))
+    print(row("TOTAL", tot) + ("  (check only, nothing written)" if a.check else ""))
     return 0
 
 

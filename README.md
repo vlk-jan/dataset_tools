@@ -105,7 +105,7 @@ singularity exec --bind /mnt/data $SIF \
     .venv/bin/python -m dataset_tools.extract <bags> <output> --jobs 8
 ```
 
-The `.venv` is not in the repository (it is gitignored) -- `slurm/slurm_extract.batch`
+The `.venv` is not in the repository (it is gitignored) -- `slurm/extract_v2.batch`
 and the Slurm example below both expect one built this way at `$REPO/.venv`.
 
 Add further `--bind` options for any other filesystem you read or write
@@ -156,9 +156,10 @@ Two files in `docs/`, both committed:
   `docs/releases/v2_4.json` as a template. Everything else in the manifest is
   measured from the scenes.
 
-Candidate bags can be surveyed before choosing them
-(`slurm/survey_v2.batch` over `docs/v2_inventory.csv`, ~1 MB per bag, no
-extraction; see [docs/V2_0_SELECTION.md](docs/V2_0_SELECTION.md)).
+The v2.0 bags were chosen from a survey of every candidate bag
+(`docs/v2_inventory.csv`, ~1 MB per bag, no extraction; see
+[docs/V2_0_SELECTION.md](docs/V2_0_SELECTION.md)); its script was removed
+after the selection (`git show 94955ed:scripts/survey_v2_bag.py`).
 
 ### 2. Extract every bag (CTU cluster)
 
@@ -633,9 +634,9 @@ After re-extracting scenes the viewer notices the changed files by itself;
 The job files in `slurm/` are the ones the HELHEST releases were built with
 on the CTU RCI cluster: `extract_v2.batch` and `finalize_v2.sh` (see
 [Extracting a dataset, step by step](#extracting-a-dataset-step-by-step)),
-`heightmaps.batch`, `viewer.batch`, the surveys, and `slurm_extract.batch`,
-the simplest shape -- one job extracting a whole directory of bags (16 CPUs,
-8 workers):
+`heightmaps.batch`, `viewer.batch` and `probe_clock_v2.batch`. The simplest
+shape -- one job extracting a whole directory of bags (16 CPUs, 8 workers;
+take the `#SBATCH` header and container setup from `extract_v2.batch`) -- is:
 
 ```bash
 singularity exec --bind /mnt/personal --bind /mnt/data "$SIF" \

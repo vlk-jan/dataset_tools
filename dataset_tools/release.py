@@ -38,7 +38,9 @@ import numpy as np
 
 from dataset_tools import heightmap, image_format, keyframes
 from dataset_tools.extract.scene_io import merge_scenes_csv
-from dataset_tools.gt_io import read_trajectory
+from dataset_tools.gnss_guard import MAX_SPEED
+from dataset_tools.gt_io import _replace_atomically, read_segments, read_trajectory
+from dataset_tools.transforms import tilt_deg
 
 #: Manifest keys other tools write; carried over from an existing manifest.
 OWNED_ELSEWHERE = ("proprio_labels", "derived")
@@ -137,21 +139,15 @@ def survey_scene(scene_dir: Path) -> dict:
     ts, poses = read_trajectory(scene_dir / "odometry.txt")
     meta = json.loads((scene_dir / "extract_meta.json").read_text())
     frames = meta.get("frames") or {}
-    seg = [
-        ln
-        for ln in (scene_dir / "odometry_segments.txt").read_text().splitlines()
-        if ln.strip() and not ln.startswith("#")
-    ]
+    seg = read_segments(scene_dir / "odometry_segments.txt")
     pos = poses[:, :3, 3]
     step = np.linalg.norm(np.diff(pos, axis=0), axis=1)
     dt = np.diff(ts)
     # Steps inside one segment only: each segment is re-anchored at the identity,
     # and a relocalisation across a hole can look like a slow drive.
-    starts = np.array([float(ln.split()[1]) for ln in seg])
-    sid = np.searchsorted(starts, ts, side="right")
-    in_seg = (np.diff(sid) == 0) & (step <= 6.0 * np.maximum(dt, 1e-3))
-    g = np.load(scene_dir / "gravity_align.npy", mmap_mode="r")
-    tilt = np.degrees(np.arccos(np.clip(np.asarray(g[:, 2, 2]), -1, 1)))
+    sid = np.searchsorted(np.array([s.start_ts for s in seg]), ts, side="right")
+    in_seg = (np.diff(sid) == 0) & (step <= MAX_SPEED * np.maximum(dt, 1e-3))
+    tilt = tilt_deg(np.load(scene_dir / "gravity_align.npy", mmap_mode="r"))
     pc = frames.get("pose_check") or {}
     guard = frames.get("guard") or {}
     holes = np.diff(d) > 1.0
@@ -386,9 +382,7 @@ def build_readme(manifest: dict, spec: dict) -> str:
 
 def _write_json(path: Path, doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False) + "\n")
-    os.replace(tmp, path)
+    _replace_atomically(path, lambda fh: fh.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n"))
 
 
 def build(root: Path, spec_path: Path, out_dir: Path | None = None) -> dict:
