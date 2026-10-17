@@ -69,7 +69,8 @@ def main():
             for t0, dur, n, wheel in frozen_runs(t, P, b, e, a.min_frozen, frame_ts, odom_p):
                 frozen.append((s, t0 - first, dur, n, wheel))
 
-        rows.append((s, span, cov, cov / span, len(seg), len(scene_gaps), sum(y - x for x, y in scene_gaps)))
+        frac = cov / span if span else np.nan  # a one-frame scene has no span
+        rows.append((s, span, cov, frac, len(seg), len(scene_gaps), sum(y - x for x, y in scene_gaps)))
 
     print("scene    span     cov frac nseg ngaps  gapsec")
     for r in rows:

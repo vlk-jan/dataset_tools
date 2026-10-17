@@ -198,7 +198,7 @@ def _height_maps_block(root: Path, scenes: dict[str, dict]) -> dict:
     if len(params) == 1:
         parameters = json.loads(next(iter(params)))
     elif params:
-        parameters = {"per_scene": {json.dumps(k): v for k, v in params.items()}}
+        parameters = {"per_scene": params}
     else:
         parameters = heightmap.Params().to_dict()
     built = sum(e["height_maps"] for e in scenes.values())
@@ -417,7 +417,7 @@ def build(root: Path, spec_path: Path, out_dir: Path | None = None) -> dict:
     _write_json(out / "splits.json", build_splits(root, manifest, lists))
     if cur := spec.get("curation"):
         _write_json(out / "atlas" / "curation.json", cur)
-    (out / "README.md").write_text(build_readme(manifest, spec))
+    _replace_atomically(out / "README.md", lambda fh: fh.write(build_readme(manifest, spec)))
     return {"scenes": len(scenes), "lists": lists["lists"], "out": str(out)}
 
 

@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from dataset_tools import release
+from dataset_tools import heightmap, release
 from dataset_tools.gt_io import read_trajectory, write_trajectory
 from dataset_tools.transforms import euler_matrix
 
@@ -82,3 +82,13 @@ def test_a_repeated_odometry_stamp_is_no_speed(tmp_path):
     assert s["max_speed_mps"] == 1.0
     with pytest.raises(ValueError):
         release._write_json(tmp_path / "x.json", {"x": float("nan")})
+
+
+def test_differing_map_settings_are_keyed_by_their_json_once(tmp_path):
+    for sc, stat in (("0000", "p90"), ("0001", "median")):
+        _scene(tmp_path, sc, "bag")
+        (tmp_path / sc / heightmap.SETTINGS_FILE).write_text(
+            json.dumps({"parameters": heightmap.Params(statistic=stat).to_dict()})
+        )
+    per = release._height_maps_block(tmp_path, {sc: {"height_maps": 0, "frames": 0} for sc in ("0000", "0001")})
+    assert {json.loads(k)["statistic"] for k in per["parameters"]["per_scene"]} == {"p90", "median"}
