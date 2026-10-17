@@ -550,6 +550,18 @@ function setupWindowNav() {
  * The camera travels as an offset from the orbit target, since each window has
  * its own coordinates. Play state is not carried. */
 const CARRY_KEY = "dt.carriedView";
+/** This view's scene (/view/{scene}/{window}): a setup is only carried within one. */
+const SCENE_ID = location.pathname.split("/")[2];
+/* Taken off storage at load, not when applied: a build that fails must not
+ * leave it for the next view opened on this origin. */
+let carried = null;
+try {
+  carried = JSON.parse(sessionStorage.getItem(CARRY_KEY) || "null");
+  sessionStorage.removeItem(CARRY_KEY);
+} catch {
+  /* no storage: nothing carried */
+}
+if (carried && carried.scene !== SCENE_ID) carried = null;
 
 function saveCarriedView() {
   const app = window.simview;
@@ -558,6 +570,7 @@ function saveCarriedView() {
     // SimView's view state minus time and absolute camera (kept: FOV).
     const { time, camera, ...view } = app.getViewState();
     const state = {
+      scene: SCENE_ID,
       view: { ...view, camera: { fov: camera.fov } },
       offset: camera.position.clone().sub(camera.target).toArray(),
       ghost: els.ghost ? els.ghost.checked : undefined,
@@ -570,21 +583,12 @@ function saveCarriedView() {
 
 /** Apply a carried setup, once. False while SimView's panel is not built yet. */
 function restoreCarriedView(app) {
-  let state;
-  try {
-    state = JSON.parse(sessionStorage.getItem(CARRY_KEY) || "null");
-  } catch {
-    state = null;
-  }
-  if (!state) return true;
+  if (!carried) return true;
   // The panel's own ghost switch is wired once `sv` is set (null: not yet;
   // false: wiring failed, so apply what does not need it and stop).
   if (!app.uiControls || sv === null) return false;
-  try {
-    sessionStorage.removeItem(CARRY_KEY);
-  } catch {
-    /* read-once is a nicety: a stuck key only re-applies the same setup */
-  }
+  const state = carried;
+  carried = null;
   try {
     // Through SimView's controls, so its panel reflects what is applied.
     if (state.view) app.setViewState(state.view);
