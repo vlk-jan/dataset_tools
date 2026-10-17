@@ -146,7 +146,8 @@ def survey_scene(scene_dir: Path) -> dict:
     # Steps inside one segment only: each segment is re-anchored at the identity,
     # and a relocalisation across a hole can look like a slow drive.
     sid = np.searchsorted(np.array([s.start_ts for s in seg]), ts, side="right")
-    in_seg = (np.diff(sid) == 0) & (step <= MAX_SPEED * np.maximum(dt, 1e-3))
+    # dt > 0: a repeated stamp is no speed at all (NaN would reach the manifest).
+    in_seg = (np.diff(sid) == 0) & (dt > 0) & (step <= MAX_SPEED * np.maximum(dt, 1e-3))
     tilt = tilt_deg(np.load(scene_dir / "gravity_align.npy", mmap_mode="r"))
     pc = frames.get("pose_check") or {}
     guard = frames.get("guard") or {}
@@ -382,7 +383,10 @@ def build_readme(manifest: dict, spec: dict) -> str:
 
 def _write_json(path: Path, doc: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    _replace_atomically(path, lambda fh: fh.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n"))
+    # allow_nan=False: a NaN stat fails here instead of writing invalid JSON.
+    _replace_atomically(
+        path, lambda fh: fh.write(json.dumps(doc, indent=1, ensure_ascii=False, allow_nan=False) + "\n")
+    )
 
 
 def build(root: Path, spec_path: Path, out_dir: Path | None = None) -> dict:

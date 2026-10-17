@@ -1,8 +1,10 @@
 import json
 
 import numpy as np
+import pytest
 
 from dataset_tools import release
+from dataset_tools.gt_io import read_trajectory, write_trajectory
 from dataset_tools.transforms import euler_matrix
 
 
@@ -68,3 +70,15 @@ def test_a_release_from_its_spec_and_its_scenes(tmp_path):
     assert json.loads((root / "atlas" / "curation.json").read_text())["title"] == "Test"
     assert "| 0001 | val | bag_b |" in (root / "README.md").read_text()
     assert (root / "scenes.csv").exists()
+
+
+def test_a_repeated_odometry_stamp_is_no_speed(tmp_path):
+    _scene(tmp_path, "0000", "bag")
+    d = tmp_path / "0000"
+    ts, poses = read_trajectory(d / "odometry.txt")
+    ts[10], poses[10] = ts[9], poses[9]
+    write_trajectory(d / "odometry.txt", ts, poses)
+    s = release.survey_scene(d)
+    assert s["max_speed_mps"] == 1.0
+    with pytest.raises(ValueError):
+        release._write_json(tmp_path / "x.json", {"x": float("nan")})
