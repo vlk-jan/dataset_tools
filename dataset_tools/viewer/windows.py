@@ -77,10 +77,11 @@ class Window:
 
 
 def _chunk_edges(start: int, end: int, n: int, frame_ts: np.ndarray | None) -> list[int]:
-    """The ``n + 1`` frame indices that cut ``[start, end)`` into ``n`` chunks.
+    """The frame indices that cut ``[start, end)`` into at most ``n`` chunks.
 
-    Cut at equal times when there is a clock, else equal frame counts. Every
-    chunk keeps at least one frame, even across a hole in the clock.
+    Cut at equal times when there is a clock, else equal frame counts. Cuts
+    that fall inside a hole in the clock all land on the same frame, so those
+    that would leave a chunk under :data:`MIN_WINDOW_FRAMES` are dropped.
     """
     if n <= 1:
         return [start, end]
@@ -88,8 +89,9 @@ def _chunk_edges(start: int, end: int, n: int, frame_ts: np.ndarray | None) -> l
         return [int(x) for x in np.linspace(start, end, n + 1).round()]
     cuts = np.linspace(float(frame_ts[start]), float(frame_ts[end - 1]), n + 1)[1:-1]
     edges = [start]
-    for i, cut in enumerate(np.searchsorted(frame_ts, cuts, side="left")):
-        edges.append(int(min(max(int(cut), edges[-1] + 1), end - (n - 1 - i))))
+    for cut in np.searchsorted(frame_ts, cuts, side="left"):
+        if cut - edges[-1] >= MIN_WINDOW_FRAMES and end - cut >= MIN_WINDOW_FRAMES:
+            edges.append(int(cut))
     edges.append(end)
     return edges
 
@@ -122,7 +124,7 @@ def _chunk_ranges(
         if max_frames <= 0 or widest <= max_frames or n >= total:
             break
         n += 1
-    return [(edges[i], edges[i + 1]) for i in range(n)]
+    return list(zip(edges, edges[1:], strict=False))
 
 
 def _playable_frames(frame_ts: np.ndarray | None, n_frames: int) -> int:

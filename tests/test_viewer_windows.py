@@ -66,9 +66,19 @@ def test_a_hole_in_the_clock_never_makes_an_empty_window():
     segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
     ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_seconds=100.0)
 
-    assert len(ws) == 7
-    assert all(w.n_frames >= 1 for w in ws)
+    assert [w.n_frames for w in ws] == [100, 100]  # the five cuts inside the hole are one cut
     assert sum(w.n_frames for w in ws) == len(ts)
+
+
+def test_a_hole_in_the_clock_does_not_shatter_a_segment_into_one_frame_windows():
+    """A camera outage inside a segment (v2_4 0030/0032/0033) used to turn every
+    equal-time cut inside it into a one-frame window."""
+    ts = np.concatenate([np.arange(3000) * 0.1, 1800.0 + np.arange(3000) * 0.1])
+    segs = [loaders.Segment(0, float(ts[0]), float(ts[-1]), len(ts), "x")]
+    ws = windows.windows_for_scene(ts, segs, len(ts), has_transforms=False, max_frames=1500, max_seconds=600.0)
+
+    assert [w.n_frames for w in ws] == [1500, 1500, 1500, 1500]
+    assert all(w.n_frames >= windows.MIN_WINDOW_FRAMES for w in ws)
 
 
 def test_the_frame_ceiling_survives_a_division_by_time():
