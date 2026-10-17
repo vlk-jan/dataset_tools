@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from dataset_tools.gnss_guard import _runs
+
 SPEED_MPS = 0.15
 TURN_DPS = 5.0
 WINDOW_S = 1.0
@@ -74,8 +76,7 @@ def trim(frame_ts: np.ndarray, odom, max_s: float, keep_s: float) -> tuple[np.nd
     if not odom or len(frame_ts) == 0:
         return keep, verdict
     idle = idle_frames(frame_ts, np.array([t for t, _ in odom]), np.array([T for _, T in odom]))
-    edges = np.diff(np.r_[0, idle.astype(np.int8), 0])
-    for a, b in zip(np.flatnonzero(edges == 1), np.flatnonzero(edges == -1), strict=True):
+    for a, b in _runs(idle):
         # a run broken by a hole in the frame clock is two runs
         cuts = np.flatnonzero(np.diff(frame_ts[a:b]) > MAX_FRAME_GAP_S) + 1
         for lo, hi in zip(np.r_[0, cuts] + a, np.r_[cuts, b - a] + a, strict=True):

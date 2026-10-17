@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from dataset_tools.gt_io import _write_trajectory, read_trajectory, write_tmp
-from dataset_tools.transforms import euler_matrix, roll_pitch_from_matrix, rotation_angle_deg, rpy_deg
+from dataset_tools.transforms import euler_matrix, level, rotation_angle_deg, rpy_deg
 
 RECORD = "odom_frame.txt"
 FILES = ("odometry.txt", "transforms.npy", "gravity_align.npy")
@@ -134,11 +134,7 @@ def corrected(poses: np.ndarray, C: np.ndarray) -> np.ndarray:
 
 
 def corrected_gravity(gravity: np.ndarray, C: np.ndarray) -> np.ndarray:
-    out = np.empty_like(gravity)
-    for k, G in enumerate(gravity):
-        roll, pitch = roll_pitch_from_matrix(G @ C)
-        out[k] = euler_matrix(roll, pitch, 0.0)[:3, :3]
-    return out
+    return level(gravity @ C)
 
 
 def apply(scene_dir: Path, fit: dict, note: str = "") -> None:

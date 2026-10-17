@@ -71,7 +71,6 @@ class SceneResult:
     bag: str
     status: str
     frames: int = 0
-    start_time: float = float("nan")
     message: str = ""
 
 
@@ -207,10 +206,9 @@ def source_bag(scene_dir: Path) -> str | None:
 
 def _scene_row(scene_dir: Path) -> list[str] | None:
     """Reconstruct a ``scenes.csv`` row from an already extracted scene."""
-    sentinel = scene_dir / SENTINEL_FILE
-    if not sentinel.is_file():
+    bag = source_bag(scene_dir)
+    if bag is None:
         return None
-    bag = sentinel.read_text().strip()
     frames = _count_images(scene_dir)
     start = ""
     data_ts = scene_dir / "data_ts.txt"
@@ -233,16 +231,15 @@ def merge_scenes_csv(output_dir: Path) -> Path:
     return csv_path
 
 
-def clear_scene_outputs(scene_dir: Path, ground_truth: bool) -> None:
+def clear_scene_outputs(scene_dir: Path) -> None:
     """Remove only the extractor's own outputs from a previous run.
 
-    Ground-truth files go only when this run rewrites them: on the old rig they
-    come from a FAST-LIO regeneration that runs before extraction.
+    Not the ground-truth files: on the old rig they come from a FAST-LIO
+    regeneration that runs before extraction.
     """
     if not scene_dir.is_dir():
         return
     for name in SCENE_OUTPUT_DIRS:
         shutil.rmtree(scene_dir / name, ignore_errors=True)
-    files = SCENE_OUTPUT_FILES + (GROUND_TRUTH_FILES if ground_truth else ())
-    for name in files:
+    for name in SCENE_OUTPUT_FILES:
         (scene_dir / name).unlink(missing_ok=True)

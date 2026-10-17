@@ -54,6 +54,16 @@ def roll_pitch_from_matrix(R: np.ndarray):
     return roll, pitch
 
 
+def level(R: np.ndarray) -> np.ndarray:
+    """Each rotation of an ``(N, 3, 3)`` stack with its roll and pitch kept, yaw dropped."""
+    return np.array([euler_matrix(*roll_pitch_from_matrix(M), 0.0)[:3, :3] for M in R]).reshape(-1, 3, 3)
+
+
+def tilt_deg(R: np.ndarray) -> np.ndarray:
+    """Angle in degrees between each rotation's z axis and the world's, for an ``(N, 3, 3)`` stack."""
+    return np.degrees(np.arccos(np.clip(np.asarray(R)[:, 2, 2], -1.0, 1.0)))
+
+
 def rpy_deg(M: np.ndarray) -> tuple[float, float, float]:
     """Roll, pitch, yaw in degrees of a matrix from `euler_matrix` ('sxyz')."""
     roll, pitch = roll_pitch_from_matrix(M)

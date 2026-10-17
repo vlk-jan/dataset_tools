@@ -53,9 +53,9 @@ from dataset_tools.gt_io import anchor_to_first
 from dataset_tools.transforms import (
     euler_matrix,
     header_stamp,
+    level,
     pose_to_matrix,
     quaternion_matrix,
-    roll_pitch_from_matrix,
 )
 
 LOG = logging.getLogger("helhest.extract")
@@ -175,7 +175,7 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
 
     # Extraction starts from scratch; the old clock decides whether derived products still hold.
     old_clock = _digest(scene_dir / "data_ts.txt")
-    clear_scene_outputs(scene_dir, ground_truth=False)
+    clear_scene_outputs(scene_dir)
 
     p1 = _collect(reader, conns, cam_conn, lidar_conn, args)
     # The ground truth goes only once pass 1 shows this run will rewrite it: with no
@@ -217,7 +217,6 @@ def process_scene(reader, bag_path: Path, scene_dir: Path, args) -> SceneResult:
     (scene_dir / SENTINEL_FILE).write_text(f"{bag}\n")
 
     result.frames = int(len(frame_ts))
-    result.start_time = float(frame_ts[0])
     return result
 
 
@@ -493,25 +492,19 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
 
     # Odom poses track the child frame (e.g. FP_POI); re-express at the base frame.
     child = p1.odom_child_frame
-    T_child_to_base = get_transform(tf_graph, child, args.base_frame) if child else None
-    if T_child_to_base is not None and not np.allclose(T_child_to_base, np.eye(4)):
-        T_base_in_child = np.linalg.inv(T_child_to_base)
-        p1.odom = [(t, T @ T_base_in_child) for t, T in p1.odom]
-    elif child and T_child_to_base is None:
+    if (odom := _at_base(tf_graph, child, args.base_frame, p1.odom)) is None:
         _frame_fallback(
             p1,
             args,
             bag,
             f"no TF path from odom child '{child}' to '{args.base_frame}': poses stay those of '{child}'",
         )
+    else:
+        p1.odom = odom
 
     # So gravity alignment is the base's tilt, not the sensor mounting's.
     imu_frame = p1.imu_frame
-    T_imu_to_base = get_transform(tf_graph, imu_frame, args.base_frame) if imu_frame else None
-    if T_imu_to_base is not None and not np.allclose(T_imu_to_base, np.eye(4)):
-        T_base_in_imu = np.linalg.inv(T_imu_to_base)
-        p1.imu = [(t, R @ T_base_in_imu) for t, R in p1.imu]
-    elif imu_frame and T_imu_to_base is None:
+    if (imu := _at_base(tf_graph, imu_frame, args.base_frame, p1.imu)) is None:
         _frame_fallback(
             p1,
             args,
@@ -519,6 +512,8 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
             f"no TF path from orientation frame '{imu_frame}' to '{args.base_frame}': "
             "gravity_align.npy is the sensor's tilt, not the base's",
         )
+    else:
+        p1.imu = imu
 
     # Without a gyro->base path, deskew falls back to the pose track's slerp.
     if p1.gyro:
@@ -536,15 +531,24 @@ def _resolve_frames(reader, lidar_conn, p1: _Pass1, scene_dir: Path, args, bag: 
 
     # Compare at the base frame, or the lever arm reads as disagreement.
     child = p1.check_child
-    T_check = get_transform(tf_graph, child, args.base_frame) if child else None
-    if T_check is not None and not np.allclose(T_check, np.eye(4)):
-        T_base_in_check = np.linalg.inv(T_check)
-        p1.check_odom = [(t, T @ T_base_in_check) for t, T in p1.check_odom]
-    elif child and T_check is None:
+    if (check := _at_base(tf_graph, child, args.base_frame, p1.check_odom)) is None:
         LOG.warning(
             "%s: no TF path from '%s' to '%s'; the pose check compares at '%s'", bag, child, args.base_frame, child
         )
+    else:
+        p1.check_odom = check
     return tf_graph, T_lidar_to_base
+
+
+def _at_base(tf_graph, frame: str | None, base: str, samples: list) -> list | None:
+    """``(t, T)`` samples of ``frame`` re-expressed at ``base``; None when ``frame`` has no TF path there."""
+    T = get_transform(tf_graph, frame, base) if frame else None
+    if T is None:
+        return None if frame else samples
+    if np.allclose(T, np.eye(4)):
+        return samples
+    T_inv = np.linalg.inv(T)
+    return [(t, M @ T_inv) for t, M in samples]
 
 
 def _frame_fallback(p1: _Pass1, args, bag: str, what: str) -> None:
@@ -799,11 +803,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
     if p1.imu:
         # Orientation on the frame clock, yaw dropped.
         oriented, _ = interpolate_poses(frame_ts, *_columns(p1.imu))
-        gravity_aligns = np.empty((len(frame_ts), 3, 3))
-        for k, M in enumerate(oriented):
-            roll, pitch = roll_pitch_from_matrix(M)
-            gravity_aligns[k] = euler_matrix(roll, pitch, 0.0)[:3, :3]
-        np.save(scene_dir / "gravity_align.npy", gravity_aligns)
+        np.save(scene_dir / "gravity_align.npy", level(oriented[:, :3, :3]))
     else:
         LOG.warning(
             "%s: no orientation messages on '%s'; gravity_align.npy not written",
