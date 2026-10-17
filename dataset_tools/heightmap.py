@@ -168,7 +168,8 @@ def _binned_quantile(x, y, z, x_bins, y_bins, q):
 
 
 def grid_height_map(points, p: Params, anchors=None):
-    """``(height, validity)`` on the grid from levelled points (N, >=3), already cut to radius and clip."""
+    """``(height, validity)`` on the grid from levelled points (N, >=3), already cut to radius and clip;
+    ``(None, None)`` with fewer than 4 measured cells."""
     lo, hi, res = -p.extents_m, p.extents_m, p.resolution_m
     x_bins = np.arange(lo, hi + res, res)
     y_bins = np.arange(lo, hi + res, res)
@@ -181,12 +182,11 @@ def grid_height_map(points, p: Params, anchors=None):
                 points[:, 0], points[:, 1], points[:, 2], x_edges, y_edges, STATISTICS[p.statistic]
             )
     except ValueError:
-        shape = (len(x_bins) - 1, len(y_bins) - 1)
-        return np.zeros(shape), np.zeros(shape, dtype=np.uint8)
+        return None, None
 
     mask = ~np.isnan(height)
-    if np.sum(mask) < 4:
-        return np.zeros(height.shape), np.zeros(height.shape, dtype=np.uint8)
+    if np.sum(mask) < 4:  # too sparse for a map, not a flat floor
+        return None, None
 
     xc = (x_edges[:-1] + x_edges[1:]) / 2
     yc = (y_edges[:-1] + y_edges[1:]) / 2

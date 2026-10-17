@@ -24,6 +24,9 @@ def test_a_sparse_cloud_has_no_map():
     cloud = np.zeros((100, 4), np.float32)
     cloud[:, 0] = np.linspace(1, 5, 100)
     assert hmap.build_frame(cloud, np.eye(3)) == (None, None)
+    # Enough points, but all in one cell: no map either, not a flat floor at 0.
+    cloud = np.tile(np.array([2.0, 0.0, -0.3, 0.0], np.float32), (300, 1))
+    assert hmap.build_frame(cloud, np.eye(3)) == (None, None)
 
 
 def _scene(tmp_path, n=3):
