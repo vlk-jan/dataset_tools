@@ -81,7 +81,8 @@ async function draw(el) {
   }
 
   const focus = track.length ? track : context;
-  const box = data.bounds && L.latLngBounds(data.bounds);
+  /* No fixes in this stretch (bounds null): fit the context it promised instead. */
+  const box = data.bounds ? L.latLngBounds(data.bounds) : context.length ? L.latLngBounds(context) : null;
   if (box && box.getSouthWest().distanceTo(box.getNorthEast()) > STANDING_STILL_M) {
     /* Fit a stretch inside a scene less tightly, so the backdrop stays useful. */
     const maxZoom = context.length ? 17 : MAX_TILE_ZOOM;
