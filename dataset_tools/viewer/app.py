@@ -40,6 +40,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from ..transforms import roll_pitch_from_matrix
 from . import geo, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene, read_driven_similarity
 from .index_page import THUMB_SLOTS, build_index, split_mark, thumb_index
@@ -50,7 +51,6 @@ from .loaders import (
     load_cloud,
     load_npz_key,
     read_timestamps,
-    roll_pitch_from_gravity_align,
 )
 from .notes import NoteStore, NotesUnavailable
 from .probe import BUNDLE_DIR_NAME, COUNTED_DIRS, DEFAULT_CACHE_MAX_GB, DatasetRoot, _npy_shape, scene_fingerprint
@@ -90,9 +90,8 @@ TILE_SIZE = 384
 #: Per-frame renders and thumbnails: revalidated by ETag every time, since their
 #: URLs survive a re-extraction that changes the pictures.
 SCENE_ASSET_RE = re.compile(r"^/api/scene/(\d+)/(frame/\d+/[a-z]+\.(jpg|png|json)|thumb/[a-z]+\.jpg)$")
-#: Allowed window and build-options keys: both end up in a cache path.
+#: Allowed window keys; the options key must be canonical. Both end up in a cache path.
 WINDOW_KEY_RE = re.compile(r"^(seg\d+(\.\d+)?|raw(\.\d+)?|frame\d+)$")
-OPTS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 #: Scene handles kept at once, least recently used dropped first.
 CACHE_SCENES = 4
 
@@ -602,18 +601,18 @@ def create_app(
     async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = await _access_or_404(state, scene_id)
         load = functools.partial(load_npz_key, key="height_map")
-        return await _npz_png(access, index, "height_maps", load, render.render_height_map, size)
+        return await _frame_png(access, index, "height_maps", load, render.render_height_map, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
     async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = await _access_or_404(state, scene_id)
         load = functools.partial(load_npz_key, key="validity")
-        return await _npz_png(access, index, "height_masks", load, render.render_validity, size)
+        return await _frame_png(access, index, "height_masks", load, render.render_validity, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
     async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = await _access_or_404(state, scene_id)
-        return await _npz_png(access, index, "driven_similarity", read_driven_similarity, _render_driven, size)
+        return await _frame_png(access, index, "driven_similarity", read_driven_similarity, _render_driven, size)
 
     @app.get("/api/scene/{scene_id}/frame/{index}/grid.json")
     async def api_frame_grid(scene_id: str, index: int):
@@ -627,18 +626,7 @@ def create_app(
     @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
     async def api_frame_cloud(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
         access = await _access_or_404(state, scene_id)
-        path = access.frame_path("clouds", index)
-
-        def work():
-            cloud = load_cloud(path)
-            if cloud is None:
-                return None
-            return render.render_cloud_bev(cloud, size=size)
-
-        data = await run_in_threadpool(work)
-        if data is None:
-            return _absent_or_unreadable(path, f"cloud for frame {index}")
-        return Response(data, media_type="image/png")
+        return await _frame_png(access, index, "clouds", load_cloud, render.render_cloud_bev, size, what="cloud")
 
     # ------------------------------------------------------------------ notes
 
@@ -651,20 +639,7 @@ def create_app(
         def work() -> str:
             out = io.StringIO()
             writer = csv.writer(out)
-            writer.writerow(
-                [
-                    "scene",
-                    "frame_start",
-                    "frame_end",
-                    "t_start",
-                    "t_end",
-                    "topic",
-                    "verdict",
-                    "author",
-                    "created",
-                    "text",
-                ]
-            )
+            writer.writerow("scene frame_start frame_end t_start t_end topic verdict author created text".split())
             for scene_id, scene_notes in notes_store.list_all().items():
                 ts = read_timestamps(root.path / scene_id / "data_ts.txt")
                 for n in scene_notes:
@@ -808,9 +783,11 @@ def _bundle_path(state: ViewerState, scene_id: str, window_key: str, opts_key: s
     The options key must be canonical (``BuildOptions.cache_key``), which refuses
     ``..`` and stops variant spellings from minting fresh builds.
     """
-    if not scene_id.isdigit() or not WINDOW_KEY_RE.match(window_key) or not OPTS_KEY_RE.match(opts_key):
-        raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
-    if _options_from_key(opts_key).cache_key() != opts_key:
+    if (
+        not scene_id.isdigit()
+        or not WINDOW_KEY_RE.match(window_key)
+        or _options_from_key(opts_key).cache_key() != opts_key
+    ):
         raise HTTPException(404, f"no bundle {scene_id}/{window_key}/{opts_key}")
     return state.bundle_dir / scene_id / window_key / opts_key
 
@@ -972,9 +949,11 @@ async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key
         logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
 
-async def _npz_png(access: SceneAccess, index: int, kind: str, load, renderer, size: int) -> Response:
+async def _frame_png(
+    access: SceneAccess, index: int, kind: str, load, renderer, size: int, what: str | None = None
+) -> Response:
     """One frame's ``kind`` file as a PNG tile: ``renderer(load(path), size=size)``,
-    absent or unreadable when ``load`` gives None."""
+    absent or unreadable (as ``what``, default ``kind``) when ``load`` gives None."""
     path = access.frame_path(kind, index)
 
     def work():
@@ -983,7 +962,7 @@ async def _npz_png(access: SceneAccess, index: int, kind: str, load, renderer, s
 
     data = await run_in_threadpool(work)
     if data is None:
-        return _absent_or_unreadable(path, f"{kind} for frame {index}")
+        return _absent_or_unreadable(path, f"{what or kind} for frame {index}")
     return Response(data, media_type="image/png")
 
 
@@ -1223,7 +1202,7 @@ def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
 
     ga = access.gravity_align
     if ga is not None and 0 <= index < len(ga):
-        roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[index])[None])
+        roll, pitch = roll_pitch_from_matrix(np.asarray(ga[index])[None])
         details["roll_deg"] = round(float(np.degrees(roll[0])), 2)
         details["pitch_deg"] = round(float(np.degrees(pitch[0])), 2)
 

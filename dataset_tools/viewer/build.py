@@ -18,7 +18,7 @@ import cv2
 import numpy as np
 
 from .. import image_format
-from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat
+from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat, roll_pitch_from_matrix
 from . import loaders as L
 from .loaders import CHASSIS, CHASSIS_CENTER, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 from .probe import ARTEFACTS_BY_KEY, COUNTED_DIRS, OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
@@ -406,14 +406,7 @@ def _level_track(track: PoseTrack, R: np.ndarray | None) -> PoseTrack:
     """Rotate a whole pose track into the gravity-aligned world."""
     if R is None:
         return track
-    q = mat_to_quat(R[None])
-    return PoseTrack(
-        track.positions @ R.T,
-        _quat_mul(q, track.quats),
-        track.valid,
-        track.source,
-        track.note,
-    )
+    return replace(track, positions=track.positions @ R.T, quats=_quat_mul(mat_to_quat(R[None]), track.quats))
 
 
 def _anchor_frame(access: SceneAccess, ts: float) -> int:
@@ -526,13 +519,9 @@ class TerrainGrid:
     layers: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.sum_wz = np.zeros((self.ny, self.nx), dtype=np.float64)
-        self.sum_w = np.zeros((self.ny, self.nx), dtype=np.float64)
+        for name in ("sum_wz", "sum_w", "sum_wv", "sum_w_v", "sum_wz_m", "sum_w_m"):
+            setattr(self, name, np.zeros((self.ny, self.nx), dtype=np.float64))
         self.count = np.zeros((self.ny, self.nx), dtype=np.int64)
-        self.sum_wv = np.zeros((self.ny, self.nx), dtype=np.float64)
-        self.sum_w_v = np.zeros((self.ny, self.nx), dtype=np.float64)
-        self.sum_wz_m = np.zeros((self.ny, self.nx), dtype=np.float64)
-        self.sum_w_m = np.zeros((self.ny, self.nx), dtype=np.float64)
 
     @property
     def x_lim(self) -> tuple[float, float]:
@@ -791,15 +780,10 @@ def aggregate_clouds(
         stats["used"] += 1
 
     covered = cnt_i > 0
-    pts = np.zeros((grid.ny, grid.nx))
-    pts[covered] = cnt_i[covered]
-    grid.layers["cloud_points"] = pts
-    inten = np.zeros((grid.ny, grid.nx))
-    inten[covered] = sum_i[covered] / cnt_i[covered]
-    grid.layers["cloud_intensity"] = inten
-    spread = np.zeros((grid.ny, grid.nx))
-    spread[covered] = max_z[covered] - min_z[covered]
-    grid.layers["cloud_spread"] = spread
+    grid.layers["cloud_points"] = cnt_i.astype(np.float64)
+    grid.layers["cloud_intensity"] = np.divide(sum_i, cnt_i, out=np.zeros_like(sum_i), where=covered)
+    # Uncovered cells hold -inf - inf = -inf (no NaN, no warning) before the mask.
+    grid.layers["cloud_spread"] = np.where(covered, max_z - min_z, 0.0)
 
     if not parts:
         return None, stats
@@ -872,7 +856,7 @@ def _finish_terrain(grid: TerrainGrid, cloud: np.ndarray | None) -> tuple[np.nda
     validity[grid.sum_w_m > 0.0] = 2.0
 
     layers = {
-        "coverage": (grid.count > 0).astype(np.float64) * grid.count,
+        "coverage": grid.count.astype(np.float64),
         "validity": validity,
     }
     layers.update(grid.layers)
@@ -937,11 +921,11 @@ def build_scalars(
     ga = access.gravity_align
     if ga is not None:
         R_gt, R_imu = _attitudes(ga, window, gt)
-        roll, pitch = L.roll_pitch_from_gravity_align(R_imu)
+        roll, pitch = roll_pitch_from_matrix(R_imu)
         scalars["roll_deg_imu"] = np.degrees(roll)
         scalars["pitch_deg_imu"] = np.degrees(pitch)
         if gt.source != "none":
-            roll, pitch = L.roll_pitch_from_gravity_align(R_gt)
+            roll, pitch = roll_pitch_from_matrix(R_gt)
             scalars["roll_deg_gt"] = np.degrees(roll)
             scalars["pitch_deg_gt"] = np.degrees(pitch)
             scalars["attitude_error_deg"] = attitude_error_deg(R_gt, R_imu)

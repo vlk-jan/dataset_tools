@@ -7,7 +7,7 @@ import io
 
 import numpy as np
 import pytest
-from helpers_viewer import make_root, viewer_client
+from helpers_viewer import driven_sidecar, make_root, viewer_client
 
 from dataset_tools.transforms import poses_from_quat
 from dataset_tools.viewer import probe, render
@@ -21,15 +21,6 @@ def driven_client(tmp_path):
     return viewer_client(root, tmp_path / "driven_cache")
 
 
-def _sidecar():
-    rows, cols = np.mgrid[0:128, 0:128]
-    driven = np.zeros((128, 128), dtype=bool)
-    driven[72:75, 63:66] = True
-    max_sim = np.clip(1.0 - np.hypot(rows - 73.0, cols - 64.0) * 0.1 / 3.0, 0.0, 1.0)
-    max_sim[driven] = 1.0
-    return driven, max_sim.astype(np.float16)
-
-
 # --------------------------------------------------------------------------
 # tile
 # --------------------------------------------------------------------------
@@ -41,7 +32,7 @@ def test_the_driven_tile_paints_driven_cells_in_their_own_colour():
     pytest.importorskip("PIL")
     from PIL import Image
 
-    driven, max_sim = _sidecar()
+    driven, max_sim = driven_sidecar()
     data = render.render_driven_similarity(driven, max_sim, 0.9)
     img = Image.open(io.BytesIO(data)).convert("RGB")
     assert img.size[0] >= 384

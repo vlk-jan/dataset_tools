@@ -38,12 +38,6 @@ def test_resample_series_does_not_invent_values_across_a_long_gap():
     assert np.isnan(out[1, 0])
 
 
-def test_roll_pitch_of_an_identity_gravity_rotation_is_zero():
-    roll, pitch = loaders.roll_pitch_from_gravity_align(np.eye(3)[None])
-    assert roll[0] == pytest.approx(0.0)
-    assert pitch[0] == pytest.approx(0.0)
-
-
 def test_odometry_reads_as_timestamps_and_poses(tmp_path):
     T = np.eye(4)
     T[:3, 3] = [1.0, 2.0, 3.0]

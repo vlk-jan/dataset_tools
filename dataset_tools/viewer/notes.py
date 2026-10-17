@@ -17,6 +17,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..gt_io import _replace_atomically
+
 logger = logging.getLogger("dataset_tools.viewer.notes")
 
 #: Topics offered in the UI; an unknown topic in a file is kept verbatim.
@@ -302,10 +304,7 @@ class NoteStore:
             raise NotesUnavailable(self.reason or "notes cannot be written here")
 
     def _save(self, scene_id: str, notes: list[Note]) -> None:
-        """Replace a scene's notes file atomically.
-
-        tmp-then-``os.replace``, so a failed write never loses the other notes.
-        """
+        """Replace a scene's notes file atomically, so a failed write never loses the other notes."""
         path = self.path_for(scene_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -313,15 +312,8 @@ class NoteStore:
             "dataset_version": self.dataset_version,
             "notes": [_note_to_json(n) for n in notes],
         }
-        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-        try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, indent=2)
-                fh.write("\n")
-            os.replace(tmp, path)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-            raise
+        # json.dump's default ensure_ascii: the bytes are the same in any locale encoding.
+        _replace_atomically(path, lambda fh: fh.write(json.dumps(payload, indent=2) + "\n"))
 
     def add(
         self,

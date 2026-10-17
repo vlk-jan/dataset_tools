@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import yaml
 
 from .. import gt_io, gt_map
 from ..gt_io import SegmentRow as Segment
-from ..transforms import roll_pitch_from_matrix
 
 logger = logging.getLogger("dataset_tools.viewer.loaders")
 
@@ -138,46 +138,17 @@ def read_text(path: Path, max_bytes: int = 200_000) -> str | None:
         return None
 
 
-def _scalar(text: str) -> Any:
-    text = text.strip()
-    for cast in (int, float):
-        try:
-            return cast(text)
-        except ValueError:
-            continue
-    return text
-
-
 def read_camera_info(path: Path) -> dict[str, Any] | None:
-    """The flat subset of a ROS ``camera_info.yaml``.
-
-    Hand-rolled (no YAML dependency) for the extractor's flat output. Nested
-    blocks become ``<parent>`` (the data list) and ``<parent>_rows`` / ``_cols``.
-    """
+    """A ROS ``camera_info.yaml``, each nested block (``camera_matrix``, ...)
+    flattened to its ``data`` list as floats."""
     text = read_text(path, 200_000)
-    if not text:
+    try:
+        doc = yaml.safe_load(text) if text else None
+        if not isinstance(doc, dict):
+            return None
+        info = {k: [float(x) for x in v["data"]] if isinstance(v, dict) and "data" in v else v for k, v in doc.items()}
+    except (yaml.YAMLError, TypeError, ValueError):
         return None
-    info: dict[str, Any] = {}
-    parent: str | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, sep, val = line.partition(":")
-        if not sep:
-            continue
-        key, val = key.strip(), val.strip()
-        if len(raw) - len(raw.lstrip()) == 0:
-            parent = key
-            if val:
-                info[key] = _scalar(val)
-        elif parent and key in ("rows", "cols"):
-            info[f"{parent}_{key}"] = _scalar(val)
-        elif parent and key == "data":
-            try:
-                info[parent] = [float(v) for v in val.strip("[] ").split(",") if v.strip()]
-            except ValueError:
-                continue
     return info or None
 
 
@@ -238,16 +209,6 @@ def read_segments(path: Path) -> list[Segment]:
         return []
     segments.sort(key=lambda s: s.start_ts)
     return segments
-
-
-# --------------------------------------------------------------------------
-# rotations
-# --------------------------------------------------------------------------
-
-
-def roll_pitch_from_gravity_align(R_ga: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Roll/pitch (radians) of each per-frame gravity-alignment rotation."""
-    return roll_pitch_from_matrix(R_ga)
 
 
 # --------------------------------------------------------------------------

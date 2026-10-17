@@ -20,6 +20,50 @@ def viewer_client(root: Path, cache_dir: Path, **app_kw):
     return TestClient(create_app(root, cache_dir=cache_dir, **app_kw))
 
 
+def scene_access(tmp_path: Path, root_path: Path, scene: str = "0000"):
+    """A ``SceneAccess`` on ``root_path``, its caches under ``tmp_path``."""
+    from dataset_tools.viewer import probe
+    from dataset_tools.viewer.build import SceneAccess
+
+    return SceneAccess(probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache"), scene)
+
+
+def card_of(page, title: str) -> dict | None:
+    return next((c for c in page["cards"] if c["title"] == title), None)
+
+
+def value_of(card, label: str):
+    return next((s["value"] for s in card["stats"] if s["label"] == label), None)
+
+
+def inline_blobs(client, base: str, node) -> None:
+    """Replace a bundle document's ``/blob/<n>`` references with the bytes from
+    ``<base>/blob/<n>``, base64-inlined as SimView's own loader reads them."""
+    import base64
+
+    items = node.items() if isinstance(node, dict) else enumerate(node)
+    for key, value in list(items):
+        if isinstance(value, str) and value.startswith("/blob/"):
+            raw = client.get(f"{base}/blob/{value.rsplit('/', 1)[-1]}").content
+            node[key] = "__b64__" + base64.b64encode(raw).decode()
+        elif isinstance(value, dict | list):
+            inline_blobs(client, base, value)
+
+
+def driven_sidecar():
+    """``(driven, max_sim)`` of a driven-similarity frame ([row=x, col=y]): the
+    centre cell and a 3x3 patch 1 m ahead driven, similarity falling off with
+    range from that patch."""
+    rows, cols = np.mgrid[0:128, 0:128]
+    driven = np.zeros((128, 128), dtype=bool)
+    driven[63:65, 63:65] = True  # under the robot
+    driven[72:75, 63:66] = True  # ~1 m ahead
+    dist = np.hypot(rows - 73.0, cols - 64.0) * 0.1  # metres from the patch
+    max_sim = np.clip(1.0 - dist / 3.0, 0.0, 1.0)
+    max_sim[driven] = 1.0
+    return driven, max_sim.astype(np.float16)
+
+
 def _write_png(path: Path, size=(16, 10)) -> None:
     pytest.importorskip("PIL")
     from PIL import Image
@@ -109,21 +153,13 @@ def make_root(
                 validity[:64] = 0  # behind the robot: extrapolated
                 np.savez_compressed(d / "height_masks" / f"{i:05d}.npz", validity=validity)
         if with_driven_similarity:
-            # Driven: the centre cell ([row=x, col=y]) and a 3x3 patch 1 m ahead;
-            # similarity falls off with range from that patch.
             (d / "driven_similarity").mkdir()
-            rows, cols = np.mgrid[0:128, 0:128]
+            driven, max_sim = driven_sidecar()
             for i in range(frames):
-                driven = np.zeros((128, 128), dtype=bool)
-                driven[63:65, 63:65] = True  # under the robot
-                driven[72:75, 63:66] = True  # ~1 m ahead
-                dist = np.hypot(rows - 73.0, cols - 64.0) * 0.1  # metres from the patch
-                max_sim = np.clip(1.0 - dist / 3.0, 0.0, 1.0)
-                max_sim[driven] = 1.0
                 np.savez_compressed(
                     d / "driven_similarity" / f"{i:05d}.npz",
                     driven=driven,
-                    max_sim=max_sim.astype(np.float16),
+                    max_sim=max_sim,
                     threshold=np.float32(0.9),
                     res=np.float32(0.1),
                     R_align=np.eye(3, dtype=np.float32),

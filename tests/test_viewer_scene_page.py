@@ -11,7 +11,10 @@ import pytest
 from helpers_viewer import (
     CAMERA_INFO,
     CURATED_THUMBS,
+    card_of,
     make_root,
+    scene_access,
+    value_of,
     viewer_client,
     write_atlas,
 )
@@ -26,19 +29,10 @@ from dataset_tools.viewer.scene_page import frame_gaps
 
 
 def scene_page(tmp_path, root_path, scene: str = "0000"):
-    from dataset_tools.viewer.build import SceneAccess
     from dataset_tools.viewer.scene_page import build_scene_page
 
-    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
-    return build_scene_page(root, SceneAccess(root, scene))
-
-
-def card_of(page, title: str) -> dict | None:
-    return next((c for c in page["cards"] if c["title"] == title), None)
-
-
-def value_of(card, label: str):
-    return next((s["value"] for s in card["stats"] if s["label"] == label), None)
+    access = scene_access(tmp_path, root_path, scene)
+    return build_scene_page(access.root, access)
 
 
 def sub_of(card, label: str):
@@ -54,9 +48,8 @@ def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
     assert info["image_width"] == 640 and info["image_height"] == 400
     assert info["distortion_model"] == "plumb_bob"
     assert info["frame_id"] == "test_camera_optical_frame"
-    # A nested block collapses to its data list plus its declared shape.
+    # A nested block collapses to its data list.
     assert len(info["distortion_coefficients"]) == 5
-    assert info["camera_matrix_rows"] == 3
     assert info["camera_matrix"][0] == 700.0
 
 

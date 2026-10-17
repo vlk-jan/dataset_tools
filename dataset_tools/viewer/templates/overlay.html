@@ -16,6 +16,15 @@
         </select>
       </div>
 {%- endmacro %}
+{#- One image tile of the panel; the call body is its heading's note. #}
+{%- macro tile(kind, endpoint, title, alt, absent, zoom=none, probe=false, optional=false, cloud=false) -%}
+    <section class="dt-tile" data-kind="{{ kind }}" data-endpoint="{{ endpoint }}"
+             {%- if zoom %} data-zoom-size="{{ zoom }}"{% endif %}{% if probe %} data-probe{% endif %}
+             {%- if optional %} data-optional{% endif %}{% if cloud %} data-cloud{% endif %}>
+      <h3>{{ title }} <span class="dt-note">{{ caller() }}</span></h3>
+      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="{{ alt }}"><div class="dt-absent">{{ absent }}</div></div>
+    </section>
+{%- endmacro %}
 <div id="dt-build" class="dt-build">
   <div class="dt-build-box">
     <h2>Preparing window</h2>
@@ -117,6 +126,9 @@
         </div>
       </form>
     </template>
+    {#- One note of the list, cloned and filled by overlay.js; no whitespace
+       between tags, so the clone's DOM is what createElement would build. #}
+    <template id="dt-noteitem"><div class="dt-note"><div class="dt-notemain"><div class="dt-notehead"><button type="button" class="dt-noterangebtn" title="Seek to the first frame of this note"></button><span class="dt-notetopic"></span></div><div class="dt-notebody"></div></div><span class="dt-notetools"><button type="button" class="dt-notebtn dt-notebtn-edit" title="Edit this note's range, topic or text" aria-label="Edit this note's range, topic or text">✏️</button><button type="button" class="dt-notebtn dt-notebtn-del" title="Delete this note" aria-label="Delete this note">🗑️</button></span></div></template>
     <div class="dt-hint" id="dt-notes-why">
       {%- if notes.writable %}Saved to {{ notes.dir }}. Both ends of the range are included.
       {%- else %}Read-only here: {{ notes.reason }}{% endif -%}
@@ -142,31 +154,19 @@
   </details>
 
   <div class="dt-tiles" id="dt-tiles">
-    <section class="dt-tile" data-kind="images" data-endpoint="image.jpg"{% if cloud_on_image %} data-cloud{% endif %}>
-      <h3>Camera <span class="dt-note"></span></h3>
-      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="camera frame"><div class="dt-absent">no image for this frame</div></div>
-    </section>
-    <section class="dt-tile" data-kind="height_maps" data-endpoint="heightmap.png" data-zoom-size="1024" data-probe>
-      <h3>Height map <span class="dt-note">BEV, forward up</span></h3>
-      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="height map"><div class="dt-absent">no height map for this frame</div></div>
-    </section>
-    <section class="dt-tile" data-kind="height_masks" data-endpoint="validity.png" data-zoom-size="1024" data-probe>
-      <h3>Validity <span class="dt-note">
+    {% call tile("images", "image.jpg", "Camera", "camera frame", "no image for this frame", cloud=cloud_on_image) %}{% endcall %}
+    {% call tile("height_maps", "heightmap.png", "Height map", "height map", "no height map for this frame", 1024, probe=true) -%}
+      BEV, forward up{% endcall %}
+    {% call tile("height_masks", "validity.png", "Validity", "height map validity", "no validity mask for this frame", 1024, probe=true) %}
         <i class="dt-sw dt-sw-m"></i>measured
         <i class="dt-sw dt-sw-i"></i>interpolated
-        <i class="dt-sw dt-sw-e"></i>extrapolated</span></h3>
-      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="height map validity"><div class="dt-absent">no validity mask for this frame</div></div>
-    </section>
-    <section class="dt-tile" data-kind="driven_similarity" data-endpoint="driven.png" data-zoom-size="1024" data-probe data-optional>
-      <h3>Driven &amp; drivable <span class="dt-note">
+        <i class="dt-sw dt-sw-e"></i>extrapolated{% endcall %}
+    {% call tile("driven_similarity", "driven.png", "Driven & drivable", "driven cells and feature similarity",
+                 "no driven-similarity map for this frame", 1024, probe=true, optional=true) %}
         <i class="dt-sw dt-sw-d"></i>driven
-        <i class="dt-sw dt-sw-s"></i>similar (DRIFT trust)</span></h3>
-      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="driven cells and feature similarity"><div class="dt-absent">no driven-similarity map for this frame</div></div>
-    </section>
-    <section class="dt-tile" data-kind="clouds" data-endpoint="cloud.png" data-zoom-size="768">
-      <h3>Raw cloud <span class="dt-note">top-down, 5 m rings</span></h3>
-      <div class="dt-imgwrap"><img class="zoomable" tabindex="0" title="Click for a bigger copy" alt="lidar cloud top-down"><div class="dt-absent">no cloud for this frame</div></div>
-    </section>
+        <i class="dt-sw dt-sw-s"></i>similar (DRIFT trust){% endcall %}
+    {% call tile("clouds", "cloud.png", "Raw cloud", "lidar cloud top-down", "no cloud for this frame", 768) -%}
+      top-down, 5 m rings{% endcall %}
   </div>
 
   <div class="dt-foot">

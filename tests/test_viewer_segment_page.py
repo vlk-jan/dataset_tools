@@ -5,28 +5,11 @@ Segments are addressed by their number in ``odometry_segments.txt``, not positio
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
-from helpers_viewer import make_root
+from helpers_viewer import card_of, make_root, value_of
+from helpers_viewer import scene_access as access_for
 
-from dataset_tools.viewer import probe, segment_page
-
-
-def access_for(tmp_path: Path, root_path: Path, scene: str = "0000"):
-    from dataset_tools.viewer.build import SceneAccess
-
-    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
-    return SceneAccess(root, scene)
-
-
-def card_of(page, title: str) -> dict | None:
-    return next((c for c in page["cards"] if c["title"] == title), None)
-
-
-def value_of(card, label: str):
-    return next((s["value"] for s in card["stats"] if s["label"] == label), None)
-
+from dataset_tools.viewer import segment_page
 
 # --------------------------------------------------------------------------
 # resolution and frame ranges

@@ -13,9 +13,9 @@ from typing import Any
 
 import numpy as np
 
+from ..transforms import roll_pitch_from_matrix
 from . import geo
 from .build import WHEEL_LABELS, SceneAccess
-from .loaders import roll_pitch_from_gravity_align
 from .windows import span_fractions
 
 #: Columns a chart is resampled onto. About one per pixel of a card's width.
@@ -295,7 +295,7 @@ def signal_charts(
     ga, ts = access.gravity_align, access.frame_ts
     if ga is not None and ts is not None and np.ndim(ga) == 3:
         n = min(len(ga), len(ts))
-        roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga[:n]))
+        roll, pitch = roll_pitch_from_matrix(np.asarray(ga[:n]))
         charts.append(
             _chart(
                 "attitude",

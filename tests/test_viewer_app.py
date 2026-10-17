@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 from helpers_viewer import (
     _write_png,
+    inline_blobs,
     make_root,
     viewer_client,
 )
@@ -54,34 +55,8 @@ def test_building_a_window_produces_a_loadable_simview_scene(client, tmp_path):
     assert [b["name"] for b in model["bodies"]][0] == "robot"
 
     # Re-inline the blobs and hand the document to SimView's own loader.
-    import base64
-
-    blobs = {}
-
-    def resolve(node):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                if isinstance(v, str) and v.startswith("/blob/"):
-                    n = v.rsplit("/", 1)[-1]
-                    if n not in blobs:
-                        raw = client.get(f"/api/data/0000/seg000/{opts}/x/blob/{n}").content
-                        blobs[n] = "__b64__" + base64.b64encode(raw).decode()
-                    node[k] = blobs[n]
-                else:
-                    resolve(v)
-        elif isinstance(node, list):
-            for i, v in enumerate(node):
-                if isinstance(v, str) and v.startswith("/blob/"):
-                    n = v.rsplit("/", 1)[-1]
-                    if n not in blobs:
-                        raw = client.get(f"/api/data/0000/seg000/{opts}/x/blob/{n}").content
-                        blobs[n] = "__b64__" + base64.b64encode(raw).decode()
-                    node[i] = blobs[n]
-                else:
-                    resolve(v)
-
-    resolve(model)
-    resolve(states)
+    inline_blobs(client, f"/api/data/0000/seg000/{opts}/x", model)
+    inline_blobs(client, f"/api/data/0000/seg000/{opts}/x", states)
     scene = SimulationScene.from_dict({"model": model, "states": states})
     assert scene.model.terrain is not None
     assert "robot" in scene.model.bodies
@@ -259,20 +234,8 @@ def test_a_single_frame_bundle_builds_and_simview_can_read_it_back(client):
 
     model = client.get(f"/api/data/0000/frame00003/{opts}/x/model.json").json()
     states = client.get(f"/api/data/0000/frame00003/{opts}/x/states.json").json()
-    import base64
-
-    def resolve(node):
-        items = node.items() if isinstance(node, dict) else enumerate(node)
-        for key, value in list(items):
-            if isinstance(value, str) and value.startswith("/blob/"):
-                n = value.rsplit("/", 1)[-1]
-                raw = client.get(f"/api/data/0000/frame00003/{opts}/x/blob/{n}").content
-                node[key] = "__b64__" + base64.b64encode(raw).decode()
-            elif isinstance(value, dict | list):
-                resolve(value)
-
-    resolve(model)
-    resolve(states)
+    inline_blobs(client, f"/api/data/0000/frame00003/{opts}/x", model)
+    inline_blobs(client, f"/api/data/0000/frame00003/{opts}/x", states)
     scene = SimulationScene.from_dict({"model": model, "states": states})
     assert len(scene.states) == 1
     assert "robot" in scene.model.bodies

@@ -17,6 +17,7 @@ from urllib.parse import urlencode
 
 import numpy as np
 
+from ..transforms import roll_pitch_from_matrix
 from . import geo
 from .build import SceneAccess
 from .index_page import (
@@ -37,7 +38,7 @@ from .index_page import (
     thumb_index,
     validation_mark,
 )
-from .loaders import read_text, roll_pitch_from_gravity_align
+from .loaders import read_text
 from .probe import ARTEFACTS_BY_KEY, DatasetRoot, _npy_shape
 from .signals import _speed, signal_charts
 from .splits import DECLARED_FILES
@@ -399,7 +400,7 @@ def _max_abs(arr: np.ndarray, cols) -> float:
 
 def roll_pitch_stat(ga: np.ndarray) -> dict[str, Any]:
     """The ``roll · pitch`` cell over a stack of gravity-alignment rotations: mean and max tilt."""
-    roll, pitch = roll_pitch_from_gravity_align(np.asarray(ga))
+    roll, pitch = roll_pitch_from_matrix(np.asarray(ga))
     roll, pitch = np.degrees(np.abs(roll)), np.degrees(np.abs(pitch))
     return stat(
         "roll · pitch", f"{roll.mean():.1f}° · {pitch.mean():.1f}°", f"mean, max {roll.max():.0f}° · {pitch.max():.0f}°"

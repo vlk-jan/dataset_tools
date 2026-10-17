@@ -5,16 +5,13 @@ from __future__ import annotations
 import json
 
 import numpy as np
-from helpers_viewer import make_root
+from helpers_viewer import make_root, scene_access
 
-from dataset_tools.viewer import probe, signals
+from dataset_tools.viewer import signals
 
 
 def access_for(tmp_path, **kw):
-    from dataset_tools.viewer.build import SceneAccess
-
-    root = probe.DatasetRoot(make_root(tmp_path, **kw), cache_dir=tmp_path / "cache")
-    return SceneAccess(root, "0000")
+    return scene_access(tmp_path, make_root(tmp_path, **kw))
 
 
 def test_resample_means_bins_bridges_short_gaps_and_leaves_holes():

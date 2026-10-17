@@ -221,19 +221,15 @@ function setupViewToggles(app) {
 function setupLegend() {
   const modes = (meta.build && meta.build.terrain_color_modes) || [];
   if (modes.length === 0) return;
-  const frag = document.createDocumentFragment();
   for (const mode of modes) {
-    const dt = document.createElement("dt");
-    dt.textContent = mode.name;
-    const dd = document.createElement("dd");
-    dd.textContent = mode.description || "no description for this layer";
     const group = document.createElement("div");
-    group.appendChild(dt);
-    group.appendChild(dd);
-    frag.appendChild(group);
+    group.append(
+      Object.assign(document.createElement("dt"), { textContent: mode.name }),
+      Object.assign(document.createElement("dd"), { textContent: mode.description || "no description for this layer" }),
+    );
+    els.legendList.append(group);
     legendRows.set(mode.name, group);
   }
-  els.legendList.appendChild(frag);
   els.legend.hidden = false;
 }
 
@@ -313,46 +309,25 @@ function renderNotes(all) {
   for (const note of here) els.noteList.appendChild(renderNote(note));
 }
 
-/** One note: its range (click to seek), topic and text, tools on the right. */
+/** One note (#dt-noteitem): its range (click to seek), topic and text, tools on the right. */
 function renderNote(note) {
-  const item = document.createElement("div");
-  item.className = "dt-note";
-  const main = document.createElement("div");
-  main.className = "dt-notemain";
-  const head = document.createElement("div");
-  head.className = "dt-notehead";
-  const range = document.createElement("button");
-  range.type = "button";
-  range.className = "dt-noterangebtn";
+  const item = document.getElementById("dt-noteitem").content.firstElementChild.cloneNode(true);
+  const range = item.querySelector(".dt-noterangebtn");
   range.textContent = note.label;
-  range.title = "Seek to the first frame of this note";
   range.addEventListener("click", () => seekToFrame(note.frame_start));
-  const topic = document.createElement("span");
-  topic.className = "dt-notetopic";
-  topic.textContent = note.topic;
-  head.append(range, topic);
-  const body = document.createElement("div");
-  body.className = "dt-notebody";
-  body.textContent = note.text;
-  main.append(head, body);
-  item.append(main);
-  if ((cfg.notes || {}).writable) item.append(noteTools(item, note));
-  return item;
-}
-
-/** The edit / delete icon pair. */
-function noteTools(item, note) {
-  const tools = document.createElement("span");
-  tools.className = "dt-notetools";
-  const edit = noteToolButton("✏️", "dt-notebtn-edit", "Edit this note's range, topic or text");
-  edit.addEventListener("click", () => {
+  item.querySelector(".dt-notetopic").textContent = note.topic;
+  item.querySelector(".dt-notebody").textContent = note.text;
+  if (!(cfg.notes || {}).writable) {
+    item.querySelector(".dt-notetools").remove();
+    return item;
+  }
+  item.querySelector(".dt-notebtn-edit").addEventListener("click", () => {
     const editor = noteEditor(note);
     item.replaceWith(editor);
     // After it is in the document: focus() on a detached element does nothing.
     editor.querySelector("textarea").focus();
   });
-  const remove = noteToolButton("🗑️", "dt-notebtn-del", "Delete this note");
-  remove.addEventListener("click", async () => {
+  item.querySelector(".dt-notebtn-del").addEventListener("click", async () => {
     if (!window.confirm(`Delete the note on ${note.label}?`)) return;
     try {
       await noteRequest(`${cfg.notesUrl}/${encodeURIComponent(note.id)}`, "DELETE");
@@ -363,15 +338,7 @@ function noteTools(item, note) {
     els.noteMsg.textContent = "deleted";
     await reloadNotes();
   });
-  tools.append(edit, remove);
-  return tools;
-}
-
-function noteToolButton(glyph, className, label) {
-  const button = document.createElement("button");
-  Object.assign(button, { type: "button", className: `dt-notebtn ${className}`, textContent: glyph, title: label });
-  button.setAttribute("aria-label", label);
-  return button;
+  return item;
 }
 
 /** The server-rendered editor (#dt-noteedit), filled; blank ends keep the note's own. */
