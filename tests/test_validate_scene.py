@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -382,6 +384,16 @@ def test_derived_files_must_name_frames_of_the_scene(tmp_path: Path):
     report = vs.validate_scene(scene)
     assert "DERIVED_INDEX" in _codes(report, vs.ERROR)
     assert "DERIVED_STALE" in _codes(report, vs.INFO)
+
+
+def test_a_truncated_npz_member_is_unreadable(tmp_path: Path):
+    scene = write_scene(tmp_path / "0000", frames=1)
+    (scene / "height_maps").mkdir()
+    buf = io.BytesIO()
+    np.save(buf, np.zeros((128, 128)))
+    with zipfile.ZipFile(scene / "height_maps" / "00000.npz", "w") as z:  # directory intact, member cut
+        z.writestr("height_map.npy", buf.getvalue()[:1000])
+    assert "UNREADABLE" in _codes(vs.validate_scene(scene), vs.ERROR)
 
 
 def test_root_checks_and_the_allowlist_make_strict_a_gate(tmp_path: Path, capsys):

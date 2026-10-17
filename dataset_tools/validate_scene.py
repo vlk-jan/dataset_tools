@@ -382,7 +382,9 @@ def check_derived(report: SceneReport, scene_dir: Path, n_frames: int | None) ->
             sample = files[len(files) // 2]
             try:
                 loaded = np.load(sample)
-                if hasattr(loaded, "close"):  # an .npz
+                if hasattr(loaded, "close"):  # an .npz: np.load reads only the zip directory
+                    for key in loaded.files:
+                        loaded[key]
                     loaded.close()
             except Exception as exc:  # noqa: BLE001
                 report.add(ERROR, "UNREADABLE", f"{name}/{sample.name}: unreadable ({type(exc).__name__}: {exc})")
