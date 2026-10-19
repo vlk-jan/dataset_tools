@@ -163,7 +163,7 @@ def render_height_map(hm: np.ndarray, size: int = 384) -> bytes:
 
 
 def render_validity(mask: np.ndarray, size: int = 384) -> bytes:
-    """Three-state validity mask in fixed colours (see VALIDITY_COLORS)."""
+    """Four-state validity mask in fixed colours (see VALIDITY_COLORS)."""
     disp = _bev_to_display(np.asarray(mask))
     idx = np.clip(disp.astype(np.int32), 0, len(VALIDITY_COLORS) - 1)
     return _bev_png(VALIDITY_COLORS[idx], size)

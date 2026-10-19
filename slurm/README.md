@@ -45,8 +45,9 @@ environment rather than the file:
 | `SUBTDATA` | `$USER@subtdata.felk.cvut.cz` | the fetching jobs |
 | `VIEWER_CACHE` | `/mnt/personal/$USER/viewer_cache` | `viewer.batch` |
 
-The output root is the first positional argument of every job, defaulting to
-`/mnt/personal/$USER/<release>`.
+The root is the first positional argument of every job, defaulting to
+`/mnt/personal/$USER/<release>` (`heightmaps.batch` requires it; for
+`viewer.batch` it is the root to serve).
 
 Nothing here calls another repository: extraction, the odom_frame correction,
 the height maps and the root files are all this one's.

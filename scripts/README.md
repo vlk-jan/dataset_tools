@@ -39,9 +39,9 @@ scripts and their inventory (`find_gt_holes.py`, whose output is
 segment relabel (`relabel_segments.py`) and the v1 vs v1.2 comparison were
 removed once the campaign finished; see git history.
 
-## Cluster helpers
+## Viewer launchers
 
 | Script | What it does |
 | --- | --- |
-| `viewer_public.sh` | start the viewer on the public release (`http://subtdata.felk.cvut.cz/HELHEST/`, or `$VIEWER_URL`) and open a browser; extra flags go to `helhest-viewer` |
-| `viewer_connect.sh` | open an ssh tunnel from a laptop to a viewer started by `slurm/viewer.batch` on an RCI compute node |
+| `viewer_public.sh` | start the viewer on the public release (`http://subtdata.felk.cvut.cz/HELHEST/`, or `$VIEWER_URL`) and open a browser, using the checkout's `.venv-viewer` or `.venv` when there is one; extra flags go to `helhest-viewer` |
+| `viewer_connect.sh` | open an ssh tunnel from a laptop to a viewer started by `slurm/viewer.batch` on an RCI compute node (`[local_port] [job_id]`; without a job id, your newest running `helhest_viewer` job) |

@@ -3,8 +3,8 @@
 Status: **run (v1.3 campaign 2026-09-09, merged as v1.4 / v1.5)**. This is the
 record of that campaign. The scripts it names (`find_gt_holes.py`,
 `fetch_hole_bags.sh`, `replay_holes.sh`, `run_scene_offset.sh`,
-`score_hole_replay.py`, `build_fill_root.py`) were removed once it finished; see
-git history. Only `survey_gt_coverage.py` remains.
+`score_hole_replay.py`, `build_fill_root.py`) were removed once it finished
+(commit 1f0d899; `find_gt_holes.py` in 365218b); see git history. Only `survey_gt_coverage.py` remains.
 
 A *hole* is a stretch of frame time no odometry segment covers. The frames, the
 clouds, the wheel encoders and `/odom` are all there; only the ground truth is
@@ -70,7 +70,7 @@ where FAST-LIO never initialised at that offset.
 ## Traps
 
 * **The container's `run_scene.sh` must honour `START_OFFSET` / `PLAY_DURATION`.**
-  That is `scripts/run_scene_offset.sh` here; the edit lives on the recorder
+  That was `scripts/run_scene_offset.sh` here (removed, see above); the edit lives on the recorder
   repo's `odometry-regen-recorder` branch and was never committed. An older copy
   ignores both variables and silently replays the entire bag.
 * **The campaign CSV's third column is the scene's first FRAME timestamp**, not

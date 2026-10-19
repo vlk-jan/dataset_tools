@@ -143,6 +143,11 @@ Everything below assumes a root that already has correct clouds, odometry and
 directory. Only `height_maps/`, `height_masks/` and what derives from them
 change.
 
+The `scripts/…` commands below are DRIFT's, run from a DRIFT checkout. (Since
+2026-10-12, `6bc7ff1`, this repository builds the maps itself, near-field repair
+included: `helhest-heightmap`, or `slurm/heightmaps.batch` for a root already on
+RCI; see `slurm/README.md`.)
+
 1. **Build the maps and masks.** The known-answer gate runs first, with the
    repair *off*, against a root whose maps already exist; it must reproduce them
    bit-for-bit before anything is written.

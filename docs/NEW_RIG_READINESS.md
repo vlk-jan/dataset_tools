@@ -87,6 +87,11 @@ Working invocation — the defaults are already right, no `--lidar_extrinsic`:
 helhest-extract <bags> <out> --jobs 8
 ```
 
+(Since 2026-10-01, `5a2c608`, the `--odom` and `--imu` defaults are
+`/odin1/odometry`, not the Fixposition topic this check ran on; pass
+`--odom /fixposition/odometry_enu --imu /fixposition/odometry_enu` to reproduce
+it. See `helhest-extract --help`.)
+
 ## 4. What the new rig fixed
 
 Both blockers named in the README's *Known caveats* for the 2026-08 bags are

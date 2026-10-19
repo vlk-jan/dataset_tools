@@ -160,7 +160,7 @@ Two files in `docs/`, both committed:
 The v2.0 bags were chosen from a survey of every candidate bag
 (`docs/v2_inventory.csv`, ~1 MB per bag, no extraction; see
 [docs/V2_0_SELECTION.md](docs/V2_0_SELECTION.md)); its script was removed
-after the selection (`git show 94955ed:scripts/survey_v2_bag.py`).
+after the selection, in af56814 (its last version: `git show 94955ed:scripts/survey_v2_bag.py`).
 
 ### 2. Extract every bag (CTU cluster)
 
@@ -186,7 +186,8 @@ Each array task leaves one finished scene:
    row's `extract_args` and `$EXTRACT_ARGS`;
 3. `helhest-odom-frame measure` then `apply`: the odometry and
    `gravity_align.npy` rotated onto the clouds' frame, recorded in
-   `odom_frame.txt` (inside the container: `open3d` needs its glibc);
+   `odom_frame.txt` (inside the container: `open3d` needs its glibc); a
+   scene it cannot measure keeps the Odin1's own odometry, with a warning;
 4. `helhest-heightmap --overwrite`: `height_maps/`, `height_masks/`,
    `height_maps.json`;
 5. `helhest-validate` on the scene, then a copy swapped in as `<root>/<scene>/` and the
@@ -260,9 +261,10 @@ helhest-heightmap <root> --scenes 3 --overwrite                                #
 
 The batch job first checks a sample of the scene's existing maps against a
 rebuild (`VERIFY=0` skips), passes `HM_ARGS` through (e.g.
-`--set statistic=median`), and will not write through a linked scene's
-`height_maps` symlink. `helhest-heightmap` refuses to mix maps built at
-other settings than `height_maps.json` records.
+`--set statistic=median`). `helhest-heightmap` refuses to mix maps built at
+other settings than `height_maps.json` records, and to write through a linked
+scene's `height_maps`, `height_masks` or `height_maps.json` symlink (build in
+the root that owns them).
 
 ## Usage
 
@@ -329,10 +331,10 @@ lidar works.
 
 | Flag | Meaning |
 | --- | --- |
-| `--jobs N` | worker processes, one bag each (default 4; `1` runs in-process) |
-| `--overwrite` | re-extract scenes that are already complete. Any scene that is extracted, complete or not, has its previous outputs removed first, `odom_frame.txt` included |
+| `--jobs N` | worker processes, one bag each (default 4; `1` runs in-process). Within a bag, frames are decoded, deskewed and written on a thread pool of the CPUs the process may use |
+| `--overwrite` | re-extract scenes that are already complete. Any scene that is extracted, complete or not, has its previous outputs removed first, `odom_frame.txt` included; `odometry.txt` and `odometry_segments.txt` only once the run is about to write new ones, so a bag without odometry, or a run that fails before that, leaves them in place |
 | `--gt auto\|on\|off` | write `odometry.txt` + `odometry_segments.txt` from the odometry stream; `auto` does so for the Odin1 odometry and for Fixposition topics |
-| `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories |
+| `--scenes 0 3 5-9 <bag-name>` | only these scene indices / ranges / bag directories; comma-separated values work too |
 | `--start_index N` | number the first scene `N` instead of `0000` |
 | `--gps TOPIC` | GNSS fix topic written to `gps.npy`; `auto` (default) finds the `NavSatFix` topic carrying messages, `off` writes none |
 | `--base_frame` | target frame for clouds, odometry and gravity (default `base_link`) |
@@ -425,7 +427,7 @@ index-aligned.
 | `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping (`frames`): messages, pairs, pairs over `--max_sync_dt`, `deskew`, `pose_check`, `idle_trim`, what the guard removed and where, frames trimmed after the clock correction, frames written. Also `unset_stamps`, `malformed_joint_messages` and `frame_fallbacks`. Since 2026-10-01 |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
 | `odom_frame.txt` | — | text + JSON last line | rotation, degrees | written by `helhest-odom-frame apply` (and removed by a re-extraction): the rotation `C` (cloud frame -> Odin1 pose frame) that `odometry.txt`, `transforms.npy` and `gravity_align.npy` were re-expressed by, and how it was measured (ICP between clouds 1.4-3 s apart). Absent where it was not applied |
-| `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: p90 of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated, filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns has none |
+| `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: p90 of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated, filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns, or with fewer than 4 cells they fall in, has none |
 | `height_masks/NNNNN.npz` | 128 x 128 | `uint8` (`validity`) | — | where each cell's value came from: 0 extrapolated, 1 interpolated, 2 measured, 3 a wheel-contact anchor |
 | `height_maps.json` | — | JSON | — | the settings the maps were built with and their counts; `helhest-heightmap` refuses to add maps at other settings to them |
 | `../keyframes.lst`, `../keyframes_train.lst`, `../keyframes_heldout.lst` | — | text | — | `helhest-keyframes`: `<scene>/clouds/NNNNN.npy <scene>/images/NNNNN.<ext>` per frame with a cloud, image, map and mask, minus frames within 4 s before a tilt past 45 deg; all scenes / all but `manifest.json` -> `held_out.scenes` / only those |
@@ -542,7 +544,10 @@ scene missing any optional file still opens, with the absent files marked
 rather than hidden. A view never spans an `odometry_segments.txt` boundary,
 because segments are each re-anchored to their own first pose. The scenes are
 only read: built 3D windows are cached elsewhere, and the one thing the viewer
-writes into the root is reviewer notes (`<root>/notes/`).
+writes into the root is reviewer notes (`<root>/notes/`). A root may also be
+the URL of one published as a directory index; it is then mirrored into the
+cache as it is browsed, and its notes are kept there
+([docs/VIEWER.md](docs/VIEWER.md#a-root-on-a-web-server)).
 
 ### Install
 
@@ -558,6 +563,8 @@ The viewer refuses to start with SimView older than 6.1.1.
 
 ```bash
 .venv-viewer/bin/helhest-viewer /path/to/root --open     # serves http://127.0.0.1:8080/
+.venv-viewer/bin/helhest-viewer http://subtdata.felk.cvut.cz/HELHEST/ --open   # a root on a web server
+scripts/viewer_public.sh                                 # the same, on the public release ($VIEWER_URL)
 ```
 
 | Flag | Default | Meaning |
@@ -565,10 +572,10 @@ The viewer refuses to start with SimView older than 6.1.1.
 | `--host`, `--port` | `127.0.0.1`, `8080` | bind address. There is no authentication and notes are writes: keep it on loopback and tunnel, or pass `--no-notes` before binding `0.0.0.0` |
 | `--max-seconds`, `--max-frames` | `600`, `12000` | a segment longer than this is split into equal viewing windows |
 | `--cache-dir` | `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>` | probes and built 3D windows |
-| `--cache-max-gb` | `5.0` | built windows kept on disk, oldest evicted first |
-| `--clear-cache` | | drop this root's cached probes and windows before starting |
+| `--cache-max-gb` | `5.0` | built windows kept on disk, least recently used evicted first |
+| `--clear-cache` | | drop this root's cached probes and windows (and a URL root's mirror) before starting |
 | `--no-prefetch` | | do not build windows in the background (the next one, a scene page's first; for slow storage) |
-| `--notes-dir`, `--no-notes`, `--author` | `<root>/notes`, on, `$USER` | reviewer notes |
+| `--notes-dir`, `--no-notes`, `--author` | `<root>/notes` (`<cache-dir>/notes` for a URL root), on, `$USER` | reviewer notes |
 | `--open`, `-v` | | open a browser; debug logging |
 
 ### On the CTU cluster
@@ -617,6 +624,9 @@ to the pages, and is re-read when it changes:
 - **`/scene/<id>`**: the ground-truth timeline, the file inventory (each chip
   opens that file's details), the map, the extraction, disk and validation
   cards, the signals, the windows table with "Open 3D", and the notes.
+- **`/scene/<id>/segment/<n>`**: one ground-truth segment, by its number in
+  `odometry_segments.txt`: what it is, what the robot did in it, its map,
+  notes, windows and frames.
 - **`/scene/<id>/frame/<n>`**: the image, the height map, validity and cloud
   tiles, and the cloud projected onto the image (a check on the extrinsic).
   Click a tile to zoom; in the zoom, hover or arrow keys read single cells.
@@ -670,9 +680,11 @@ the GNSS guard, ground-truth segmentation and I/O, pose interpolation and the
 pose check, TF pins, camera info and extrinsics, image formats, the
 odometry-frame rotation, height maps (against a stored parity sample of the
 DRIFT builder), keyframe lists, release assembly from a spec, the scene
-validator, disk usage, the atlas, `helhest-sort-bag`, and the viewer
-(probing, window enumeration, the map's geodesy, splits, notes, the segment
-page, rendering and every route, against synthetic scene directories).
+validator, disk usage, the atlas, the segment filter and the map-mismatch
+test behind the segment scripts, `helhest-sort-bag`, and the viewer (probing,
+window enumeration, the map's geodesy, splits, notes, the segment page,
+rendering, the URL-root mirror and every route, against synthetic scene
+directories).
 
 `.github/workflows/ci.yml` runs three jobs: `lint` (`black` and `ruff`, pinned),
 `extraction` (`.[test]`, every non-viewer console script's `--help`, pytest with the

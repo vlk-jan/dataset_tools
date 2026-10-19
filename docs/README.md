@@ -28,7 +28,8 @@ laptop). They are kept because the next campaign starts from them.
 | File | What it is |
 | --- | --- |
 | `scene_bags.csv`, `v2_bags.csv`, `v2_<n>_bags.csv` | scene number to raw bag: the v1 list, the v2 beta list, and one cumulative list per v2 release; the slurm array jobs index into them and `scripts/make_atlas.py --bags` reads bag sizes and sessions from them |
-| `v2_inventory.csv` | every new-rig bag on subtdata as `scripts/survey_v2_bag.py` (removed after the selection; commit 94955ed) saw it; the rows the v2 lists were chosen from (`V2_0_SELECTION.md`) |
+| `v2_inventory.csv` | every new-rig bag on subtdata as `scripts/survey_v2_bag.py` (removed in af56814; last version in 94955ed) saw it; the rows the v2 lists were chosen from (`V2_0_SELECTION.md`) |
+| `releases/<release>.json` | a release's spec: what only a person can say about it (bag list, held-out scenes and why, sessions, defects, open items, atlas prose); `releases/helhest_v2.json` is the prose every v2 release inherits. `helhest-release` turns a spec and the scenes into the root's `manifest.json`, `splits.json`, keyframe lists and `README.md` |
 | `odin_tf_static_2026-09-30.txt` | what 42 bags published for the Odin1's self-estimated extrinsics; the survey behind `dataset_tools/tf_pins.py` |
 | `validation_v1.csv` | `helhest-validate` over the published v1 root |
 | `regen_comparison.csv` | the paired v1 vs v1.2 comparison from `scripts/compare_v1_v12.py` (removed; see git history) |

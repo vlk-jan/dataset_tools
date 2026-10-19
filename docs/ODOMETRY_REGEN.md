@@ -319,7 +319,7 @@ window error median 0.11 m, p95 0.98 m, 4.9 % > 1 m. Local consistency is
 the only property DRIFT consumes, so **segment restarts are mandatory**, and
 the ranking must come from `scripts/motion_audit.py` (stationary-interval
 drift) and `scripts/local_consistency.py` (windowed error vs `/odom`; both
-removed since, see git history), never from pose counts. The detector still misses some divergences (p99 3.7 m) —
+only ever on the `odometry-regen-recorder` branch, e68d5f2, never on main), never from pose counts. The detector still misses some divergences (p99 3.7 m) —
 tightening it is the open task.
 
 **Scene 0013** (did not diverge in v1), 10 s windows, rate 0.5:
@@ -492,8 +492,8 @@ restart storms — 0032 (0.72 -> 0.90), 0038 (0.42 -> 0.99),
 windows median 0.078 m / p95 0.255, all <= 1 m by the gate. The other 22
 scenes stay pure v1.2. Merged frame-weighted coverage 0.830 (v1.2 alone
 0.802, v1 0.586); 31 scenes above 80 %. A dataset-wide fill was measured
-(+24.6 min, coverage 0.877) and is one `merge_v11_fill.py` run away if ever
-wanted; the script is idempotent and per-scene.
+(+24.6 min, coverage 0.877) and was one `merge_v11_fill.py` run away if ever
+wanted; the script was idempotent and per-scene (removed since, commit 1f0d899).
 
 ## Per-scene run
 

@@ -3,14 +3,16 @@
 ## Setting up
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[test]"                      # the extraction tools
-python3 -m venv .venv-viewer && .venv-viewer/bin/pip install -e ".[viewer,test]" # plus the viewer
+python3 -m venv .venv && .venv/bin/pip install -e ".[test]"   # the extraction tools; ".[test,build]" adds open3d for helhest-odom-frame
+uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e ".[viewer,test]"   # plus the viewer
 ```
 
-Python 3.12 or newer. Two venvs, as in the README: the viewer's extra pulls in
-SimView and with it torch, which the extraction tools never need. On a machine
-without a GPU, `--extra-index-url https://download.pytorch.org/whl/cpu` keeps
-that small.
+Python 3.12 or newer (`requires-python` in `pyproject.toml`; CI runs 3.12).
+Two venvs, as in the README: the viewer's extra pulls in SimView and with it
+torch, which the extraction tools never need. `uv` takes torch from the
+CPU-only index configured in `pyproject.toml`; plain `pip` ignores that and
+fetches the CUDA build (~3 GB), so with pip run
+`pip install torch --index-url https://download.pytorch.org/whl/cpu` first.
 The cloudini shim is committed prebuilt; `cloudini_shim/build_shim.sh` rebuilds
 it, and its header says on which machine to do that.
 
@@ -22,7 +24,9 @@ it, and its header says on which machine to do that.
 ```
 
 No bags are needed: every test runs on synthetic data written with `rosbags`
-or on synthetic scene directories (`tests/helpers_viewer.py`). Keep it that way
+or on synthetic scene directories (`tests/helpers_viewer.py`); the one recorded
+input is `tests/data/heightmap_parity.npz`, a few frames DRIFT built, which
+holds `helhest-heightmap` to its maps. Keep it that way
 -- a test that needs a recording cannot run in CI and will not be run. The
 viewer's tests skip themselves when its extra is not installed.
 

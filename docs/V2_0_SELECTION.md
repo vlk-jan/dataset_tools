@@ -7,7 +7,7 @@ Written 2026-09-25 from a survey of every new-rig bag on
 bag under `/mnt/personal/vlkjan6/HELHEST_v2_survey/<session>/<bag>/`
 (summary.json, a 1 Hz GNSS track, 12 thumbnails). RCI job 11704468. The
 sessions already in `HELHEST_v2_beta` were read from that root instead. Both
-files were removed after the selection (last in commit 94955ed).
+files were removed after the selection (in af56814; last version in 94955ed).
 
 v2.0 is a **fresh extraction into its own root**, `HELHEST_v2_0`, with its own
 bag list (`docs/v2_0_bags.csv`, row = scene number, numbered from 0000 again)
@@ -180,7 +180,9 @@ Height maps come from DRIFT's `slurm/build_heightmaps_v2_beta.batch` at its
 current defaults (min_radius 0.65, p90, ground fill, wheel-contact anchors with
 the shift relevel, wheel radius 0.36), the same settings the beta was rebuilt
 with on 2026-09-25. `manifest.json`, `README.md` and `atlas/curation.json` are
-written by hand afterwards, as for the beta.
+written by hand afterwards, as for the beta. (Since 2026-10-12, `6bc7ff1`,
+`extract_v2.batch` builds the height maps in the same task and `finalize_v2.sh`
+writes the root files from a release spec; see `slurm/README.md`.)
 
 ## 6. Verified before submitting (answers 2026-09-25, build = RCI job 11706726)
 

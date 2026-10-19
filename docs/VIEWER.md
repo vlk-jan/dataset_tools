@@ -34,7 +34,7 @@ python3 -m venv .venv-viewer
 | `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
 | `--cache-dir DIR` | where built scenes are cached (default: `<root name>-<hash>` under `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/`, one per root) |
 | `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
-| `--cache-max-gb GB` | keep at most this much of built 3D windows on disk, oldest build removed first (default `5`) |
+| `--cache-max-gb GB` | keep at most this much of built 3D windows on disk, the least recently used removed first (default `5`) |
 | `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset; `<cache-dir>/notes/` for a URL root) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
@@ -45,8 +45,9 @@ python3 -m venv .venv-viewer
 Apart from notes (below), the dataset root is only ever **read** -- every byte
 the viewer writes goes to the cache directory -- so it is safe to point at a
 read-only or shared copy. Notes are the one thing a person adds, and they are
-written into `<root>/notes/`; on a root that will not take them the viewer says
-so and keeps composing switched off rather than failing at the save.
+written into `<root>/notes/` (`<cache-dir>/notes/` for a URL root); on a root
+that will not take them the viewer says so and keeps composing switched off
+rather than failing at the save.
 
 ### A root on a web server
 
@@ -86,7 +87,7 @@ clouds and height maps. After that it is as fast as a local root.
 
 The server has **no authentication**. Anyone who can open the port can read
 every scene, have windows built (which costs CPU and cache disk) and, with
-notes on, write into `<root>/notes/`. It is meant to run on the machine you sit
+notes on, write into the notes directory. It is meant to run on the machine you sit
 at, or on a cluster node reached over an SSH tunnel (`slurm/viewer.batch` and
 `scripts/viewer_connect.sh` do exactly that), and the default bind of
 `127.0.0.1` keeps it there. A loopback bind (`localhost`, `::1`, any
@@ -154,7 +155,7 @@ So the unit of viewing is a *window*:
 | window | pose source | what it is |
 | --- | --- | --- |
 | `segNNN` | `odometry.txt` | one ground-truth segment; the trustworthy view |
-| `raw` | `transforms.npy` | the whole scene by wheel odometry — continuous, but it drifts |
+| `raw` | `transforms.npy` | the whole scene by wheel odometry — continuous, but it drifts; offered only when the scene has no ground-truth window |
 | `raw` (no transforms) | none | frames only; the robot stays at the origin |
 
 Segments longer than `--max-seconds` (default 600) are split into consecutive
@@ -167,7 +168,10 @@ non-uniform frame clock tells the two apart -- but that is when it matters,
 since frames dropped early in a segment would otherwise push the cut late and
 hand the last part more seconds than the cap allows. Where cutting by time puts
 more frames in one part than the ceiling permits, the part count is raised until
-both caps hold for every part.
+both caps hold for every part. Cuts that fall inside a hole in the frame clock
+all land on its far edge, so one that would leave a part under two frames is
+dropped rather than kept: a hole never shatters a segment into one-frame
+windows.
 
 The cap counts seconds rather than frames because that is what a longer window
 actually costs. Building one window reads a bounded number of per-frame files
@@ -198,6 +202,7 @@ driving. Below 2 Hz the rate is flagged.
 
 | file | in the viewer |
 | --- | --- |
+| `data_ts.txt` | the frame clock everything plays back on (`pcd_ts.txt` stands in when it is missing; see [URLs](#urls)) |
 | `odometry.txt` | the robot body's animated pose |
 | `odometry_segments.txt` | the window list; the episode marker on the playback bar |
 | `transforms.npy` | a second "wheel odom" ghost body, plus the `wheel_odom_drift` plot |
@@ -211,6 +216,7 @@ driving. Below 2 Hz the rate is flagged.
 | `joint_setpoints.npy` | commanded wheel-velocity plots, and with `joint_states.npy` the `wheel_slip_*` plots (commanded minus measured, rad/s, per wheel) |
 | `cmd_vel.npy` | `cmd_linear_x` / `cmd_angular_z` plots |
 | `camera_intrinsics.txt`, `T_cam_to_base.txt` | shown on the scene page; a small camera body at the real extrinsic; and, on a frame page, the frame's cloud projected into its image (below) |
+| `camera_info.yaml` | the distortion model the cloud-on-image projection applies |
 | `gps.npy` | the map, on the scene, segment and frame pages |
 | `time_align.txt` | the scene page's **Extraction** card: whether the frame clock was corrected, by how much, and from how many windows |
 | `gnss_guard.txt` | the same card: how many fabricated GNSS/INS stretches were removed and what they cost in poses and frames |
@@ -219,9 +225,12 @@ driving. Below 2 Hz the rate is flagged.
 ## The cloud on the image: a check on the extrinsic
 
 A frame page whose scene carries both `camera_intrinsics.txt` and
-`T_cam_to_base.txt` shows a second copy of the camera frame under the first,
-with every lidar return of that frame projected into it and coloured by depth
-(`/api/scene/{scene}/frame/{n}/overlay.jpg`). It is a calibration check: a
+`T_cam_to_base.txt` has a **Cloud on image** button that swaps the camera frame
+for a copy with every lidar return of that frame projected into it, coloured by
+depth, with a depth legend over it (`/api/scene/{scene}/frame/{n}/overlay.jpg`,
+fetched only once asked for). It starts off on every page; the zoom dialog,
+on the frame page and in the 3D view's panel, carries the same toggle. It is a
+calibration check: a
 road that lands beside the road, or a trunk that lands a metre from its
 picture, is a wrong extrinsic -- the error that shifted every v1 cloud by
 0.34 m, and the one the Odin1's own extrinsic estimate wanders by between
@@ -320,15 +329,17 @@ the samples either side are more than 1.5 s apart. The y-range covers the centra
 The lines are server-rendered SVG; `static/charts.js` adds a crosshair shared by
 every chart, a per-chart readout, and a click (or arrow keys + Enter) that opens
 the frame under the pointer. Each chart carries its own time axis and folds away
-under the arrow before its name (a native `<details>`, open by default).
+under the arrow before its name (a native `<details>`, open by default), and
+the card as a whole folds the same way.
 
 ## The map: where the recording happened
 
 A scene that carries `gps.npy` gets a map. On the scene page it sits beside the
 file inventory, the two of them a pair; on a segment page the segment's own
-stretch is highlighted with the rest of the outing dashed behind it; on a frame
+stretch is highlighted with the rest of the outing dashed behind it (a segment
+with no fixes of its own shows the outing alone, fitted to it); on a frame
 page a marker shows where that frame was, interpolated between the fixes around
-it (and left off when the nearest fix is more than a second away — a line drawn
+it (and left off when those fixes are more than a second apart — a line drawn
 across a receiver dropout would be a claim about where the robot went).
 
 **A scene without `gps.npy` renders no map at all** — no card, no grid, no
@@ -377,9 +388,9 @@ files, and only one of them is written by hand:
 | `atlas/atlas.json` | `scripts/make_atlas.py`. The curated half copied through, every number computed from the root, and the `dataset_version` it was generated against. |
 
 ```sh
-scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
-scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
-scripts/make_atlas.py <root> --bags docs/v2_3_bags.csv   # a v2 root: its own bag list (the default is the v1 list)
+python3 scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
+python3 scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
+python3 scripts/make_atlas.py <root> --bags docs/v2_3_bags.csv   # session and bag size from the root's bag list (left out without one)
 ```
 
 Numbers come from the same code the pages use (`SceneProbe`,
@@ -450,12 +461,14 @@ A root may carry a `splits.json` naming the scenes held out from training. When
 it does, every index card gets a labelled band down its left edge — solid violet
 `VAL` for held out, quiet slate `TRAIN` for trained on — and the scene page's
 header a tag in the same colours. Under the masthead a panel names the fold,
-counts each side in scenes and in windows (or labels), draws the window shares
-as a bar, and filters the index to one side: *All scenes*, *Validation* or
-*Training*. The filter is kept in the address (`/?split=val`), so a filtered
-index can be linked; the fold's caveat note sits behind *What this split
-measures*. Without the file nothing is coloured and the pages render exactly as
-they did before; the viewer has no opinion of its own about which scenes are
+counts each side in scenes and its share of the root's frames, draws those
+shares as a bar, and filters the index to one side: *All scenes*, *Validation*
+or *Training*. The filter is kept in the address (`/?split=val`), so a filtered
+index can be linked. Behind *What this split measures* a table sizes each side
+in every unit the root can count -- scenes, frames, recorded time, keyframes
+(`keyframes.lst`), proprio labels and windows -- above the fold's caveat note.
+Without the file nothing is coloured and the pages render exactly as they did
+before; the viewer has no opinion of its own about which scenes are
 validation data, because that is a modelling decision and not something a
 directory listing can answer.
 
@@ -487,11 +500,12 @@ python3 scripts/data/dump_split.py --rootdir <root> --out <root>/splits.json --n
 | `root`, `dataset_version` | checked against this root — see below |
 | `val_scenes`, `train_scenes` | the card band, the scene-page tag and the filter |
 | `excluded_scenes` | a third, grey state: in neither split (empty today) |
-| `labels_per_scene`, `windows_per_scene` | each side's share in the panel, and its bar |
+| `labels_per_scene`, `windows_per_scene` | the proprio-label and window columns of the size table |
 | `source` | shown under *What this split measures*, so the page says where the lists came from |
 
 A hand-written file may use the short key names `val`, `train`, `excluded` and
-`name` instead, and may write scene ids as integers (`[0, 9, 15]`).
+`name` instead, and may write scene ids as integers (`[0, 9, 15]`) or digit
+strings (`["9"]`), both read as the four-digit directory name.
 
 **Scene ids are only meaningful inside one tree.** They survive root *versions*
 — v1.2 through v1.5 renumbered segments, never scenes — but not *trees*: the
@@ -506,8 +520,9 @@ not mention is left **unmarked** rather than assumed to be training data.
 **The held-out share always names its unit.** The same fold is 23.7 % of the
 proprio labels and 25.8 % of the loader windows, and one scene (`0019`, fallow
 meadow) is 30 % of the held-out labels but 56 % of the held-out windows. A bare
-percentage would be read as whichever the reader had in mind, so the panel
-quotes windows when the file carries them, labels otherwise, and says which.
+percentage would be read as whichever the reader had in mind, so the panel's
+share is always of frames and says so, and the size table puts every unit side
+by side.
 
 **What this fold can and cannot measure.** It tests "new patch, known site", not
 unseen terrain: scenes repeat ground — `0018`/`0019` are the same meadow,
@@ -558,7 +573,8 @@ that means, which is deliberately not `windows.Window`'s convention, where
       "text": "GT jumps ~2 m sideways around 1250 and never recovers.",
       "author": "jan",
       "created": "2026-09-05T10:42:11+00:00",
-      "updated": null
+      "updated": null,
+      "verdict": "fix"
     }
   ]
 }
@@ -613,20 +629,23 @@ retype. The `id` and `created` never move; `updated` is stamped instead.
 
 **When the root will not take them.** Roots are routinely read-only or shared
 copies. The viewer probes the location once at startup — an actual write, since
-network mounts report permissions they will not honour — and lands in one of
-three states, which `/healthz` and the scene page both report:
+network mounts report permissions they will not honour — and reports where
+notes go, and whether they can be written there, on `/healthz` and the scene
+page:
 
 | | what happens |
 | --- | --- |
 | the root is writable | notes go to `<root>/notes/`, and travel with the dataset |
 | `--notes-dir PATH` | notes go there instead; they no longer travel with the data |
+| a URL root | notes go to `<cache-dir>/notes/`, as if passed as `--notes-dir` |
 | `--no-notes` | off entirely: nothing read, written or shown |
 
 A read-only root with no `--notes-dir` still **reads** its notes. Only
 composing is refused, with the reason on the page rather than the form silently
 missing — the same habit as an absent artefact, which is struck through rather
-than hidden. The notes directory itself is created by the first note, not by
-opening the root: looking at a dataset leaves it as it was found.
+than hidden. `<root>/notes/` itself is created by the first note, not by
+opening the root: looking at a dataset leaves it as it was found. (A
+`--notes-dir`, a URL root's included, is created at startup.)
 
 **Stale frame numbers.** A frame index only means the same thing while the
 extraction does. Each notes file records the `dataset_version` it was written
@@ -725,7 +744,8 @@ measured than the height warrants: a distant frame's map edge does get real
 lidar returns and does mark the cell measured, while the near frames that
 decided the height were driving past it and extrapolating behind themselves — on
 a straight traverse that describes roughly two covered cells in five. The
-per-frame Validity tile still shows the three states unmixed.
+per-frame Validity tile still shows the four states (measured, interpolated,
+extrapolated, wheel-anchored) unmixed.
 
 ### Paging through a scene's segments
 
@@ -737,7 +757,10 @@ view (`frame00042`) pages back into the segment holding it, and stop at either
 end of the scene rather than wrapping. The build options in the URL travel
 along -- page to the next segment and it is built with the same cloud and
 terrain settings -- while `?frame=` does not, since it names a frame of the
-window you are leaving.
+window you are leaving. The view setup travels too: SimView's view state, the
+camera's offset from the robot (each window has its own coordinates) and the
+ghost switch, though not the play state. It is carried once, through
+`sessionStorage`, and only into a window of the same scene.
 
 The two keys are SimView's own episode shortcuts, which do nothing here: a
 dataset scene declares no episodes. A key pressed into a note field is left to
@@ -746,15 +769,17 @@ the field.
 ### The 3D view toggles
 
 Two things in the scene are diagnostics rather than the robot, and both are off
-until asked for, each with its explanation beside it in the panel:
+until asked for:
 
-- **show lidar cloud** — every cloud in the window, aggregated in the world
-  frame. Turning it on also drops the terrain surface, which is drawn over the
-  points and describes the same ground.
-- **show wheel-odometry ghost** — an amber, translucent marker at the pose
-  wheel odometry alone would give. The gap between it and the robot is the
-  drift plotted as `wheel_odom_drift`; it grows without bound and routinely
-  ends up a hundred metres off the path, which is why it is not shown unasked.
+- **Show Point Clouds**, under SimView's own *Body Options* — every cloud in
+  the window, aggregated in the world frame. The terrain surface stays; it is
+  drawn over the points and describes the same ground, so switch the terrain
+  off in *Terrain Options* to see the points under it.
+- **wheel-odometry ghost**, in the panel, with its explanation as its tooltip —
+  an amber, translucent marker at the pose wheel odometry alone would give.
+  The gap between it and the robot is the drift plotted as `wheel_odom_drift`;
+  it grows without bound and routinely ends up a hundred metres off the path,
+  which is why it is not shown unasked.
 
 The robot stays a solid mesh throughout: the cloud is drawn independently of
 SimView's global body-visualization mode rather than by switching the whole
@@ -766,9 +791,10 @@ What SimView opens on is declared with the scene, in `build.py`: the ghost's
 colour, opacity and hidden start (`create_body`), and the point cloud off, the
 folders open or closed, Body states collapsed, and — for a single frame — no
 playback bar or Analysis panel (`viewer_defaults`, SimView's `viewerDefaults`).
-`dataset_tools/viewer/static/simview_patch.js` keeps what cannot be: the ready
-signal, the ghost switch, and fitting SimView's Analysis bar between its other
-two panels beside ours.
+`dataset_tools/viewer/static/simview_patch.js` keeps what cannot be: waiting
+for the ready signal and fitting SimView's Analysis bar between its other two
+panels beside ours. The ghost switch is the panel's own (`overlay.js`), showing
+and hiding SimView's ghost body.
 
 The `lidar_cloud` body deliberately carries no per-frame trajectory: it is
 already accumulated in the window's frame, so a per-frame identity transform
@@ -798,6 +824,8 @@ Dataset roots usually live on contended network storage, so:
   an image — and caches the result per scene, keyed by the scene's fingerprint:
   the directory and every entry directly in it (about thirty `stat` calls), so
   a file added to `height_maps/` or `odometry.txt` rewritten in place is seen.
+  A URL root's scene is fingerprinted by the listing it was last synced from,
+  so fetching its frames never moves it.
 - Scenes are built per window, on demand, and cached on disk under
   `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>/`.
 - One window aggregates a bounded number of clouds and height maps -- chosen
@@ -938,7 +966,8 @@ fingerprint, the atlas and the viewer's code: an unchanged picture costs a
 reload. (Until 2026-10-01 they were cached for a day, thumbnails for a year,
 under URLs that name only a scene number and a frame index.) To force a full
 rebuild, start once with `--clear-cache`. That removes only what
-the viewer wrote -- `probe_cache.json` and `bundles/` -- so it is safe even
+the viewer wrote -- `probe_cache.json`, `bundles/` and, for a URL root,
+`mirror/` -- so it is safe even
 when `--cache-dir` points at a directory holding something else. To clear every
 root at once, delete the whole default cache instead:
 

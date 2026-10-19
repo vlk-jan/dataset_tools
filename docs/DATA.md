@@ -22,8 +22,8 @@ banks, a drained reservoir bed, snow, and three tip-over events are all in.
 > This document describes the **first-generation** sensor setup (Livox + OAK-D,
 > Sep 2025 – Feb 2026). The robot was rebuilt in summer 2026 with an Odin1
 > LiDAR-camera unit and a Fixposition GNSS/INS; recordings from that setup are
-> extracted with the same tooling but are **not** part of this dataset yet
-> (see [New sensor generation](#7-new-sensor-generation)).
+> extracted with the same tooling into separate releases, HELHEST v2.0 – v2.4,
+> which this document covers only in [New sensor generation](#7-new-sensor-generation).
 
 ---
 
@@ -72,9 +72,11 @@ HELHEST/
 └── keyframes_adaptation.lst      [derived] small subset for online-adaptation experiments
 ```
 
-Files marked *derived* are produced by downstream processing (the DRIFT
-project's `scripts/data/prep_dataset.py`), not by the extraction tool; they
-are included for convenience and can be regenerated.
+Files marked *derived* are produced after extraction. In this root they came
+from the DRIFT project (`scripts/data/prep_dataset.py`); since 2026-10-12 the
+height maps, masks and keyframe lists of a v2 root are built by this repository
+instead (`helhest-heightmap`, `helhest-keyframes`), while `driven_similarity/`
+and `proprio_labels/` remain DRIFT's.
 
 **Frame indices** are chronological and shared: `images/i.png`,
 `clouds/i.npy`, `gravity_align[i]`, `transforms[i]`, `pcd_ts[i]` all refer to
@@ -343,7 +345,7 @@ published root for anything that consumes odometry or raw clouds.
   and refuses triangles that span the hole (median wall +0.19 → +0.02 m; full
   runbook in `HEIGHTMAP_REGEN.md`). Repaired roots mark anchor-fed cells
   `validity == 3`; rank codes with `VALIDITY_RANK`
-  (`dataset_tools/viewer/loaders.py`, `utils/pcd.py`) rather than `>= k`,
+  (`dataset_tools/viewer/loaders.py`, DRIFT's `utils/pcd.py`) rather than `>= k`,
   because 3 is a provenance, not a better 2. **`--anchor_radius` is not
   optional.** Unbounded, the anchors are the rearmost samples in the
   interpolation set, so the nearest-neighbour pass hands them the entire blind
@@ -431,9 +433,20 @@ Since August 2026 HELHEST carries an **Odin1** integrated LiDAR–camera–IMU
 unit (organised 256 × 192 clouds at ~14 Hz, cloudini-compressed; 1600 × 1296
 camera at ~29 Hz; onboard SLAM odometry) and a **Fixposition** GNSS/INS
 (georeferenced ENU poses at 10 Hz), with the same wheel/IMU proprioception.
-The extraction tool in this repository handles both generations and writes the
-same scene layout (plus `joint_setpoints.npy`, `cmd_vel.npy` and `gps.npy` when
-available).
+The extraction tool in this repository handles both generations. A v2 scene
+has the layout of §2 with these differences: images are the camera's own JPEG
+bytes (`images/NNNNN.jpg`, declared in `manifest.json` -> `images`), the camera
+extrinsic is `T_cam_to_base.txt` (camera optical frame to `base_link`) beside a
+full `camera_info.yaml`, the ground truth comes with its segment table
+`odometry_segments.txt`, `joint_names.txt` names the `joint_states.npy` columns,
+`joint_setpoints.npy`, `cmd_vel.npy` and `gps.npy` are added when the bag has
+them, `height_masks/` hold `validity` only, and the records `extract_meta.json`,
+`time_align.txt`, `gnss_guard.txt`, `pose_check.txt`, `tf_pins.txt`,
+`odom_frame.txt` and `height_maps.json` sit beside the data. At the root, `helhest-release` writes
+`manifest.json`, `splits.json`, `scenes.csv`, the keyframe lists and a
+`README.md` from the release's spec (`docs/releases/`). Every file, its shape
+and dtype: the repository README's
+[Output format](../README.md#output-format).
 
 **The Odin1 frame is a 67 ms sweep.** The unit scans its 256 × 192 raster
 bottom to top over 67 ms, stamps the frame at the start of the sweep and gives
@@ -488,9 +501,13 @@ the ~0.5 m sigma the receiver reports. On the old generation the extractor takes
 whatever `sensor_msgs/NavSatFix` a bag carries; the published v1.3 scenes
 predate this and have none.
 
-A georeferenced track is a disclosure the anchored poses were not. The dataset
-is **internal for now**, and anonymisation before any public release is a
-prerequisite — GNSS included.
+A georeferenced track is a disclosure the anchored poses were not.
+Anonymisation before any public release was set as a prerequisite — GNSS
+included — and has not been done: the images show members of the public
+unblurred. Since 2026-10-19 a copy of HELHEST v2.4 is nonetheless being
+published at <http://subtdata.felk.cvut.cz/HELHEST/> (an Apache directory
+index, still filling; `helhest-viewer` opens it by URL,
+`scripts/viewer_public.sh`), `gps.npy` included.
 
 The first recordings with the new stack
 (`subtdata:/data/helhest/26-08-01-dobyvani_hradu`, `26-08-21-stromovka-roads`)
@@ -510,8 +527,14 @@ Extraction, validation and statistics scripts live in
 ```bash
 helhest-extract <bag_dir> <out_dir> --cam /luxonis/oak/rgb/image_raw/compressed \
     --lidar /livox/lidar_front --odom /odom --imu /ekf/imu/data      # old generation
-helhest-validate /mnt/data/vras/data/HELHEST --csv scenes.csv        # completeness/consistency report
+helhest-extract <bag_dir> <out_dir>                                  # new generation (the defaults)
+helhest-validate /mnt/data/vras/data/HELHEST --csv validation.csv    # completeness/consistency report
 ```
+
+A v2 release root is built further with `helhest-odom-frame`,
+`helhest-heightmap`, `helhest-keyframes`, `helhest-release` and
+`scripts/make_atlas.py` (`slurm/finalize_v2.sh`); the order and flags are in
+the repository README.
 
 ## 9. Citation, licence, contact
 

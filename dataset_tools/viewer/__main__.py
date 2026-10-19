@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--cache-max-gb",
         type=float,
         default=DEFAULT_CACHE_MAX_GB,
-        help="keep at most this much of built 3D windows on disk, oldest removed first (default: %(default)s)",
+        help="keep at most this much of built 3D windows on disk, least recently used removed first (default: %(default)s)",
     )
     parser.add_argument("--open", action="store_true", help="open a browser at the index page")
     parser.add_argument("-v", "--verbose", action="store_true", help="debug logging")
