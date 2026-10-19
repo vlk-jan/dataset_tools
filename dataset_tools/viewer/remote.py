@@ -218,7 +218,10 @@ def _download(url: str, dest: Path) -> None:
 
 
 def _remove(path: Path) -> None:
-    shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(missing_ok=True)
+    if path.is_dir():
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        path.unlink(missing_ok=True)
 
 
 def _sync(path: Path, parts: tuple[str, ...]) -> None:
