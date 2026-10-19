@@ -73,7 +73,14 @@ clouds and height maps. After that it is as fast as a local root.
 - Notes go to `<cache-dir>/notes/` (or `--notes-dir`), never into the mirror,
   which every sync is free to overwrite.
 - The mirror has no size limit (`--cache-max-gb` bounds only built windows).
-  `--clear-cache` empties it along with the rest.
+  `--clear-cache` empties it along with the rest. A `mirror/` the viewer did
+  not create (no `.listing.json`) is refused rather than cleared.
+- What the server sends is treated as untrusted. Names that could leave
+  their directory are dropped, responses over 512 MB (compressed or not) are
+  refused, redirects are followed only within the root's scheme and host,
+  arrays load without pickle, and everything shown is HTML-escaped.
+- subtdata serves plain HTTP only, so nothing protects the data in transit:
+  anyone on the path can alter what the viewer mirrors.
 
 ### Who can reach it
 

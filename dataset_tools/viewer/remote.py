@@ -19,7 +19,6 @@ A scene's fingerprint is that file's digest, so fetching a frame never moves it.
 
 from __future__ import annotations
 
-import gzip
 import hashlib
 import html
 import json
@@ -29,10 +28,12 @@ import re
 import shutil
 import threading
 import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from urllib.parse import quote, unquote
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.parse import quote, unquote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 logger = logging.getLogger("dataset_tools.viewer.remote")
 
@@ -40,6 +41,9 @@ LISTING = ".listing.json"
 #: How long a synced listing is trusted before it is fetched again (s).
 REFRESH_SECONDS = 300.0
 TIMEOUT = 30
+#: Largest response accepted, compressed or not (a 28k-frame scene's
+#: ``joint_states.npy`` is 15 MB), so a hostile server cannot exhaust memory.
+MAX_BYTES = 512 * 2**20
 #: Files at most this many directories below the root are downloaded by a sync
 #: (but for ``.npy``); deeper ones are placeholders until read.
 EAGER_DEPTH = 1
@@ -50,6 +54,18 @@ _synced: dict[Path, float] = {}
 _locks: dict[Path, threading.Lock] = {}
 _locks_guard = threading.Lock()
 _pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="remote-fetch")
+
+
+class _SameHost(HTTPRedirectHandler):
+    """Follow a redirect only within the root's scheme and host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlsplit(newurl)[:2] != urlsplit(req.full_url)[:2]:
+            raise HTTPError(newurl, code, f"redirect off {urlsplit(req.full_url).netloc} refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = build_opener(_SameHost)
 
 #: One link of a directory index and the text after it (Apache: date, size).
 _LINK = re.compile(r'<a href="([^"]+)"[^>]*>.*?</a>(.*?)(?=<a |</tr>|</li>|\Z)', re.S | re.I)
@@ -67,6 +83,9 @@ def mount(url: str, cache_dir: Path, clear: bool = False) -> Path:
     # ponytail: the mirror is unbounded; evict like bundles if public users fill disks.
     global _mount
     mirror = Path(cache_dir) / "mirror"
+    # Only a mirror's own listing proves the directory is ours to clear and overwrite.
+    if mirror.is_dir() and not (mirror / LISTING).is_file() and any(mirror.iterdir()):
+        raise OSError(f"{mirror} holds files this viewer did not mirror; pass another --cache-dir")
     if clear:
         shutil.rmtree(mirror, ignore_errors=True)
     mirror.mkdir(parents=True, exist_ok=True)
@@ -184,10 +203,12 @@ def _url(parts: tuple[str, ...], is_dir: bool = False) -> str:
 def _get(url: str, headers: dict | None = None) -> bytes:
     headers = headers or {"Accept-Encoding": "gzip"}
     req = Request(url, headers={**headers, "User-Agent": "dataset_tools-viewer"})
-    with urlopen(req, timeout=TIMEOUT) as resp:
-        data = resp.read()
-        if resp.headers.get("Content-Encoding") == "gzip":
-            data = gzip.decompress(data)
+    with _opener.open(req, timeout=TIMEOUT) as resp:
+        data = resp.read(MAX_BYTES + 1)
+        if len(data) <= MAX_BYTES and resp.headers.get("Content-Encoding") == "gzip":
+            data = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(data, MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise OSError(f"{url}: response over {MAX_BYTES >> 20} MB refused")
     return data
 
 

@@ -135,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             root = remote.mount(args.root, cache_dir, clear=args.clear_cache)
         except OSError as exc:
-            print(f"error: cannot list {args.root}: {exc}", file=sys.stderr)
+            print(f"error: cannot mirror {args.root}: {exc}", file=sys.stderr)
             return 2
     else:
         root = Path(args.root)

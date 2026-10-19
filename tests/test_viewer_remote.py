@@ -63,3 +63,32 @@ def test_a_url_root_probes_and_builds_like_the_local_one(served, tmp_path):
     assert cloud.read_bytes() == (root / "0000" / "clouds" / "00000.npy").read_bytes()
     # Fetching frames must not invalidate the scene's probe or built windows.
     assert probe.scene_fingerprint(mirror / "0000") == fingerprint
+
+
+def test_a_mirror_refuses_a_foreign_directory_an_oversized_body_and_an_off_host_redirect(served, tmp_path, monkeypatch):
+    root, url = served
+    foreign = tmp_path / "theirs" / "mirror"
+    foreign.mkdir(parents=True)
+    (foreign / "keep.txt").write_text("not the viewer's")
+    with pytest.raises(OSError, match="did not mirror"):
+        remote.mount(url, tmp_path / "theirs", clear=True)
+    assert (foreign / "keep.txt").exists()
+
+    remote.mount(url, tmp_path / "cache")
+    monkeypatch.setattr(remote, "MAX_BYTES", 100)
+    with pytest.raises(OSError, match="over"):
+        remote._get(url + "0000/data_ts.txt")
+
+    class Away(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://localhost:9/elsewhere")
+            self.end_headers()
+
+    away = ThreadingHTTPServer(("127.0.0.1", 0), Away)
+    threading.Thread(target=away.serve_forever, daemon=True).start()
+    try:
+        with pytest.raises(OSError, match="redirect off"):
+            remote._get(f"http://127.0.0.1:{away.server_port}/x")
+    finally:
+        away.shutdown()
