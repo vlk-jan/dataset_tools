@@ -217,6 +217,10 @@ the whole root into `<root>/validation.csv`, and draws the atlas
 (`scripts/make_atlas.py <root> --bags <list>`). Its exit code is the
 validation's. `helhest-release` refuses a root whose scenes do not match the
 bag list, either way round, or a held-out scene that is not on disk.
+DRIFT's loader keeps the `manifest.json` -> `held_out.scenes` out of every
+training and validation fold whichever list it reads (`--keyframes`,
+`--allow_held_out`); v2.1 and v2.2 did this with symlink roots (`*_train`,
+`*_heldout`, `*_allframes_notrain`) instead.
 
 ### 4. Check it
 
@@ -414,7 +418,7 @@ index-aligned.
 | `pose_check.txt` | — | text | s, m, deg | the scene's odometry (`--odom`) against `--check_odom`: spans and overlap, path length and jumps (steps over the segment gate, and the metres they carry) in each, z range, the clock lag of the odometry against the reference, the median roll/pitch difference, and the |displacement| disagreement over 1/2/5 s windows (median, p90, scale). Warnings at the end where a figure is out of bounds |
 | `gnss_guard.txt` | — | text | seconds | the stretches of fabricated GNSS/INS pose this scene had removed, what they cost in poses and frames, how many further frames went for having no pose under them at all (since 2026-10-01 split into before the pose stream, after it and inside holes), and how many more once the clock was corrected; absent when the guard did not run |
 | `tf_pins.txt` | — | text | m, degrees | the static transforms pinned to a constant (`--tf_pins`): for each, the pin the scene was built with and what the bag's own `/tf_static` said, so a bag whose estimate sat far from the constant can be found; absent when nothing was pinned (a Livox bag, or `--tf_pins off`) |
-| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame from `--odom`, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP) |
+| `transforms.npy` | (F, 4, 4) | `float64` | m, SE(3) | base pose per frame from `--odom`, relative to frame 0 (identity); interpolated onto `data_ts` (lerp + SLERP); the nearest sample outside the pose stream, across a gap over 0.5 s, or across a step over 6 m/s (a GNSS teleport, the gate `odometry.txt` breaks segments on) |
 | `gravity_align.npy` | (F, 3, 3) | `float64` | rotation | `Ry(pitch) @ Rx(roll)` of the base at `data_ts`, yaw dropped |
 | `camera_intrinsics.txt` | 3 x 3 | text `float64` | pixels | `K` from the matching `camera_info` topic |
 | `camera_info.yaml` | — | YAML | — | the full `CameraInfo` (size, distortion model + coefficients, `K`, `R`, `P`); v1 scenes have only `camera_intrinsics.txt` |
@@ -694,16 +698,6 @@ pytest). [CONTRIBUTING.md](CONTRIBUTING.md) covers the two virtualenvs
 
 ## Known caveats
 
-- **One root, three keyframe lists, the hold-out in the manifest** (since
-  2026-10-01, HELHEST v2.3). `keyframes.lst` lists every frame with a map,
-  `keyframes_train.lst` the training scenes and `keyframes_heldout.lst` the
-  held-out session; `manifest.json` → `held_out.scenes` names that session,
-  and DRIFT's loader keeps those scenes out of every training and validation
-  fold whichever list it reads (`--keyframes`, `--allow_held_out`). v2.1 and
-  v2.2 did this with symlink roots (`*_train`, `*_heldout`,
-  `*_allframes_notrain`) because the loader read one fixed file name;
-  `helhest-validate` now checks the lists against the declaration
-  (`ROOT_KEYFRAMES`), and the viewer tags the scenes from it.
 - **A lidar frame is a sweep, not a snapshot.** The Odin1 scans its raster
   bottom to top over 67 ms and stamps the frame at the start; each point's
   own time is in the `offset_time` field. Until 2026-10-01 the extractor
@@ -718,15 +712,13 @@ pytest). [CONTRIBUTING.md](CONTRIBUTING.md) covers the two virtualenvs
   gives at that time (line 2 summarises it, a range where it varied; 0 where
   none was applied), and the smear within the sweep
   cannot be undone without the bag.
-- **Cloudini clouds.** The Odin1 lidar publishes
-  `point_cloud_interfaces/CompressedPointCloud2`; decoding needs
-  `dataset_tools/libcloudini_shim.so` (see above).
-- **Missing Odin1 extrinsic.** The 2026-08 bags' TF tree does not connect
-  `odin1_base_link` to `base_link` — the mount extrinsic was never published.
-  Without `--lidar_extrinsic` such a scene fails; with
-  `--allow_frame_fallback` the identity is used, a warning is logged and the
-  fallback is listed in `extract_meta.json` -> `frame_fallbacks`, so those
-  clouds are in the lidar frame.
+- **The 2026-08 bags are not dataset material.** Their TF tree has no
+  `base_link -> odin1_base_link` edge, so a scene fails without
+  `--lidar_extrinsic`; with `--allow_frame_fallback` the identity is used and
+  listed in `extract_meta.json` -> `frame_fallbacks`, leaving those clouds in
+  the lidar frame. The 2026-08-21 `/joint_states` carry efforts only
+  (commanded wheel velocities are in `joint_setpoints.npy`). The rig has had
+  both since 2026-09-02 (`docs/NEW_RIG_READINESS.md`).
 - **The Odin1 re-estimates its own extrinsics.** From the 2026-09-14
   firmware the unit publishes `imu_link -> odin1_lidar` and
   `odin1_lidar -> odin1_camera_link` on `/tf_static`, but as a running
@@ -738,46 +730,18 @@ pytest). [CONTRIBUTING.md](CONTRIBUTING.md) covers the two virtualenvs
   `docs/odin_tf_static_2026-09-30.txt`); HELHEST v2.0 and v2.1 were built from
   the bags' own values, so their ground height differs by up to 3.5 cm from
   scene to scene for no physical reason.
-- **Static-TF convention (fixed 2026-08-28).** `get_transform(G, src, dst)`
-  now returns the point map `p_dst = T @ p_src`, matching tf2's
-  `lookup_transform(dst, src)`, and a manual `--lidar_extrinsic X Y Z R P Y`
-  is the pose of the lidar in the base frame (same convention). Earlier
-  versions of this tool composed the static TF chain in the wrong direction.
-  For HELHEST's front Livox (`base_link -> livox_front_frame`: x = +0.17 m,
-  z = +0.145 m, rolled 180°) the rotation and z happened to survive
-  (R_x(π) is its own inverse), but **all previously published v1 scenes have
-  their clouds shifted by −0.34 m along x** (the lidar was placed at
-  x = −0.17 m instead of +0.17 m). Re-extracting an old bag with the current
-  tool therefore differs from the published scene by exactly +0.34 m in x;
-  see `docs/DATA.md` for the recommended fix on existing data.
-- **Fixposition topic choice.** Use `/fixposition/odometry_enu`, not
-  `_smooth`: the smooth variant's child frame (`FP_POISH`) is not connected to
-  `base_link` by static TF, so its poses cannot be re-expressed at the base.
-- **Do not use `/imu/data` for gravity alignment** on the new stack: that IMU
-  is mounted tilted (~5 deg roll, ~11 deg pitch) and its frame (`imu`) has no
-  TF to `base_link`. The default `--imu /odin1/odometry` (or the Fixposition
-  orientation) gives clean base roll/pitch.
-- **Dataset defect, 2026-08-21 bags:** `/joint_states` carries only efforts —
-  positions and velocities are all zero. Commanded wheel velocities are in
-  `/joint_setpoints` (`joint_setpoints.npy`).
-- **Cloud dtype.** The extractor writes `float32`; the previously published
-  HELHEST dataset stores `float64` clouds. The validator accepts both.
-- **One clock per frame (fixed 2026-09-09).** `transforms.npy` and
-  `gravity_align.npy` are now sampled at `data_ts` -- the camera/lidar midpoint
-  the frame index actually stands for. They used to be sampled at the camera and
-  the lidar stamps respectively, so a consumer reading frame `k` from the three
-  files got three slightly different instants (a median 3.9 ms apart on the
-  2026-09 recordings, up to 67 ms).
-- **Poses are interpolated, not snapped (fixed 2026-09-09).** Nearest-neighbour
-  lookup onto a 10 Hz stream quantised every frame by up to 50 ms, which is 5 cm
-  at 1 m/s. `interpolate_poses()` now lerps the translation and SLERPs the
-  rotation, falling back to the nearest sample outside the sample range, across
-  a gap over 0.5 s, or across a bracket implying more than 6 m/s (4 m/s until
-  2026-09-29, which the sprints of the 2026-09-28 recordings exceed) -- a GNSS
-  teleport, where blending the two sides would fabricate a pose the robot never
-  held. The speed gate matches the one `write_ground_truth()` breaks segments
-  on, so the two files agree about which steps are real motion. The count of
-  interpolated versus fallen-back frames is logged per scene.
+- **Published v1 clouds sit 0.34 m back (static-TF direction, fixed
+  2026-08-28).** Earlier versions of this tool composed the static TF chain
+  backwards; for the front Livox (x = +0.17 m, rolled 180°) only x came out
+  wrong, so every previously published v1 cloud is shifted −0.34 m along x and
+  re-extracting an old bag differs from it by exactly +0.34 m. Now
+  `get_transform(G, src, dst)` returns `p_dst = T @ p_src` (tf2's
+  `lookup_transform(dst, src)`) and `--lidar_extrinsic` is the lidar's pose in
+  the base frame. Fix for existing data: `docs/DATA.md` §5.
+- **`/imu/data` is mounted tilted** (~5 deg roll, ~11 deg pitch) and its frame
+  has no TF to `base_link`: do not pass it as `--imu`. The default
+  `/odin1/odometry` (or the Fixposition orientation) gives clean base
+  roll/pitch.
 - **The sensor unit may stamp at publish, not at capture.** On the 2026-09
   Odin1 recordings the poses run ahead of the imagery *and* of the clouds by
   **~0.69 s** -- 0.5 m of smear at walking pace, and the reason the viewer
