@@ -114,8 +114,9 @@ def _allowed_hosts(host: str) -> list[str] | None:
         return None
     allowed = {*LOOPBACK_HOSTS, host}
     if ":" in host:
-        # A browser sends "[::1]:8080", which Starlette splits on ":" and reads as "[".
-        allowed.add("[")
+        # A browser sends "[::1]:8080": Starlette >= 1.9 reads it as "[::1]",
+        # older ones split on ":" and read "[".
+        allowed.update({"[", f"[{host}]"})
     return sorted(allowed)
 
 
