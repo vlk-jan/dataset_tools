@@ -44,9 +44,6 @@ TIMEOUT = 30
 #: Largest response accepted, compressed or not (a 28k-frame scene's
 #: ``joint_states.npy`` is 15 MB), so a hostile server cannot exhaust memory.
 MAX_BYTES = 512 * 2**20
-#: Files at most this many directories below the root are downloaded by a sync
-#: (but for ``.npy``); deeper ones are placeholders until read.
-EAGER_DEPTH = 1
 
 #: (URL ending in "/", resolved mirror directory) of the mounted root.
 _mount: tuple[str, Path] | None = None
@@ -107,7 +104,7 @@ def parse_listing(text: str) -> dict[str, list]:
     entries: dict[str, list] = {}
     for m in _LINK.finditer(text):
         href = html.unescape(m[1])
-        if href.startswith(("?", "/", "#")) or "://" in href:
+        if href.startswith("?"):  # sort links; the name check drops the rest
             continue
         is_dir = href.endswith("/")
         name = unquote(href.rstrip("/"))
@@ -149,15 +146,15 @@ def local(path: Path) -> Path:
     return path
 
 
-def head(path: Path, size: int = 4096) -> bytes | None:
-    """The first ``size`` bytes of a mirrored placeholder, by a range request.
+def head(path: Path) -> bytes | None:
+    """The first 4 KiB of a mirrored placeholder, by a range request.
 
     ``None`` for any other path: read that one directly.
     """
     parts = _parts(path)
     if not _placeholder(path, parts):
         return None
-    return _get(_url(parts), {"Range": f"bytes=0-{size - 1}"})[:size]
+    return _get(_url(parts), {"Range": "bytes=0-4095"})[:4096]
 
 
 def fingerprint(scene_dir: Path) -> str | None:
@@ -183,7 +180,7 @@ def _parts(path: Path) -> tuple[str, ...] | None:
 
 
 def _lazy(parts: tuple[str, ...]) -> bool:
-    return len(parts) > EAGER_DEPTH + 1 or parts[-1].endswith(".npy")
+    return len(parts) > 2 or parts[-1].endswith(".npy")  # deeper than a scene's own files, or an array
 
 
 def _placeholder(path: Path, parts: tuple[str, ...] | None) -> bool:
@@ -221,10 +218,7 @@ def _download(url: str, dest: Path) -> None:
 
 
 def _remove(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path, ignore_errors=True)
-    else:
-        path.unlink(missing_ok=True)
+    shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(missing_ok=True)
 
 
 def _sync(path: Path, parts: tuple[str, ...]) -> None:
@@ -248,8 +242,6 @@ def _sync(path: Path, parts: tuple[str, ...]) -> None:
         dest = path / name
         changed = old.get(name) != entry
         if entry[0]:
-            if dest.exists() and not dest.is_dir():
-                _remove(dest)
             dest.mkdir(exist_ok=True)
             synced[name] = entry
             if not parts and name.isdigit():  # a scene: synced when it is looked at
@@ -262,8 +254,6 @@ def _sync(path: Path, parts: tuple[str, ...]) -> None:
         elif not _lazy((*parts, name)):
             fetch.append(name)
         else:
-            if dest.is_dir():
-                _remove(dest)
             open(dest, "wb").close()  # placeholder: fetched by local()
             synced[name] = entry
 

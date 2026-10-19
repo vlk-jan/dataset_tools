@@ -18,10 +18,6 @@ for venv in .venv-viewer .venv; do
         break
     fi
 done
-if [ -z "$VIEWER" ]; then
-    echo "helhest-viewer not found. Install it with:" >&2
-    echo "  uv venv --python 3.12 $REPO/.venv-viewer && uv pip install --python $REPO/.venv-viewer -e \"$REPO[viewer]\"" >&2
-    exit 1
-fi
+: "${VIEWER:?helhest-viewer not found; install the viewer extra: pip install -e \"$REPO[viewer]\"}"
 
 exec "$VIEWER" "$URL" --open "$@"
