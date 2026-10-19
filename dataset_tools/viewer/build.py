@@ -20,6 +20,7 @@ import numpy as np
 from .. import image_format
 from ..transforms import interpolate_poses, mat_to_quat, poses_from_quat, roll_pitch_from_matrix
 from . import loaders as L
+from . import remote
 from .loaders import CHASSIS, CHASSIS_CENTER, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 from .probe import ARTEFACTS_BY_KEY, COUNTED_DIRS, OPTIONAL_ARTEFACTS, DatasetRoot, SceneProbe
 from .render import unit_colors
@@ -612,7 +613,7 @@ def read_driven_similarity(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
-        with np.load(path) as d:
+        with np.load(remote.local(path)) as d:
             if "driven" not in d.files or "max_sim" not in d.files:
                 return None
             out = {

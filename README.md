@@ -35,6 +35,7 @@ python3 -m venv .venv && .venv/bin/pip install -e .                  # extractio
 
 uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e ".[viewer]"   # plus the viewer
 .venv-viewer/bin/helhest-viewer /path/to/dataset --open              # http://127.0.0.1:8080/
+.venv-viewer/bin/helhest-viewer http://subtdata.felk.cvut.cz/HELHEST/   # or a root on a web server
 ```
 
 - That is a bare root: scenes with clouds, images and poses. A release root

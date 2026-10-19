@@ -42,7 +42,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from ..transforms import roll_pitch_from_matrix
-from . import geo, render
+from . import geo, remote, render
 from .build import META_VERSION, BuildOptions, SceneAccess, build_scene, read_driven_similarity
 from .index_page import THUMB_SLOTS, build_index, split_mark, thumb_index
 from .loaders import (
@@ -586,7 +586,7 @@ def create_app(
             raise HTTPException(404, f"no thumbnail slot {slot!r}")
         stored = root.atlas_thumb(scene_id, slot)
         if stored is not None:
-            return FileResponse(stored, media_type="image/jpeg")
+            return FileResponse(remote.local(stored), media_type="image/jpeg")
 
         n_frames = access.probe.n_frames
         if not n_frames or not access.probe.has("images"):

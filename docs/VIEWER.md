@@ -27,7 +27,7 @@ python3 -m venv .venv-viewer
 
 | Flag | Meaning |
 | --- | --- |
-| `root` | the dataset root: the directory holding `0000/`, `0001/`, ... |
+| `root` | the dataset root: the directory holding `0000/`, `0001/`, ..., or the `http(s)://` URL of one (see [A root on a web server](#a-root-on-a-web-server)) |
 | `--host` | bind address (default `127.0.0.1`; `0.0.0.0` to reach it from another machine -- see [Who can reach it](#who-can-reach-it)) |
 | `--port` | port (default `8080`) |
 | `--max-seconds S` | seconds per viewing window; longer segments are split into parts of equal duration (default `600`) |
@@ -35,7 +35,7 @@ python3 -m venv .venv-viewer
 | `--cache-dir DIR` | where built scenes are cached (default: `<root name>-<hash>` under `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/`, one per root) |
 | `--clear-cache` | delete this root's cached probes and built scenes before starting, so everything is rebuilt |
 | `--cache-max-gb GB` | keep at most this much of built 3D windows on disk, oldest build removed first (default `5`) |
-| `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset) |
+| `--notes-dir DIR` | where reviewer notes are kept (default: `<root>/notes/`, so they travel with the dataset; `<cache-dir>/notes/` for a URL root) |
 | `--no-notes` | turn notes off entirely: none read, written or shown |
 | `--author NAME` | who new notes are from (default: `$USER`) |
 | `--no-prefetch` | do not build windows in the background (the next one when a window is opened, the first when a scene page is) (see [Performance](#performance)) |
@@ -47,6 +47,33 @@ the viewer writes goes to the cache directory -- so it is safe to point at a
 read-only or shared copy. Notes are the one thing a person adds, and they are
 written into `<root>/notes/`; on a root that will not take them the viewer says
 so and keeps composing switched off rather than failing at the save.
+
+### A root on a web server
+
+A root published as a plain directory index (Apache's autoindex, or
+`python -m http.server`) is opened by its URL:
+
+```bash
+helhest-viewer http://subtdata.felk.cvut.cz/HELHEST/
+```
+
+It is mirrored into `<cache-dir>/mirror/` as it is browsed
+(`dataset_tools/viewer/remote.py`). Directory listings and the small files of
+the root, a scene and `atlas/` are synced when they are first needed and again
+after 5 minutes. A scene is synced when it is first probed. Per-frame files and
+every `.npy` are downloaded when something reads them; the probe reads only the
+arrays' headers, by range requests. A first index of a release therefore costs
+a few listings per scene (a 28k-frame scene: 6 x 250 kB gzipped), a scene page
+its arrays (up to ~50 MB for the longest scenes), and a 3D window its 40-160
+clouds and height maps. After that it is as fast as a local root.
+
+- Changes on the server show up after the 5-minute refresh. They are seen by
+  the date and size the index prints: to the minute and rounded, which is fine
+  for a published release that is not rewritten in place.
+- Notes go to `<cache-dir>/notes/` (or `--notes-dir`), never into the mirror,
+  which every sync is free to overwrite.
+- The mirror has no size limit (`--cache-max-gb` bounds only built windows).
+  `--clear-cache` empties it along with the rest.
 
 ### Who can reach it
 

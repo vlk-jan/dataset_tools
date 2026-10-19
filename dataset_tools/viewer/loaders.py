@@ -16,6 +16,7 @@ import numpy as np
 
 from .. import gt_io, gt_map
 from ..gt_io import SegmentRow as Segment
+from . import remote
 
 logger = logging.getLogger("dataset_tools.viewer.loaders")
 
@@ -106,7 +107,7 @@ def read_matrix(path: Path, shape: tuple[int, ...] | None = None) -> np.ndarray 
 def load_npy(path: Path) -> np.ndarray | None:
     """``np.load`` that returns None instead of raising."""
     try:
-        return np.load(path)
+        return np.load(remote.local(path))
     except (OSError, ValueError) as exc:
         _unreadable("load", path, exc)
         return None
@@ -116,7 +117,7 @@ def load_npz_key(path: Path, key: str) -> np.ndarray | None:
     """Load one array out of an ``.npz``, tolerating a differently-named key
     (falls back to the file's single array when ``key`` is absent)."""
     try:
-        with np.load(path) as data:
+        with np.load(remote.local(path)) as data:
             if key in data:
                 return np.asarray(data[key])
             names = list(data.keys())

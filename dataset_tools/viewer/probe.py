@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import logging
 import os
@@ -20,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 from .. import image_format
+from . import remote
 from .loaders import count_lines, read_segments, read_text
 from .splits import DECLARED_FILES, NO_SPLITS, SceneSplits, read_splits
 from .windows import span_fractions
@@ -34,8 +36,13 @@ def scene_fingerprint(scene_dir: Path) -> str:
     """A digest that moves whenever anything a page shows from this scene does.
 
     Stats the directory and every entry directly in it (not per-frame files
-    rewritten in place). Raises ``OSError`` when the scene is gone.
+    rewritten in place). Raises ``OSError`` when the scene is gone. A mirrored
+    scene (:mod:`.remote`) is synced first and digested by its listing instead.
     """
+    remote.refresh(scene_dir)
+    digest = remote.fingerprint(scene_dir)
+    if digest is not None:
+        return digest
     st = scene_dir.stat()
     h = hashlib.sha1(f"{st.st_ino}:{st.st_mtime_ns}".encode())
     with os.scandir(scene_dir) as entries:
@@ -279,8 +286,14 @@ class SceneProbe:
 
 
 def _npy_shape(path: Path) -> tuple[int, ...] | None:
-    """Shape of an ``.npy`` from its header only (memory-mapped)."""
+    """Shape of an ``.npy`` from its header only (memory-mapped, or a mirror's range read)."""
     try:
+        head = remote.head(path)
+        if head is not None:
+            fh = io.BytesIO(head)
+            version = np.lib.format.read_magic(fh)
+            read = np.lib.format.read_array_header_1_0 if version == (1, 0) else np.lib.format.read_array_header_2_0
+            return tuple(read(fh)[0])
         return tuple(np.load(path, mmap_mode="r").shape)
     except Exception:  # noqa: BLE001 - any unreadable array is just "unknown"
         return None
@@ -464,6 +477,7 @@ class DatasetRoot:
     def scene_ids(self, refresh: bool = False) -> list[str]:
         """All scene directories (all-digit names), sorted."""
         if self._scene_ids is None or refresh:
+            remote.refresh(self.path)
             try:
                 names = [n for n in os.listdir(self.path) if n.isdigit() and (self.path / n).is_dir()]
             except OSError as exc:

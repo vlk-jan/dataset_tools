@@ -12,6 +12,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from . import remote
 from .loaders import CHASSIS, CHASSIS_CENTER, HM_RES, WHEEL_RADIUS, WHEEL_WIDTH, WHEELS
 
 # Anchor colours (0-255) for a few perceptually reasonable ramps.
@@ -276,7 +277,7 @@ def render_camera_image(path: Path, width: int = 640, quality: int = JPEG_QUALIT
 
     A JPEG source that needs no downscale is served as is (no re-encode loss).
     """
-    data = path.read_bytes()
+    data = remote.local(path).read_bytes()
     bgr = _decode(data)
     if data[:3] == b"\xff\xd8\xff" and not (width and bgr.shape[1] > width):
         return data
@@ -333,7 +334,7 @@ def render_cloud_on_image(
     dots coloured by depth. Returns the JPEG and the colour depth span (2nd-98th
     percentile, m), or ``None`` when no return landed.
     """
-    full = _decode(image_path.read_bytes())
+    full = _decode(remote.local(image_path).read_bytes())
     bgr = _shrink(full, width)
     scale = bgr.shape[1] / full.shape[1]
     h, w = bgr.shape[:2]

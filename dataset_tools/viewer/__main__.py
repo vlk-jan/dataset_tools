@@ -8,7 +8,8 @@ import logging
 import sys
 from pathlib import Path
 
-from .probe import DEFAULT_CACHE_MAX_GB
+from . import remote
+from .probe import DEFAULT_CACHE_MAX_GB, default_cache_dir
 from .windows import DEFAULT_MAX_FRAMES, DEFAULT_MAX_SECONDS
 
 #: Bind addresses that mean "this machine only", and the Host names a browser
@@ -25,7 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
             "segment with the camera image, height map and cloud alongside."
         ),
     )
-    parser.add_argument("root", type=Path, help="dataset root directory (the one holding 0000/, 0001/, ...)")
+    parser.add_argument(
+        "root",
+        help="dataset root directory (the one holding 0000/, 0001/, ...), or the http(s) URL of one "
+        "served as a directory index, mirrored into the cache as it is browsed",
+    )
     parser.add_argument(
         "--host",
         default="127.0.0.1",
@@ -59,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--notes-dir",
         type=Path,
         default=None,
-        help="where reviewer notes are kept (default: <root>/notes, so they travel with the dataset)",
+        help="where reviewer notes are kept (default: <root>/notes, so they travel with the dataset; "
+        "<cache-dir>/notes for a URL root)",
     )
     parser.add_argument(
         "--no-notes",
@@ -122,9 +128,20 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
-    if not args.root.is_dir():
-        print(f"error: {args.root} is not a directory", file=sys.stderr)
-        return 2
+    cache_dir, notes_dir = args.cache_dir, args.notes_dir
+    if remote.is_url(args.root):
+        cache_dir = cache_dir or default_cache_dir(Path(args.root))
+        notes_dir = notes_dir or cache_dir / "notes"  # the mirror is overwritten by each sync
+        try:
+            root = remote.mount(args.root, cache_dir, clear=args.clear_cache)
+        except OSError as exc:
+            print(f"error: cannot list {args.root}: {exc}", file=sys.stderr)
+            return 2
+    else:
+        root = Path(args.root)
+        if not root.is_dir():
+            print(f"error: {root} is not a directory", file=sys.stderr)
+            return 2
 
     try:
         from .app import create_app
@@ -160,11 +177,11 @@ def main(argv: list[str] | None = None) -> int:
             args.host,
         )
     app = create_app(
-        args.root,
+        root,
         max_frames=args.max_frames,
         max_seconds=args.max_seconds,
-        cache_dir=args.cache_dir,
-        notes_dir=args.notes_dir,
+        cache_dir=cache_dir,
+        notes_dir=notes_dir,
         notes=args.notes,
         author=args.author,
         clear_cache=args.clear_cache,
