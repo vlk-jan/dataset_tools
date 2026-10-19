@@ -12,7 +12,7 @@ authors:
     given-names: Jan
     email: vlkjan6@fel.cvut.cz
     affiliation: Czech Technical University in Prague
-version: 1.0.1
+version: 1.1.0
 license: BSD-3-Clause
 repository-code: https://github.com/vlk-jan/dataset_tools
 keywords:

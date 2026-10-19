@@ -62,6 +62,7 @@ from scipy.spatial import Delaunay, cKDTree
 from scipy.stats import binned_statistic_2d
 
 from dataset_tools.gt_io import _replace_atomically
+from dataset_tools.time_align import usable_cpus
 
 #: Outside the hull of returns: filled, not measured.
 VALIDITY_EXTRAPOLATED = 0
@@ -411,7 +412,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root", type=Path)
     ap.add_argument("--scenes", default="", help="comma-separated; default every scene with clouds")
-    ap.add_argument("--workers", type=int, default=os.cpu_count() or 8)
+    ap.add_argument("--workers", type=int, default=usable_cpus(), help="default: the CPUs this process may use")
     ap.add_argument(
         "--overwrite", action="store_true", help="rebuild every map, dropping maps of frames now too sparse"
     )

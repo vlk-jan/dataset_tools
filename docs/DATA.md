@@ -17,7 +17,7 @@ banks, a drained reservoir bed, snow, and three tip-over events are all in.
 | Sites | Robotour 2025 venue — chateau landscape park & arboretum [LOCATION]; Temešvár area (Písek district) — village farmyard, pine-forest edge & fallow meadow, forested hills around a drained pond; Milíčovský háj (Prague) — snow-covered lowland deciduous forest |
 | Odometry | present in 32 scenes (17 covering the whole scene, 15 only part of it; see table); absent in 11 |
 | Size on disk | ~7 GB per 10k frames (PNG images dominate) |
-| Location | `/mnt/data/vras/data/HELHEST/` (CTU VRAS storage); raw bags on `subtdata:/data/` (see [Raw recordings](#6-raw-recordings)) |
+| Location | `/mnt/data/vras/data/HELHEST/` (CTU VRAS storage) is to hold HELHEST v2.4, not this release (see [New sensor generation](#7-new-sensor-generation)); raw bags on `subtdata:/data/` (see [Raw recordings](#6-raw-recordings)) |
 
 > This document describes the **first-generation** sensor setup (Livox + OAK-D,
 > Sep 2025 – Feb 2026). The robot was rebuilt in summer 2026 with an Odin1
@@ -504,8 +504,8 @@ predate this and have none.
 A georeferenced track is a disclosure the anchored poses were not.
 Anonymisation before any public release was set as a prerequisite — GNSS
 included — and has not been done: the images show members of the public
-unblurred. Since 2026-10-19 a copy of HELHEST v2.4 is nonetheless being
-published at <http://subtdata.felk.cvut.cz/HELHEST/> (an Apache directory
+unblurred. HELHEST v2.4 is to live at `/mnt/data/vras/data/HELHEST/`, and
+since 2026-10-19 a copy of it is nonetheless being published at <http://subtdata.felk.cvut.cz/HELHEST/> (an Apache directory
 index, still filling; `helhest-viewer` opens it by URL,
 `scripts/viewer_public.sh`), `gps.npy` included.
 

@@ -906,5 +906,5 @@ which `dataset_tools.heightmap` and `dataset_tools.keyframes` reproduce).
 
 ## License
 
-BSD-3-Clause, see [LICENSE](LICENSE). Copyright (c) Jan Vlk,
-Czech Technical University in Prague.
+BSD-3-Clause, see [LICENSE](LICENSE). Copyright (c) VRAS (Vision for Robotics
+and Autonomous Systems), Czech Technical University in Prague.
