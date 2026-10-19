@@ -43,4 +43,5 @@ removed once the campaign finished; see git history.
 
 | Script | What it does |
 | --- | --- |
+| `viewer_public.sh` | start the viewer on the public release (`http://subtdata.felk.cvut.cz/HELHEST/`, or `$VIEWER_URL`) and open a browser; extra flags go to `helhest-viewer` |
 | `viewer_connect.sh` | open an ssh tunnel from a laptop to a viewer started by `slurm/viewer.batch` on an RCI compute node |
