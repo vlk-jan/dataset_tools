@@ -1,6 +1,6 @@
 # Documentation
 
-Two kinds of document live here. The first two describe things a user of the
+Two kinds of document live here. The first three describe things a user of the
 tools or the dataset needs; the rest are the records of the campaigns that
 produced the HELHEST releases -- what was decided, measured and fixed, dated,
 and site-specific in places (the CTU RCI cluster, the group's storage, one
@@ -12,6 +12,7 @@ laptop). They are kept because the next campaign starts from them.
 | --- | --- |
 | [`DATA.md`](DATA.md) | The HELHEST dataset itself: platform and sensors, the scene layout and every file's format, sessions and sites, the per-scene table, known issues, the second sensor generation. |
 | [`VIEWER.md`](VIEWER.md) | The dataset viewer: what each file turns into on the page, windows and segments, the map, reviewer notes, the atlas, the train/validation split display, and the command line. |
+| [`EXTRACTION_GUARDS.md`](EXTRACTION_GUARDS.md) | What `helhest-extract` corrects for before writing a frame: the sensor's publish latency (`--time_align`), reset GNSS/INS solutions and frames with no pose under them (`--gnss_guard`). |
 
 ## Campaign records
 
