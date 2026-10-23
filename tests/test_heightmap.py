@@ -11,14 +11,19 @@ FIXTURE = Path(__file__).parent / "data" / "heightmap_parity.npz"
 
 
 def test_maps_match_drifts_builder():
-    """Three HELHEST v2.4 frames (meadow, paved path, forest; a third of each cloud) as DRIFT's
-    scripts/data/build_heightmaps.py built them at the v2 settings, 2026-10-12."""
+    """Three HELHEST v2.4 frames (meadow, paved path, forest; a third of each cloud). ``height_map_v24_*``:
+    as DRIFT's scripts/data/build_heightmaps.py built them at the v2.0-v2.4 settings, 2026-10-12;
+    ``height_map_*``: at the HELHEST v2.5 settings in ``parameters``, which DRIFT's builder must reproduce."""
     d = np.load(FIXTURE)
+    p = hmap.Params.from_dict(json.loads(str(d["parameters"])))
+    assert p == hmap.Params(statistic="median", tie_jitter=hmap.TIE_JITTER_V1)
+    assert str(d["tie_jitter_sha256"]) == hashlib.sha256(hmap.tie_jitter_table(p.tie_jitter).tobytes()).hexdigest()
     for k in range(3):
-        hm, val = hmap.build_frame(d[f"cloud_{k}"], d[f"R_align_{k}"])
-        np.testing.assert_allclose(hm, d[f"height_map_{k}"], atol=1e-9, rtol=0)
-        np.testing.assert_array_equal(val, d[f"validity_{k}"])
-        assert set(np.unique(val)) <= {0, 1, 2, 3} and (val == hmap.VALIDITY_ANCHORED).any()
+        for params, suffix in ((hmap.Params(), "v24_"), (p, "")):
+            hm, val = hmap.build_frame(d[f"cloud_{k}"], d[f"R_align_{k}"], params)
+            np.testing.assert_allclose(hm, d[f"height_map_{suffix}{k}"], atol=1e-9, rtol=0)
+            np.testing.assert_array_equal(val, d[f"validity_{suffix}{k}"])
+            assert set(np.unique(val)) <= {0, 1, 2, 3} and (val == hmap.VALIDITY_ANCHORED).any()
 
 
 def test_a_sparse_cloud_has_no_map():
