@@ -27,8 +27,6 @@ import cv2
 import numpy as np
 
 from dataset_tools.disk_usage import dir_usage
-from dataset_tools.gt_gaps import window_errors as scan_windows
-from dataset_tools.gt_io import read_trajectory
 from dataset_tools.release import _write_json as write_json
 from dataset_tools.validate_scene import _npy_rows
 from dataset_tools.viewer import render
@@ -50,60 +48,8 @@ ATLAS_SCHEMA = "dataset_tools.viewer/atlas@2"
 THUMB_WIDTH = 384
 THUMB_QUALITY = 80
 
-#: Window length of the local-consistency metric, in seconds.
-WINDOW_S = 2.0
-
-#: Clouds sampled for ``pts_mean`` when ``regen/validation.csv`` has no count.
+#: Clouds sampled for ``pts_mean``.
 CLOUD_SAMPLES = 5
-
-
-# --------------------------------------------------------------------------
-# small readers over <scene>/regen/
-# --------------------------------------------------------------------------
-
-
-def read_kv(path: Path) -> dict[str, str]:
-    """``key=value`` lines (``regen/filter_stats.txt``)."""
-    out: dict[str, str] = {}
-    try:
-        text = path.read_text()
-    except OSError:
-        return out
-    for line in text.splitlines():
-        key, sep, value = line.partition("=")
-        if sep:
-            out[key.strip()] = value.strip()
-    return out
-
-
-def count_rows(path: Path) -> int | None:
-    """Non-comment, non-blank lines, or None when the file is absent."""
-    try:
-        with open(path) as fh:
-            return sum(1 for line in fh if line.strip() and not line.startswith("#"))
-    except OSError:
-        return None
-
-
-def read_validation(path: Path) -> dict[str, str]:
-    """The scene's row of ``regen/validation.csv``.
-
-    Only its cloud/frame columns are trusted: the pose ones may come from another odometry run.
-    """
-    try:
-        with open(path, newline="") as fh:
-            for row in csv.DictReader(fh):
-                return row
-    except OSError:
-        pass
-    return {}
-
-
-def as_int(value: Any) -> int | None:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
 
 
 def as_float(value: Any) -> float | None:
@@ -119,40 +65,8 @@ def as_float(value: Any) -> float | None:
 # --------------------------------------------------------------------------
 
 
-def window_errors(access: SceneAccess) -> tuple[float, float] | None:
-    """``(median, p95)`` of the 2 s window error against the live /odom, in m.
-
-    Only within segments. ``regen/odom_ref.txt`` (~100 Hz) is the reference;
-    frame-rate ``transforms.npy`` is too coarse for a 2 s window.
-    """
-    ref_path = access.dir / "regen" / "odom_ref.txt"
-    odom = access.odometry
-    if odom is None or not ref_path.is_file():
-        return None
-    ts, poses = odom
-    if len(ts) < 2:
-        return None
-    try:
-        rt, rT = read_trajectory(ref_path)
-    except (OSError, ValueError) as exc:
-        logger.warning("%s: cannot read odom_ref.txt: %s", access.scene_id, exc)
-        return None
-    if not len(rt):
-        return None
-    t = np.asarray(ts)
-    bounds = [(s.start_ts, s.end_ts) for s in access.segments]
-    errs = [
-        err
-        for i, j, err in scan_windows(t, np.asarray(poses), rt, rT, WINDOW_S)
-        if not bounds or any(a <= t[i] and t[j] <= b for a, b in bounds)
-    ]
-    if not len(errs):
-        return None
-    return float(np.median(errs)), float(np.percentile(errs, 95))
-
-
 def sampled_points(access: SceneAccess) -> int | None:
-    """Mean points per cloud from a few ``.npy`` headers (no ``validation.csv`` fallback)."""
+    """Mean points per cloud from a few ``.npy`` headers."""
     probe = access.probe
     if not probe.has("clouds") or not probe.n_frames:
         return None
@@ -198,9 +112,6 @@ def scene_entry(
 ) -> dict[str, Any]:
     """One scene's atlas entry: curated prose first, then everything computed."""
     probe = access.probe
-    regen = access.dir / "regen"
-    filter_stats = read_kv(regen / "filter_stats.txt")
-    validation = read_validation(regen / "validation.csv")
     bag = bags.get(probe.scene_id, {})
 
     entry: dict[str, Any] = {}
@@ -219,7 +130,7 @@ def scene_entry(
     for kind in ("images", "clouds"):
         if probe.counts.get(kind) is not None:
             entry[kind] = probe.counts[kind]
-    points = as_int(validation.get("points_mean")) or sampled_points(access)
+    points = sampled_points(access)
     if points:
         entry["pts_mean"] = points
 
@@ -233,12 +144,6 @@ def scene_entry(
         ts = odom[0]
         inside = ts if win is None else ts[(ts >= win[0]) & (ts <= win[1])]
         entry["poses"] = int(len(inside))
-    poses_unf = as_int(filter_stats.get("poses_in"))
-    if poses_unf:
-        entry["poses_unf"] = poses_unf
-    raw = count_rows(regen / "odometry_imu_raw.txt")
-    if raw:
-        entry["poses_raw"] = raw
 
     entry["segments"] = len(segments) or probe.n_segments
     lens = sorted((v for s in segments if (v := clip((s.start_ts, s.end_ts), win)) > 0.0), reverse=True)
@@ -246,10 +151,6 @@ def scene_entry(
         entry["seg_lens"] = [round(v, 1) for v in lens]
         entry["seg_med_s"] = round(float(statistics.median(lens)), 1)
         entry["gt_span_s"] = round(float(sum(lens)), 1)
-
-    flags = count_rows(regen / "odometry_flags.txt")
-    if flags is not None:
-        entry["flags"] = flags
 
     clipped_bounds = [(max(s.start_ts, win[0]), min(s.end_ts, win[1])) for s in segments] if win and segments else None
     if clipped_bounds is not None:
@@ -261,14 +162,8 @@ def scene_entry(
 
     if probe.segment_coverage is not None:
         entry["cov"] = round(probe.segment_coverage, 4)
-    errors = window_errors(access)
-    if errors:
-        entry["win_med"] = round(errors[0], 4)
-        entry["win_p95"] = round(errors[1], 4)
 
     entry["seg_spans"] = [[round(v, 4) for v in span] for span in probe.segment_spans]
-    entry["fill_spans"] = [[round(v, 4) for v in span] for span in probe.fill_spans]
-    entry["fill_segments"] = len(probe.fill_spans)
 
     if curated.get("description"):
         entry["description"] = curated["description"]
@@ -481,9 +376,8 @@ def build_atlas(root: DatasetRoot, args, curation: dict, previous: dict) -> dict
         "root": str(root.path),
         "source": (
             "Generated by dataset_tools scripts/make_atlas.py from this root: counts, "
-            "spans and coverage from the scene probe, path and motion from odometry.txt, "
-            "pose and flag counts from <scene>/regen/, 2 s window error against "
-            "<scene>/regen/odom_ref.txt. Prose and thumbnail frames come from "
+            "spans and coverage from the scene probe, path and motion from odometry.txt. "
+            "Prose and thumbnail frames come from "
             "atlas/curation.json, the only hand-edited file."
         ),
         "note": (

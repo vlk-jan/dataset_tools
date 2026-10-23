@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from .. import gt_io, gt_map
+from .. import gt_io, robot
 from ..gt_io import SegmentRow as Segment
 from . import remote
 
@@ -27,17 +27,17 @@ HM_RES = 0.1
 HM_EXTENT = (-6.4, 6.4)
 
 # HELHEST geometry (DRIFT's robot model): base_link IS the front axle. Hubs and
-# radius come from ``gt_map`` so the drawn robot is the one the contact check uses.
+# radius come from ``dataset_tools.robot`` so the drawn robot is the one the height maps anchor.
 # The chassis box carries base_link's trajectory, its centre shifted back by
 # CHASSIS_CENTER (body frame) to span the real chassis. Shared by build and render.
 CHASSIS = dict(hx=0.35, hy=0.25, hz=0.15)
 CHASSIS_CENTER = (-0.15, 0.0, 0.0)
-WHEEL_RADIUS = gt_map.WHEEL_RADIUS
+WHEEL_RADIUS = robot.WHEEL_RADIUS
 WHEEL_WIDTH = 0.142
 #: name -> (x, y, z) hub in base frame, joint_states column, x-align sign.
-#: ``gt_map.WHEELS`` rows are left, right, rear; the bodies are made in
+#: ``robot.WHEELS`` rows are left, right, rear; the bodies are made in
 #: joint_states order (left, rear, right).
-_LEFT, _RIGHT, _REAR = (tuple(float(v) for v in row) for row in gt_map.WHEELS)
+_LEFT, _RIGHT, _REAR = (tuple(float(v) for v in row) for row in robot.WHEELS)
 WHEELS = {
     "wheel_left": (*_LEFT, 0.0, 0, -1.0),
     "wheel_rear": (*_REAR, 0.0, 1, -1.0),
