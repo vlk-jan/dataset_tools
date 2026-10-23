@@ -5,7 +5,7 @@ installed package. They import the installed `dataset_tools`, so run them with
 the virtualenv the checkout is installed into (`pip install -e .`):
 
 ```bash
-.venv/bin/python scripts/make_atlas.py /data/HELHEST_v2_beta --bags docs/v2_bags.csv --check
+.venv/bin/python scripts/make_atlas.py /mnt/personal/$USER/HELHEST_v2_4 --bags docs/v2_4_bags.csv --check
 ```
 
 ## Tools for any root

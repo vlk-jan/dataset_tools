@@ -16,19 +16,21 @@
 #
 #   CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 #
-# Array index = 0-based row of $CSV = scene number; pass CSV and out_root every
-# time, their defaults are the v2 beta list and root. A scene with
-# source_bag.txt is skipped, so re-submitting resumes. %4: subtdata sustains
-# ~50 MB/s aggregate. FORCE=1 re-extracts (--overwrite):
+# Array index = 0-based row of $CSV = scene number; CSV and out_root are
+# required. A scene whose source_bag.txt names the same bag is skipped, so
+# re-submitting resumes. %4: subtdata sustains ~50 MB/s aggregate.
+# HM_ARGS passes settings to the height maps, whose defaults are not v2.4's:
+# HM_ARGS="--set statistic=p90 --set tie_jitter=none" builds v2.0-v2.4 maps.
+# FORCE=1 re-extracts (--overwrite):
 #
 #   FORCE=1 CSV=docs/v2_4_bags.csv sbatch --array=7 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 set -uo pipefail
 
-OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
+OUT=${1:?usage: CSV=docs/v2_<n>_bags.csv sbatch --array=N-M slurm/extract_v2.batch OUT_ROOT}
 # Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-CSV=${CSV:-$REPO/docs/v2_bags.csv}
+CSV=${CSV:?set CSV to the release bag list, e.g. CSV=docs/v2_4_bags.csv}
 
 read_row
 scene=$(echo "$row" | cut -d, -f1)
@@ -79,12 +81,12 @@ if [ -s "$local_out/$scene/odometry.txt" ] && [ -d "$local_out/$scene/clouds" ];
     fi
 fi
 
-# Height maps and masks (dataset_tools.heightmap, the v2 settings), in this task,
+# Height maps and masks (dataset_tools.heightmap; HM_ARGS adds settings), in this task,
 # from the clouds and the gravity_align.npy just written, so a re-extraction can
 # never leave maps of the run before it.
 echo "[$(date '+%F %T')] $scene height maps"
 singularity exec $BINDS "$SIF" "$PY" -m dataset_tools.heightmap "$local_out" \
-    --scenes "$scene" --workers "${SLURM_CPUS_PER_TASK:-16}" --overwrite
+    --scenes "$scene" --workers "${SLURM_CPUS_PER_TASK:-16}" --overwrite ${HM_ARGS:-}
 hmrc=$?
 echo "[$(date '+%F %T')] $scene height maps rc=$hmrc"
 [ $hmrc -eq 0 ] || { echo "$scene: HEIGHT MAPS FAILED (rc=$hmrc) -- not published"; exit 16; }

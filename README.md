@@ -100,14 +100,15 @@ default, so neither the bags nor the dataset are reachable without them.
 
 ```bash
 SIF=/mnt/data/vras/data/helhest-jazzy.sif
-singularity exec --bind /mnt/data $SIF python3 -m venv .venv
-singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[test,build]"
-singularity exec --bind /mnt/data $SIF \
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF python3 -m venv .venv
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF .venv/bin/pip install -e ".[test,build]"
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF \
     .venv/bin/python -m dataset_tools.extract <bags> <output> --jobs 8
 ```
 
 The `.venv` is not in the repository (it is gitignored) -- `slurm/extract_v2.batch`
-and the Slurm example below both expect one built this way at `$REPO/.venv`.
+and the Slurm example below both expect one built this way at `$REPO/.venv`
+(`slurm/viewer.batch`: the viewer's at `$REPO/.venv-viewer`).
 
 Add further `--bind` options for any other filesystem you read or write
 (e.g. `--bind /mnt/personal`).
@@ -169,12 +170,14 @@ container as under [Container](#container-ctu-cluster):
 
 ```bash
 mkdir -p slurm/slurm_out
-CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
+CSV=docs/v2_4_bags.csv HM_ARGS="--set statistic=p90 --set tie_jitter=none" \
+    sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 ```
 
 The array range is the bag list's rows (`0` to rows - 1; `%4` caps the jobs
-running at once). **Always pass `CSV=` and the root**: their defaults are the
-v2 beta list and root, and a forgotten one extracts the wrong bags. A root
+running at once). `CSV=` and the root are required. `HM_ARGS` goes to
+`helhest-heightmap`, whose defaults are v2.5's; the line above builds v2.4's
+maps. A root
 that reuses an earlier release's scenes (linked in) is submitted with the
 range of its new rows only.
 
@@ -188,13 +191,14 @@ Each array task leaves one finished scene:
    `gravity_align.npy` rotated onto the clouds' frame, recorded in
    `odom_frame.txt` (inside the container: `open3d` needs its glibc); a
    scene it cannot measure keeps the Odin1's own odometry, with a warning;
-4. `helhest-heightmap --overwrite`: `height_maps/`, `height_masks/`,
+4. `helhest-heightmap --overwrite $HM_ARGS`: `height_maps/`, `height_masks/`,
    `height_maps.json`;
 5. `helhest-validate` on the scene, then a copy swapped in as `<root>/<scene>/` and the
    report to `<root>/.validation/<scene>.csv`.
 
-A scene already complete with the same bag is skipped, so resubmitting the
-same range resumes. A scene that holds a *different* bag stops the task
+A scene whose `source_bag.txt` names the same bag is skipped, so resubmitting
+the same range resumes (only that file is checked, not the frame counts;
+`FORCE=1` redoes a scene you suspect is incomplete). A scene that holds a *different* bag stops the task
 (exit 13); `FORCE=1` re-extracts it. A scene that fails validation is not
 published unless `FORCE_PUBLISH=1`. Exit codes name the failing step: 10
 fetch, 11 extract, 12 publish, 14 validation, 15 the rotation, 16 the maps.
@@ -214,8 +218,9 @@ It runs `helhest-release` (`scenes.csv`, `keyframes.lst`,
 `keyframes_train.lst`, `keyframes_heldout.lst`, `manifest.json` with the
 image format, `splits.json`, `atlas/curation.json`, `README.md`), validates
 the whole root into `<root>/validation.csv`, and draws the atlas
-(`scripts/make_atlas.py <root> --bags <list>`). Its exit code is the
-validation's. `helhest-release` refuses a root whose scenes do not match the
+(`scripts/make_atlas.py <root> --bags <list>`). It exits 2 when
+`helhest-release` fails, else with the validation's code; atlas problems are
+only logged. `helhest-release` refuses a root whose scenes do not match the
 bag list, either way round, or a held-out scene that is not on disk.
 DRIFT's loader keeps the `manifest.json` -> `held_out.scenes` out of every
 training and validation fold whichever list it reads (`--keyframes`,
@@ -226,27 +231,27 @@ training and validation fold whichever list it reads (`--keyframes`,
 
 ```bash
 helhest-validate <root> -v                      # INFO lines too
-helhest-disk-usage <root>                       # refresh disk_usage.json for the viewer
+helhest-disk-usage <root> --all                 # rescan every scene for the viewer
 helhest-viewer <root>                           # see Viewer below
 ```
 
 ### The same without Slurm
 
-`helhest-extract` numbers scenes by the sorted bag directory names, and
-`helhest-release` refuses a scene whose bag is not the list's, so the bag
-directory must sort in list order. Rows with `extract_args` take a call of
-their own on the single bag, with `--start_index <scene>`, as the batch job
-does:
+`helhest-extract` numbers the bags of a directory by their sorted names, and
+the v2.4 names do not sort in scene order (`robotour_finals_1` is 0002, the
+`helhest_*` bags 0022-0035 sort first), so extract one bag per row with
+`--start_index <scene>` and the row's `extract_args`, as the batch job does:
 
 ```bash
-helhest-extract <bags> <root> --jobs 8 --scenes 0-28                        # rows without extract_args
-helhest-extract <bags>/<bag_29> <root> --start_index 29 --trim_idle 60 10   # one per row with them
+tail -n +2 docs/v2_4_bags.csv | while IFS=, read -r scene _ bag _ _ _ _ _ args; do
+    helhest-extract "<bags>/$(basename "$bag")" <root> --start_index "$((10#$scene))" $args
+done
 helhest-odom-frame measure <root> --fits fits.json      # every scene with clouds and no odom_frame.txt
 helhest-odom-frame apply   <root> --fits fits.json
-helhest-heightmap <root>                                # --workers N, --scenes 0,3
+helhest-heightmap <root> --set statistic=p90 --set tie_jitter=none   # v2.4's settings; --workers N, --scenes 0000,0003
 helhest-release   <root> --spec docs/releases/v2_4.json
 helhest-validate  <root> --csv <root>/validation.csv
-python scripts/make_atlas.py <root> --bags docs/v2_4_bags.csv
+.venv/bin/python scripts/make_atlas.py <root> --bags docs/v2_4_bags.csv
 ```
 
 `helhest-odom-frame` needs the `build` extra. Re-extracting a scene removes
@@ -259,8 +264,9 @@ leaves the root's `scenes.csv` alone), to compare against a root that exists.
 After the clouds or `gravity_align.npy` of a root changed:
 
 ```bash
-sbatch --array=0-35 slurm/heightmaps.batch /mnt/personal/$USER/HELHEST_v2_4   # array index = scene
-helhest-heightmap <root> --scenes 3 --overwrite                                # or by hand
+HM_ARGS="--set statistic=p90 --set tie_jitter=none" \
+    sbatch --array=0-35 slurm/heightmaps.batch /mnt/personal/$USER/HELHEST_v2_4   # array index = scene
+helhest-heightmap <root> --scenes 0003 --overwrite --set statistic=p90 --set tie_jitter=none   # or by hand
 ```
 
 The batch job first checks a sample of the scene's existing maps against a

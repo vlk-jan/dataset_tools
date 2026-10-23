@@ -60,12 +60,14 @@ extractor options to every task of a submission, after the row's own
 
 ```bash
 mkdir -p slurm/slurm_out
-CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
+CSV=docs/v2_4_bags.csv HM_ARGS="--set statistic=p90 --set tie_jitter=none" \
+    sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 ```
 
 The array range covers the rows of the bag list (`0` to rows - 1); `%4` caps
-how many jobs run at once. **Always pass `CSV=` and the root**: omitting either
-falls back to a default that extracts the wrong bags. A root that links in an
+how many jobs run at once. `CSV=` and the root are required. `HM_ARGS` sets
+the height-map settings; the tool's defaults are not v2.4's, so a v2.4 build
+passes the p90 settings shown. A root that links in an
 earlier release's scenes is submitted with the range of its new rows only.
 
 Each array task produces one finished scene:
@@ -75,8 +77,7 @@ Each array task produces one finished scene:
 3. runs `helhest-odom-frame measure`, then `apply` if the measurement succeeded
    (a scene it cannot measure keeps the Odin1's own odometry and gravity alignment,
    with a warning);
-4. runs `helhest-heightmap` with the tool's defaults, which are not v2.4's
-   settings (see [Rebuilding only the height maps](#rebuilding-only-the-height-maps));
+4. runs `helhest-heightmap` with `HM_ARGS`;
 5. validates the scene, moves it into `<root>/<scene>/`, and writes the report
    to `<root>/.validation/<scene>.csv`.
 

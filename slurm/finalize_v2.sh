@@ -5,13 +5,13 @@
 # without one: scenes.csv and the image-format declaration only. Then validate
 # the root and regenerate the atlas (last, so its numbers match the scenes).
 #
-#   slurm/finalize_v2.sh [out_root] [bag_list.csv] [release_spec.json]
+#   slurm/finalize_v2.sh out_root bag_list.csv [release_spec.json]
 #   slurm/finalize_v2.sh /mnt/personal/$USER/HELHEST_v2_4 docs/v2_4_bags.csv docs/releases/v2_4.json
 set -uo pipefail
-OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta}
+OUT=${1:?usage: slurm/finalize_v2.sh OUT_ROOT BAG_LIST.csv [RELEASE_SPEC.json]}
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 . "$REPO/slurm/common.sh"
-BAGS=${2:-$REPO/docs/v2_bags.csv}
+BAGS=${2:?usage: slurm/finalize_v2.sh OUT_ROOT BAG_LIST.csv [RELEASE_SPEC.json]}
 SPEC=${3:-}
 BINDS="--bind /mnt/personal --bind /mnt/data"
 run() { singularity exec $BINDS "$SIF" env PYTHONPATH="$REPO" "$PY" "$@"; }
