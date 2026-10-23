@@ -310,6 +310,13 @@ def build_readme(manifest: dict, spec: dict) -> str:
     path_km = sum(e["path_m"] for e in sc.values()) / 1000
     hours = sum(e["span_s"] for e in sc.values()) / 3600
     kf = manifest["keyframes"]["files"]
+    hp = manifest["height_maps"]["parameters"]
+    hm_line = (
+        "Height maps: built with other settings per scene"
+        if "per_scene" in hp
+        else f"Height maps: cell statistic {hp['statistic']}, canopy clip {hp['canopy_clip_m']} m, "
+        f"min radius {hp['min_radius_m']} m, wheel radius {hp['wheel_radius_m']} m"
+    ) + " (all settings: `manifest.json` -> `height_maps.parameters`)."
     parts = [
         f"# {manifest.get('title') or 'HELHEST ' + manifest['dataset_version']}",
         "",
@@ -321,6 +328,8 @@ def build_readme(manifest: dict, spec: dict) -> str:
         f"{len(sc)} scenes, {frames:,} frames, {hours:.1f} h, {path_km:.1f} km driven. "
         f"Keyframe lists: `keyframes.lst` {kf['keyframes.lst']:,} / `keyframes_train.lst` {kf['keyframes_train.lst']:,} / "
         f"`keyframes_heldout.lst` {kf['keyframes_heldout.lst']:,} lines.",
+        "",
+        hm_line,
         "",
         "## Rebuilding it",
         "",

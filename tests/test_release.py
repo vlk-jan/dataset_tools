@@ -68,7 +68,9 @@ def test_a_release_from_its_spec_and_its_scenes(tmp_path):
     splits = json.loads((root / "splits.json").read_text())
     assert splits["val_scenes"] == ["0001"] and splits["train_scenes"] == ["0000"]
     assert json.loads((root / "atlas" / "curation.json").read_text())["title"] == "Test"
-    assert "| 0001 | val | bag_b |" in (root / "README.md").read_text()
+    readme = (root / "README.md").read_text()
+    assert "| 0001 | val | bag_b |" in readme
+    assert "Height maps: cell statistic p90" in readme
     assert (root / "scenes.csv").exists()
 
 
