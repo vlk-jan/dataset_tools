@@ -40,7 +40,7 @@ REQUIRED_FILES = (
     "gravity_align.npy",
     "camera_intrinsics.txt",
 )
-#: Files that may legitimately be absent (topic missing, or old layout only).
+#: Files that may legitimately be absent (topic missing, or not asked for).
 OPTIONAL_FILES = (
     "joint_states.npy",
     "joint_setpoints.npy",
@@ -51,8 +51,6 @@ OPTIONAL_FILES = (
     "T_cam_to_base.txt",
     "odometry.txt",
     "odometry_segments.txt",
-    "trajectory.txt",
-    "T_cam_to_lidar.txt",
     "tf_pins.txt",
     "extract_meta.json",
     "joint_names.txt",
@@ -253,7 +251,7 @@ def check_clouds(report: SceneReport, clouds: Sequence[Path], n_sample: int) -> 
         if len(dtypes) > 1:
             report.add(WARNING, "CLOUD_DTYPE", f"clouds: mixed dtypes {sorted(dtypes)}")
         elif not dtypes <= {"float32", "float64"}:
-            # float32 is what the extractor writes; the old dataset is float64.
+            # float32 is what the extractor writes; float64 is accepted too.
             report.add(WARNING, "CLOUD_DTYPE", f"clouds: unexpected dtype {sorted(dtypes)[0]}")
     if n_points:
         report.stats["points_mean"] = int(np.mean(n_points))
@@ -468,7 +466,7 @@ def check_tilt(report: SceneReport, gravity: np.ndarray, max_tilt_deg: float) ->
 
 
 def check_extrinsic(report: SceneReport, path: Path) -> None:
-    """``T_cam_to_base.txt`` / ``T_cam_to_lidar.txt``: one finite SE(3) matrix."""
+    """``T_cam_to_base.txt``: one finite SE(3) matrix."""
     try:
         T = np.loadtxt(path)
     except Exception as exc:  # noqa: BLE001
@@ -625,9 +623,6 @@ def validate_scene(
     for name in DERIVED_DIRS:
         if (scene_dir / name).is_dir():
             report.extras.append(f"{name}/")
-    full_npz = scene_dir / f"{scene_dir.name}_full.npz"
-    if full_npz.is_file():
-        report.extras.append(full_npz.name)
 
     timestamps: dict[str, np.ndarray] = {}
     for name in ("data_ts.txt", "pcd_ts.txt"):
@@ -681,9 +676,8 @@ def validate_scene(
         except Exception as exc:  # noqa: BLE001
             report.add(ERROR, "UNREADABLE", f"camera_intrinsics.txt: unreadable ({type(exc).__name__}: {exc})")
 
-    for name in ("T_cam_to_base.txt", "T_cam_to_lidar.txt"):
-        if (scene_dir / name).is_file():
-            check_extrinsic(report, scene_dir / name)
+    if (scene_dir / "T_cam_to_base.txt").is_file():
+        check_extrinsic(report, scene_dir / "T_cam_to_base.txt")
 
     check_gps(report, scene_dir, timestamps.get("data_ts.txt"))
     check_ground_truth(report, scene_dir)

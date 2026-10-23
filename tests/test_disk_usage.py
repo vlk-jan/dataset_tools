@@ -49,9 +49,9 @@ def test_a_file_from_an_older_schema_is_rescanned_whole(tmp_path):
 
 
 def test_what_a_link_leads_to_is_counted_apart(tmp_path):
-    """A root built from links into another one (v1.3 into v1.2, v2.1 into
-    v2.0): the linked frames are this root's frames, the linked bytes are not
-    its disk usage."""
+    """A root built from links into another one (a release linking scenes of
+    the one before): the linked frames are this root's frames, the linked bytes
+    are not its disk usage."""
     make_scene(tmp_path / "other_root", "0000", 3)
     (tmp_path / "other_root" / "0000" / "clouds").mkdir()
     (tmp_path / "other_root" / "0000" / "clouds" / "00000.npy").write_bytes(b"x" * 7)

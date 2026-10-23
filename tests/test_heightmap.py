@@ -12,7 +12,7 @@ FIXTURE = Path(__file__).parent / "data" / "heightmap_parity.npz"
 
 def test_maps_match_drifts_builder():
     """Three HELHEST v2.4 frames (meadow, paved path, forest; a third of each cloud). ``height_map_v24_*``:
-    as DRIFT's scripts/data/build_heightmaps.py built them at the v2.0-v2.4 settings, 2026-10-12;
+    as DRIFT's scripts/data/build_heightmaps.py built them at the v2.4 settings, 2026-10-12;
     ``height_map_*``: at the HELHEST v2.5 settings in ``parameters``, which DRIFT's builder must reproduce."""
     d = np.load(FIXTURE)
     p = hmap.Params.from_dict(json.loads(str(d["parameters"])))

@@ -67,8 +67,8 @@ def test_a_roll_over_is_data_and_is_left_alone():
 
 
 def test_standing_still_is_not_a_reset():
-    """A real solution dithers. Across HELHEST v2 beta no genuine run of
-    bit-identical positions lasts longer than 0.3 s."""
+    """A real solution dithers: no genuine run of bit-identical positions
+    lasts longer than 0.3 s."""
     odom = drive(300) + drive(300, t0=1030.0, speed=0.0, x0=30.0) + drive(300, t0=1060.0, x0=30.0)
     _, keep, verdict = gg.guard(odom, np.arange(1000.0, 1090.0, 0.08))
     assert verdict.clean and keep.all()

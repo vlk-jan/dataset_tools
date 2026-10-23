@@ -4,7 +4,7 @@
     helhest-image-format <root>            # declare what the scenes hold
     helhest-image-format <root> --check    # say it, write nothing
 
-Since 2026-09-29 a root stores the camera's own compressed bytes (``.jpg``)
+By default a root stores the camera's own compressed bytes (``.jpg``)
 rather than re-encoded PNG (~4x the size). ``<root>/manifest.json`` declares it::
 
     "images": {"extension": "jpg",

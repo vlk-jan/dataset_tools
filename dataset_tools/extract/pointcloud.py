@@ -110,7 +110,7 @@ def valid_returns_mask(xyzi: np.ndarray, offsets: np.ndarray | None = None) -> n
     them at the pose of the bag's start).
 
     Apply BEFORE transforming to base_link, or the zeros become a dense fake
-    object at the mount translation (as in HELHEST v1).
+    object at the mount translation.
     """
     keep = ~np.isnan(xyzi).any(axis=1) & np.any(xyzi[:, :3] != 0, axis=1)
     if offsets is not None:

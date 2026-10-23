@@ -79,7 +79,7 @@ def test_a_constant_latency_comes_back(tmp_path, world, latency):
 
 
 def test_a_latency_that_changes_is_followed(tmp_path, world):
-    """Half the drive 0.70 s late, half not (v2 beta 0000): the curve follows both."""
+    """Half the drive 0.70 s late, half not: the curve follows both."""
     edge = 25.0  # seconds into the drive
 
     scene, want = build_scene(tmp_path / "step", world, lambda t: 0.70 if t < edge else 0.0)
@@ -184,7 +184,7 @@ def test_a_long_scene_is_measured_to_its_end(tmp_path):
 
 
 def test_a_small_but_consistent_offset_is_a_measurement_not_noise():
-    """Small knots all on one side are an offset, not 'already aligned' (v2.2 0011)."""
+    """Small knots all on one side are an offset, not 'already aligned'."""
     from dataset_tools.time_align import ZERO_TOL, already_aligned
 
     weak = [{"gain": 9.0}, {"gain": 12.0}, {"gain": 10.0}, {"gain": 6.0}]

@@ -1,6 +1,6 @@
 """One pose stream checked against another: ``pose_check.txt``.
 
-From v2.3 the ground truth is the Odin1 odometry, checked against the
+The ground truth is the Odin1 odometry, checked against the
 Fixposition GNSS/INS. Measured at ``base_link`` in both streams:
 
 - **jumps**: steps over ``max_speed``, their count and metres carried;

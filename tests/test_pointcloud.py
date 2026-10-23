@@ -129,8 +129,8 @@ def test_cloud_to_xyzi_organized_cloud_uses_width_times_height():
 
 
 # ---------------------------------------------------------------------------
-# valid_returns_mask: the guard that keeps the HELHEST v1 origin-delta bug
-# from being reproduced on the Odin1 rig. See the function's docstring.
+# valid_returns_mask: missed shots must not become a fake object at the
+# mount. See the function's docstring.
 # ---------------------------------------------------------------------------
 def test_drop_invalid_returns_drops_nan_rows():
     pts = np.array(
@@ -252,7 +252,7 @@ def test_an_absolute_timestamp_is_taken_against_the_stamp():
     seconds = make_timed_msg(_pts(), stamp + np.array([0.0, 0.01, 0.02, 0.03]), "timestamp", FLOAT64)
     pts = np.frombuffer(seconds.data, dtype=fields_to_dtype(seconds.fields, seconds.point_step))
     assert np.allclose(point_time_offsets(pts, stamp), [0.0, 0.01, 0.02, 0.03], atol=1e-6)
-    # Livox: a double holding nanoseconds.
+    # A double holding nanoseconds.
     nanos = make_timed_msg(_pts(), (stamp + np.array([0.0, 0.01, 0.02, 0.03])) * 1e9, "timestamp", FLOAT64)
     pts = np.frombuffer(nanos.data, dtype=fields_to_dtype(nanos.fields, nanos.point_step))
     assert np.allclose(point_time_offsets(pts, stamp), [0.0, 0.01, 0.02, 0.03], atol=1e-5)
