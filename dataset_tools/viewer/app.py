@@ -26,7 +26,7 @@ from collections.abc import Sequence
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import cv2
 import numpy as np
@@ -34,7 +34,7 @@ import simview
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi import Path as PathParam
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
@@ -210,6 +210,19 @@ def create_app(
         name="simview_static_versioned",
     )
     threading.Thread(target=_warm_build_imports, name="warm-build-imports", daemon=True).start()
+
+    @app.middleware("http")
+    async def same_origin_writes(request: Request, call_next):
+        """Refuse a write sent by another site's page (CSRF): the browser names that page in ``Origin``.
+        The note routes have no other guard, and a loopback bind does not stop a page the user has open."""
+        origin = request.headers.get("origin")
+        if (
+            request.method not in ("GET", "HEAD", "OPTIONS")
+            and origin
+            and urlsplit(origin).netloc != request.headers.get("host")
+        ):
+            return JSONResponse({"detail": "cross-origin write refused"}, status_code=403)
+        return await call_next(request)
 
     # ------------------------------------------------------------------ pages
 
@@ -628,6 +641,10 @@ def create_app(
     async def api_notes_csv():
         """Every note in the root as CSV, with frame ranges also as ``data_ts.txt`` times."""
 
+        def cell(s: str) -> str:
+            """A leading = + - @ makes a spreadsheet run the cell as a formula; a ' keeps it text."""
+            return f"'{s}" if s[:1] in ("=", "+", "-", "@", "\t", "\r") else s
+
         def work() -> str:
             out = io.StringIO()
             writer = csv.writer(out)
@@ -640,7 +657,17 @@ def create_app(
                         last = len(ts) - 1
                         span = [f"{ts[min(n.frame_start, last)]:.6f}", f"{ts[min(n.frame_end, last)]:.6f}"]
                     writer.writerow(
-                        [scene_id, n.frame_start, n.frame_end, *span, n.topic, n.verdict, n.author, n.created, n.text]
+                        [
+                            scene_id,
+                            n.frame_start,
+                            n.frame_end,
+                            *span,
+                            n.topic,
+                            n.verdict,
+                            cell(n.author),
+                            n.created,
+                            cell(n.text),
+                        ]
                     )
             return out.getvalue()
 

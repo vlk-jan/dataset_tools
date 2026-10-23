@@ -30,6 +30,7 @@ python3 -m venv .venv-viewer
 | `root` | the dataset root: the directory holding `0000/`, `0001/`, ..., or the `http(s)://` URL of one (see [A root on a web server](#a-root-on-a-web-server)) |
 | `--host` | bind address (default `127.0.0.1`; `0.0.0.0` to reach it from another machine -- see [Who can reach it](#who-can-reach-it)) |
 | `--port` | port (default `8080`) |
+| `--uds` | listen on this Unix socket instead of `--host`/`--port`; its directory must be yours with mode `0700` (see [Who can reach it](#who-can-reach-it)) |
 | `--max-seconds S` | seconds per viewing window; longer segments are split into parts of equal duration (default `600`) |
 | `--max-frames N` | frames per viewing window: a backstop under `--max-seconds`, which normally decides (default `12000`) |
 | `--cache-dir DIR` | where built scenes are cached (default: `<root name>-<hash>` under `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/`, one per root) |
@@ -99,6 +100,17 @@ hostname it arranged to resolve to your machine.
 a network you would let write to the root, or pass `--no-notes` so nothing can
 be written; the viewer logs a warning at startup when it is bound beyond
 loopback with notes on.
+
+Loopback is not private on a machine other people use: on a shared cluster
+node every user's job can open `127.0.0.1:8080`. There `--uds DIR/viewer.sock`
+listens on a Unix socket instead; the viewer refuses a `DIR` that is not yours
+with mode `0700`, which is what keeps others out (uvicorn makes the socket
+itself world-writable), and `ssh -L 8080:DIR/viewer.sock node` reaches it.
+`slurm/viewer.batch` runs that way.
+
+Every request that writes (a note added, edited or removed) must come from the
+viewer's own pages: one whose `Origin` names another site is refused with 403,
+so a page open in the same browser cannot write notes through it.
 
 Start at the index, click a scene id for its inventory and window list, then a
 window to open the 3D view. Nothing else needs configuring.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -39,6 +40,14 @@ def build_parser() -> argparse.ArgumentParser:
         "pass --no-notes before exposing it with 0.0.0.0",
     )
     parser.add_argument("--port", type=int, default=8080, help="port (default: %(default)s)")
+    parser.add_argument(
+        "--uds",
+        type=Path,
+        default=None,
+        help="listen on this Unix socket instead of --host/--port; its directory must be yours and "
+        "closed to everyone else (mode 0700). On a machine shared with other users, the only bind "
+        "they cannot reach: reach it with ssh -L PORT:SOCKET",
+    )
     parser.add_argument(
         "--max-seconds",
         type=float,
@@ -120,11 +129,25 @@ def _allowed_hosts(host: str) -> list[str] | None:
     return sorted(allowed)
 
 
+def _private_dir(path: Path) -> str | None:
+    """Why ``path`` may not hold the socket (uvicorn makes it 0666, so the directory
+    is the lock), or None when it is this user's and closed to everyone else."""
+    try:
+        st = path.stat()
+    except OSError as exc:
+        return str(exc)
+    if st.st_uid != os.getuid() or st.st_mode & 0o077:
+        return f"{path} must be owned by you with mode 0700 (it is {st.st_mode & 0o777:o})"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.cache_max_gb <= 0:
         parser.error("--cache-max-gb must be above 0")
+    if args.uds is not None and (why := _private_dir(args.uds.parent)):
+        parser.error(f"--uds: {why}")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
@@ -169,8 +192,10 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    # Loopback binds answer only to loopback Host names (DNS-rebinding guard).
-    loopback = _is_loopback(args.host)
+    # Loopback binds answer only to loopback Host names (DNS-rebinding guard);
+    # a socket is reached through a tunnel that ends on the user's loopback.
+    host = "127.0.0.1" if args.uds is not None else args.host
+    loopback = _is_loopback(host)
     if not loopback and args.notes:
         logging.getLogger("dataset_tools.viewer").warning(
             "binding %s with notes on: anyone who can reach the port can write notes into the root "
@@ -186,18 +211,22 @@ def main(argv: list[str] | None = None) -> int:
         notes=args.notes,
         author=args.author,
         clear_cache=args.clear_cache,
-        allowed_hosts=_allowed_hosts(args.host),
+        allowed_hosts=_allowed_hosts(host),
         prefetch=args.prefetch,
         cache_max_gb=args.cache_max_gb,
     )
     url = f"http://{args.host}:{args.port}/"
-    print(f"dataset viewer for {args.root}\n  {url}")
+    print(f"dataset viewer for {args.root}\n  {args.uds or url}")
     if args.open:
         import threading
         import webbrowser
 
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="debug" if args.verbose else "info")
+    log_level = "debug" if args.verbose else "info"
+    if args.uds is not None:
+        uvicorn.run(app, uds=str(args.uds), log_level=log_level)
+    else:
+        uvicorn.run(app, host=args.host, port=args.port, log_level=log_level)
     return 0
 
 

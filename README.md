@@ -576,6 +576,7 @@ scripts/viewer_public.sh                                 # the same, on the publ
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--host`, `--port` | `127.0.0.1`, `8080` | bind address. There is no authentication and notes are writes: keep it on loopback and tunnel, or pass `--no-notes` before binding `0.0.0.0` |
+| `--uds PATH` | off | listen on a Unix socket instead, in a directory that is yours with mode `0700`: on a machine shared with other users, loopback is reachable by them too |
 | `--max-seconds`, `--max-frames` | `600`, `12000` | a segment longer than this is split into equal viewing windows |
 | `--cache-dir` | `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>` | probes and built 3D windows |
 | `--cache-max-gb` | `5.0` | built windows kept on disk, least recently used evicted first |
@@ -595,15 +596,17 @@ laptop.
    mkdir -p slurm/slurm_out
    sbatch slurm/viewer.batch /mnt/personal/$USER/HELHEST_v2_4      # 8 h; -p cpulong -t 2-00:00:00 for longer
    ```
-   The job picks a free port, caches under
+   The job listens on a Unix socket in a private
+   `/tmp/helhest_viewer_<user>_<job>/` (other users' jobs share the node, so a
+   port would be theirs too), caches under
    `$VIEWER_CACHE/<root name>` (default `/mnt/personal/$USER/viewer_cache`)
-   and writes `slurm/slurm_out/viewer_<job>.conn` (node and port); its log
+   and writes `slurm/slurm_out/viewer_<job>.conn` (node and socket); its log
    prints the manual `ssh -N -J ... -L ...` line.
 2. On the laptop:
    ```bash
    scripts/viewer_connect.sh            # [local_port=8080] [job_id]; newest running viewer job by default
    ```
-   It finds the node and port and holds the tunnel open (`VIEWER_USER`,
+   It finds the node and socket and holds the tunnel open (`VIEWER_USER`,
    `VIEWER_LOGIN`, `VIEWER_REPO` for a different account, login node or
    checkout). Ctrl-C closes the tunnel; the viewer keeps running until the job
    ends.

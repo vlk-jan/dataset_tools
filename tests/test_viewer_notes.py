@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
@@ -61,6 +63,31 @@ def test_a_note_round_trips_through_the_api_and_the_file(tmp_path):
     assert client.delete(f"/api/scene/0000/notes/{note['id']}").status_code == 200
     assert client.get("/api/scene/0000/notes").json()["notes"] == []
     assert client.delete(f"/api/scene/0000/notes/{note['id']}").status_code == 404
+
+
+def test_another_sites_page_cannot_write_notes(tmp_path):
+    """A page on another origin can send a POST the browser does not preflight;
+    its Origin header gives it away. The viewer's own page names the viewer."""
+    root_path, client = _notes_client(tmp_path)
+    note = {"frames": [1, 2], "text": "planted"}
+    assert (
+        client.post("/api/scene/0000/notes", json=note, headers={"Origin": "https://evil.example"}).status_code == 403
+    )
+    assert client.post("/api/scene/0000/notes", json=note, headers={"Origin": "null"}).status_code == 403
+    assert not (root_path / "notes").exists()
+    created = client.post("/api/scene/0000/notes", json=note, headers={"Origin": "http://testserver"})
+    assert created.status_code == 201
+    # Reads stay open to any page (they are what a link opens).
+    assert client.get("/api/scene/0000/notes", headers={"Origin": "https://evil.example"}).status_code == 200
+
+
+def test_the_notes_csv_keeps_formulas_as_text(tmp_path):
+    _, client = _notes_client(tmp_path)
+    client.post("/api/scene/0000/notes", json={"frames": [0, 0], "text": "=HYPERLINK(1)", "author": "@me"})
+    client.post("/api/scene/0000/notes", json={"frames": [1, 1], "text": "plain - fine"})
+    rows = list(csv.DictReader(io.StringIO(client.get("/api/notes.csv").text)))
+    assert [(r["author"], r["text"]) for r in rows][0] == ("'@me", "'=HYPERLINK(1)")
+    assert rows[1]["text"] == "plain - fine"
 
 
 def test_a_notes_frame_range_is_inclusive_ordered_and_inside_the_scene(tmp_path):

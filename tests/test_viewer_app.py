@@ -997,3 +997,17 @@ def test_the_cli_treats_every_loopback_address_as_local_and_refuses_an_empty_cac
     assert not _is_loopback("0.0.0.0")
     with pytest.raises(SystemExit):
         main(["--cache-max-gb", "0", str(tmp_path)])
+
+
+def test_the_cli_puts_a_socket_only_in_a_directory_closed_to_other_users(tmp_path):
+    """uvicorn makes the socket world-writable, so the directory is what keeps others out."""
+    from dataset_tools.viewer.__main__ import _private_dir, main
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o755)
+    shared.chmod(0o755)
+    assert "0700" in _private_dir(shared)
+    with pytest.raises(SystemExit):
+        main(["--uds", str(shared / "viewer.sock"), str(tmp_path)])
+    shared.chmod(0o700)
+    assert _private_dir(shared) is None

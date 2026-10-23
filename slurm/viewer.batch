@@ -15,8 +15,9 @@
 #   scripts/viewer_connect.sh          # from the laptop, opens the tunnel
 #
 # Partition walltimes: cpufast 4 h, cpu 1 d, cpulong 3 d, cpuextralong 42 d,
-# e.g. `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`. The viewer binds
-# 127.0.0.1 only: the cluster network is shared and the tunnel doesn't need it.
+# e.g. `sbatch -p cpulong -t 2-00:00:00 slurm/viewer.batch`. The viewer listens
+# on a Unix socket in a 0700 directory, not on a port: other users' jobs share
+# the node (OverSubscribe=NO only keeps cores apart), and 127.0.0.1 is theirs too.
 set -uo pipefail
 
 # Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
@@ -36,33 +37,30 @@ CACHE="$CACHE_BASE/$(basename "$ROOT")"
     cd $REPO && uv venv --python 3.12 .venv-viewer && uv pip install --python .venv-viewer -e '.[viewer]'"; exit 1; }
 mkdir -p "$CACHE" || { echo "cannot write cache dir $CACHE"; exit 1; }
 
-# First free port from a job-derived offset; several viewers can share a node.
-port_taken() { (exec 3<>/dev/tcp/127.0.0.1/"$1") 2>/dev/null; }
-PORT=""
-base=$((8080 + SLURM_JOB_ID % 100))
-for p in $(seq "$base" $((base + 99))); do
-    port_taken "$p" || { PORT=$p; break; }
-done
-[ -n "$PORT" ] || { echo "no free port in $base-$((base + 99))"; exit 1; }
+# No per-job /tmp on RCI (no job_container): make the private directory here.
+# scripts/viewer_connect.sh derives the same path from the user and job id.
+SOCKDIR=/tmp/helhest_viewer_${USER}_${SLURM_JOB_ID}
+mkdir -m 700 "$SOCKDIR" || { echo "cannot create $SOCKDIR (exists already?)"; exit 1; }
+SOCK=$SOCKDIR/viewer.sock
 
-# Read by scripts/viewer_connect.sh. No `exec` below, so the trap removes it on scancel.
+# Read by scripts/viewer_connect.sh. No `exec` below, so the trap cleans up on scancel.
 CONN="$REPO/slurm/slurm_out/viewer_${SLURM_JOB_ID}.conn"
-echo "$(hostname -s) $PORT" > "$CONN"
-trap 'rm -f "$CONN"' EXIT TERM INT
+echo "$(hostname -s) $SOCK" > "$CONN"
+trap 'rm -rf "$CONN" "$SOCKDIR"' EXIT TERM INT
 
 cat <<EOF
-[$(date '+%F %T')] viewer job $SLURM_JOB_ID on $(hostname -s), port $PORT
+[$(date '+%F %T')] viewer job $SLURM_JOB_ID on $(hostname -s), socket $SOCK
   root  $ROOT
   cache $CACHE
   time  $(squeue -h -j "$SLURM_JOB_ID" -o %L 2>/dev/null) remaining
 
 From your laptop:
 
-  ssh -N -J login3.rci.cvut.cz -L 8080:127.0.0.1:$PORT $(hostname -s)
+  ssh -N -J login3.rci.cvut.cz -L 8080:$SOCK $(hostname -s)
 
 then open http://127.0.0.1:8080/ -- or just run scripts/viewer_connect.sh,
 which finds this job and does the same. The tunnel dies with the job.
 EOF
 
-"$VIEWER" "$ROOT" --host 127.0.0.1 --port "$PORT" --cache-dir "$CACHE" &
+"$VIEWER" "$ROOT" --uds "$SOCK" --cache-dir "$CACHE" &
 wait $!

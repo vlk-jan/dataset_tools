@@ -39,26 +39,24 @@ NODE_SSH=(-o BatchMode=yes
           -o UserKnownHostsFile="$NODE_HOSTS $HOME/.ssh/known_hosts"
           -o StrictHostKeyChecking=accept-new)
 
+# The viewer listens on a Unix socket (see slurm/viewer.batch), at a path the
+# user and job id fix; the .conn file says so too, plus the node.
 conn=$(ssh -o BatchMode=yes "$LOGIN" "cat $REPO/slurm/slurm_out/viewer_$JOB.conn" 2>/dev/null)
 if [ -z "$conn" ]; then
-    # .conn file gone (untracked dir): ask slurm for the node, the node for the port.
+    # .conn file gone (untracked dir): ask slurm for the node.
     node=$(ssh -o BatchMode=yes "$LOGIN" \
         "squeue -h -j $JOB -t RUNNING -O NodeList" 2>/dev/null)
     node=${node// /}
-    [ -n "$node" ] || { echo "job $JOB has not published a node/port yet -- still starting?"; exit 1; }
-    port=$(ssh "${NODE_SSH[@]}" -J "$LOGIN" "$RCI_USER@$node" \
-        'pid=$(pgrep -u "$USER" -f helhest-viewer | head -1)
-         [ -n "$pid" ] && ss -ltnpH 2>/dev/null | grep -o "127.0.0.1:[0-9]*.*pid=$pid," |
-             head -1 | cut -d: -f2 | cut -d" " -f1' 2>/dev/null)
-    [ -n "$port" ] || { echo "job $JOB runs on $node but publishes no port -- viewer not up?"; exit 1; }
-    echo "no slurm/slurm_out/viewer_$JOB.conn; found the viewer on $node:$port instead."
+    [ -n "$node" ] || { echo "job $JOB has not published a node yet -- still starting?"; exit 1; }
+    sock=/tmp/helhest_viewer_${RCI_USER}_$JOB/viewer.sock
+    echo "no slurm/slurm_out/viewer_$JOB.conn; trying $node:$sock."
 else
     node=${conn%% *}
-    port=${conn##* }
+    sock=${conn##* }
 fi
 
-echo "job $JOB on $node:$port -> http://127.0.0.1:$LOCAL_PORT/"
+echo "job $JOB on $node:$sock -> http://127.0.0.1:$LOCAL_PORT/"
 echo "ctrl-c closes the tunnel; the viewer keeps running until the job ends."
 exec ssh -N "${NODE_SSH[@]}" -o ExitOnForwardFailure=yes \
     -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
-    -J "$LOGIN" -L "$LOCAL_PORT:127.0.0.1:$port" "$RCI_USER@$node"
+    -J "$LOGIN" -L "127.0.0.1:$LOCAL_PORT:$sock" "$RCI_USER@$node"
