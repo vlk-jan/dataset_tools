@@ -53,7 +53,7 @@ the odometry-frame rotation, height maps, keyframe lists and a manifest; see
 
 [`slurm/`](slurm/README.md) holds the CTU RCI cluster jobs the releases were
 built with, [`scripts/`](scripts/README.md) the tools that are not part of the
-package (the viewer's atlas, clock probes, segment-table repairs).
+package (the viewer's atlas, clock probes, viewer launchers).
 
 Code comments refer to **DRIFT**: the downstream training code the roots are
 extracted for (a separate repository). It adds its own per-frame products to a

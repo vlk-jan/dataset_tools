@@ -20,7 +20,7 @@
 # required. A scene whose source_bag.txt names the same bag is skipped, so
 # re-submitting resumes. %4: subtdata sustains ~50 MB/s aggregate.
 # HM_ARGS passes settings to the height maps, whose defaults are not v2.4's:
-# HM_ARGS="--set statistic=p90 --set tie_jitter=none" builds v2.0-v2.4 maps.
+# HM_ARGS="--set statistic=p90 --set tie_jitter=none" builds v2.4 maps.
 # FORCE=1 re-extracts (--overwrite):
 #
 #   FORCE=1 CSV=docs/v2_4_bags.csv sbatch --array=7 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4

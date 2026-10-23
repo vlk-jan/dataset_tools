@@ -24,9 +24,8 @@ in the bag. What that difference cannot see is the pipeline *behind* the
 stamp: the unit stamps when it publishes, and its pixels and points are older
 than that by however long its own processing took.
 
-A latency follows load, so it does not hold still -- scene 0000 of v2 beta
-spends 80 of its 290 s at ~0.05 s and the rest at ~0.69 s, and 0006-0008 have
-none at all. There is no per-rig or even per-bag number to configure, so
+A latency follows load, so it does not hold still -- one 290 s recording
+spends 80 s at ~0.05 s and the rest at ~0.69 s, and others have none at all. There is no per-rig or even per-bag number to configure, so
 `--time_align auto` measures it **during extraction**, as a curve, and takes
 it off. Every scene carries the measurement it was corrected by in
 `time_align.txt`.
@@ -49,17 +48,17 @@ its solution -- and rolling the robot over is exactly how it loses it, with
 the antennas pointing at the ground -- the odometry topic does not stop. It
 fills with the reset state: a position hundreds of metres from where the
 robot is, held perfectly still, attitude snapped back to identity, and no
-flag on any of it. Scene 0010 of v2 beta reported a **1249 m step between two
-frames 64 ms apart** that way, and 0014 a pair of 1130 m round trips.
+flag on any of it. One recording reported a **1249 m step between two
+frames 64 ms apart** that way, another a pair of 1130 m round trips.
 
 `--gnss_guard auto` removes those stretches during extraction, before an
 image or a cloud is written, so the frames that survive are the frames the
 dataset can put a pose on and the indices stay contiguous. What marks the
 fabricated side is that the translation stops moving *at all* -- the reset
-state is one position repeated, held for 2.9 s and 46.5 s in the two v2 beta
+state is one position repeated, held for 2.9 s and 46.5 s in those two
 cases. That is never enough on its own, because a robot can be genuinely
 stopped and a Fixposition quantises to a micrometre, so a stopped robot
-publishes the same number for seconds too: scene 0009 does it three times
+publishes the same number for seconds too: one recording does it three times
 while the driver leans on a robot that will not move, with a continuous fix,
 the scene's best covariance and a GNSS latitude and longitude every bit as
 still as the odometry. A freeze is therefore believed only where something
@@ -70,16 +69,16 @@ short island fenced in by a jump at both ends is an excursion rather than a
 visit, and stands on its own. So does an outage with a jump inside it: an
 outage alone is a solution coasting, a lone jump says one of its two sides is
 wrong without saying which, but together they are conclusive. That last rule
-has no catch of its own across v2 beta -- 0014's span is already convicted by
+has had no catch of its own -- the one span seen was already convicted by
 its island -- but it is the only one that would reach a fabricated stretch
 which neither held still long enough nor came back.
 
 The outage is read as a *hole*, not as a flag, because the receiver reports
-losing its fix two different ways and 0014 uses both: 3 s of null-island
+losing its fix two different ways and one recording uses both: 3 s of null-island
 `NavSatFix` around one jump, and 12.7 s of publishing nothing at all around
 the other. Only holes between fixes count -- a stream that starts late or
-stops early is the ordinary shape of a recording (0009 waits 11.7 s for its
-first fix, 0016 spends its last 57 s without one), and coasting is degraded,
+stops early is the ordinary shape of a recording (one waits 11.7 s for its
+first fix, another spends its last 57 s without one), and coasting is degraded,
 not fabricated.
 
 The guard fails towards keeping data: a fabricated stretch that arrives
@@ -90,7 +89,7 @@ deleting the frames of a robot that was merely stuck.
 
 What the guard deliberately does *not* read is the attitude. The 180 deg flip
 is the tempting signature and it is a trap: the robot really does roll over,
-and when it does, the flip is the measurement. Scene 0010 spends 56 s upside
+and when it does, the flip is the measurement. One recording spends 56 s upside
 down **before** its solution resets, and that stretch is good data.
 
 Each scene records what it lost in `gnss_guard.txt`, and the hole reads as
@@ -103,7 +102,7 @@ fabricating receiver. `interpolate_poses` falls back to the nearest sample
 wherever it cannot interpolate -- before the pose stream starts, after it
 ends, or across a hole wider than its 0.5 s bracket -- and what comes out is a
 stationary pose under a frame the robot was driving through, written into
-`transforms.npy` looking exactly like a measurement. Scene 0014 of v2 beta
+`transforms.npy` looking exactly like a measurement. One recording
 exported a **3.29 m step between two frames 62 ms apart, 53 m/s**, with no
 fabricated pose anywhere near it: both frames sat in a 12 s hole in the
 odometry and borrowed the same distant sample.
@@ -113,14 +112,12 @@ a span -- a frame the dataset cannot put a real pose on has nothing to offer
 a consumer of a pose-annotated dataset. The margin is spent the other way
 round from a span, though: a span drops a frame that *might* fall inside it,
 support keeps a frame that *might* sit on a pose, so a hole has to exceed
-2 s (1 s of margin each side) before it costs anything. Across v2 beta this is 1,127 frames, 1.1%,
-two thirds of them 0016's last 57 s, where the receiver stops publishing while
+2 s (1 s of margin each side) before it costs anything. In one measured set of recordings this was 1,127 frames, 1.1%,
+two thirds of them one recording's last 57 s, where the receiver stops publishing while
 the camera runs on. With it, no scene in the root exports a step above
 3.2 m/s, and every one of those is driving.
 
 That margin is there because the guard runs before the clock correction. Once
 the clock is final, a frame that still has no pose on either side of it is
 dropped too and the indices close up behind it (`gnss_guard.txt`: "after the
-clock correction"); before 2026-10-01 those were exported with the nearest
-pose copied in -- 184 frames across ten scenes of HELHEST v2.2, all at a
-scene's ends.
+clock correction").
