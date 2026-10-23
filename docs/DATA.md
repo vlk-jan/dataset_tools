@@ -471,7 +471,11 @@ agrees with the odometry). The Fixposition GNSS/INS remains the georeference
 `base_link` (jumps, displacement over 1/2/5 s, clock lag, tilt). Measured on
 the v2.2 bags the two agree to 2–5 cm over 1–5 s windows and 1 % in scale; the
 Odin1's failure mode is a discrete relocalisation jump, which breaks a
-segment and is counted in the check. v2 beta through v2.2 were built on the
+segment and is counted in the check. Each segment starts at `eye(4)` at its
+first pose, so its frame is the robot's attitude there, not level: absolute
+roll/pitch comes from `gravity_align.npy`, never from `odometry.txt` (two
+segments that start upside down after a roll-over: `defects.odometry_frame_upside_down`).
+v2 beta through v2.2 were built on the
 Fixposition instead (`odometry` in their manifests says so).
 **One root from v2.3.** The three keyframe lists sit beside the data
 (`keyframes.lst` every scene, `keyframes_train.lst`, `keyframes_heldout.lst`)

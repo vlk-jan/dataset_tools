@@ -128,6 +128,13 @@
   "roll_overs_0011_0012": {
    "what": "The robot tipped and rolled over in the meadow. 0011: the receiver reset after each event and the guard removed 130.9-133.9 s, 169.6-182.7 s (290 of 2758 frames); the scene has 3 segments and keeps 34 frames past 45 deg (max 177 deg). 0012: the roll-over is in the scene (17 frames past 45 deg, max 177 deg); the receiver reset after it and the guard removed 67.1-72.4 s (71 of 1030 frames); 1 segment(s). After the roll-over RTK held for only 54 % of the bag's fixes (horizontal 1-sigma 0.22 m)."
   },
+  "odometry_frame_upside_down": {
+   "what": "Each odometry segment's frame is its first pose (eye(4)). Two segments begin right after a roll-over with the robot on its roof, so the frame is flipped ~180 deg against gravity: odometry.txt reads level while the robot is upside down and ~180 deg once it is upright, and its z points down. 0033 segment 2 (t+227-635 s of the scene, 408 s): upside down for its first ~10 s, righted by ~16 s, then driven upright with the odometry reading 173-178 deg (2,788 of its 2,941 frames more than 45 deg off gravity_align.npy); 0015 segment 2 (t+81-102 s, 21 s): upside down throughout (odometry ~1 deg, gravity_align.npy ~178 deg, all 307 frames). gravity_align.npy is right throughout (it tracks the flip and the righting), and so is transforms.npy, which is one unsegmented frame per scene anchored at the scene's first frame. Relative poses within each segment are unaffected, so are the labels, and the keyframe lists hold no upside-down frame (0033 segment 2 only from 16.0 s; nothing of 0015 segment 2). Take absolute attitude from gravity_align.npy, never from the odometry. No other segment of any scene has more than 10 frames whose odometry tilt and gravity_align tilt differ by more than 45 deg. Found by DRIFT (Fix DRIFT session); documented 2026-10-23 (user), data unchanged.",
+   "scenes": [
+    "0033",
+    "0015"
+   ]
+  },
   "pose_coverage_0015": {
    "what": "Every robot-side topic (Fixposition, wheels) stops 60.9 s into the 102.5 s bag while the Odin1 records on: the on-board computer shut down after the robot flipped. 586 of 1482 synced frames have no pose and are not exported, so the flip itself is not in the scene. The guard removed nothing."
   },

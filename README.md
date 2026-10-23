@@ -395,7 +395,9 @@ Behaviour worth knowing:
   fixes are the receiver's own position — on the new rig the fusion point,
   a few tens of centimetres from `base_link` and well inside its own sigma —
   and they are **not** ground truth: `odometry.txt` is anchored per segment
-  and says nothing about the Earth. A fix whose covariance the receiver called
+  (`eye(4)` at each segment's first pose, not levelled: absolute roll/pitch
+  is `gravity_align.npy`) and says nothing about the Earth. A fix whose
+  covariance the receiver called
   unknown carries `NaN` in the three covariance columns rather than zeros.
 - **`scenes.csv`** at the dataset root maps `scene,bag,start_time,frames`. The parent
   rebuilds it from the finished scene directories when the run ends.
