@@ -172,10 +172,10 @@
 
           {% if row.description %}<p class="env">{{ row.description }}</p>{% endif %}
 
-          {% if row.spans or row.fill_spans %}
+          {% if row.spans %}
           <div class="bar">
             <div class="track" title="where ground truth exists inside the scene">
-              {{ ui.spans(row.spans, row.fill_spans) }}
+              {{ ui.spans(row.spans) }}
             </div>
             <div class="barcap"><span>0</span><span>{{ row.span_label }}</span></div>
           </div>

@@ -124,8 +124,8 @@ def make_root(
             half = frames // 2
             with open(d / "odometry_segments.txt", "w") as fh:
                 fh.write("# id start_ts end_ts n_poses reason\n")
-                fh.write(f"0 {ts[0]:.6f} {ts[half - 1]:.6f} {half} filtered:pose_jump\n")
-                fh.write(f"1 {ts[half]:.6f} {ts[-1]:.6f} {frames - half} filtered:end_of_run\n")
+                fh.write(f"0 {ts[0]:.6f} {ts[half - 1]:.6f} {half} teleport\n")
+                fh.write(f"1 {ts[half]:.6f} {ts[-1]:.6f} {frames - half} end_of_run\n")
 
         if with_transforms:
             np.save(d / "transforms.npy", np.stack(poses))
@@ -273,7 +273,6 @@ def write_atlas(root_path: Path, scenes=("0000",), *, dataset_version: str | Non
             "clouds": 1962,
             "pts_mean": 6090,
             "poses": 4580,
-            "poses_unf": 4776,
             "segments": 9,
             "seg_lens": [314.3, 93.9, 67.0],
             "seg_med_s": 18.7,
@@ -281,9 +280,6 @@ def write_atlas(root_path: Path, scenes=("0000",), *, dataset_version: str | Non
             "cov": 0.867,
             "path_m": 439.5,
             "moving_frac": 0.763,
-            "win_med": 0.1207,
-            "win_p95": 0.2537,
-            "flags": 24,
             "bag_gb": 25.1,
             "session": "synthetic_session",
             "thumbs": dict(CURATED_THUMBS),

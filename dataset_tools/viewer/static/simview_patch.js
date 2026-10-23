@@ -4,7 +4,7 @@
  * build.py instead.
  */
 
-/** The wheel-odometry pose marker (see build.py's `_ghost_track`). */
+/** The transforms.npy pose marker (see build.py's `_ghost_track`). */
 export const GHOST_BODY = "wheel_odom_ghost";
 
 /** The chassis: the body a view of this dataset is meant to be looking at. */

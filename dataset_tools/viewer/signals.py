@@ -227,8 +227,8 @@ def signal_charts(
             "Ground speed",
             "m/s",
             speed,
-            "Ground truth is differentiated inside each segment and never across a boundary; the robot's "
-            "own odometry is continuous but drifts. Where they part, one of them is wrong.",
+            "Ground truth is differentiated inside each segment and never across a boundary; the frame "
+            "odometry (transforms.npy) is one continuous track. Where they part, one of them is wrong.",
         )
     )
 

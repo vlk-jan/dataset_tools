@@ -37,16 +37,13 @@ def test_atlas_thumbnails_are_looked_up_through_the_manifest_not_the_path(tmp_pa
 
 
 def test_a_thumbnail_slot_resolves_to_the_frame_the_atlas_names(tmp_path):
-    """The curated index wins over the fraction, and both spellings are read."""
+    """The curated index wins over the fraction."""
     curated = {"thumbs": dict(CURATED_THUMBS)}
     assert index_page.thumb_slots(curated) == ["a", "b", "c"]
     assert [index_page.thumb_index(curated, s, 12) for s in ("a", "b", "c")] == [2, 7, 11]
 
-    # The older spelling names no frame, so the fractions stand in -- which is
-    # what those files were cut at anyway.
-    legacy = {"thumbs": ["a", "b", "c"]}
-    assert index_page.thumb_slots(legacy) == ["a", "b", "c"]
-    assert [index_page.thumb_index(legacy, s, 12) for s in ("a", "b", "c")] == [1, 6, 10]
+    # No curated frame: the fractions stand in.
+    assert [index_page.thumb_index({}, s, 12) for s in ("a", "b", "c")] == [1, 6, 10]
 
     # A slot the atlas skipped, and an index pointing past a re-cut scene.
     assert index_page.thumb_slots({"thumbs": {"b": 3}}) == ["b"]
@@ -56,17 +53,17 @@ def test_a_thumbnail_slot_resolves_to_the_frame_the_atlas_names(tmp_path):
 
 
 def test_an_atlas_from_another_release_says_so_on_the_index(tmp_path):
-    """The v1.3 failure: atlas/ symlinked to v1.2's, so every curated number on
-    the page described the previous release under the previous release's title."""
+    """An atlas/ symlinked to the previous release's would describe that release
+    under its title, every curated number included."""
     root_path = make_root(tmp_path)
-    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "1.3"}))
-    write_atlas(root_path, dataset_version="1.2")
+    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "2.5"}))
+    write_atlas(root_path, dataset_version="2.4")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
     page = index_page.build_index(root, root.probe_all())
-    assert "1.2" in page["atlas_warning"] and "1.3" in page["atlas_warning"]
+    assert "2.4" in page["atlas_warning"] and "2.5" in page["atlas_warning"]
 
     # Regenerated against this root: nothing to say.
-    write_atlas(root_path, dataset_version="1.3")
+    write_atlas(root_path, dataset_version="2.5")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache2")
     assert index_page.build_index(root, root.probe_all())["atlas_warning"] is None
 
@@ -79,18 +76,17 @@ def test_a_malformed_atlas_file_degrades_to_no_atlas(tmp_path):
     assert root.atlas() is None
 
 
-def test_probe_records_segment_spans_as_fractions_and_marks_filled_ones(tmp_path):
+def test_probe_records_segment_spans_as_fractions(tmp_path):
     root_path = make_root(tmp_path)
     scene = root_path / "0000"
     ts = np.loadtxt(scene / "data_ts.txt")
     with open(scene / "odometry_segments.txt", "w") as fh:
         fh.write("# id start_ts end_ts n_poses reason\n")
-        fh.write(f"0 {ts[0]:.6f} {ts[3]:.6f} 4 filtered:pose_jump\n")
-        fh.write(f"1 {ts[6]:.6f} {ts[9]:.6f} 4 v11_fill\n")
+        fh.write(f"0 {ts[0]:.6f} {ts[3]:.6f} 4 teleport\n")
+        fh.write(f"1 {ts[6]:.6f} {ts[9]:.6f} 4 end_of_run\n")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
     p = root.probe("0000")
     assert len(p.segment_spans) == 2
-    assert p.fill_spans == [p.segment_spans[1]]
     lo, hi = p.segment_spans[0]
     assert lo == pytest.approx(0.0, abs=1e-6)
     assert hi == pytest.approx(3 / 11, abs=1e-3)  # frames 0..3 of 0..11
@@ -123,8 +119,6 @@ def test_index_rows_use_curated_content_when_it_exists(tmp_path):
     assert row["description"].startswith("A synthetic place")
     labels = [s["label"] for s in row["stats"]]
     assert "path in GT" in labels and "time with GT" in labels
-    # Regeneration diagnostics stay off the index (they live on the scene page).
-    assert "2 s err med / p95" not in labels and "v1 coverage" not in labels
     assert [t["url"] for t in row["thumbs"]] == [f"/api/scene/0000/thumb/{s}.jpg" for s in ("a", "b", "c")]
     assert page["totals"][0]["label"] == "scenes"
 
@@ -177,52 +171,28 @@ def test_duration_formatting_matches_the_atlas_phrasing():
 # --------------------------------------------------------------------------
 
 
-def test_the_atlas_cannot_add_filled_segments_the_live_file_does_not_have(tmp_path):
-    """The segment file beats a stale atlas, even when it lists no filled segments."""
+def test_the_live_segment_file_beats_a_stale_atlas(tmp_path):
+    """The segment file decides the timeline, whatever spans the atlas lists."""
     root_path = make_root(tmp_path)
     write_atlas(root_path)
     atlas_file = root_path / "atlas" / "atlas.json"
     data = json.loads(atlas_file.read_text())
     data["scenes"]["0000"]["seg_spans"] = [[0.0, 0.4]]
-    data["scenes"]["0000"]["fill_spans"] = [[0.5, 0.9]]
     atlas_file.write_text(json.dumps(data))
 
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
     p = root.probe("0000")
-    assert p.segment_spans and not p.fill_spans  # the live file has no fills
+    assert p.segment_spans and p.segment_spans != [[0.0, 0.4]]
 
     from dataset_tools.viewer.build import SceneAccess
     from dataset_tools.viewer.index_page import build_row
     from dataset_tools.viewer.scene_page import ground_truth_card
 
     row = build_row(root, p)
-    assert row["fill_spans"] == []
     assert row["spans"] == p.segment_spans
 
     card = ground_truth_card(SceneAccess(root, "0000"), root.atlas_scene("0000"))
-    assert card["timeline"]["fill"] == []
-    assert "filled from v1.1" not in (card["note"] or "")
-
-
-def test_a_filled_span_is_drawn_once_not_twice(tmp_path):
-    """`fill_spans` is a subset of `segment_spans`, so the plain half has to
-    have it removed or a filled stretch gets a green bar under its amber one."""
-    root_path = make_root(tmp_path, segments=False)
-    scene = root_path / "0000"
-    ts = np.loadtxt(scene / "data_ts.txt")
-    with open(scene / "odometry_segments.txt", "w") as fh:
-        fh.write(f"0 {ts[0]:.6f} {ts[4]:.6f} 40 filtered:pose_jump\n")
-        fh.write(f"1 {ts[6]:.6f} {ts[-1]:.6f} 50 v11_fill:end_of_run\n")
-
-    root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
-    p = root.probe("0000")
-    assert len(p.segment_spans) == 2 and len(p.fill_spans) == 1
-
-    from dataset_tools.viewer.index_page import build_row
-
-    row = build_row(root, p)
-    assert len(row["spans"]) == 1 and len(row["fill_spans"]) == 1
-    assert row["spans"][0] not in row["fill_spans"]
+    assert card["timeline"]["spans"] == p.segment_spans
 
 
 # --------------------------------------------------------------------------
@@ -315,7 +285,7 @@ def test_disk_sizes_read_in_decimal_units():
 
 
 def test_a_scene_reached_entirely_through_links_is_sized_by_what_it_links_to(tmp_path):
-    """v2.4 links 25 scenes into v2.3: the viewer sizes them as if the files were there."""
+    """A release linking 25 scenes into the one before: the viewer sizes them as if the files were there."""
     from dataset_tools.disk_usage import update
     from dataset_tools.viewer.build import SceneAccess
     from dataset_tools.viewer.scene_page import disk_card, file_sizes

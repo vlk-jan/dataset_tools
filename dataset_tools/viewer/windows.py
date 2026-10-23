@@ -3,7 +3,7 @@
 A window never spans two segments (segments share no frame). Long segments are
 cut by *seconds* (sampling density is a per-second cost), with a frame cap as a
 backstop. ``pose_source`` says what the poses are: ``odometry`` (ground truth),
-``transforms`` (drifty wheel odometry) or ``none``.
+``transforms`` (the per-frame odometry track, not ground truth) or ``none``.
 """
 
 from __future__ import annotations
@@ -64,9 +64,7 @@ class Window:
         """Concrete, plain-language description shown in the windows table."""
         if self.kind == "segment":
             d = describe_reason(self.reason)
-            if d and not d.startswith("filled"):
-                return f"ends because {d}"
-            return d
+            return f"ends because {d}" if d else d
         return self.reason
 
     def to_json(self) -> dict:
@@ -208,7 +206,7 @@ def windows_for_scene(
                 n_poses=seg.n_poses,
             )
 
-    # Whole-scene wheel-odometry fallback, only when there is no ground-truth
+    # Whole-scene transforms.npy fallback, only when there is no ground-truth
     # window (it is not GT). Bounded by the timestamp track, not ``n_frames``.
     playable = _playable_frames(frame_ts, n_frames)
     if not windows and playable >= MIN_WINDOW_FRAMES:
@@ -220,9 +218,11 @@ def windows_for_scene(
             max_seconds,
             key="raw",
             kind="raw",
-            label="Whole scene, wheel odometry" if has_transforms else "Whole scene, no pose",
+            label="Whole scene, frame odometry" if has_transforms else "Whole scene, no pose",
             pose_source="transforms" if has_transforms else "none",
-            reason="wheel odometry, drifts; not ground truth" if has_transforms else "no pose data in this scene",
+            reason=(
+                "frame odometry (transforms.npy); not ground truth" if has_transforms else "no pose data in this scene"
+            ),
         )
     return windows
 
@@ -278,86 +278,21 @@ def neighbour_windows(windows: list[Window], current: Window) -> tuple[Window | 
     return (before[-1] if before else None, after[0] if after else None)
 
 
-#: Plain-language text for the machine tags in ``odometry_segments.txt``.
-#: A tag names why the segment ENDED (except ``v11_fill``, which names where
-#: the whole segment came from). Unknown tags pass through verbatim.
+#: Plain-language text for the machine tags in ``odometry_segments.txt``
+#: (``extract.ground_truth``): why the segment ENDED. Unknown tags pass through verbatim.
 _REASON_TEXT = {
-    "pose_jump": "the GT pose jumped against the robot's live odometry",
-    "speed_mismatch": "the GT speed disagreed with the robot's live odometry",
-    "yawrate_mismatch": "the GT yaw rate disagreed with the robot's live odometry",
-    "odom_mismatch": "the post-hoc check against live odometry rejected the poses that follow",
     "end_of_run": "the recording ended",
     "gap": "a gap of over 1 s in the GT stream",
-    "wheel_gap": "the wheels drove further across a gap in the GT stream than the GT pose moved",
     "teleport": "a step faster than the robot can move (GT jump)",
     "fix_lost": "the GNSS fix was lost and the poses the receiver fabricated without it were removed",
 }
 
 
-#: Where a segment's poses came from when not this root's own run. Each must
-#: start with "filled": the pages branch on it.
-_FILL_TEXT = {
-    "v11_fill": "filled from v1.1 ground truth, through the same quality gate",
-    "regen_fill": "filled by replaying that stretch of the bag through the estimator, through the same quality gate",
-}
-
-#: ``+`` tags: what was done to the poses after the stretch was cut.
-_MARK_TEXT = {
-    "refined": "refined against the wheel odometry",
-    "coverage_guard": "spliced from the earlier root, which covered this stretch",
-    "joined": "joined across a standstill",
-}
-
-#: Where the pieces of a joined segment came from (``+joined:native,v11_fill``).
-_SOURCE_TEXT = {
-    "native": "this root's own estimator run",
-    "v11_fill": "the v1.1 fill",
-    "regen_fill": "a replay of the bag",
-}
-
-
 def describe_reason(reason: str) -> str:
-    """A concrete sentence fragment for a segment-reason tag.
-
-    E.g. ``regen_fill:t194+refined``: the body says where the segment came
-    from or why it ended; ``+`` tails are appended in parentheses.
-    """
+    """A concrete sentence fragment for a segment-reason tag (its last ``:`` field)."""
     if not reason:
         return ""
-    described = _describe_body(reason.split("+")[0])
-    extra = "; ".join(describe_marks(reason))
-    return f"{described} ({extra})" if described and extra else (described or reason)
-
-
-def describe_marks(reason: str, brief: bool = False) -> list[str]:
-    """The ``+`` tails of a reason, translated; ``[]`` when it carries none.
-
-    ``brief`` drops per-segment detail so a page can count them across a scene.
-    """
-    return [_mark_text(m, brief) for m in reason.split("+")[1:] if m]
-
-
-def _mark_text(mark: str, brief: bool = False) -> str:
-    """One ``+`` tail, translated. ``joined`` also carries the sources it joined."""
-    if mark.startswith("joined"):
-        if brief:
-            return _MARK_TEXT["joined"]
-        text = f"{_MARK_TEXT['joined']} the wheels, the live odometry and the IMU all confirm"
-        if ":" not in mark:
-            return text
-        pieces = [_SOURCE_TEXT.get(x, x) for x in mark.split(":", 1)[1].split(",") if x]
-        return f"{text}, out of pieces from {' and '.join(pieces)}"
-    return _MARK_TEXT.get(mark, mark)
-
-
-def _describe_body(body: str) -> str:
-    for prefix, text in _FILL_TEXT.items():
-        if body.startswith(prefix):
-            rest = body.split(":", 1)[1] if ":" in body else ""
-            # A fill may also carry the reason it ends.
-            tail = _REASON_TEXT.get(rest.split(":")[-1], "")
-            return f"{text}; ends because {tail}" if tail else text
-    return _REASON_TEXT.get(body.split(":")[-1], body)
+    return _REASON_TEXT.get(reason.split(":")[-1], reason)
 
 
 #: Key prefix of the one-frame window (``frame00042``), built on demand from the key.

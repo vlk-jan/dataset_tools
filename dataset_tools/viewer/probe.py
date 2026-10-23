@@ -29,7 +29,7 @@ from .windows import span_fractions
 logger = logging.getLogger("dataset_tools.viewer.probe")
 
 #: Bump whenever ``SceneProbe``'s fields change, so older caches are discarded.
-PROBE_CACHE_FORMAT = 5
+PROBE_CACHE_FORMAT = 6
 
 
 def scene_fingerprint(scene_dir: Path) -> str:
@@ -89,7 +89,7 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("pcd_ts", "pcd_ts.txt", "file", "Lidar timestamps", "one lidar timestamp per frame"),
     Artefact("odometry", "odometry.txt", "file", "Ground-truth odometry", "timestamped 4x4 poses"),
     Artefact("odometry_segments", "odometry_segments.txt", "file", "Odometry segments", "independently anchored stretches of GT"),
-    Artefact("transforms", "transforms.npy", "file", "Wheel odometry", "(F, 4, 4) continuous but drifty per-frame pose"),
+    Artefact("transforms", "transforms.npy", "file", "Frame odometry", "(F, 4, 4) per-frame pose, one track for the scene"),
     Artefact("gravity_align", "gravity_align.npy", "file", "Gravity alignment", "(F, 3, 3) roll/pitch-removing rotation"),
     Artefact("joint_states", "joint_states.npy", "file", "Joint states", "(T, 10) ts + wheel position/velocity/effort"),
     Artefact("joint_setpoints", "joint_setpoints.npy", "file", "Joint setpoints", "(T, 10) commanded wheel state"),
@@ -98,7 +98,6 @@ ARTEFACTS: tuple[Artefact, ...] = (
     Artefact("camera_intrinsics", "camera_intrinsics.txt", "file", "Camera intrinsics", "3x3 K"),
     Artefact("camera_info", "camera_info.yaml", "file", "Camera info", "full camera_info message"),
     Artefact("T_cam_to_base", "T_cam_to_base.txt", "file", "Camera extrinsic", "4x4 camera-optical -> base"),
-    Artefact("T_cam_to_lidar", "T_cam_to_lidar.txt", "file", "Camera->lidar extrinsic", "4x4, older roots"),
     Artefact("source_bag", "source_bag.txt", "file", "Source bag", "provenance of the recording"),
     Artefact("time_align", "time_align.txt", "file", "Frame-clock correction", "the latency taken off the frame clock, per window measured"),
     Artefact("gnss_guard", "gnss_guard.txt", "file", "GNSS guard", "fabricated pose stretches removed, and what they cost"),
@@ -159,9 +158,9 @@ ARTEFACT_PURPOSE: dict[str, str] = {
         "builds a trajectory, terrain or cloud across a boundary."
     ),
     "transforms": (
-        "The robot's own wheel-and-IMU odometry, one pose per frame. Continuous and always present "
-        "but drifting, so it is never ground truth: it stands in for a view where there is no GT, "
-        "and it is the reference the ground truth is checked against."
+        "The odometry sampled at each frame, relative to frame 0, as one track for the whole scene: "
+        "not split at segment breaks, so it is not ground truth. It stands in for a view where "
+        "there is no GT."
     ),
     "gravity_align": (
         "A per-frame rotation that takes roll and pitch out of the base frame. Height maps are "
@@ -200,10 +199,6 @@ ARTEFACT_PURPOSE: dict[str, str] = {
         "The 4x4 that takes a point from the camera-optical frame to the robot base -- where the "
         "camera sat on the robot. Every overlay of image on geometry depends on it."
     ),
-    "T_cam_to_lidar": (
-        "Camera to lidar, written by older extractions in place of T_cam_to_base. A scene that has "
-        "this one and not the other is from an earlier tooling generation."
-    ),
     "source_bag": (
         "Which recording this scene was extracted from. Provenance only, but it is the only link "
         "back to the raw bag the scene came out of."
@@ -219,13 +214,13 @@ ARTEFACT_PURPOSE: dict[str, str] = {
         "The stretches of fabricated GNSS/INS pose the extractor removed -- a receiver that has "
         "lost its fix keeps publishing a reset position -- with what they cost in poses and "
         "frames, and how many further frames went for having no pose under them at all. Absent "
-        "when the guard did not run (wheel odometry, or --gnss_guard off)."
+        "when the guard did not run (--gnss_guard off)."
     ),
     "tf_pins": (
         "The static transforms the extractor pinned to one constant for every bag, because the "
         "Odin1 re-estimates its own extrinsics as it runs: for each, the pin the scene was built "
         "with and what the bag's own /tf_static said, so a bag whose estimate sat far from the "
-        "constant can be found. Absent when nothing was pinned (a Livox bag, or --tf_pins off)."
+        "constant can be found. Absent when nothing was pinned (--tf_pins off)."
     ),
 }
 
@@ -236,9 +231,7 @@ ARTEFACTS_BY_KEY = {a.key: a for a in ARTEFACTS}
 COUNTED_DIRS = ("images", "clouds", "height_maps", "height_masks", "driven_similarity")
 
 #: Artefacts a complete scene may lack; their absence is not shown as missing.
-OPTIONAL_ARTEFACTS = frozenset(
-    {"driven_similarity", "T_cam_to_lidar", "cmd_vel", "time_align", "gnss_guard", "tf_pins"}
-)
+OPTIONAL_ARTEFACTS = frozenset({"driven_similarity", "cmd_vel", "time_align", "gnss_guard", "tf_pins"})
 
 
 @dataclass
@@ -257,8 +250,6 @@ class SceneProbe:
     segment_coverage: float | None = None
     #: Each segment as ``[start, end]`` fractions of the scene's time span.
     segment_spans: list[list[float]] = field(default_factory=list)
-    #: The subset of spans with borrowed ground truth (reason contains "fill").
-    fill_spans: list[list[float]] = field(default_factory=list)
     bag: str | None = None
     warnings: list[str] = field(default_factory=list)
     #: :func:`scene_fingerprint` when probed; empty for a scene that was unreadable.
@@ -328,7 +319,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
                 probe.counts[key] = 0
 
     # Frame count: the timestamp file is authoritative; fall back to whatever
-    # per-frame directory exists, then to the wheel-odometry array's length.
+    # per-frame directory exists, then to the transforms.npy array's length.
     if probe.present.get("data_ts"):
         probe.counts["data_ts"] = count_lines(scene_dir / "data_ts.txt")
     if probe.present.get("pcd_ts"):
@@ -381,10 +372,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
             lo, hi = span_fractions(seg, base, span)
             if hi <= lo:
                 continue
-            pair = [round(lo, 5), round(hi, 5)]
-            probe.segment_spans.append(pair)
-            if "fill" in (seg.reason or "").lower():
-                probe.fill_spans.append(pair)
+            probe.segment_spans.append([round(lo, 5), round(hi, 5)])
 
     if probe.present.get("source_bag"):
         text = read_text(scene_dir / "source_bag.txt", 4096)

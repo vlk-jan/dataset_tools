@@ -17,14 +17,14 @@ from dataset_tools.viewer import segment_page
 
 
 def test_a_segment_is_found_by_its_own_number_not_its_position(tmp_path):
-    """filter_segments renumbers; window keys carry the file's number."""
+    """Tables need not number from one; window keys carry the file's number."""
     root_path = make_root(tmp_path)
     scene = root_path / "0000"
     ts = np.loadtxt(scene / "data_ts.txt")
     (scene / "odometry_segments.txt").write_text(
         "# id start_ts end_ts n_poses reason\n"
-        f"4 {ts[0]:.6f} {ts[5]:.6f} 6 filtered:pose_jump\n"
-        f"9 {ts[6]:.6f} {ts[-1]:.6f} 6 filtered:end_of_run\n"
+        f"4 {ts[0]:.6f} {ts[5]:.6f} 6 teleport\n"
+        f"9 {ts[6]:.6f} {ts[-1]:.6f} 6 end_of_run\n"
     )
     access = access_for(tmp_path, root_path)
 
@@ -69,7 +69,7 @@ def test_a_segment_never_covers_more_than_the_whole_scene(tmp_path):
     scene = root_path / "0000"
     ts = np.loadtxt(scene / "data_ts.txt")
     (scene / "odometry_segments.txt").write_text(
-        f"# id start_ts end_ts n_poses reason\n0 {ts[0] - 3.0:.6f} {ts[-1] + 3.0:.6f} 12 filtered:end_of_run\n"
+        f"# id start_ts end_ts n_poses reason\n0 {ts[0] - 3.0:.6f} {ts[-1] + 3.0:.6f} 12 end_of_run\n"
     )
     access = access_for(tmp_path, root_path)
     seg = access.segment(0)
@@ -83,7 +83,7 @@ def test_a_thinly_anchored_segment_says_so(tmp_path):
     scene = root_path / "0000"
     ts = np.loadtxt(scene / "data_ts.txt")
     (scene / "odometry_segments.txt").write_text(
-        f"# id start_ts end_ts n_poses reason\n0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n"
+        f"# id start_ts end_ts n_poses reason\n0 {ts[0]:.6f} {ts[-1]:.6f} 2 end_of_run\n"
     )
     access = access_for(tmp_path, root_path)
     seg = access.segment(0)

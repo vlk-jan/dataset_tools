@@ -295,13 +295,8 @@ class SceneAccess:
 
     @property
     def T_cam(self) -> np.ndarray | None:
-        def load():
-            for name in ("T_cam_to_base.txt", "T_cam_to_lidar.txt"):
-                if (self.dir / name).is_file():
-                    return L.read_matrix(self.dir / name, (4, 4))
-            return None
-
-        return self.cached("T_cam", load)  # type: ignore[return-value]
+        path = self.dir / "T_cam_to_base.txt"
+        return self.cached("T_cam", lambda: L.read_matrix(path, (4, 4)) if path.is_file() else None)  # type: ignore[return-value]
 
     # -- per-frame directories --------------------------------------------
 
@@ -311,7 +306,7 @@ class SceneAccess:
         return self.cached(f"avail_{kind}", lambda: set(L.frame_indices_dir(self.dir / kind, suffix)))  # type: ignore[return-value]
 
     def frame_suffix(self, kind: str) -> str:
-        """The extension of a per-frame file; images may be JPEG or (older roots) PNG."""
+        """The extension of a per-frame file; images may be JPEG or PNG (``--image_format png``)."""
         if kind != "images":
             return ARTEFACTS_BY_KEY[kind].suffix
 
@@ -422,7 +417,7 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
     """The window's robot pose, in the window's own reference frame.
 
     ``segment`` windows: ground truth interpolated within that segment only.
-    ``raw`` windows: wheel odometry re-anchored to the window's first frame.
+    ``raw`` windows: transforms.npy re-anchored to the window's first frame.
     """
     n = len(times)
     if window.kind == "frame":
@@ -465,14 +460,14 @@ def resolve_poses(access: SceneAccess, window: Window, times: np.ndarray) -> Pos
         pos = _hold_last(rel[:, :3, 3], n)
         quat = _hold_last(mat_to_quat(rel[:, :3, :3]), n)
         valid = np.arange(len(pos)) < len(idx)
-        track = PoseTrack(pos, quat, valid, "transforms", "wheel odometry, drifts")
+        track = PoseTrack(pos, quat, valid, "transforms", "frame odometry, not ground truth")
         return _level_track(track, _gravity_level(access, int(idx[0])))
 
     return _identity_track(n, "none", "no pose data; robot held at the origin")
 
 
 def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrack | None:
-    """Wheel odometry in the ground-truth window frame, aligned at the first valid frame."""
+    """transforms.npy in the ground-truth window frame, aligned at the first valid frame."""
     tf = access.transforms
     if tf is None or gt.source != "odometry" or not gt.valid.any():
         return None
@@ -488,7 +483,7 @@ def _ghost_track(access: SceneAccess, window: Window, gt: PoseTrack) -> PoseTrac
     pos, quat = world[:, :3, 3], mat_to_quat(world[:, :3, :3])
     n = len(gt.positions)
     return PoseTrack(
-        _hold_last(pos, n)[:n], _hold_last(quat, n)[:n], np.ones(n, dtype=bool), "transforms", "wheel odometry"
+        _hold_last(pos, n)[:n], _hold_last(quat, n)[:n], np.ones(n, dtype=bool), "transforms", "frame odometry"
     )
 
 
@@ -1192,7 +1187,7 @@ def build_scene(access: SceneAccess, window_key: str, opts: BuildOptions):
     for name in WHEELS:
         scene.create_body(name, BodyShapeType.CYLINDER, radius=WHEEL_RADIUS, height=WHEEL_WIDTH, parent="robot")
     if ghost is not None:
-        # Small flat marker for where wheel odometry thinks the robot is;
+        # Small flat marker for where transforms.npy puts the robot;
         # hidden until the panel's ghost switch, since it can drift far away.
         scene.create_body(
             "wheel_odom_ghost",

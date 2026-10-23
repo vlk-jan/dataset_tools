@@ -345,38 +345,12 @@ def test_the_windows_table_states_the_ground_truth_pose_rate(client):
     assert "Hz" in body
 
 
-def test_a_reason_tag_is_translated_tag_by_tag():
-    """Reasons accumulate tags; none of them may reach a page as raw jargon."""
+def test_a_reason_tag_is_translated():
+    """No tag the extractor writes may reach a page as raw jargon."""
     d = windows.describe_reason
-    assert d("filtered:pose_jump").startswith("the GT pose jumped")
-    # Where the poses came from reads as "filled ...", which is what the pages
-    # branch on to avoid saying "ends because filled".
-    assert d("v11_fill").startswith("filled from v1.1 ground truth")
-    assert d("regen_fill:t194").startswith("filled by replaying")
-    # A "+" tail says what was done to the poses afterwards.
-    assert d("regen_fill:t194+refined").endswith("(refined against the wheel odometry)")
-    assert "spliced from the earlier root" in d("filtered:gap+coverage_guard")
-    assert d("filtered:gap+coverage_guard").startswith("a gap of over 1 s")
-    # A filled stretch that also carries why it ended says both.
-    assert "ends because the recording ended" in d("v11_fill:end_of_run")
+    for tag in ("end_of_run", "gap", "teleport", "fix_lost"):
+        assert d(tag) and d(tag) != tag
+    assert d("gap").startswith("a gap of over 1 s")
     # An unknown tag is shown as it is rather than dropped.
     assert d("something_new") == "something_new"
     assert d("") == ""
-
-
-def test_a_joined_segment_says_what_was_joined_and_out_of_what():
-    """v1.5 joins pieces across a proven standstill; the tag names the sources."""
-    d = windows.describe_reason
-    assert "joined across a standstill" in d("filtered:gap+joined")
-    # Pieces from different estimators: the reason keeps only the last piece's
-    # body, so the mark is where a reader learns the segment is a composite.
-    both = d("filtered:pose_jump+joined:native,v11_fill")
-    assert "this root's own estimator run and the v1.1 fill" in both
-    assert "native" not in both and "v11_fill" not in both
-    assert windows.describe_marks("regen_fill:t194+refined+joined") == [
-        "refined against the wheel odometry",
-        "joined across a standstill the wheels, the live odometry and the IMU all confirm",
-    ]
-    # The scene card counts marks across a scene, so it asks for the short form:
-    # the sources vary segment to segment and would splinter every count.
-    assert windows.describe_marks("filtered:gap+joined:native,v11_fill", brief=True) == ["joined across a standstill"]
