@@ -53,6 +53,10 @@ viewer = [
 
 # The viewer builds scenes on the CPU; the default Linux torch wheel drags in
 # ~3 GB of CUDA libraries it never uses. Elsewhere (macOS) PyPI's wheel is used.
+[dependency-groups]
+# The documentation site (mkdocs.yml); CI builds it without installing the package.
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5"]
+
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"

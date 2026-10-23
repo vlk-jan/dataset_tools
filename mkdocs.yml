@@ -1,0 +1,72 @@
+site_name: HELHEST dataset_tools
+site_description: Tools for extracting the HELHEST robot dataset from ROS 2 bags
+site_author: Jan Vlk
+site_url: https://vlk-jan.github.io/dataset_tools/
+repo_url: https://github.com/vlk-jan/dataset_tools
+repo_name: vlk-jan/dataset_tools
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2026 <a href="https://vlk-jan.github.io">Jan Vlk</a>
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+# docs/ also holds the campaign records and their tables; the site is only these pages.
+# Not a bare /*: exclude_docs applies to the theme's files too and would drop assets/.
+exclude_docs: |
+  /*.md
+  /*.csv
+  /*.txt
+  /img/
+  /releases/
+  !/index.md
+  !/installation.md
+  !/tools.md
+  !/building.md
+  !/dataset.md
+  !/viewer.md
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Tools: tools.md
+  - Building a release root: building.md
+  - Dataset layout: dataset.md
+  - Viewer: viewer.md
