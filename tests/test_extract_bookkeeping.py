@@ -152,19 +152,19 @@ def test_merge_scenes_csv_ignores_non_scene_entries(tmp_path: Path):
 
 
 # -------------------------------------------------------------------- CLI
-def test_cli_is_backwards_compatible():
+def test_cli_takes_explicit_topics_and_an_extrinsic():
     args = build_parser().parse_args(
         [
             "in",
             "out",
             "--cam",
-            "/luxonis/oak/rgb/image_raw/compressed",
+            "/cam/image/compressed",
             "--lidar",
-            "/livox/lidar_front",
+            "/lidar/points",
             "--odom",
-            "/odom",
+            "/fixposition/odometry_enu",
             "--imu",
-            "/ekf/imu/data",
+            "/odin1/imu",
             "--base_frame",
             "base_link",
             "--lidar_extrinsic",
@@ -179,7 +179,7 @@ def test_cli_is_backwards_compatible():
         ]
     )
     assert (args.input_dir, args.output_dir) == ("in", "out")
-    assert args.lidar == "/livox/lidar_front"
+    assert args.lidar == "/lidar/points"
     assert args.lidar_extrinsic == [0.1, 0.0, 0.2, 0.0, 0.0, 0.0]
     assert args.jobs == 8
     # New flags default to the previous behaviour.

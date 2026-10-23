@@ -22,8 +22,8 @@ def get_first_frame(reader, conn):
 
 
 def save_intrinsics(reader, conns, cam_topic: str, scene_dir: Path) -> bool:
-    # e.g. /luxonis/oak/rgb/image_raw/compressed -> /luxonis/oak/rgb/camera_info
-    #      /odin1/image/compressed               -> /odin1/camera_info
+    # e.g. /odin1/image/compressed     -> /odin1/camera_info
+    #      /cam/image_raw/compressed   -> /cam/camera_info
     candidates = [
         cam_topic.replace("image_raw/compressed", "camera_info"),
         cam_topic.replace("image/compressed", "camera_info"),
@@ -41,7 +41,7 @@ def save_intrinsics(reader, conns, cam_topic: str, scene_dir: Path) -> bool:
     for _, _, raw in reader.messages([conn]):
         msg = reader.deserialize(raw, conn.msgtype)
         np.savetxt(scene_dir / "camera_intrinsics.txt", np.array(msg.k).reshape(3, 3))
-        # The full CameraInfo too (v1 kept only K and lost the distortion).
+        # The full CameraInfo too: K alone loses the distortion.
         write_camera_info_yaml(msg, scene_dir / "camera_info.yaml")
         return True
     LOG.warning("camera_info topic %s carries no messages", conn.topic)
@@ -72,10 +72,7 @@ def write_camera_info_yaml(msg, path: Path) -> None:
 
 
 def save_camera_extrinsic(tf_graph, cam_frame, base_frame, scene_dir: Path) -> bool:
-    """Write T_cam_to_base.txt: p_base = T @ p_cam_optical, from the static TF.
-
-    (v1's hand-entered ``T_cam_to_lidar.txt`` uses the raw lidar frame instead.)
-    """
+    """Write T_cam_to_base.txt: p_base = T @ p_cam_optical, from the static TF."""
     if not cam_frame:
         return False
     T = get_transform(tf_graph, cam_frame, base_frame)

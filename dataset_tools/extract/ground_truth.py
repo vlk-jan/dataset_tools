@@ -13,12 +13,12 @@ from dataset_tools.gt_io import SegmentRow, anchor_to_first, write_segments, wri
 def _auto(mode: str, odom: str) -> bool:
     """``on``/``off`` as given; ``auto`` is on only for a ground-truth source (Odin1, Fixposition).
 
-    Wheel /odom drifts and holds still when parked, which the guard would read as fabricated.
+    Other odometry (wheel odometry, say) drifts and holds still when parked, which the guard would read as fabricated.
     """
     return mode == "on" or (mode == "auto" and any(key in odom for key in GROUND_TRUTH_SOURCES))
 
 
-#: Odometry topics taken as ground truth: Odin1 (v2.3 on), Fixposition (v2 beta to v2.2).
+#: Odometry topics taken as ground truth: the Odin1 odometry and the Fixposition GNSS/INS.
 GROUND_TRUTH_SOURCES = ("odin1/odometry", "fixposition")
 
 
@@ -27,7 +27,7 @@ MAX_GAP_S, MIN_POSES = 1.0, 20
 
 
 def write_ground_truth(odom_data, scene_dir: Path, spans=None) -> bool:
-    """Write odometry.txt + odometry_segments.txt in the HELHEST v1.2 contract.
+    """Write odometry.txt + odometry_segments.txt (``dataset_tools.gt_io``).
 
     Segments break at gaps > ``MAX_GAP_S`` and steps faster than ``gnss_guard.MAX_SPEED``;
     segments under ``MIN_POSES`` are dropped. Each ``reason`` says why the segment
@@ -59,7 +59,7 @@ def write_ground_truth(odom_data, scene_dir: Path, spans=None) -> bool:
             continue
         kept_ts.append(ts[a:b])
         kept_poses.append(anchor_to_first(Ts[a:b]))
-        # Why this segment ENDED, as in the regenerated (FAST-LIO) tables.
+        # Why this segment ENDED.
         reason = reasons[k] if k < len(reasons) else "end_of_run"
         rows.append(SegmentRow(len(rows), float(ts[a]), float(ts[b - 1]), b - a, reason))
     write_trajectory(

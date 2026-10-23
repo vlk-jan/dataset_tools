@@ -24,7 +24,7 @@ from dataset_tools.validate_scene import validate_scene
 TS = get_typestore(Stores.ROS2_JAZZY)
 T0 = 1_700_000_000
 FRAMES = 30  # enough odometry samples for a ground-truth segment (min_poses=20)
-LIDAR_XYZ = (0.17, 0.0, 0.145)  # the HELHEST front Livox mount, rolled 180 deg
+LIDAR_XYZ = (0.17, 0.0, 0.145)  # a lidar mount rolled 180 deg
 
 
 def _t(name):
@@ -466,29 +466,29 @@ def test_overwrite_removes_what_an_earlier_run_left_behind(bags: Path, tmp_path:
     scene = out / "0000"
     (scene / "images" / "00099.png").write_bytes(b"stale")
     (scene / "clouds" / "00099.npy").write_bytes(b"stale")
-    (scene / "regen").mkdir()
-    (scene / "regen" / "keep.txt").write_text("provenance, not ours to delete\n")
-    (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration, which runs before the extraction\n")
+    (scene / "notes").mkdir()
+    (scene / "notes" / "keep.txt").write_text("not ours to delete\n")
+    (scene / "odometry.txt").write_text("# an earlier ground truth\n")
     assert not scene_is_complete(scene)
 
     assert main([str(bags), str(out), *COMMON, "--overwrite"]) == 0
     assert scene_is_complete(scene)
     assert not (scene / "images" / "00099.png").exists() and not (scene / "clouds" / "00099.npy").exists()
-    assert (scene / "regen" / "keep.txt").is_file()
-    # --gt is off for /odom, so the regenerated ground truth is not this run's to remove.
-    assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+    assert (scene / "notes" / "keep.txt").is_file()
+    # --gt is off for /odom, so the existing ground truth is not this run's to remove.
+    assert (scene / "odometry.txt").read_text().startswith("# an earlier ground truth")
 
 
-def test_a_regenerated_ground_truth_survives_a_bag_without_odometry(tmp_path: Path):
+def test_an_existing_ground_truth_survives_a_bag_without_odometry(tmp_path: Path):
     """--gt on with no odometry messages has nothing to write, so it must not delete what is there."""
     write_bag(tmp_path / "bags" / "bag_a", odom_until=0)
     out = tmp_path / "out"
     scene = out / "0000"
     scene.mkdir(parents=True)
-    (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration\n")
+    (scene / "odometry.txt").write_text("# an earlier ground truth\n")
     assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on"]) == 0
     assert scene_is_complete(scene)
-    assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+    assert (scene / "odometry.txt").read_text().startswith("# an earlier ground truth")
 
 
 def test_a_republished_odometry_stamp_keeps_the_last_pose(tmp_path: Path):
@@ -505,16 +505,16 @@ def test_a_republished_odometry_stamp_keeps_the_last_pose(tmp_path: Path):
     )
 
 
-def test_a_regenerated_ground_truth_survives_a_run_that_fails_before_writing_its_own(tmp_path: Path, monkeypatch):
-    """--gt on replaces the regenerated odometry.txt only once it is about to write its own."""
+def test_an_existing_ground_truth_survives_a_run_that_fails_before_writing_its_own(tmp_path: Path, monkeypatch):
+    """--gt on replaces an existing odometry.txt only once it is about to write its own."""
     write_bag(tmp_path / "bags" / "bag_a")
     out = tmp_path / "out"
     scene = out / "0000"
     scene.mkdir(parents=True)
-    (scene / "odometry.txt").write_text("# from the FAST-LIO regeneration\n")
+    (scene / "odometry.txt").write_text("# an earlier ground truth\n")
     monkeypatch.setattr(cv2, "imwrite", lambda *a, **k: False)
     assert main([str(tmp_path / "bags"), str(out), *COMMON, "--gt", "on", "--image_format", "png"]) == 1
-    assert (scene / "odometry.txt").read_text().startswith("# from the FAST-LIO")
+    assert (scene / "odometry.txt").read_text().startswith("# an earlier ground truth")
 
 
 def test_a_png_that_cannot_be_written_fails_the_scene(bags: Path, tmp_path: Path, monkeypatch):
@@ -722,7 +722,7 @@ def test_tf_pins_off_keeps_the_bag(tmp_path: Path):
     assert not (scene / tf_pins.FILE).exists()
 
 
-def test_livox_bag_has_nothing_to_pin(bags: Path, tmp_path: Path):
+def test_a_bag_without_odin1_transforms_has_nothing_to_pin(bags: Path, tmp_path: Path):
     out = tmp_path / "out"
     assert main([str(bags), str(out), *COMMON]) == 0
     assert not (out / "0000" / tf_pins.FILE).exists()

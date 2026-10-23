@@ -90,20 +90,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--cam",
         type=str,
         default="/odin1/image/compressed",
-        help="Compressed image topic (old bags: /luxonis/oak/rgb/image_raw/compressed)",
+        help="Compressed image topic",
     )
     parser.add_argument(
         "--lidar",
         type=str,
         default="/odin1/cloud_filtered/cloudini",
-        help="PointCloud2 or CompressedPointCloud2 topic (old bags: /livox/lidar_front)",
+        help="PointCloud2 or CompressedPointCloud2 topic",
     )
     parser.add_argument(
         "--odom",
         type=str,
         default="/odin1/odometry",
-        help="Odometry topic for odometry.txt and transforms.npy (ground truth from v2.3 on; v2 beta to "
-        "v2.2 used /fixposition/odometry_enu, old bags /odom). Note: the Fixposition _smooth variant's "
+        help="Odometry topic for odometry.txt and transforms.npy (the Odin1 odometry is the ground truth; "
+        "/fixposition/odometry_enu is the alternative). Note: the Fixposition _smooth variant's "
         "FP_POISH frame has no static TF to base_link; plain odometry_enu (FP_POI) does.",
     )
     parser.add_argument(
@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="/odin1/odometry",
         help="Orientation source for gravity alignment, sensor_msgs/Imu or nav_msgs/Odometry "
-        "(v2 beta to v2.2 used /fixposition/odometry_enu, old bags /ekf/imu/data).",
+        "(e.g. /fixposition/odometry_enu).",
     )
     parser.add_argument(
         "--gps",
@@ -155,8 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("auto", "off"),
         default="auto",
         help="auto: move each return to the robot's pose at data_ts, where the cloud has per-point times "
-        "(Odin1: a 67 ms sweep) and poses cover it. off: write sweeps as recorded (every root before "
-        "2026-10-01). Recorded in extract_meta.json (frames.deskew)",
+        "(Odin1: a 67 ms sweep) and poses cover it. off: write sweeps as recorded. "
+        "Recorded in extract_meta.json (frames.deskew)",
     )
     parser.add_argument(
         "--deskew_imu",
@@ -179,8 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--image_format",
         choices=("camera", "png"),
         default="camera",
-        help="camera: store the camera's own compressed bytes. png: re-encode as PNG (~4x the size); "
-        "only for extending a root that already holds PNG",
+        help="camera: store the camera's own compressed bytes. png: re-encode as PNG (~4x the size)",
     )
     parser.add_argument("--base_frame", type=str, default="base_link")
     parser.add_argument(
@@ -188,7 +187,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("on", "off"),
         default="on",
         help="on: replace the Odin1's online-estimated extrinsics with constants, recording the bag's "
-        f"values in {tf_pins.FILE}. off: use the bag's own values (as before 2026-09-30)",
+        f"values in {tf_pins.FILE}. off: use the bag's own values",
     )
     parser.add_argument(
         "--lidar_extrinsic",

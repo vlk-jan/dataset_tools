@@ -764,7 +764,7 @@ def _write_derived(scene_dir: Path, frame_ts, valid_pcd_ts, p1: _Pass1, guard_ve
         gnss_guard.write_report(scene_dir / GNSS_GUARD_FILE, guard_verdict, float(frame_ts[0]))
 
     # The ground truth goes only once this run is about to rewrite it: with no odometry
-    # in the bag, or a failure before this point, a regenerated odometry.txt would be
+    # in the bag, or a failure before this point, an existing odometry.txt would be
     # deleted and not replaced.
     if _auto(args.gt, args.odom) and p1.odom:
         for name in GROUND_TRUTH_FILES:

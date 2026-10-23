@@ -57,7 +57,7 @@ SCENE_OUTPUT_FILES = (
 #: Written only when the odometry source is its own ground truth (``--gt``).
 GROUND_TRUTH_FILES = ("odometry.txt", "odometry_segments.txt")
 #: Per-frame products built after extraction; moved aside when the frame clock changes
-#: (``scene._set_aside_stale``). ``regen/`` is keyed by time, so it is not here.
+#: (``scene._set_aside_stale``).
 DERIVED_DIRS = ("height_maps", "height_masks", "proprio_labels", "driven_similarity")
 #: dataset_tools.heightmap's record of the settings, moved aside with the maps.
 DERIVED_FILES = ("height_maps.json",)
@@ -234,8 +234,8 @@ def merge_scenes_csv(output_dir: Path) -> Path:
 def clear_scene_outputs(scene_dir: Path) -> None:
     """Remove only the extractor's own outputs from a previous run.
 
-    Not the ground-truth files: on the old rig they come from a FAST-LIO
-    regeneration that runs before extraction.
+    Not the ground-truth files: they are replaced only once a run is about to
+    write new ones (``--gt``).
     """
     if not scene_dir.is_dir():
         return

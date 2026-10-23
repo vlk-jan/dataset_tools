@@ -188,18 +188,15 @@ def test_sync_offset_warning(scene: Path):
     assert any("sync offset" in w for w in report.warnings)
 
 
-def test_old_layout_extras_are_optional_and_reported(scene: Path):
+def test_optional_extras_are_reported(scene: Path):
     # The extras are inspected, not just counted, so they have to be well formed.
     pose = " ".join(["1700000000.000000", *(f"{v:.6f}" for v in np.eye(4).ravel())])
     (scene / "odometry.txt").write_text("# Timestamp(sec) r11 ... 0 0 0 1\n" + pose + "\n")
-    (scene / "trajectory.txt").write_text("# Timestamp(sec) r11\n")
-    np.savetxt(scene / "T_cam_to_lidar.txt", np.eye(4))
     (scene / "height_maps").mkdir()
     (scene / "height_masks").mkdir()
-    (scene / f"{scene.name}_full.npz").write_bytes(b"")
     report = vs.validate_scene(scene)
     assert report.status() == "OK"
-    for name in ("odometry.txt", "trajectory.txt", "height_maps/", "0000_full.npz"):
+    for name in ("odometry.txt", "height_maps/"):
         assert name in report.extras
 
 
