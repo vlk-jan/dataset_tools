@@ -1,7 +1,7 @@
 # Dataset layout
 
 HELHEST is a small three-wheeled skid-steer field robot built at CTU in Prague
-(VRAS group). It carries an **Odin1** lidar-camera-IMU unit and a
+(VRAS group). It carries a **Manifold Tech Odin1** lidar-camera-IMU unit and a
 **Fixposition** GNSS/INS, plus wheel encoders. A HELHEST root holds one
 directory per recording (scene), with every per-frame file index-aligned,
 alongside root-level metadata files.
@@ -10,21 +10,21 @@ alongside root-level metadata files.
 
 | Sensor | Topic | In a scene as |
 | --- | --- | --- |
-| Odin1 lidar, 256 x 192 raster at ~15 Hz | `/odin1/cloud_filtered/cloudini` | `clouds/`, in `base_link` |
+| Odin1 lidar, 256 x 192 raster at ~14.4 Hz | `/odin1/cloud_filtered/cloudini` | `clouds/`, in `base_link` |
 | Odin1 camera, 1600 x 1296, fisheye | `/odin1/image/compressed` | `images/`, `camera_info.yaml`, `T_cam_to_base.txt` |
-| Odin1 lidar-inertial odometry, 14.5 Hz, 6-DoF | `/odin1/odometry` | `odometry.txt`, `transforms.npy`, `gravity_align.npy` |
+| Odin1 lidar-inertial odometry, 14.4 Hz, 6-DoF | `/odin1/odometry` | `odometry.txt`, `transforms.npy`, `gravity_align.npy` |
 | Odin1 IMU, 400 Hz | `/odin1/imu` | used to deskew the sweeps |
 | Fixposition GNSS/INS | `/fixposition/odometry_llh`, `/fixposition/odometry_enu` | `gps.npy`, and the check in `pose_check.txt` |
 | Wheels | `/joint_states`, `/joint_setpoints`, `/cmd_vel` | `joint_states.npy`, `joint_setpoints.npy`, `cmd_vel.npy` |
 
-Camera and lidar run 1:1, yielding approximately 15
-frames per second.
+Camera and lidar run 1:1 at about 14.4 Hz, so a scene has about 14.4 frames
+per second.
 
 ## Root layout
 
 ```
 <root>/
-├── 0000/ … 0035/            one directory per recording (a scene)
+├── 0000/ … 0035/            one directory per scene
 ├── manifest.json            what the release is: version, scenes, sessions, held-out scenes, defects
 ├── splits.json              train / validation split
 ├── scenes.csv               scene, bag, start time, frame count
@@ -52,22 +52,27 @@ same instant.
 
 | Path | Shape, dtype | Content |
 | --- | --- | --- |
-| `images/NNNNN.jpg` | 1600 x 1296 x 3 JPEG | the camera's raw compressed JPEG bytes, unmodified |
+| `images/NNNNN.jpg` | JPEG, 1600 x 1296 | the camera's raw compressed JPEG bytes, unmodified |
 | `clouds/NNNNN.npy` | (N, 4) `float32` | x, y, z in metres and intensity, in `base_link`, deskewed onto the frame's instant. `N` varies; NaN and all-zero points are dropped. The robot's own body reflections are retained |
 | `height_maps/NNNNN.npz` | 128 x 128 `float64`, key `height_map` | terrain height in metres, gravity-aligned base frame, 0.1 m cells, ±6.4 m. Rows correspond to x forward, columns to y left |
 | `height_masks/NNNNN.npz` | 128 x 128 `uint8`, key `validity` | source of each cell's height: 0 extrapolated, 1 interpolated, 2 measured, 3 wheel contact |
 | `data_ts.txt` | (F,) | the frame's instant, Unix seconds |
 | `pcd_ts.txt` | (F,) | the lidar timestamp, on the same latency-corrected clock |
-| `transforms.npy` | (F, 4, 4) `float64` | base pose per frame relative to frame 0, interpolated from odometry |
+| `transforms.npy` | (F, 4, 4) `float64` | base pose per frame relative to frame 0, interpolated from odometry. One track for the whole scene, **not split at segment breaks** (see [Ground truth](#ground-truth)) |
 | `gravity_align.npy` | (F, 3, 3) `float64` | `Ry(pitch) @ Rx(roll)` of the base: applied to a cloud (`pts @ R.T`), it levels the ground. Yaw is omitted |
 
-A frame with too few lidar returns produces no height map.
+A frame with too few lidar returns produces no height map. HELHEST v2.4's
+height maps are built with the p90 cell statistic and no tie jitter; each
+scene's `height_maps.json` records the exact settings.
 
 ### Per scene
 
+Files fed by a topic or TF the bag lacks are not written; `odometry.txt` and
+its segment table need ground truth enabled (the default for the Odin1).
+
 | Path | Content |
 | --- | --- |
-| `odometry.txt` | ground truth: base poses at the odometry's full rate; one row per pose containing timestamp followed by the row-major 4 x 4 matrix |
+| `odometry.txt` | ground truth: base poses at the odometry's full rate within the kept segments; one row per pose with 17 values, the timestamp followed by the row-major 4 x 4 matrix |
 | `odometry_segments.txt` | segment table for `odometry.txt`; see [Ground truth](#ground-truth) |
 | `camera_info.yaml` | full camera calibration: resolution, distortion model and coefficients, `K`, `R`, and `P` |
 | `camera_intrinsics.txt` | the 3 x 3 intrinsic matrix `K` |
@@ -88,8 +93,8 @@ first place to look when something in a scene seems wrong.
 | `extract_meta.json` | the extraction run (git commit, all options), the source bag (topics and message counts), all streams with data gaps exceeding 1 s, and frame filtering records |
 | `source_bag.txt` | the bag the scene originated from; also serves as the completion sentinel for the scene |
 | `time_align.txt` | the estimated publish latency subtracted from the frame clock |
-| `pose_check.txt` | odometry compared against the Fixposition at `base_link`: jumps, displacement disagreement over 1, 2, and 5 s, clock lag, and tilt |
-| `gnss_guard.txt` | frames dropped for having no valid underlying pose |
+| `pose_check.txt` | odometry compared against the Fixposition at `base_link`: jumps, displacement disagreement over 1, 2, and 5 s, clock lag, and tilt (at the child frame when TF does not reach `base_link`) |
+| `gnss_guard.txt` | frames and poses the guard removed: fabricated-pose spans and frames without a bracketing pose |
 | `tf_pins.txt` | fixed extrinsics used by the scene compared against what the bag itself published |
 | `odom_frame.txt` | the rotation applied to odometry by `helhest-odom-frame` |
 | `height_maps.json` | the configuration settings used to build height maps |
@@ -121,14 +126,19 @@ span, its pose count, and why it ended:
 | `fix_lost` | the pose source had no valid solution |
 | `end_of_run` | the recording ended |
 
+Segments shorter than 20 poses are dropped and appear in neither file.
+
 **Never bridge two segments.** Within a segment, compute relative motion with
 `inv(T0) @ Ti`. A segment's frame is defined by the robot's attitude at its
-first pose and is therefore not level: obtain absolute roll and pitch from
-`gravity_align.npy`.
+first pose and is therefore not guaranteed to be level (z is up only if the
+robot started level): obtain absolute roll and pitch from `gravity_align.npy`.
 
-`transforms.npy` is the same odometry sampled at each frame. Where a frame has
-no pose on either side of it, the extractor drops the frame rather than
-extrapolating.
+`transforms.npy` is the same odometry sampled at each frame, but as one
+unsegmented track anchored at frame 0. Do not take pose differences across a
+segment boundary: assign frames to segments with the time spans in
+`odometry_segments.txt`. Within the odometry, poses are interpolated; across a
+gap or a teleport the nearest pose is used instead. Frames the odometry does not
+cover are dropped by default (`--gnss_guard`).
 
 ## Timing
 
@@ -140,14 +150,15 @@ extrapolating.
 - **Clouds are deskewed.** The Odin1 scans its raster from bottom to top over
   67 ms. Every return is moved to where the robot was at `data_ts`, using the
   odometry and the IMU, so a cloud is a snapshot at the exact instant of its
-  camera image.
+  camera image. Sweeps without per-point times or odometry around them are
+  written as recorded and counted in `extract_meta.json`.
 
-Full-rate streams (`odometry.txt`, `joint_states.npy`, `gps.npy`, ...) carry
-their own timestamps on the same Unix clock.
+Full-rate streams (`odometry.txt` within its segments, `joint_states.npy`,
+`gps.npy`, ...) carry their own timestamps on the same Unix clock.
 
 ## Recordings
 
-The current release, HELHEST v2.5, holds 36 scenes from seven sessions in
+The current release, HELHEST v2.4, holds 36 scenes from seven sessions in
 September and October 2026:
 
 | Scenes | Date | Site |
@@ -159,6 +170,10 @@ September and October 2026:
 | 0016-0021 | 2026-09-29 | Temešvár: the same meadow, late afternoon into dusk |
 | 0022-0028 | 2026-10-02 | Temešvár: pine and mixed forest, the meadow |
 | 0029-0035 | 2026-10-07 | Stromovka park, off the paths: lawn, woodland, tall weeds |
+
+The held-out (validation) scenes are 0001, 0019, 0020, 0024, 0025, 0026, 0027,
+0034 and 0035, one per kind of ground, each on ground the training scenes do
+not drive.
 
 `manifest.json` lists each session, the held-out scenes, and the known defects
 of every scene.

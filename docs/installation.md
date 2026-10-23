@@ -19,11 +19,9 @@ Optional extras:
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
-| `build` | `open3d` | `helhest-odom-frame` (required for building a release root). The Linux wheel requires glibc 2.29 or newer. |
+| `build` | `open3d` | `helhest-odom-frame measure` (part of building a release root). The Linux wheel requires glibc 2.29 or newer. |
 | `test` | `pytest`, `httpx` | Running the test suite |
 | `viewer` | FastAPI, uvicorn, Jinja2, SimView, torch | `helhest-viewer` (see below) |
-
-To build a complete release root, install with the `build` extra: `pip install -e ".[build]"`.
 
 ## Viewer
 
@@ -32,19 +30,21 @@ uv venv --python 3.12 .venv-viewer
 uv pip install --python .venv-viewer -e ".[viewer]"
 ```
 
-`uv` installs `torch` from the CPU-only index configured in `pyproject.toml`.
-Standard `pip` ignores that configuration and downloads the CUDA build (about
-3 GB); when using `pip`, install the CPU build first:
+On Linux, `uv` installs `torch` from the CPU-only index configured in
+`pyproject.toml`; on macOS it uses the regular PyPI wheel. Plain `pip` ignores
+that configuration and on Linux downloads the CUDA build (about 3 GB); with
+`pip`, install the CPU build first:
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-pip install -e ".[viewer]"
+python3 -m venv .venv-viewer
+.venv-viewer/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+.venv-viewer/bin/pip install -e ".[viewer]"
 ```
 
 The viewer requires SimView 6.1.1 or newer and refuses to start with earlier
 versions.
 
-## Container (CTU cluster)
+## Container (CTU RCI cluster) { #container-ctu-cluster }
 
 On the cluster, create the virtual environment using the container's Python
 interpreter and run all commands through the container. Network data shares are
@@ -52,25 +52,31 @@ not mounted inside the container by default, so always specify `--bind`:
 
 ```bash
 SIF=/mnt/data/vras/data/helhest-jazzy.sif
-singularity exec --bind /mnt/data $SIF python3 -m venv .venv
-singularity exec --bind /mnt/data $SIF .venv/bin/pip install -e ".[build]"
-singularity exec --bind /mnt/data $SIF \
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF python3 -m venv .venv
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF .venv/bin/pip install -e ".[build]"
+singularity exec --bind /mnt/personal --bind /mnt/data $SIF \
     .venv/bin/helhest-extract <bags> <root> --jobs 8
 ```
 
-Add `--bind` for every other filesystem you read from or write to (for
-example, `--bind /mnt/personal`). The Slurm jobs in `slurm/` expect a virtual
-environment built this way at `<repository>/.venv`.
+Add `--bind` for any other filesystem you read from or write to. The extraction,
+height-map and finalize jobs in `slurm/` expect a virtual environment built this
+way at `<repository>/.venv`; `slurm/viewer.batch` expects the viewer environment
+at `<repository>/.venv-viewer`.
 
 ## The cloudini decoder
 
 The Odin1 lidar publishes compressed clouds (cloudini). The decoder ships
-prebuilt at `dataset_tools/libcloudini_shim.so` and requires glibc 2.32 or newer
-(Ubuntu 22.04 and later). On older systems, rebuild it once:
+prebuilt at `dataset_tools/libcloudini_shim.so` and was built on Ubuntu 22.04 and
+needs glibc 2.32 or newer (`GLIBC_2.32`, `GLIBCXX_3.4.30`). On older systems,
+rebuild it once:
 
 ```bash
 cloudini_shim/build_shim.sh
 ```
 
-This requires `cmake` and a C++20-capable `g++`. All prerequisites are available
-in `helhest-jazzy.sif`, so if in doubt, run the script inside the container.
+This requires `cmake` and a C++20-capable `g++`. `build_shim.sh` clones the
+cloudini sources from GitHub unless an existing checkout is passed as its first
+argument (`cloudini_shim/build_shim.sh <cloudini-checkout>`), so it needs git
+and network access otherwise; it uses system zstd/lz4 headers when present,
+else builds vendored copies. All prerequisites are available in `helhest-jazzy.sif`,
+so if in doubt, run the script inside the container.
