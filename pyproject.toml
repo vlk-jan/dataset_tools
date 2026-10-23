@@ -30,8 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 # httpx is what starlette's TestClient imports, so the viewer's route tests
 # error at fixture setup without it even though nothing imports it directly.
-# Pillow writes the viewer tests' fixture images.
-test = ["pytest>=7", "httpx>=0.27", "pillow>=10.0"]
+test = ["pytest>=7", "httpx>=0.27"]
 # Building a root beyond extraction: dataset_tools.odom_frame registers clouds
 # with open3d's ICP. Its Linux wheel needs glibc >= 2.29 (inside the container).
 build = ["open3d>=0.18"]
@@ -87,7 +86,7 @@ dataset_tools = ["libcloudini_shim.so"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = [".", "scripts"]
 addopts = "-q"
 
 # The tree is formatted with this; 88 described nothing, nineteen files violated

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -64,11 +65,14 @@ def driven_sidecar():
     return driven, max_sim.astype(np.float16)
 
 
-def _write_png(path: Path, size=(16, 10)) -> None:
-    pytest.importorskip("PIL")
-    from PIL import Image
+def write_image(path: Path, size=(16, 10), rgb=(40, 80, 120)) -> None:
+    """A flat ``rgb`` image ``size = (width, height)`` px; the format from the suffix."""
+    cv2.imwrite(str(path), np.full((size[1], size[0], 3), rgb[::-1], np.uint8))
 
-    Image.new("RGB", size, (40, 80, 120)).save(path)
+
+def decode_rgb(data: bytes) -> np.ndarray:
+    """An encoded image as an ``(height, width, 3)`` RGB array."""
+    return cv2.cvtColor(cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
 
 
 def make_root(
@@ -97,7 +101,7 @@ def make_root(
         (d / "clouds").mkdir()
         ts = 1_700_000_000.0 + 0.1 * np.arange(frames)
         for i in range(frames):
-            _write_png(d / "images" / f"{i:05d}.png")
+            write_image(d / "images" / f"{i:05d}.png")
             cloud = rng.normal(scale=2.0, size=(64, 4)).astype(np.float32)
             cloud[:, 0] = np.abs(cloud[:, 0])  # forward-only, like a front lidar
             np.save(d / "clouds" / f"{i:05d}.npy", cloud)
@@ -259,7 +263,7 @@ def write_atlas(root_path: Path, scenes=("0000",), *, dataset_version: str | Non
     entries = {}
     for scene in scenes:
         for slot in slots:
-            _write_png(atlas_dir / "thumbs" / f"{scene}{slot}.jpg", size=(64, 40))
+            write_image(atlas_dir / "thumbs" / f"{scene}{slot}.jpg", size=(64, 40))
         entries[scene] = {
             "description": f"A synthetic place for scene {scene}, written by hand.",
             "date": "2025-09-12 15:13",

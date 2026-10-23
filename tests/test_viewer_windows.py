@@ -7,9 +7,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 from helpers_viewer import (
-    _write_png,
     make_root,
     viewer_client,
+    write_image,
 )
 
 from dataset_tools.viewer import loaders, probe, windows
@@ -202,7 +202,7 @@ def _root_with_untimestamped_frames(tmp_path: Path, timestamped: int = 8, extra:
     root_path = make_root(tmp_path, frames=timestamped, segments=False, with_transforms=False)
     scene = root_path / "0000"
     for i in range(timestamped, timestamped + extra):
-        _write_png(scene / "images" / f"{i:05d}.png")
+        write_image(scene / "images" / f"{i:05d}.png")
     return root_path
 
 

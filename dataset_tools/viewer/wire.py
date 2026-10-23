@@ -46,8 +46,6 @@ def write_static_bundle(doc: dict, dest: Path) -> dict:
 
     from simview.columnar import write_static_bundle as simview_write
 
-    if doc.get("model") is None or doc.get("states") is None:
-        raise ValueError("scene document is missing 'model' or 'states'")
     dest.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{dest.name}.", dir=dest.parent))
     try:

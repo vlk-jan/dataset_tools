@@ -106,15 +106,15 @@ def test_a_scene_without_gravity_alignment_is_left_unlevelled(tmp_path):
     assert np.allclose(track.quats[0], [1.0, 0.0, 0.0, 0.0], atol=1e-6)
 
 
-def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_path):
-    """Height maps are distance-weighted, so drifted far observations don't lift the ground."""
+def _two_frames_apart(tmp_path, height_maps, masks=()):
+    """A two-frame segment, the frames 6 m apart along x with these height maps
+    (and masks); returns ``(access, frames, track, poses, opts, grid)`` for splatting."""
     from dataset_tools.viewer import build
     from dataset_tools.viewer import probe as probe_mod
 
     root_path = make_root(tmp_path, frames=2, with_height_maps=True)
     scene = root_path / "0000"
     ts = loaders.read_timestamps(scene / "data_ts.txt")
-    # Two frames 6 m apart, each reporting flat ground at a different height.
     with open(scene / "odometry.txt", "w") as fh:
         for i, t in enumerate(ts):
             T = np.eye(4)
@@ -122,8 +122,10 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
             fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
     with open(scene / "odometry_segments.txt", "w") as fh:
         fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
-    for i in range(2):
-        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), float(i)))
+    for i, hm in enumerate(height_maps):
+        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=hm)
+    for i, validity in enumerate(masks):
+        np.savez_compressed(scene / "height_masks" / f"{i:05d}.npz", validity=validity)
 
     access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
     window = access.window("seg000")
@@ -132,6 +134,17 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
     poses = poses_from_quat(track.positions, track.quats)
     opts = build.BuildOptions().sanitized()
     grid = build._make_grid(track.positions, opts)
+    return access, frames, track, poses, opts, grid
+
+
+def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_path):
+    """Height maps are distance-weighted, so drifted far observations don't lift the ground."""
+    from dataset_tools.viewer import build
+
+    # Two frames 6 m apart, each reporting flat ground at a different height.
+    access, frames, track, poses, opts, grid = _two_frames_apart(
+        tmp_path, [np.full((128, 128), float(i)) for i in range(2)]
+    )
     build.splat_height_maps(access, grid, frames, poses, opts)
     height, _, _ = build._finish_terrain(grid, None)
 
@@ -146,37 +159,15 @@ def test_terrain_under_the_robot_comes_from_the_frame_that_drove_over_it(tmp_pat
 def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
     """A measured cell ignores extrapolations, however near they were taken."""
     from dataset_tools.viewer import build
-    from dataset_tools.viewer import probe as probe_mod
 
-    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
-    scene = root_path / "0000"
-    ts = loaders.read_timestamps(scene / "data_ts.txt")
     # Two frames 6 m apart. Each stands where the other only reaches with the
-    # far edge of its map, worth ~2% of a sample directly underfoot.
-    with open(scene / "odometry.txt", "w") as fh:
-        for i, t in enumerate(ts):
-            T = np.eye(4)
-            T[0, 3] = 6.0 * i
-            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
-    with open(scene / "odometry_segments.txt", "w") as fh:
-        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
-    for i in range(2):
-        np.savez_compressed(
-            scene / "height_maps" / f"{i:05d}.npz", height_map=np.full((128, 128), 1.0 if i == 0 else 0.0)
-        )
-        # Frame 0 measured everything it saw; frame 1 extrapolated everything.
-        np.savez_compressed(
-            scene / "height_masks" / f"{i:05d}.npz",
-            validity=np.full((128, 128), 2 if i == 0 else 0, dtype=np.uint8),
-        )
-
-    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000")
-    frames = np.arange(window.frame_start, window.frame_end)
-    track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = poses_from_quat(track.positions, track.quats)
-    opts = build.BuildOptions().sanitized()
-    grid = build._make_grid(track.positions, opts)
+    # far edge of its map, worth ~2% of a sample directly underfoot. Frame 0
+    # measured everything it saw; frame 1 extrapolated everything.
+    access, frames, track, poses, opts, grid = _two_frames_apart(
+        tmp_path,
+        [np.full((128, 128), 1.0 if i == 0 else 0.0) for i in range(2)],
+        [np.full((128, 128), 2 if i == 0 else 0, dtype=np.uint8) for i in range(2)],
+    )
     build.splat_height_maps(access, grid, frames, poses, opts)
     height, layers, bounds = build._finish_terrain(grid, None)
 
@@ -193,32 +184,10 @@ def test_validity_layer_reports_the_samples_that_decided_the_height(tmp_path):
 def test_wheel_anchored_cells_do_not_read_as_measured(tmp_path):
     """Validity code 3 (DRIFT wheel anchors) counts as unmeasured, not better than 2."""
     from dataset_tools.viewer import build
-    from dataset_tools.viewer import probe as probe_mod
 
-    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
-    scene = root_path / "0000"
-    ts = loaders.read_timestamps(scene / "data_ts.txt")
-    with open(scene / "odometry.txt", "w") as fh:
-        for i, t in enumerate(ts):
-            T = np.eye(4)
-            T[0, 3] = 6.0 * i
-            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
-    with open(scene / "odometry_segments.txt", "w") as fh:
-        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
-    for i in range(2):
-        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=np.zeros((128, 128)))
-        np.savez_compressed(
-            scene / "height_masks" / f"{i:05d}.npz",
-            validity=np.full((128, 128), 3, dtype=np.uint8),
-        )
-
-    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000")
-    frames = np.arange(window.frame_start, window.frame_end)
-    track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = poses_from_quat(track.positions, track.quats)
-    opts = build.BuildOptions().sanitized()
-    grid = build._make_grid(track.positions, opts)
+    access, frames, track, poses, opts, grid = _two_frames_apart(
+        tmp_path, [np.zeros((128, 128))] * 2, [np.full((128, 128), 3, dtype=np.uint8)] * 2
+    )
     build.splat_height_maps(access, grid, frames, poses, opts)
     _, layers, _ = build._finish_terrain(grid, None)
 
@@ -237,30 +206,11 @@ def test_validity_rank_is_the_identity_on_every_published_root(tmp_path):
 def test_a_nan_in_a_height_map_does_not_poison_the_terrain(tmp_path):
     """NaN height-map cells are dropped before splatting."""
     from dataset_tools.viewer import build
-    from dataset_tools.viewer import probe as probe_mod
 
-    root_path = make_root(tmp_path, frames=2, with_height_maps=True)
-    scene = root_path / "0000"
-    ts = loaders.read_timestamps(scene / "data_ts.txt")
-    with open(scene / "odometry.txt", "w") as fh:
-        for i, t in enumerate(ts):
-            T = np.eye(4)
-            T[0, 3] = 6.0 * i
-            fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
-    with open(scene / "odometry_segments.txt", "w") as fh:
-        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
-    for i in range(2):
-        hm = np.full((128, 128), float(i))
+    maps = [np.full((128, 128), float(i)) for i in range(2)]
+    for hm in maps:
         hm[100:120, 100:120] = np.nan  # ahead and to the right of the robot
-        np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=hm)
-
-    access = build.SceneAccess(probe_mod.DatasetRoot(root_path), "0000")
-    window = access.window("seg000")
-    frames = np.arange(window.frame_start, window.frame_end)
-    track = build.resolve_poses(access, window, access.frame_ts[frames])
-    poses = poses_from_quat(track.positions, track.quats)
-    opts = build.BuildOptions().sanitized()
-    grid = build._make_grid(track.positions, opts)
+    access, frames, track, poses, opts, grid = _two_frames_apart(tmp_path, maps)
     with warnings.catch_warnings():
         # The undefined cast announces itself; the guard has to run before it.
         warnings.simplefilter("error", RuntimeWarning)

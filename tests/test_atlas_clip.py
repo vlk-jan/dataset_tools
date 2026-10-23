@@ -1,15 +1,9 @@
 """Ground-truth statistics are clipped to the frame window (GT can start before the Odin)."""
 
-import sys
-from pathlib import Path
-
 import pytest
+from make_atlas import clip, frame_window
 
 from dataset_tools.viewer.probe import SceneProbe
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from make_atlas import clip, frame_window  # noqa: E402
 
 
 def test_clip_keeps_only_the_overlap():

@@ -43,4 +43,6 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[viewer,test]" --extra-index-url https://download.pytorch.org/whl/cpu
       - run: helhest-viewer --help > /dev/null
-      - run: python -m pytest tests
+      # The rest ran in the extraction job; test_camera_info's yaml round trip
+      # needs pyyaml, which only this job's install brings.
+      - run: python -m pytest tests/test_viewer_*.py tests/test_atlas_*.py tests/test_camera_info.py

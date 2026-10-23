@@ -858,18 +858,20 @@ def _set_aside_stale(scene_dir: Path, old_clock: str | None, bag: str) -> None:
     LOG.warning("%s: the frame clock changed; %s moved aside as *.%s -- rebuild them", bag, ", ".join(present), suffix)
 
 
+def git(*argv) -> str | None:
+    """A git command's output in this checkout, or None (not a checkout, no git, a failure)."""
+    try:
+        run = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), *argv], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return run.stdout.strip() if run.returncode == 0 else None
+
+
 @functools.cache
 def _tool() -> dict:
     """Which code this is: the checkout's commit, and the versions that decode the bag."""
-    here = Path(__file__).resolve().parent
-
-    def git(*argv):
-        try:
-            run = subprocess.run(["git", "-C", str(here), *argv], capture_output=True, text=True, timeout=10)
-        except (OSError, subprocess.SubprocessError):
-            return None
-        return run.stdout.strip() if run.returncode == 0 else None
-
     # --no-optional-locks: N workers at once must not race for index.lock.
     status = git("--no-optional-locks", "status", "--porcelain")
     try:

@@ -279,11 +279,6 @@ class SceneProbe:
             return "partial"
         return "yes"
 
-    def to_json(self) -> dict:
-        d = asdict(self)
-        d["missing"] = self.missing
-        return d
-
 
 def _npy_shape(path: Path) -> tuple[int, ...] | None:
     """Shape of an ``.npy`` from its header only (memory-mapped, or a mirror's range read)."""
@@ -667,7 +662,7 @@ class DatasetRoot:
         if data.get("root") != str(self.path) or data.get("format") != PROBE_CACHE_FORMAT:
             return
         for sid, raw in (data.get("scenes") or {}).items():
-            raw.pop("missing", None)
+            raw.pop("missing", None)  # written by caches before 2026-10-23
             try:
                 self._probe_cache[sid] = SceneProbe(**raw)
             except TypeError:
@@ -682,7 +677,7 @@ class DatasetRoot:
             "format": PROBE_CACHE_FORMAT,
             "saved": time.time(),
             # list(): a probe on another request thread may insert while this runs.
-            "scenes": {sid: p.to_json() for sid, p in list(self._probe_cache.items())},
+            "scenes": {sid: asdict(p) for sid, p in list(self._probe_cache.items())},
         }
         # pid: two viewers on one root must not write into each other's tmp file.
         tmp = self._probe_cache_path.with_suffix(f".{os.getpid()}.tmp")

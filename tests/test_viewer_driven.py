@@ -3,11 +3,9 @@ similarity -- through probe, tile, terrain layers and routes."""
 
 from __future__ import annotations
 
-import io
-
 import numpy as np
 import pytest
-from helpers_viewer import driven_sidecar, make_root, viewer_client
+from helpers_viewer import decode_rgb, driven_sidecar, make_root, viewer_client
 
 from dataset_tools.transforms import poses_from_quat
 from dataset_tools.viewer import probe, render
@@ -29,19 +27,14 @@ def driven_client(tmp_path):
 def test_the_driven_tile_paints_driven_cells_in_their_own_colour():
     """The driven cells are the one thing on the tile that is a fact rather
     than a similarity, so they get a colour the ramp never produces."""
-    pytest.importorskip("PIL")
-    from PIL import Image
-
     driven, max_sim = driven_sidecar()
-    data = render.render_driven_similarity(driven, max_sim, 0.9)
-    img = Image.open(io.BytesIO(data)).convert("RGB")
-    assert img.size[0] >= 384
-    px = np.asarray(img)
+    px = decode_rgb(render.render_driven_similarity(driven, max_sim, 0.9))
+    assert px.shape[1] >= 384
     driven_px = np.all(px == render.DRIVEN_COLOR, axis=-1)
     assert driven_px.sum() > 0
     # Forward is up: the patch one metre ahead lands above the tile's centre.
     ys, _ = np.nonzero(driven_px)
-    assert ys.mean() < img.size[1] / 2
+    assert ys.mean() < px.shape[0] / 2
     # Cells beyond the ramp's reach are the ramp's floor, not black or turbo.
     far = np.all(px == render.DRIVEN_SIM_ANCHORS[0].astype(np.uint8), axis=-1)
     assert far.sum() > 0
@@ -198,12 +191,8 @@ def test_the_grid_the_zoom_probe_reads_keeps_the_files_layout(driven_client):
 
 
 def test_the_zoom_asks_for_bigger_tiles_within_bounds(driven_client):
-    import io
-
-    from PIL import Image
-
     r = driven_client.get("/api/scene/0000/frame/0/heightmap.png?size=1024")
-    assert Image.open(io.BytesIO(r.content)).size == (1024, 1024)
+    assert decode_rgb(r.content).shape[:2] == (1024, 1024)
     assert driven_client.get("/api/scene/0000/frame/0/cloud.png?size=99999").status_code == 422
     page = driven_client.get("/scene/0000/frame/0").text
     assert 'data-grid="/api/scene/0000/frame/0/grid.json"' in page and "zoom.js" in page

@@ -18,8 +18,6 @@ from helpers_viewer import (
 
 
 def _notes_client(tmp_path, **kwargs):
-    pytest.importorskip("fastapi")
-
     root_path = kwargs.pop("root_path", None) or make_root(tmp_path, frames=12)
     return root_path, viewer_client(root_path, tmp_path / "cache", **kwargs)
 

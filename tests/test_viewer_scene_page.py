@@ -17,6 +17,7 @@ from helpers_viewer import (
     value_of,
     viewer_client,
     write_atlas,
+    write_image,
 )
 
 from dataset_tools.viewer import probe
@@ -37,6 +38,11 @@ def scene_page(tmp_path, root_path, scene: str = "0000"):
 
 def sub_of(card, label: str):
     return next((s["sub"] for s in card["stats"] if s["label"] == label), None)
+
+
+def files_of(page) -> list[dict]:
+    """The file card's entries, across its groups."""
+    return [f for g in page["file_groups"] for f in g["entries"]]
 
 
 def test_camera_info_reads_the_fields_the_page_shows(tmp_path):
@@ -216,7 +222,7 @@ def test_a_scene_with_no_segment_file_still_draws_its_curated_timeline(tmp_path)
 
 def test_the_file_inventory_says_what_each_artefact_is_for(tmp_path):
     page = scene_page(tmp_path, make_root(tmp_path, with_cmd_vel=False, with_transforms=False))
-    entries = {f["key"]: f for f in page["files"]}
+    entries = {f["key"]: f for f in files_of(page)}
     assert entries["odometry"]["state"] == "yes" and "ground truth" in entries["odometry"]["purpose"].lower()
     assert entries["odometry"]["relpath"] == "odometry.txt"
     assert entries["images"]["relpath"] == "images" and entries["images"]["group"] == "Per frame"
@@ -295,9 +301,7 @@ def test_a_curated_thumbnail_with_no_stored_file_renders_the_frame_it_names(tmp_
     for stored in (atlas_dir / "thumbs").glob("*.jpg"):
         stored.unlink()
     # Mark the frame the 50 % fraction would pick, so the two rules differ.
-    from PIL import Image
-
-    Image.new("RGB", (16, 10), (200, 30, 30)).save(root_path / "0000" / "images" / "00006.png")
+    write_image(root_path / "0000" / "images" / "00006.png", rgb=(200, 30, 30))
 
     client = viewer_client(root_path, tmp_path / "cache")
     thumb = client.get("/api/scene/0000/thumb/b.jpg")
@@ -388,7 +392,7 @@ def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
     root_path = make_root(tmp_path)
     page = scene_page(tmp_path, root_path)
     assert page["disk"] is None
-    assert all(f["size"] is None for f in page["files"])
+    assert all(value_of(f, "on disk") is None for f in files_of(page))
 
     doc = disk_usage.update(root_path)
     page = scene_page(tmp_path / "again", root_path)
@@ -398,10 +402,10 @@ def test_a_measured_scene_gets_a_disk_card_and_sized_files(tmp_path):
     assert sum(p["bytes"] for p in card["parts"]) == entry["bytes"]
     assert "images" in sub_of(card, "per frame")
 
-    files = {f["relpath"]: f for f in page["files"]}
-    assert files["images"]["size"] and files["odometry.txt"]["size"]
+    files = {f["relpath"]: f for f in files_of(page)}
+    assert value_of(files["images"], "on disk") and value_of(files["odometry.txt"], "on disk")
     # An absent file has no size, whatever the measurement said.
-    assert files["gps.npy"]["size"] is None
+    assert value_of(files["gps.npy"], "on disk") is None
 
 
 # --------------------------------------------------------------------------
@@ -462,14 +466,14 @@ def test_the_extraction_card_sums_up_the_three_report_files(tmp_path):
     assert "negative moves a frame earlier" in card["note"]
 
     # And the inventory knows the files by name.
-    present = {f["relpath"] for f in page["files"] if f["present"]}
+    present = {f["relpath"] for f in files_of(page) if f["state"] in ("yes", "partial")}
     assert {"time_align.txt", "gnss_guard.txt", "tf_pins.txt"} <= present
 
 
 def test_a_scene_without_the_report_files_has_no_extraction_card(tmp_path):
     page = scene_page(tmp_path, make_root(tmp_path))
     assert card_of(page, "Extraction") is None
-    absent = {f["relpath"] for f in page["files"] if not f["present"]}
+    absent = {f["relpath"] for f in files_of(page) if f["state"] not in ("yes", "partial")}
     assert {"time_align.txt", "gnss_guard.txt", "tf_pins.txt"} <= absent
 
 

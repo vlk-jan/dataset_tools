@@ -120,8 +120,6 @@ class ViewerState:
         self._locks: dict[str, asyncio.Lock] = {}
         self.bundle_dir = root.cache_dir / BUNDLE_DIR_NAME
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
-        #: Parsed meta.json per bundle path, keyed by mtime: re-parsing per blob was slow.
-        self.meta_memo: dict[Path, tuple[int, tuple]] = {}
         #: The scene page's prefetch of its first window; one at a time, so
         #: clicking through scenes does not queue a build per page.
         self.scene_prefetch: asyncio.Future | None = None
@@ -280,7 +278,17 @@ def create_app(
         "rate": ("pose rate", lambda r: r["window"].pose_rate or 0.0, False),
         "duration": ("duration", lambda r: r["window"].duration, True),
     }
-    segment_rows: dict[tuple, list[dict]] = {}
+
+    @functools.lru_cache(maxsize=1)
+    def segment_rows(key: tuple) -> list[dict]:
+        """The ``/segments`` rows for ``key``, ``((scene, fingerprint), ...)``."""
+        rows = []
+        for sid, _ in key:
+            access = state.access(sid)
+            wins = [w for w in access.windows() if w.kind == "segment"]
+            att = attitude_per_window(access, wins)
+            rows += [{"scene": sid, "window": w, "att": att.get(w.key)} for w in wins]
+        return rows
 
     @app.get("/segments", response_class=HTMLResponse)
     async def segments_page(
@@ -294,20 +302,11 @@ def create_app(
         def work() -> list[dict]:
             ids = root.scene_ids(refresh=True)
             key = tuple((sid, root.probe(sid).fingerprint) for sid in ids)
-            if key not in segment_rows:
-                rows = []
-                for sid in ids:
-                    access = state.access(sid)
-                    wins = [w for w in access.windows() if w.kind == "segment"]
-                    att = attitude_per_window(access, wins)
-                    rows += [{"scene": sid, "window": w, "att": att.get(w.key)} for w in wins]
-                segment_rows.clear()
-                segment_rows[key] = rows
             notes = notes_store.list_all()
             # Read fresh like the notes: splits.json is not in any scene's fingerprint.
             marks = {sid: split_mark(root, sid) for sid in ids}
             out = []
-            for r in segment_rows[key]:
+            for r in segment_rows(key):
                 w = r["window"]
                 touching = [n for n in notes.get(r["scene"], []) if n.overlaps(w.frame_start, w.frame_end)]
                 verdicts = sorted({n.verdict for n in touching if n.verdict})
@@ -605,22 +604,12 @@ def create_app(
         return Response(data, media_type="image/jpeg")
 
     # ``size``: tile pixel size; click-to-zoom asks for a bigger one.
-    @app.get("/api/scene/{scene_id}/frame/{index}/heightmap.png")
-    async def api_frame_heightmap(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
+    @app.get("/api/scene/{scene_id}/frame/{index}/{layer}.png")
+    async def api_frame_tile(scene_id: str, index: int, layer: str, size: int = Query(TILE_SIZE, ge=128, le=1536)):
+        if layer not in TILES:
+            raise HTTPException(404, "Not Found")
         access = await _access_or_404(state, scene_id)
-        load = functools.partial(load_npz_key, key="height_map")
-        return await _frame_png(access, index, "height_maps", load, render.render_height_map, size)
-
-    @app.get("/api/scene/{scene_id}/frame/{index}/validity.png")
-    async def api_frame_validity(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = await _access_or_404(state, scene_id)
-        load = functools.partial(load_npz_key, key="validity")
-        return await _frame_png(access, index, "height_masks", load, render.render_validity, size)
-
-    @app.get("/api/scene/{scene_id}/frame/{index}/driven.png")
-    async def api_frame_driven(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = await _access_or_404(state, scene_id)
-        return await _frame_png(access, index, "driven_similarity", read_driven_similarity, _render_driven, size)
+        return await _frame_png(access, index, size, *TILES[layer])
 
     @app.get("/api/scene/{scene_id}/frame/{index}/grid.json")
     async def api_frame_grid(scene_id: str, index: int):
@@ -630,11 +619,6 @@ def create_app(
         if grid is None:
             raise HTTPException(404, f"no BEV grid for frame {index}")
         return Response(json.dumps(grid, separators=(",", ":")), media_type="application/json")
-
-    @app.get("/api/scene/{scene_id}/frame/{index}/cloud.png")
-    async def api_frame_cloud(scene_id: str, index: int, size: int = Query(TILE_SIZE, ge=128, le=1536)):
-        access = await _access_or_404(state, scene_id)
-        return await _frame_png(access, index, "clouds", load_cloud, render.render_cloud_bev, size, what="cloud")
 
     # ------------------------------------------------------------------ notes
 
@@ -843,7 +827,21 @@ def _options_from_key(opts_key: str) -> BuildOptions:
         return BuildOptions()
 
 
-def _bundle_is_current(dest: Path, window: Window | None, data: str, memo: dict[Path, tuple[int, tuple]]) -> bool:
+@functools.lru_cache(maxsize=1024)
+def _meta_summary(dest: Path, mtime_ns: int) -> tuple:
+    """What :func:`_bundle_is_current` compares, from ``dest/meta.json`` as of ``mtime_ns``
+    (memoised: re-parsing per blob was slow). Raises when unreadable, so that is not memoised."""
+    meta = json.loads((dest / "meta.json").read_text())
+    cached = meta.get("window") or {}
+    return (
+        meta.get("meta_version"),
+        cached.get("frame_start"),
+        cached.get("frame_end"),
+        (meta.get("build") or {}).get("data", ""),
+    )
+
+
+def _bundle_is_current(dest: Path, window: Window | None, data: str) -> bool:
     """Is this cached bundle complete and still valid?
 
     It must match ``META_VERSION``, the window's current frame range (a key can
@@ -855,25 +853,9 @@ def _bundle_is_current(dest: Path, window: Window | None, data: str, memo: dict[
     if not (dest / "model.json").is_file():
         return False
     try:
-        mtime = (dest / "meta.json").stat().st_mtime_ns
-    except OSError:
+        summary = _meta_summary(dest, (dest / "meta.json").stat().st_mtime_ns)
+    except (OSError, ValueError):
         return False
-    hit = memo.get(dest)
-    if hit is not None and hit[0] == mtime:
-        summary = hit[1]
-    else:
-        try:
-            meta = json.loads((dest / "meta.json").read_text())
-        except (OSError, ValueError):
-            return False
-        cached = meta.get("window") or {}
-        summary = (
-            meta.get("meta_version"),
-            cached.get("frame_start"),
-            cached.get("frame_end"),
-            (meta.get("build") or {}).get("data", ""),
-        )
-        memo[dest] = (mtime, summary)
     if summary != (META_VERSION, window.frame_start, window.frame_end, data):
         return False
     os.utime(dest)  # _evict_bundles reads the directory's mtime as last use
@@ -889,11 +871,11 @@ async def _ensure_bundle(state: ViewerState, scene_id: str, window_key: str, opt
         window_key = window.key  # one bundle per window, however its key was spelled (frame3, frame00003)
     dest = _bundle_path(state, scene_id, window_key, opts_key)
     data = access.probe.fingerprint
-    if await run_in_threadpool(_bundle_is_current, dest, window, data, state.meta_memo):
+    if await run_in_threadpool(_bundle_is_current, dest, window, data):
         return dest
 
     async with state.lock(f"{scene_id}/{window_key}/{opts_key}"):
-        if await run_in_threadpool(_bundle_is_current, dest, window, data, state.meta_memo):
+        if await run_in_threadpool(_bundle_is_current, dest, window, data):
             return dest
         opts = _options_from_key(opts_key)
 
@@ -962,8 +944,23 @@ async def _prefetch(state: ViewerState, scene_id: str, window_key: str, opts_key
         logger.debug("prefetch of %s/%s skipped: %s", scene_id, window_key, exc)
 
 
+#: The ``{layer}.png`` tiles: ``(kind, load, renderer, what)`` for :func:`_frame_png`.
+TILES = {
+    "heightmap": ("height_maps", functools.partial(load_npz_key, key="height_map"), render.render_height_map, None),
+    "validity": ("height_masks", functools.partial(load_npz_key, key="validity"), render.render_validity, None),
+    # Three keys of one small npz, one image.
+    "driven": (
+        "driven_similarity",
+        read_driven_similarity,
+        lambda s, size: render.render_driven_similarity(s["driven"], s["max_sim"], s["threshold"], size=size),
+        None,
+    ),
+    "cloud": ("clouds", load_cloud, render.render_cloud_bev, "cloud"),
+}
+
+
 async def _frame_png(
-    access: SceneAccess, index: int, kind: str, load, renderer, size: int, what: str | None = None
+    access: SceneAccess, index: int, size: int, kind: str, load, renderer, what: str | None = None
 ) -> Response:
     """One frame's ``kind`` file as a PNG tile: ``renderer(load(path), size=size)``,
     absent or unreadable (as ``what``, default ``kind``) when ``load`` gives None."""
@@ -977,11 +974,6 @@ async def _frame_png(
     if data is None:
         return _absent_or_unreadable(path, f"{what or kind} for frame {index}")
     return Response(data, media_type="image/png")
-
-
-def _render_driven(sidecar: dict[str, Any], size: int) -> bytes:
-    """The driven-similarity tile: three keys of one small npz, one image."""
-    return render.render_driven_similarity(sidecar["driven"], sidecar["max_sim"], sidecar["threshold"], size=size)
 
 
 def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
@@ -1173,11 +1165,7 @@ def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
     """Everything the per-frame page states about one frame. Cheap: no cloud,
     image or height map is decoded here."""
     probe = access.probe
-    details: dict[str, Any] = {
-        "index": index,
-        "n_frames": probe.n_frames,
-        "strip_page": _page_of(_frame_indices(access), index),
-    }
+    details: dict[str, Any] = {"strip_page": _page_of(_frame_indices(access), index)}
 
     ts = access.frame_ts
     if ts is not None and 0 <= index < len(ts):
@@ -1195,17 +1183,6 @@ def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
     details["present"] = present
     # The cloud-on-image check needs both per-frame files and the calibration.
     details["overlay"] = present["images"] and present["clouds"] and _overlay_possible(access)
-
-    if present["driven_similarity"]:
-        # Small (a few kB); the caption needs its cell counts.
-        sidecar = read_driven_similarity(access.frame_path("driven_similarity", index))
-        if sidecar is not None:
-            driven, threshold = sidecar["driven"], sidecar["threshold"]
-            details["driven"] = {
-                "n_driven": int(driven.sum()),
-                "n_trusted": int((driven | (sidecar["max_sim"] > threshold)).sum()),
-                "threshold": threshold,
-            }
 
     if present["clouds"]:
         shape = _npy_shape(access.frame_path("clouds", index))
@@ -1247,9 +1224,7 @@ def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
         details["window"] = {
             "key": best.key,
             "label": best.label,
-            "kind": best.kind,
             "pose_source": best.pose_source,
-            "offset": index - best.frame_start,
             "n_frames": best.n_frames,
         }
     else:

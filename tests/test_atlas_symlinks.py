@@ -4,14 +4,8 @@ HELHEST v1.5 has a real ``atlas/`` whose ``thumbs`` is a link into v1.4's, so
 the guard on ``atlas/`` alone let a thumbnail rewrite land in v1.4.
 """
 
-import sys
-from pathlib import Path
-
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
-
-from make_atlas import resolve_atlas_dir  # noqa: E402
+from make_atlas import resolve_atlas_dir
 
 
 def _linked(tmp_path):

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from dataset_tools import heightmap, release
-from dataset_tools.gt_io import read_trajectory, write_trajectory
+from dataset_tools.gt_io import SegmentRow, read_trajectory, write_segments, write_trajectory
 from dataset_tools.transforms import euler_matrix
 
 
@@ -17,14 +17,10 @@ def _scene(root, sc, bag, n=40, tilted=()):
         for sub, ext in (("clouds", "npy"), ("images", "jpg"), ("height_maps", "npz"), ("height_masks", "npz")):
             (d / sub / f"{i:05d}.{ext}").touch()
     np.savetxt(d / "data_ts.txt", t)
-    rows = [
-        np.r_[ti, np.eye(4)[:3].ravel() + np.r_[0, 0, 0, 0.1 * i, 0, 0, 0, 0, 0, 0, 0, 0], 0, 0, 0, 1]
-        for i, ti in enumerate(t)
-    ]
-    np.savetxt(d / "odometry.txt", rows, header="t r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1")
-    (d / "odometry_segments.txt").write_text(
-        f"# segment start_ts end_ts n_poses reason\n1 {t[0]} {t[-1]} {n} end_of_run\n"
-    )
+    poses = np.tile(np.eye(4), (n, 1, 1))
+    poses[:, 0, 3] = 0.1 * np.arange(n)
+    write_trajectory(d / "odometry.txt", t, poses)
+    write_segments(d / "odometry_segments.txt", [SegmentRow(1, t[0], t[-1], n, "end_of_run")])
     np.save(
         d / "gravity_align.npy",
         np.stack([euler_matrix(np.radians(90) if i in tilted else 0, 0, 0)[:3, :3] for i in range(n)]),

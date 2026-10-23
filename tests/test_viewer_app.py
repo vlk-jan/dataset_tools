@@ -7,10 +7,11 @@ import json
 import numpy as np
 import pytest
 from helpers_viewer import (
-    _write_png,
+    decode_rgb,
     inline_blobs,
     make_root,
     viewer_client,
+    write_image,
 )
 
 from dataset_tools.viewer import loaders, probe, render, windows
@@ -268,18 +269,13 @@ def test_a_single_frame_view_page_opens(client):
 
 def test_the_tile_robot_is_helhest_drawn_to_scale():
     """The BEV tiles draw the robot's real footprint, so it works as a ruler."""
-    pytest.importorskip("PIL")
-    import io
-
-    from PIL import Image
-
     # A flat map: everything that differs from the background is the robot.
-    png = render.render_height_map(np.zeros((128, 128)), size=384)
-    img = Image.open(io.BytesIO(png)).convert("RGB")
-    assert img.size == (384, 384)
-    px_per_m = (img.width / 128) / loaders.HM_RES
+    img = decode_rgb(render.render_height_map(np.zeros((128, 128)), size=384))
+    assert img.shape[:2] == (384, 384)
+    height, width = img.shape[:2]
+    px_per_m = (width / 128) / loaders.HM_RES
 
-    arr = np.asarray(img).astype(int)
+    arr = img.astype(int)
     background = arr[0, 0]
     marked = np.abs(arr - background).sum(axis=2) > 12
     rows, cols = np.nonzero(marked)
@@ -293,12 +289,12 @@ def test_the_tile_robot_is_helhest_drawn_to_scale():
     assert 0.75 < width_m < 1.0, width_m  # +-0.431 across the wheels
 
     # Tile centre is base_link (front axle): most ink is behind it, symmetric left-right.
-    front_m = (img.height / 2 - rows.min()) / px_per_m
-    rear_m = (rows.max() + 1 - img.height / 2) / px_per_m
+    front_m = (height / 2 - rows.min()) / px_per_m
+    rear_m = (rows.max() + 1 - height / 2) / px_per_m
     assert 0.4 < front_m < 0.6, front_m  # nose + wedge
     assert 0.95 < rear_m < 1.15, rear_m  # rear wheel
-    assert abs((cols.min() + cols.max()) / 2 - img.width / 2) < 0.12 * px_per_m
-    assert marked[img.height // 2, :].sum() > 0  # a front tyre crosses the middle row
+    assert abs((cols.min() + cols.max()) / 2 - width / 2) < 0.12 * px_per_m
+    assert marked[height // 2, :].sum() > 0  # a front tyre crosses the middle row
 
     # Subtle: a marker that covered the map would defeat the point of the map.
     assert marked.mean() < 0.03, marked.mean()
@@ -307,11 +303,6 @@ def test_the_tile_robot_is_helhest_drawn_to_scale():
 def test_every_bev_tile_carries_the_same_robot():
     """Height map, validity and cloud are all the same robot-centred frame, so
     the robot has to be drawn the same real size on each of them."""
-    pytest.importorskip("PIL")
-    import io
-
-    from PIL import Image
-
     # The silhouette outline is the only near-white ink on these tiles.
     tiles = {
         128 * loaders.HM_RES: render.render_height_map(np.zeros((128, 128))),
@@ -320,14 +311,14 @@ def test_every_bev_tile_carries_the_same_robot():
     }
     sizes = set()
     for span_m, png in tiles.items():
-        img = Image.open(io.BytesIO(png)).convert("RGB")
-        white = np.asarray(img).min(axis=2) >= 190
+        img = decode_rgb(png)
+        white = img.min(axis=2) >= 190
         assert white.any(), span_m
         rows, cols = np.nonzero(white)
-        px_per_m = img.width / span_m
+        px_per_m = img.shape[1] / span_m
         sizes.add(round((cols.max() - cols.min() + 1) / px_per_m, 1))
         # Centred on the robot, whatever the tile's scale.
-        assert abs((cols.min() + cols.max()) / 2 - img.width / 2) < 0.15 * px_per_m
+        assert abs((cols.min() + cols.max()) / 2 - img.shape[1] / 2) < 0.15 * px_per_m
     assert len(sizes) == 1, sizes
 
 
@@ -521,7 +512,7 @@ def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):
     ts = 1_700_000_000.0 + 0.1 * np.arange(600)
     np.savetxt(scene / "data_ts.txt", ts, fmt="%.6f")
     for i in range(0, 600, 40):
-        _write_png(scene / "images" / f"{i:05d}.png")
+        write_image(scene / "images" / f"{i:05d}.png")
     for stale in scene.glob("images/*.png"):
         if int(stale.stem) % 40:
             stale.unlink()
@@ -580,15 +571,15 @@ def test_a_bundle_is_current_only_when_built_by_today_s_code_for_this_window(cli
     window = windows.Window("seg000", "segment", "", stored["frame_start"], stored["frame_end"], "odometry")
     data = json.loads(meta.read_text())["build"]["data"]
     assert data
-    assert _bundle_is_current(meta.parent, window, data, {})
-    assert not _bundle_is_current(meta.parent, window, "another scene state", {})
-    assert not _bundle_is_current(meta.parent, None, data, {})
-    assert not _bundle_is_current(tmp_path / "nowhere", window, data, {})
+    assert _bundle_is_current(meta.parent, window, data)
+    assert not _bundle_is_current(meta.parent, window, "another scene state")
+    assert not _bundle_is_current(meta.parent, None, data)
+    assert not _bundle_is_current(tmp_path / "nowhere", window, data)
 
     stale = json.loads(meta.read_text())
     stale["meta_version"] = 0
     meta.write_text(json.dumps(stale))
-    assert not _bundle_is_current(meta.parent, window, data, {})
+    assert not _bundle_is_current(meta.parent, window, data)
 
 
 def test_changed_data_reaches_every_page_without_a_restart(client, tmp_path):
@@ -988,7 +979,7 @@ def test_a_bundle_just_served_is_not_the_first_evicted(tmp_path):
         (d / "meta.json").write_text(json.dumps(meta))
         os.utime(d, (age, age))
     window = windows.Window("seg000", "segment", "", 0, 5, "odometry")
-    assert _bundle_is_current(old, window, "fp", {})  # served now
+    assert _bundle_is_current(old, window, "fp")  # served now
     total = sum(f.stat().st_size for f in tmp_path.rglob("*") if f.is_file())
     _evict_bundles(tmp_path / "bundles", new, max_bytes=total - 1)
     assert old.exists() and new.exists() and not older.exists()

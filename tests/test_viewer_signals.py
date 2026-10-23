@@ -32,12 +32,20 @@ def test_a_scene_offers_one_chart_per_unit_from_the_files_it_has(tmp_path):
     access = access_for(tmp_path)
     ts = access.frame_ts
     sig = signals.signal_charts(access, float(ts[0]), float(ts[-1]))
-    keys = [c["key"] for c in sig["charts"]]
-    assert keys == ["speed", "wheel_left", "wheel_rear", "wheel_right", "effort", "attitude", "frame_dt"]
-    speed = next(c for c in sig["charts"] if c["key"] == "speed")
+    titles = [c["title"] for c in sig["charts"]]
+    assert titles == [
+        "Ground speed",
+        "Left wheel speed",
+        "Rear wheel speed",
+        "Right wheel speed",
+        "Wheel effort",
+        "Roll & pitch",
+        "Frame interval",
+    ]
+    speed = sig["charts"][0]
     assert [s["label"] for s in speed["series"]] == ["ground truth", "robot odometry", "commanded"]
     # The three wheels share one y-range, so they read against each other.
-    wheels = [c for c in sig["charts"] if c["key"].startswith("wheel_")]
+    wheels = [c for c in sig["charts"] if c["title"].endswith(" wheel speed")]
     assert len({(c["lo"], c["hi"]) for c in wheels}) == 1
     # Every chart is drawn and read on the same columns, and a click opens a real frame.
     frames = json.loads(sig["frames"])
@@ -53,7 +61,7 @@ def test_absent_files_drop_their_charts_rather_than_draw_them_empty(tmp_path):
     access = access_for(tmp_path, with_joints=False, with_cmd_vel=False, with_gravity=False, with_transforms=False)
     ts = access.frame_ts
     sig = signals.signal_charts(access, float(ts[0]), float(ts[-1]))
-    assert [c["key"] for c in sig["charts"]] == ["speed", "frame_dt"]
+    assert [c["title"] for c in sig["charts"]] == ["Ground speed", "Frame interval"]
     assert [s["label"] for s in sig["charts"][0]["series"]] == ["ground truth"]
 
 

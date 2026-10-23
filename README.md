@@ -87,7 +87,7 @@ python3 -m venv .venv
 ```
 
 Python >= 3.12. Dependencies: `rosbags`, `numpy`, `opencv-python-headless`,
-`scipy`. Extras: `test` (`pytest`, `httpx`, `pillow`), `build` (`open3d`, for
+`scipy`. Extras: `test` (`pytest`, `httpx`), `build` (`open3d`, for
 `helhest-odom-frame`; its Linux wheel wants glibc >= 2.29, so on the cluster
 it runs inside the container) and `viewer` (see [Viewer](#viewer)). Building
 a release root: `pip install -e ".[test,build]"`.

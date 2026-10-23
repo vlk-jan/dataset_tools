@@ -15,15 +15,11 @@ def _auto(mode: str, odom: str) -> bool:
 
     Wheel /odom drifts and holds still when parked, which the guard would read as fabricated.
     """
-    return mode == "on" or (mode == "auto" and is_ground_truth_source(odom))
+    return mode == "on" or (mode == "auto" and any(key in odom for key in GROUND_TRUTH_SOURCES))
 
 
 #: Odometry topics taken as ground truth: Odin1 (v2.3 on), Fixposition (v2 beta to v2.2).
 GROUND_TRUTH_SOURCES = ("odin1/odometry", "fixposition")
-
-
-def is_ground_truth_source(odom: str) -> bool:
-    return any(key in odom for key in GROUND_TRUTH_SOURCES)
 
 
 #: Segments break at gaps over MAX_GAP_S s; shorter than MIN_POSES poses they are dropped.

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import io
-
 import numpy as np
-import pytest
+from helpers_viewer import decode_rgb, write_image
 
 from dataset_tools.viewer import render
 
@@ -34,38 +32,27 @@ def test_colorize_handles_nan_and_a_flat_range():
 
 
 def test_renderers_produce_valid_images():
-    pytest.importorskip("PIL")
-    from PIL import Image
-
     hm = np.random.default_rng(0).normal(size=(128, 128))
     for data in (render.render_height_map(hm), render.render_validity((hm > 0).astype(np.uint8))):
-        assert Image.open(io.BytesIO(data)).size[0] > 0
+        assert decode_rgb(data).shape[1] > 0
     cloud = np.random.default_rng(1).normal(size=(500, 4))
-    assert Image.open(io.BytesIO(render.render_cloud_bev(cloud))).size[0] > 0
+    assert decode_rgb(render.render_cloud_bev(cloud)).shape[1] > 0
 
 
 def test_the_cameras_own_jpeg_is_served_untouched_when_no_downscale_is_needed(tmp_path):
-    pytest.importorskip("PIL")
-    from PIL import Image
-
     from dataset_tools.viewer import render
 
     path = tmp_path / "00000.jpg"
-    Image.new("RGB", (64, 40), (40, 80, 120)).save(path, format="JPEG", quality=95)
+    write_image(path, (64, 40))
     assert render.render_camera_image(path, width=640) == path.read_bytes()
     smaller = render.render_camera_image(path, width=32)
     assert smaller != path.read_bytes()
-    assert Image.open(io.BytesIO(smaller)).size == (32, 20)
+    assert decode_rgb(smaller).shape[:2] == (20, 32)
 
 
 def test_a_known_point_lands_on_its_pixel_when_projected_into_the_image(tmp_path):
-    pytest.importorskip("PIL")
-    import io
-
-    from PIL import Image
-
     path = tmp_path / "00000.png"
-    Image.new("RGB", (200, 100), (0, 0, 0)).save(path)
+    write_image(path, (200, 100), (0, 0, 0))
     K = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]])
     # The camera's optical frame (z forward, x right, y down) expressed in the
     # base frame (x forward, y left, z up), 0.2 m above the base origin.
@@ -77,23 +64,18 @@ def test_a_known_point_lands_on_its_pixel_when_projected_into_the_image(tmp_path
     cloud = np.array([[5.0, 1.0, 0.2, 10.0]], dtype=np.float32)
     jpeg, span = render.render_cloud_on_image(path, cloud, K, T, width=1280)
     assert span is not None and span[0] < span[1]  # the depth span the page's legend states
-    px = np.asarray(Image.open(io.BytesIO(jpeg)).convert("RGB"))
+    px = decode_rgb(jpeg)
     assert px[50, 80].sum() > 100  # the dot
     assert px[50, 150].sum() < 30  # nowhere else
     # A return behind the camera is not drawn at all.
     behind, no_span = render.render_cloud_on_image(path, np.array([[-5.0, 1.0, 0.2, 10.0]]), K, T)
     assert no_span is None
-    assert np.asarray(Image.open(io.BytesIO(behind)).convert("RGB")).sum() < 3000
+    assert decode_rgb(behind).sum() < 3000
 
 
 def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path):
-    pytest.importorskip("PIL")
-    import io
-
-    from PIL import Image
-
     path = tmp_path / "00000.png"
-    Image.new("RGB", (300, 100), (0, 0, 0)).save(path)
+    write_image(path, (300, 100), (0, 0, 0))
     K = np.array([[100.0, 0.0, 100.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]])
     T = np.eye(4)
     T[:3, :3] = [[0, 0, 1], [-1, 0, 0], [0, -1, 0]]
@@ -105,7 +87,7 @@ def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path
 
     # 1. Pinhole: lands around u=200
     jpeg_pin, _ = render.render_cloud_on_image(path, cloud, K, T, width=1280)
-    px_pin = np.asarray(Image.open(io.BytesIO(jpeg_pin)).convert("RGB"))
+    px_pin = decode_rgb(jpeg_pin)
     assert px_pin[50, 200].sum() > 100
     assert px_pin[50, 179].sum() < 30
 
@@ -113,6 +95,6 @@ def test_fisheye_and_distortion_projection_lands_at_fisheye_coordinates(tmp_path
     jpeg_fish, _ = render.render_cloud_on_image(
         path, cloud, K, T, width=1280, distortion_model="equidistant", distortion_coeffs=[0.0, 0.0, 0.0, 0.0]
     )
-    px_fish = np.asarray(Image.open(io.BytesIO(jpeg_fish)).convert("RGB"))
+    px_fish = decode_rgb(jpeg_fish)
     assert px_fish[50, 179].sum() > 100
     assert px_fish[50, 200].sum() < 30

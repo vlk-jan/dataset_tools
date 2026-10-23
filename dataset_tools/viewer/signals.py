@@ -91,7 +91,6 @@ def _y_range(values: list[np.ndarray]) -> tuple[float, float]:
 
 
 def _chart(
-    key: str,
     title: str,
     unit: str,
     series: list[dict],
@@ -107,7 +106,6 @@ def _chart(
         return None
     lo, hi = span or _y_range([s["values"] for s in series])
     return {
-        "key": key,
         "title": title,
         "unit": unit,
         "note": note,
@@ -226,7 +224,6 @@ def signal_charts(
         speed.append({"label": "commanded", "cls": "s3", "values": resample(cv[:, 0], np.abs(cv[:, 1]), t0, t1)})
     charts.append(
         _chart(
-            "speed",
             "Ground speed",
             "m/s",
             speed,
@@ -261,7 +258,6 @@ def signal_charts(
             last = k == len(WHEEL_LABELS) - 1
             charts.append(
                 _chart(
-                    f"wheel_{label}",
                     f"{label.capitalize()} wheel speed",
                     "rad/s",
                     series,
@@ -280,7 +276,6 @@ def signal_charts(
             )
         charts.append(
             _chart(
-                "effort",
                 "Wheel effort",
                 "as recorded",
                 [
@@ -298,7 +293,6 @@ def signal_charts(
         roll, pitch = roll_pitch_from_matrix(np.asarray(ga[:n]))
         charts.append(
             _chart(
-                "attitude",
                 "Roll & pitch",
                 "deg",
                 [
@@ -313,7 +307,6 @@ def signal_charts(
     if geo.is_track(gps) and gps.shape[1] > geo.ALT:
         charts.append(
             _chart(
-                "altitude",
                 "GNSS altitude",
                 "m",
                 [{"label": "altitude", "cls": "s1", "values": resample(gps[:, geo.T], gps[:, geo.ALT], t0, t1)}],
@@ -323,7 +316,6 @@ def signal_charts(
             sigma = np.sqrt(var)
             charts.append(
                 _chart(
-                    "gnss_sigma",
                     "GNSS horizontal σ",
                     "m",
                     [{"label": "σ", "cls": "s1", "values": resample(gps[:, geo.T], sigma, t0, t1, how="max")}],
@@ -334,7 +326,6 @@ def signal_charts(
     if ts is not None and len(ts) > 2:
         charts.append(
             _chart(
-                "frame_dt",
                 "Frame interval",
                 "ms",
                 [

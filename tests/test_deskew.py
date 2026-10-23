@@ -144,7 +144,7 @@ def test_covered_requires_a_bracket_without_a_wide_gap():
 
 
 def _gyro(ts, rate_fn):
-    return deskew.GyroTrack.build([(t, 0.0, 0.0, rate_fn(t)) for t in ts])
+    return deskew.GyroTrack.build([(t, 0.0, 0.0, rate_fn(t)) for t in ts], np.eye(3))
 
 
 def _track_from_rate(ts, rate_fn):
@@ -214,4 +214,4 @@ def test_the_gyro_is_rotated_into_the_base_frame():
     Rr = g.relative_rotations(0.5, np.array([0.6]))
     assert rotation_angle_deg(Rr[0]) == pytest.approx(np.degrees(0.1), abs=1e-6)
     assert Rr[0][1, 0] > 0  # a positive yaw
-    assert deskew.GyroTrack.build([]) is None
+    assert deskew.GyroTrack.build([], np.eye(3)) is None

@@ -37,7 +37,7 @@ def slice_time(gps: np.ndarray, t0: float, t1: float) -> np.ndarray:
 
 def decimate(track: np.ndarray, max_points: int) -> np.ndarray:
     """At most ``max_points`` fixes, evenly spaced, both ends kept."""
-    if max_points <= 0 or len(track) <= max_points:
+    if len(track) <= max_points:
         return track
     step = -(-len(track) // max_points)  # ceil
     out = track[::step]

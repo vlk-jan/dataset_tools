@@ -21,7 +21,7 @@ def interpolate_poses(
     query_ts: np.ndarray,
     sample_ts: np.ndarray,
     poses: np.ndarray,
-    max_gap: float = 0.5,
+    max_gap: float = gnss_guard.SUPPORT_GAP,
     max_speed: float = gnss_guard.MAX_SPEED,
 ) -> tuple[np.ndarray, int]:
     """Pose at each query time: linear in translation, SLERP in rotation.

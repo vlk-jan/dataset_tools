@@ -124,7 +124,6 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
     notes.append("Poses are anchored to this segment's own first pose, so they mean nothing outside it.")
 
     return {
-        "kind": "segment",
         "title": "Segment",
         "badge": f"{rate:.1f} Hz" if rate else None,
         "badge_class": band(rate, GOOD_POSE_RATE, THIN_POSE_RATE),
@@ -190,7 +189,7 @@ def motion_card(access: SceneAccess, seg: Segment, frames: tuple[int, int]) -> d
 
     if not stats:
         return None
-    return {"kind": "motion", "title": "Path & motion", "stats": stats, "note": " ".join(notes) or None}
+    return {"title": "Path & motion", "stats": stats, "note": " ".join(notes) or None}
 
 
 def hero_thumbs(access: SceneAccess, frames: tuple[int, int]) -> list[dict[str, Any]]:

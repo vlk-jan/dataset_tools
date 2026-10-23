@@ -19,7 +19,8 @@ from dataset_tools.gnss_guard import Span, _merge
 #: Tag written into ``odometry_segments.txt`` for a run that ends at a mismatch cut.
 TAG_MAP = "map_mismatch"
 
-#: HELHEST wheel contacts in base_link (URDF: base_link is the front axle) and the wheel radius.
+#: HELHEST wheel contacts in base_link (URDF: base_link is the front axle) and the wheel radius;
+#: also the height-map builder's defaults.
 WHEELS = np.array([[0.0, 0.36], [0.0, -0.36], [-0.697, 0.0]])
 WHEEL_RADIUS = 0.36
 #: Height-map layout DRIFT ships: 128x128 cells of 0.1 m, robot at the centre, row = x, col = y.

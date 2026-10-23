@@ -84,14 +84,13 @@ class GyroTrack:
     omega: np.ndarray
 
     @classmethod
-    def build(cls, rows, R_to_base: np.ndarray | None = None) -> GyroTrack | None:
+    def build(cls, rows, R_to_base: np.ndarray) -> GyroTrack | None:
         """From ``[(t, wx, wy, wz), ...]`` in the sensor frame, rotated into the base frame."""
         if rows is None or len(rows) < 2:
             return None
         a = np.asarray(rows, dtype=np.float64)
         a = a[np.argsort(a[:, 0], kind="stable")]
-        w = a[:, 1:4] if R_to_base is None else a[:, 1:4] @ np.asarray(R_to_base, float).T
-        return cls(a[:, 0], w)
+        return cls(a[:, 0], a[:, 1:4] @ np.asarray(R_to_base, float).T)
 
     def relative_rotations(self, t_ref: float, times: np.ndarray) -> np.ndarray | None:
         """``R[k] = R_world(t_ref)^T R_world(times[k])``, or None when the
@@ -114,11 +113,11 @@ class GyroTrack:
         return np.array([R_ref_T @ at(float(t)) for t in times])
 
 
-def covered(sample_ts: np.ndarray, t_lo: float, t_hi: float, max_gap: float = MAX_GAP_S) -> bool:
-    """Whether sorted ``sample_ts`` bracket ``[t_lo, t_hi]`` with no gap over ``max_gap``."""
+def covered(sample_ts: np.ndarray, t_lo: float, t_hi: float) -> bool:
+    """Whether sorted ``sample_ts`` bracket ``[t_lo, t_hi]`` with no gap over :data:`MAX_GAP_S`."""
     ts = np.asarray(sample_ts, dtype=np.float64)
     if len(ts) < 2 or t_lo < ts[0] or t_hi > ts[-1]:
         return False
     i0 = int(np.searchsorted(ts, t_lo, side="right")) - 1
     i1 = int(np.searchsorted(ts, t_hi, side="left"))
-    return bool(np.all(np.diff(ts[i0 : i1 + 1]) <= max_gap))
+    return bool(np.all(np.diff(ts[i0 : i1 + 1]) <= MAX_GAP_S))

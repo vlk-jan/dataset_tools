@@ -63,12 +63,13 @@ from pathlib import Path
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
-from scipy.interpolate import LinearNDInterpolator, griddata
+from scipy.interpolate import LinearNDInterpolator
 from scipy.ndimage import gaussian_filter
 from scipy.spatial import Delaunay, cKDTree
 from scipy.stats import binned_statistic_2d
 
 from dataset_tools.gt_io import _replace_atomically
+from dataset_tools.gt_map import WHEEL_RADIUS, WHEELS
 from dataset_tools.time_align import usable_cpus
 
 #: Outside the hull of returns: filled, not measured.
@@ -83,7 +84,7 @@ VALIDITY_ANCHORED = 3
 #: Re-levelling and the ground fill need at least this many measured cells, else they keep the plain value.
 ANCHOR_MIN_GROUND_CELLS = 8
 
-STATISTICS = {"median": None, "max": 1.0, "p90": 0.9, "p75": 0.75}
+STATISTICS = {"median": None, "p90": 0.9}
 
 SETTINGS_FILE = "height_maps.json"
 
@@ -106,24 +107,25 @@ class Params:
     fill_radius_m: float = 2.0
     anchors: bool = True
     anchor_radius_m: float | None = 1.0
-    #: "shift": the contact plane moved onto the measured ground; "kinematic": z = -wheel_radius as is.
+    #: The contact plane moved onto the measured ground (the only mode; recorded in height_maps.json).
     anchor_relevel: str = "shift"
     anchor_ground_inner_m: float = 0.65
     anchor_ground_radius_m: float = 2.5
-    #: Only the "kinematic" relevel reads it as a height (the URDF's value; the rig rolls 0.334 m/rad).
-    wheel_radius_m: float = 0.36
+    #: The URDF's value (the rig rolls 0.334 m/rad); the shift relevel leaves it no say over any height.
+    wheel_radius_m: float = WHEEL_RADIUS
     #: Wheel centres in base_link, which is the front axle: left, right, rear.
-    wheel_centres_m: tuple = field(default=((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0)))
+    wheel_centres_m: tuple = field(default=tuple(map(tuple, WHEELS.tolist())))
     #: None: off. Else a table like TIE_JITTER_V1, applied to the points the triangulation is built from.
     tie_jitter: dict | None = field(default_factory=lambda: dict(TIE_JITTER_V1))
 
     def __post_init__(self):
         if self.statistic not in STATISTICS:
             raise ValueError(f"statistic must be one of {sorted(STATISTICS)}, got {self.statistic!r}")
-        if self.fill not in ("nearest", "ground"):
-            raise ValueError(f"fill must be 'nearest' or 'ground', got {self.fill!r}")
-        if self.anchor_relevel not in ("shift", "kinematic"):
-            raise ValueError(f"anchor_relevel must be 'shift' or 'kinematic', got {self.anchor_relevel!r}")
+        # Recorded in height_maps.json, but the builder has only these modes.
+        if (self.fill, self.anchor_relevel, self.anchors) != ("ground", "shift", True):
+            raise ValueError("fill must be 'ground', anchor_relevel 'shift' and anchors on")
+        if self.max_edge_m is None or not (self.anchor_radius_m or 0) > 0:
+            raise ValueError("max_edge_m and anchor_radius_m must be set (anchor_radius_m > 0)")
         if self.tie_jitter is not None:
             n = round(2 * self.extents_m / self.resolution_m) + 2  # one cell of margin each side
             if self.tie_jitter.get("rng") != TIE_JITTER_V1["rng"] or list(self.tie_jitter.get("shape", [])) != [
@@ -149,7 +151,7 @@ class Params:
         return cls(**kw)
 
 
-def wheel_contact_anchors(wheel_centres, wheel_radius, R_align=None, ring=0.45, n_ring=8):
+def wheel_contact_anchors(wheel_centres, wheel_radius, R_align, ring=0.45, n_ring=8):
     """Pseudo-returns of the ground under the wheels: each contact at z = -r and a ring round it.
 
     One point per wheel does not stop the triangulation bridging the blind
@@ -157,15 +159,10 @@ def wheel_contact_anchors(wheel_centres, wheel_radius, R_align=None, ring=0.45, 
     """
     c = np.asarray(wheel_centres, dtype=float).reshape(-1, 2)
     contacts = np.column_stack([c, np.full(len(c), -float(wheel_radius))])
-    pts = [contacts]
-    if n_ring:
-        ang = np.linspace(0, 2 * np.pi, n_ring, endpoint=False)
-        offsets = np.stack([ring * np.cos(ang), ring * np.sin(ang), np.zeros(n_ring)], axis=-1)
-        pts.append((contacts[:, None, :] + offsets[None, :, :]).reshape(-1, 3))
-    out = np.vstack(pts)
-    if R_align is not None:
-        out = out @ np.asarray(R_align, dtype=float).T
-    return out
+    ang = np.linspace(0, 2 * np.pi, n_ring, endpoint=False)
+    offsets = np.stack([ring * np.cos(ang), ring * np.sin(ang), np.zeros(n_ring)], axis=-1)
+    out = np.vstack([contacts, (contacts[:, None, :] + offsets[None, :, :]).reshape(-1, 3)])
+    return out @ np.asarray(R_align, dtype=float).T
 
 
 @functools.lru_cache(maxsize=4)
@@ -210,7 +207,7 @@ def _binned_quantile(x, y, z, x_bins, y_bins, q):
     return out.reshape(nx, ny)
 
 
-def grid_height_map(points, p: Params, anchors=None):
+def grid_height_map(points, p: Params, anchors):
     """``(height, validity)`` on the grid from levelled points (N, >=3), already cut to radius and clip;
     ``(None, None)`` with fewer than 4 measured cells."""
     lo, hi, res = -p.extents_m, p.extents_m, p.resolution_m
@@ -238,45 +235,34 @@ def grid_height_map(points, p: Params, anchors=None):
     values_valid = height[mask]
     n_measured = len(values_valid)
 
-    if anchors is not None and len(anchors):
-        anchors = np.asarray(anchors, dtype=float).reshape(-1, 3)
-        if p.anchor_relevel == "shift":
-            r2 = points_valid[:, 0] ** 2 + points_valid[:, 1] ** 2
-            near = (r2 <= p.anchor_ground_radius_m**2) & (r2 >= p.anchor_ground_inner_m**2)
-            if near.sum() >= ANCHOR_MIN_GROUND_CELLS:
-                # Shift the contact plane, do not flatten it: it carries the
-                # robot's pitch and roll, the slope under it. The offset is the
-                # median gap between the measured ground and the plane.
-                A = np.column_stack([anchors[:, :2], np.ones(len(anchors))])
-                coef, _, _, _ = np.linalg.lstsq(A, anchors[:, 2], rcond=None)
-                plane = coef[0] * points_valid[near, 0] + coef[1] * points_valid[near, 1] + coef[2]
-                anchors = anchors.copy()
-                anchors[:, 2] += np.median(values_valid[near] - plane)
-        points_valid = np.vstack([points_valid, anchors[:, :2]])
-        values_valid = np.concatenate([values_valid, anchors[:, 2]])
-    else:
-        anchors = None
+    anchors = np.asarray(anchors, dtype=float).reshape(-1, 3)
+    r2 = points_valid[:, 0] ** 2 + points_valid[:, 1] ** 2
+    near = (r2 <= p.anchor_ground_radius_m**2) & (r2 >= p.anchor_ground_inner_m**2)
+    if near.sum() >= ANCHOR_MIN_GROUND_CELLS:
+        # Shift the contact plane, do not flatten it: it carries the
+        # robot's pitch and roll, the slope under it. The offset is the
+        # median gap between the measured ground and the plane.
+        A = np.column_stack([anchors[:, :2], np.ones(len(anchors))])
+        coef, _, _, _ = np.linalg.lstsq(A, anchors[:, 2], rcond=None)
+        plane = coef[0] * points_valid[near, 0] + coef[1] * points_valid[near, 1] + coef[2]
+        anchors = anchors.copy()
+        anchors[:, 2] += np.median(values_valid[near] - plane)
+    points_valid = np.vstack([points_valid, anchors[:, :2]])
+    values_valid = np.concatenate([values_valid, anchors[:, 2]])
 
-    anchor_radius = p.anchor_radius_m if p.anchor_radius_m is not None and p.anchor_radius_m > 0 else None
-    if anchors is None and p.max_edge_m is None:
-        height = griddata(_jittered(points_valid, p), values_valid, (X, Y), method="linear")
-        from_anchor = np.zeros(height.shape, dtype=bool)
-    else:
-        # The same interpolant, with the triangulation kept to attribute cells.
-        tri = Delaunay(_jittered(points_valid, p))
-        height = LinearNDInterpolator(tri, values_valid)(X, Y)
-        simplex = tri.find_simplex(np.stack([X.ravel(), Y.ravel()], axis=-1)).reshape(X.shape)
-        # find_simplex gives -1 outside the hull; the appended False catches it.
-        has_anchor = np.append((tri.simplices >= n_measured).any(axis=1), False)
-        from_anchor = has_anchor[simplex]
-        if anchors is not None and anchor_radius is not None:
-            d_a, _ = cKDTree(anchors[:, :2]).query(np.stack([X.ravel(), Y.ravel()], axis=-1))
-            from_anchor &= (d_a <= anchor_radius).reshape(X.shape)
-        if p.max_edge_m is not None:
-            verts = points_valid[tri.simplices]  # the unjittered points: edge lengths as measured
-            longest = np.linalg.norm(verts - verts[:, [1, 2, 0]], axis=2).max(axis=1)
-            bridged = np.append(longest > p.max_edge_m, False)[simplex] & ~mask
-            height[bridged] = np.nan
+    # The triangulation is kept to attribute cells.
+    tri = Delaunay(_jittered(points_valid, p))
+    height = LinearNDInterpolator(tri, values_valid)(X, Y)
+    simplex = tri.find_simplex(np.stack([X.ravel(), Y.ravel()], axis=-1)).reshape(X.shape)
+    # find_simplex gives -1 outside the hull; the appended False catches it.
+    has_anchor = np.append((tri.simplices >= n_measured).any(axis=1), False)
+    from_anchor = has_anchor[simplex]
+    d_a, _ = cKDTree(anchors[:, :2]).query(np.stack([X.ravel(), Y.ravel()], axis=-1))
+    from_anchor &= (d_a <= p.anchor_radius_m).reshape(X.shape)
+    verts = points_valid[tri.simplices]  # the unjittered points: edge lengths as measured
+    longest = np.linalg.norm(verts - verts[:, [1, 2, 0]], axis=2).max(axis=1)
+    bridged = np.append(longest > p.max_edge_m, False)[simplex] & ~mask
+    height[bridged] = np.nan
 
     nan_mask = np.isnan(height)
     validity = np.full(height.shape, VALIDITY_INTERPOLATED, dtype=np.uint8)
@@ -285,7 +271,7 @@ def grid_height_map(points, p: Params, anchors=None):
     # MEASURED last and winning: anchors can move the hull so a measured edge
     # cell comes back NaN; its height is restored by the nearest pass below.
     validity[mask] = VALIDITY_MEASURED
-    if nan_mask.any() and p.fill == "ground":
+    if nan_mask.any():
         # From the binned values, never from `height`: a measured hull-edge cell
         # can be NaN there, and one NaN in the median once wiped 1 % of a root.
         measured_xy = points_valid[:n_measured]
@@ -294,26 +280,23 @@ def grid_height_map(points, p: Params, anchors=None):
             height[nan_mask & ~mask] = np.median(values_valid[:n_measured][near])
             nan_mask = np.isnan(height)
     if nan_mask.any():
-        if anchors is None:
-            height[nan_mask] = griddata(points_valid, values_valid, (X[nan_mask], Y[nan_mask]), method="nearest")
-        else:
-            # griddata's nearest query, explicit so the winning sample can be attributed.
-            q = np.stack([X[nan_mask], Y[nan_mask]], axis=-1)
-            _, idx = cKDTree(points_valid).query(q)
-            won_by_anchor = idx >= n_measured
-            if anchor_radius is not None and won_by_anchor.any():
-                # Past the anchors' radius the nearest return fills, or anchors claim the whole rear.
-                d_a, _ = cKDTree(anchors[:, :2]).query(q)
-                too_far = won_by_anchor & (d_a > anchor_radius)
-                if too_far.any():
-                    _, ridx = cKDTree(points_valid[:n_measured]).query(q[too_far])
-                    idx = idx.copy()
-                    idx[too_far] = ridx
-                    won_by_anchor &= ~too_far
-            height[nan_mask] = values_valid[idx]
-            anchored = np.zeros(height.shape, dtype=bool)
-            anchored[nan_mask] = won_by_anchor
-            validity[anchored & ~mask] = VALIDITY_ANCHORED
+        # griddata's nearest query, explicit so the winning sample can be attributed.
+        q = np.stack([X[nan_mask], Y[nan_mask]], axis=-1)
+        _, idx = cKDTree(points_valid).query(q)
+        won_by_anchor = idx >= n_measured
+        if won_by_anchor.any():
+            # Past the anchors' radius the nearest return fills, or anchors claim the whole rear.
+            d_a, _ = cKDTree(anchors[:, :2]).query(q)
+            too_far = won_by_anchor & (d_a > p.anchor_radius_m)
+            if too_far.any():
+                _, ridx = cKDTree(points_valid[:n_measured]).query(q[too_far])
+                idx = idx.copy()
+                idx[too_far] = ridx
+                won_by_anchor &= ~too_far
+        height[nan_mask] = values_valid[idx]
+        anchored = np.zeros(height.shape, dtype=bool)
+        anchored[nan_mask] = won_by_anchor
+        validity[anchored & ~mask] = VALIDITY_ANCHORED
 
     # Smooth quantisation artefacts; the mask describes the data before smoothing.
     return gaussian_filter(height, sigma=0.5), validity
@@ -327,8 +310,7 @@ def build_frame(cloud: np.ndarray, R_align: np.ndarray, p: Params = Params()):
     pts = pts[pts[:, 2] < p.canopy_clip_m]
     if len(pts) < p.min_points:
         return None, None
-    anchors = wheel_contact_anchors(p.wheel_centres_m, p.wheel_radius_m, R_align) if p.anchors else None
-    return grid_height_map(pts, p, anchors)
+    return grid_height_map(pts, p, wheel_contact_anchors(p.wheel_centres_m, p.wheel_radius_m, R_align))
 
 
 def _write_npz(path: str, **arrays) -> None:
@@ -416,13 +398,13 @@ def build_scene(scene_dir: Path, p: Params = Params(), workers: int = 8, overwri
     return {**counts, "errors": errors, "maps": n_maps, "frames": len(frames)}
 
 
-def verify_against(ref_root: Path, p: Params, n_frames: int = 12, seed: int = 0) -> tuple[list[str], int]:
+def verify_against(ref_root: Path, p: Params, n_frames: int = 12) -> tuple[list[str], int]:
     """Rebuild a sample of an existing root's maps and compare (float rounding allowed).
 
     Returns ``(failures, frames checked)``. A scene with a ``height_maps.json``
     is rebuilt at its own settings, one without at ``p``.
     """
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(0)
     failures, checked = [], 0
     ref_root = Path(ref_root)
     scenes = [d for d in sorted(os.listdir(ref_root)) if d.isdigit() and (ref_root / d / "height_maps").is_dir()]

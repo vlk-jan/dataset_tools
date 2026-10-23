@@ -134,7 +134,6 @@ def recording_card(access: SceneAccess, a: dict, info: dict | None) -> dict[str,
     if a.get("session"):
         bits.append(f"session {a['session']}")
     return {
-        "kind": "recording",
         "title": "Recording",
         "stats": stats,
         "note": " · ".join(bits) or None,
@@ -309,7 +308,6 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         notes.append(f"{len(fill)} segment{'s' if len(fill) != 1 else ''} (amber): {detail}.")
 
     return {
-        "kind": "gt",
         "title": "Ground truth",
         "badge": f"{coverage * 100:.0f}% GT" if coverage is not None else None,
         "badge_class": coverage_class(coverage),
@@ -371,7 +369,6 @@ def calibration_card(access: SceneAccess, info: dict | None) -> dict[str, Any] |
         return None
     frame = (info or {}).get("frame_id") or (info or {}).get("camera_name")
     return {
-        "kind": "calib",
         "title": "Calibration",
         "stats": stats,
         "matrices": matrices,
@@ -456,7 +453,6 @@ def proprioception_card(access: SceneAccess) -> dict[str, Any] | None:
     if not p.has("cmd_vel") and not p.has("joint_setpoints"):
         notes.append("Nothing recorded what was commanded, only what the wheels did.")
     return {
-        "kind": "proprio",
         "title": "Proprioception",
         "stats": stats,
         "note": " ".join(notes) or None,
@@ -584,7 +580,6 @@ def extraction_card(access: SceneAccess) -> dict[str, Any] | None:
     if absent:
         notes.append(f"No {', '.join(absent)} in this scene.")
     return {
-        "kind": "extraction",
         "title": "Extraction",
         "stats": stats,
         "note": " ".join(notes) or None,
@@ -622,7 +617,6 @@ def validation_card(access: SceneAccess) -> dict[str, Any] | None:
             "validation.csv with --json validation.json."
         )
     card = {
-        "kind": "validation",
         "title": "Validation",
         "badge": mark["status"],
         "badge_class": {"yes": "hi", "partial": "lo", "no": "lo"}[mark["cls"]],
@@ -720,7 +714,6 @@ def map_card(access: SceneAccess, segment=None, frame: int | None = None) -> dic
 
     best = shares[0] if shares else None
     return {
-        "kind": "map",
         "title": "Where",
         "badge": f"{best[0]} {best[1] * 100:.0f}%" if best else None,
         "badge_class": coverage_class(best[1]) if best else "none",
@@ -890,8 +883,6 @@ def file_entries(access: SceneAccess) -> list[dict[str, Any]]:
                     "label": art.label,
                     "relpath": art.relpath,
                     "group": title,
-                    "present": p.has(art.key),
-                    "size": fmt_bytes(size) if size is not None else None,
                     "state": state,
                     "state_word": _STATE_WORD[state],
                     "stats": stats,
@@ -964,17 +955,12 @@ def build_scene_page(root: DatasetRoot, access: SceneAccess) -> dict[str, Any]:
             # map and disk are None (not empty) without gps.npy / disk_usage.json.
             "map": map_card(access),
             "disk": disk_card(access),
-            "files": (files := file_entries(access)),
-            "file_groups": file_groups(files),
+            "file_groups": file_groups(files := file_entries(access)),
             "files_summary": file_summary(files),
             "signals": scene_signals(access),
         }
 
-    stamp = root.root_stamp(PAGE_ROOT_FILES)
-    hit = access._cache.get("scene_page")
-    if hit is None or hit[0] != stamp:
-        hit = access._cache["scene_page"] = (stamp, work())
-    return hit[1]
+    return access.cached(f"scene_page:{root.root_stamp(PAGE_ROOT_FILES)}", work)
 
 
 def scene_signals(access: SceneAccess) -> dict[str, Any] | None:

@@ -7,30 +7,22 @@ may inherit its tag; the rest end where the filter cut them.
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
+import filter_segments
 import numpy as np
+import split_segments_at_gaps as split_at_gaps
 
 from dataset_tools.gt_gaps import TAG_GAP, cut_segments
-from dataset_tools.gt_io import SegmentRow
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-_spec = importlib.util.spec_from_file_location("filter_segments", REPO_ROOT / "scripts" / "filter_segments.py")
-filter_segments = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(filter_segments)
-
-HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
+from dataset_tools.gt_io import SegmentRow, write_trajectory
 
 
 def _write_traj(path: Path, ts, xs) -> None:
-    with open(path, "w") as f:
-        f.write(HEADER + "\n")
-        for t, x in zip(ts, xs, strict=False):
-            T = np.eye(4)
-            T[0, 3] = x
-            f.write(" ".join(f"{v:.6f}" for v in (t, *T.ravel())) + "\n")
+    """A straight run along x."""
+    poses = np.tile(np.eye(4), (len(xs), 1, 1))
+    poses[:, 0, 3] = xs
+    write_trajectory(path, ts, poses)
 
 
 def _segments(path: Path):
@@ -179,12 +171,6 @@ def test_poses_no_segment_covers_are_counted(tmp_path):
 
 def test_split_segments_at_gaps_never_writes_through_a_linked_regen(tmp_path):
     """A derived root links its parent's regen/: the backup and the digest must not land there."""
-    _spec2 = importlib.util.spec_from_file_location(
-        "split_segments_at_gaps", REPO_ROOT / "scripts" / "split_segments_at_gaps.py"
-    )
-    split_at_gaps = importlib.util.module_from_spec(_spec2)
-    _spec2.loader.exec_module(split_at_gaps)
-
     ts = np.concatenate([np.arange(0, 10, 0.1), np.arange(13, 23, 0.1)])  # a 3 s hole
     parent_regen, scene = tmp_path / "parent" / "regen", tmp_path / "derived" / "0000"
     parent_regen.mkdir(parents=True)

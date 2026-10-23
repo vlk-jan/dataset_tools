@@ -29,7 +29,6 @@ import csv
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,8 +36,9 @@ from pathlib import Path
 import numpy as np
 
 from dataset_tools import heightmap, image_format, keyframes
+from dataset_tools.extract.scene import git
 from dataset_tools.extract.scene_io import merge_scenes_csv
-from dataset_tools.gnss_guard import MAX_SPEED
+from dataset_tools.gnss_guard import MAX_SPEED, _runs
 from dataset_tools.gt_io import _replace_atomically, read_segments, read_trajectory
 from dataset_tools.transforms import tilt_deg
 
@@ -62,15 +62,6 @@ PROSE_KEYS = (
 TILT_REPORT_DEG = 60.0
 
 
-def _git(*argv) -> str | None:
-    try:
-        return subprocess.run(
-            ["git", *argv], cwd=Path(__file__).resolve().parent, capture_output=True, text=True, check=True
-        ).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
 def load_spec(path: Path) -> dict:
     """The spec with its ``inherit`` chain merged under it (relative to the spec's directory)."""
     path = Path(path)
@@ -87,15 +78,13 @@ def read_bag_list(path: Path) -> dict[str, dict]:
         return {row["scene"].zfill(4): row for row in csv.DictReader(fh)}
 
 
-def _runs(idx: np.ndarray, d: np.ndarray) -> dict:
-    """Index runs with their seconds into the scene: ``[first, last, t_first, t_last]``."""
-    if not len(idx):
-        return {"count": 0, "runs": []}
-    runs = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+def _flag_runs(flags: np.ndarray, d: np.ndarray) -> dict:
+    """Runs of flagged frames with their seconds into the scene: ``[first, last, t_first, t_last]``."""
     return {
-        "count": int(len(idx)),
+        "count": int(flags.sum()),
         "runs": [
-            [int(r[0]), int(r[-1]), round(float(d[r[0]] - d[0]), 1), round(float(d[r[-1]] - d[0]), 1)] for r in runs
+            [int(a), int(b - 1), round(float(d[a] - d[0]), 1), round(float(d[b - 1] - d[0]), 1)]
+            for a, b in _runs(flags)
         ],
     }
 
@@ -177,7 +166,7 @@ def survey_scene(scene_dir: Path) -> dict:
         "odom_frame_deg": _odom_frame(scene_dir / "odom_frame.txt"),
         "height_maps": sum(1 for f in os.listdir(maps_dir) if f.endswith(".npz")) if maps_dir.is_dir() else 0,
         "tilt_max_deg": round(float(tilt.max()), 1),
-        f"frames_past_{TILT_REPORT_DEG:.0f}deg": _runs(np.nonzero(tilt > TILT_REPORT_DEG)[0], d),
+        f"frames_past_{TILT_REPORT_DEG:.0f}deg": _flag_runs(tilt > TILT_REPORT_DEG, d),
         "odin_tf_bag_vs_pin": _tf_pins(scene_dir / "tf_pins.txt"),
         "has": {f: (scene_dir / f).exists() for f in ("cmd_vel.npy", "gps.npy", "joint_states.npy")},
         "extraction": {
@@ -247,7 +236,7 @@ def build_manifest(root: Path, spec: dict, spec_path: Path, bags: dict, scenes: 
         "generated": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generator": {
             "tool": "dataset_tools.release",
-            "dataset_tools": _git("describe", "--always", "--dirty"),
+            "dataset_tools": git("describe", "--always", "--dirty"),
             "spec": str(spec_path),
             "extraction_commits": commits,
             "driver": "slurm/extract_v2.batch (one bag per array task: extract, odom_frame, height maps, validate), "

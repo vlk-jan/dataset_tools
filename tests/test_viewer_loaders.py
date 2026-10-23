@@ -75,7 +75,7 @@ def test_missing_files_return_none_rather_than_raising(tmp_path):
     assert loaders.read_segments(tmp_path / "nope.txt") == []
     assert loaders.read_timestamps(tmp_path / "nope.txt") is None
     assert loaders.load_npy(tmp_path / "nope.npy") is None
-    assert loaders.read_matrix(tmp_path / "nope.txt") is None
+    assert loaders.read_matrix(tmp_path / "nope.txt", (3, 3)) is None
 
 
 def test_frame_indices_take_ascii_digits_only(tmp_path):

@@ -42,7 +42,7 @@ MIN_ISLAND = 5.0
 #: Seconds without a usable fix that count as a lost solution (fix rate is 10 Hz).
 MIN_OUTAGE = 2.0
 
-#: Seconds; must track ``interpolate_poses``' ``max_gap`` default.
+#: Seconds; also ``interpolate_poses``' ``max_gap`` default.
 SUPPORT_GAP = 0.5
 
 #: Seconds of margin around a span: the frame clock is not latency-corrected yet when this runs.
@@ -154,8 +154,6 @@ def outage_spans(fix_ts) -> list[Span]:
 # ---------------------------------------------------------------------------
 def _merge(spans: list[Span]) -> list[Span]:
     """Union of overlapping spans, keeping every reason that contributed."""
-    if not spans:
-        return []
     out: list[Span] = []
     for s in sorted(spans, key=lambda s: s.start):
         if out and s.start <= out[-1].end:
@@ -169,8 +167,6 @@ def _merge(spans: list[Span]) -> list[Span]:
 
 def _outages_with_a_jump(ts: np.ndarray, edges: np.ndarray, outages: list[Span]) -> list[Span]:
     """Outages during which the position also teleported (either alone is inconclusive)."""
-    if not len(edges) or not outages:
-        return []
     out = []
     for o in outages:
         jumped = any(o.start <= ts[int(i)] <= o.end or o.start <= ts[int(i) + 1] <= o.end for i in edges)
@@ -210,10 +206,7 @@ def find_spans(ts, poses, fix_ts=None) -> list[Span]:
     fixes = None if fix_ts is None else np.asarray(fix_ts, dtype=float)
 
     frozen = [s for s in frozen_spans(ts, pos) if _corroborated(s, ts, edges, outages, fixes)]
-    found = frozen + island_spans(ts, edges) + _outages_with_a_jump(ts, edges, outages)
-    if not found:
-        return []
-    spans = _merge(found)
+    spans = _merge(frozen + island_spans(ts, edges) + _outages_with_a_jump(ts, edges, outages))
 
     # Widen spans to outages they reach into; a lone outage is just coasting.
     for outage in outages:

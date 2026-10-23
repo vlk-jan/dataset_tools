@@ -232,18 +232,15 @@ class NoteStore:
 
     # -- reading -----------------------------------------------------------
 
-    def list(self, scene_id: str, strict: bool = False) -> list[Note]:
-        """Every note on a scene, in frame order. [] when there are none.
+    def read(self, scene_id: str, strict: bool = False) -> tuple[list[Note], str | None]:
+        """Every note on a scene, in frame order ([] when there are none), and the
+        dataset version they were written against when it is not the root's (a
+        re-extraction can move frame numbers), else None.
 
         A malformed file logs a warning and reads as no notes. With ``strict``
         (every write path) it raises :class:`NotesUnreadable` instead, so a
         write never replaces notes it could not read; only a missing file is empty.
         """
-        return self.read(scene_id, strict)[0]
-
-    def read(self, scene_id: str, strict: bool = False) -> tuple[list[Note], str | None]:
-        """:meth:`list`, plus the dataset version the notes were written against
-        when it is not the root's (a re-extraction can move frame numbers), else None."""
         if not self.enabled:
             return [], None
         try:
@@ -292,7 +289,7 @@ class NoteStore:
             stem, ext = os.path.splitext(name)
             if ext != ".json" or not stem.isdigit():
                 continue
-            notes = self.list(stem)
+            notes = self.read(stem)[0]
             if notes:
                 out[stem] = notes
         return out
@@ -336,7 +333,7 @@ class NoteStore:
             raise ValueError("a note needs some text")
         verdict = _clean_verdict(verdict)
         start, end = _clamp_range(frames, n_frames)
-        notes = self.list(scene_id, strict=True)
+        notes = self.read(scene_id, strict=True)[0]
         taken = {n.id for n in notes}
         note = Note(
             id=_fresh_id(taken),
@@ -368,7 +365,7 @@ class NoteStore:
         Only the fields passed change; ``created`` and ``author`` never do.
         """
         self._require_writable()
-        notes = self.list(scene_id, strict=True)
+        notes = self.read(scene_id, strict=True)[0]
         for note in notes:
             if note.id != note_id:
                 continue
@@ -391,7 +388,7 @@ class NoteStore:
 
     def delete(self, scene_id: str, note_id: str) -> bool:
         self._require_writable()
-        notes = self.list(scene_id, strict=True)
+        notes = self.read(scene_id, strict=True)[0]
         kept = [n for n in notes if n.id != note_id]
         if len(kept) == len(notes):
             return False

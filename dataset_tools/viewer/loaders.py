@@ -88,20 +88,18 @@ def count_lines(path: Path) -> int:
         return 0
 
 
-def read_matrix(path: Path, shape: tuple[int, ...] | None = None) -> np.ndarray | None:
-    """Read a whitespace-separated numeric matrix (K, T_cam_to_base, ...)."""
+def read_matrix(path: Path, shape: tuple[int, ...]) -> np.ndarray | None:
+    """Read a whitespace-separated numeric matrix (K, T_cam_to_base, ...) of ``shape``."""
     try:
         arr = np.loadtxt(path, dtype=np.float64, comments="#")
     except (OSError, ValueError) as exc:
         _unreadable("read matrix", path, exc)
         return None
-    if shape is not None:
-        try:
-            arr = arr.reshape(shape)
-        except ValueError:
-            logger.warning("matrix %s has shape %s, expected %s", path, arr.shape, shape)
-            return None
-    return arr
+    try:
+        return arr.reshape(shape)
+    except ValueError:
+        logger.warning("matrix %s has shape %s, expected %s", path, arr.shape, shape)
+        return None
 
 
 def load_npy(path: Path) -> np.ndarray | None:
