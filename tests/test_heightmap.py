@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -92,3 +93,24 @@ def test_verify_against_catches_a_changed_map(tmp_path):
     np.savez_compressed(f, height_map=hm + 0.01)
     fails, checked = hmap.verify_against(tmp_path, hmap.Params(), n_frames=1)
     assert checked == 1 and "max diff" in fails[0]
+
+
+def test_tie_jitter_table_is_the_one_drift_shares():
+    J = hmap.tie_jitter_table(hmap.TIE_JITTER_V1)
+    assert J.shape == (130, 130, 2) and np.abs(J).max() <= 1e-4
+    assert hashlib.sha256(J.tobytes()).hexdigest() == "0258ba5ab713121970a8e141adced992d523a96b0cfd400f9b55c0eb1fbdf454"
+    with pytest.raises(ValueError):
+        hmap.Params(tie_jitter={**hmap.TIE_JITTER_V1, "shape": [128, 128, 2]})
+
+
+def test_tie_jitter_makes_the_map_immune_to_a_1um_anchor_nudge():
+    """Without it the cell centres' co-circular ties flip and single cells move by decimetres."""
+    d = np.load(FIXTURE)
+    p = hmap.Params(tie_jitter=hmap.TIE_JITTER_V1)
+    nudged = hmap.Params(
+        tie_jitter=hmap.TIE_JITTER_V1, wheel_centres_m=tuple((x + 1e-6, y + 1e-6) for x, y in p.wheel_centres_m)
+    )
+    hm, val = hmap.build_frame(d["cloud_2"], d["R_align_2"], p)
+    hm2, val2 = hmap.build_frame(d["cloud_2"], d["R_align_2"], nudged)
+    assert np.abs(hm2 - hm).max() < 1e-4 and np.array_equal(val, val2)
+    assert hmap.Params.from_dict(p.to_dict()) == p

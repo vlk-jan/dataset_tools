@@ -37,11 +37,17 @@ Why the settings are what they are
 - ``fill`` ground: cells outside the hull of returns take the median measured
   height within ``fill_radius`` of the robot, not whatever stands at the
   field-of-view rim.
+- ``tie_jitter`` (off in v2.0-v2.4): the cell centres are co-circular, so
+  Delaunay breaks ties by input order and a 1 um anchor nudge changed ~28 cells
+  a frame by over 1 cm (up to 0.77 m). A fixed seeded table of +-0.1 mm xy
+  offsets, looked up by each point's cell, moves only the points the
+  triangulation is built from; DRIFT's utils/pcd.py uses the same table.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import multiprocessing as mp
 import os
@@ -80,6 +86,9 @@ STATISTICS = {"median": None, "max": 1.0, "p90": 0.9, "p75": 0.75}
 
 SETTINGS_FILE = "height_maps.json"
 
+#: The tie-break table HELHEST v2.5 is built with (``tie_jitter``); shared with DRIFT's builder.
+TIE_JITTER_V1 = {"seed": 12345, "amplitude_m": 1e-4, "shape": [130, 130, 2], "rng": "numpy.default_rng.uniform"}
+
 
 @dataclass(frozen=True)
 class Params:
@@ -104,6 +113,8 @@ class Params:
     wheel_radius_m: float = 0.36
     #: Wheel centres in base_link, which is the front axle: left, right, rear.
     wheel_centres_m: tuple = field(default=((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0)))
+    #: None: off. Else a table like TIE_JITTER_V1, applied to the points the triangulation is built from.
+    tie_jitter: dict | None = None
 
     def __post_init__(self):
         if self.statistic not in STATISTICS:
@@ -112,6 +123,16 @@ class Params:
             raise ValueError(f"fill must be 'nearest' or 'ground', got {self.fill!r}")
         if self.anchor_relevel not in ("shift", "kinematic"):
             raise ValueError(f"anchor_relevel must be 'shift' or 'kinematic', got {self.anchor_relevel!r}")
+        if self.tie_jitter is not None:
+            n = round(2 * self.extents_m / self.resolution_m) + 2  # one cell of margin each side
+            if self.tie_jitter.get("rng") != TIE_JITTER_V1["rng"] or list(self.tie_jitter.get("shape", [])) != [
+                n,
+                n,
+                2,
+            ]:
+                raise ValueError(
+                    f"tie_jitter must be numpy.default_rng.uniform of shape [{n}, {n}, 2], got {self.tie_jitter!r}"
+                )
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -144,6 +165,26 @@ def wheel_contact_anchors(wheel_centres, wheel_radius, R_align=None, ring=0.45, 
     if R_align is not None:
         out = out @ np.asarray(R_align, dtype=float).T
     return out
+
+
+@functools.lru_cache(maxsize=4)
+def _jitter_table(seed: int, amplitude: float, shape: tuple) -> np.ndarray:
+    return np.random.default_rng(seed).uniform(-amplitude, amplitude, size=shape)
+
+
+def tie_jitter_table(spec: dict) -> np.ndarray:
+    """The ``tie_jitter`` offsets, ``(n, n, 2)`` float64; DRIFT checks its copy by ``sha256(table.tobytes())``."""
+    return _jitter_table(int(spec["seed"]), float(spec["amplitude_m"]), tuple(spec["shape"]))
+
+
+def _jittered(xy, p: Params):
+    """The triangulation's copy of the points: each moved by its cell's table entry (cell index + 1, clipped)."""
+    if p.tie_jitter is None:
+        return xy
+    J = tie_jitter_table(p.tie_jitter)
+    i = np.clip(np.floor((xy[:, 0] + p.extents_m) / p.resolution_m).astype(int) + 1, 0, J.shape[0] - 1)
+    j = np.clip(np.floor((xy[:, 1] + p.extents_m) / p.resolution_m).astype(int) + 1, 0, J.shape[1] - 1)
+    return xy + J[i, j]
 
 
 def _binned_quantile(x, y, z, x_bins, y_bins, q):
@@ -217,11 +258,11 @@ def grid_height_map(points, p: Params, anchors=None):
 
     anchor_radius = p.anchor_radius_m if p.anchor_radius_m is not None and p.anchor_radius_m > 0 else None
     if anchors is None and p.max_edge_m is None:
-        height = griddata(points_valid, values_valid, (X, Y), method="linear")
+        height = griddata(_jittered(points_valid, p), values_valid, (X, Y), method="linear")
         from_anchor = np.zeros(height.shape, dtype=bool)
     else:
         # The same interpolant, with the triangulation kept to attribute cells.
-        tri = Delaunay(points_valid)
+        tri = Delaunay(_jittered(points_valid, p))
         height = LinearNDInterpolator(tri, values_valid)(X, Y)
         simplex = tri.find_simplex(np.stack([X.ravel(), Y.ravel()], axis=-1)).reshape(X.shape)
         # find_simplex gives -1 outside the hull; the appended False catches it.
@@ -231,7 +272,7 @@ def grid_height_map(points, p: Params, anchors=None):
             d_a, _ = cKDTree(anchors[:, :2]).query(np.stack([X.ravel(), Y.ravel()], axis=-1))
             from_anchor &= (d_a <= anchor_radius).reshape(X.shape)
         if p.max_edge_m is not None:
-            verts = points_valid[tri.simplices]
+            verts = points_valid[tri.simplices]  # the unjittered points: edge lengths as measured
             longest = np.linalg.norm(verts - verts[:, [1, 2, 0]], axis=2).max(axis=1)
             bridged = np.append(longest > p.max_edge_m, False)[simplex] & ~mask
             height[bridged] = np.nan
@@ -428,7 +469,7 @@ def main(argv=None) -> int:
         action="append",
         default=[],
         metavar="NAME=VALUE",
-        help="change one setting of Params (e.g. --set statistic=median); recorded in height_maps.json",
+        help="change one setting of Params (e.g. --set statistic=median, --set tie_jitter=v1 or a JSON table spec); recorded in height_maps.json",
     )
     a = ap.parse_args(argv)
 
@@ -441,6 +482,8 @@ def main(argv=None) -> int:
         d = defaults[k]
         if v.lower() == "none":
             kw[k] = None
+        elif k == "tie_jitter":
+            kw[k] = TIE_JITTER_V1 if v == "v1" else json.loads(v)
         elif isinstance(d, bool):
             kw[k] = v.lower() in ("1", "true", "yes", "on")
         else:
