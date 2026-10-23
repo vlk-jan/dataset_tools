@@ -15,15 +15,6 @@ the virtualenv the checkout is installed into (`pip install -e .`):
 | `make_atlas.py` | Generate `<root>/atlas/atlas.json` and its thumbnails from the root itself, merging the hand-written prose in `atlas/curation.json`; `--check` reports a stale atlas without writing. `--bags` names the bag list the sessions and bag sizes come from (`docs/v2_<n>_bags.csv`, as `slurm/finalize_v2.sh` does); without it those two fields are left out. There is no default because every list numbers its scenes from 0000. The viewer's index page renders it. |
 | `measure_time_offset.py` | Audit an extracted scene's frame clock against its poses: was `--time_align` applied, is the scene still off, and by how much over its course. |
 | `probe_clock_skew.py` | Every publisher's clock against the recorder's, straight out of a bag (`recv - header` per message), to see *when* a sensor's clock moved. |
-| `survey_gt_coverage.py` | How much of a root's frame time has ground truth, every gap over a threshold with the wheel distance driven through it, and every frozen run inside a segment. |
-| `split_segments_at_gaps.py` | Cut a root's segments at the holes `gt_gaps` finds and re-anchor each side, in place, keeping the input beside it. |
-| `cut_segments_at_map_mismatch.py` | Cut a root's segments where the ground-truth path leaves the lidar's ground (`gt_map`), the same way. |
-
-## Left from the v1 ground-truth regeneration (2026-09)
-
-| Script | What it does |
-| --- | --- |
-| `filter_segments.py` | post-hoc filter of a regenerated `odometry.txt` against the live `/odom`; first-generation rig only (`<scene>/regen/` layout). The rest of that campaign's tooling and its records were removed; see git history. |
 
 ## Viewer launchers
 

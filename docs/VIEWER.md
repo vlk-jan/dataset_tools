@@ -136,7 +136,7 @@ Nothing in the viewer is specific to a sensor generation. A scene is any
   from the aggregated cloud instead, no `joint_states.npy` means no wheel-velocity
   plots and no wheel spin, no `transforms.npy` means no drift comparison.
 - Odometry is parsed from the columns, not from a rig's conventions. Segment
-  `reason` tags (`filtered:pose_jump`, `fixposition:fix_lost`, …)
+  `reason` tags (`gap`, `teleport`, `fix_lost`, `end_of_run`)
   are read out in words where they are shown (`windows.describe_reason`); a tag
   it does not recognise passes through verbatim.
 
@@ -167,7 +167,7 @@ So the unit of viewing is a *window*:
 | window | pose source | what it is |
 | --- | --- | --- |
 | `segNNN` | `odometry.txt` | one ground-truth segment; the trustworthy view |
-| `raw` | `transforms.npy` | the whole scene by wheel odometry — continuous, but it drifts; offered only when the scene has no ground-truth window |
+| `raw` | `transforms.npy` | the whole scene by the per-frame odometry track — one track, not split at segment breaks, so not ground truth; offered only when the scene has no ground-truth window |
 | `raw` (no transforms) | none | frames only; the robot stays at the origin |
 
 Segments longer than `--max-seconds` (default 600) are split into consecutive
@@ -216,7 +216,7 @@ driving. Below 2 Hz the rate is flagged.
 | `data_ts.txt` | the frame clock everything plays back on (`pcd_ts.txt` stands in when it is missing; see [URLs](#urls)) |
 | `odometry.txt` | the robot body's animated pose |
 | `odometry_segments.txt` | the window list; the episode marker on the playback bar |
-| `transforms.npy` | a second "wheel odom" ghost body, plus the `wheel_odom_drift` plot |
+| `transforms.npy` | a second, "frame-odometry ghost" body, plus the `wheel_odom_drift` plot |
 | `gravity_align.npy` | the attitude comparison and its plots; places each height map level in the world; levels the window (above) |
 | `height_maps/` | the terrain surface, and a per-frame tile in the side panel |
 | `height_masks/` | the terrain's `validity` colour layer (weighted mean per cell), and its own panel tile |
@@ -248,8 +248,7 @@ estimate wanders by between boots. Metres of error are pixels of misalignment
 at any range. Where `camera_info.yaml` is present, its distortion model (e.g.
 `equidistant` fisheye for Odin1 or `plumb_bob` / `rational_polynomial` for
 pinhole rigs) is applied; otherwise, uncorrected pinhole projection is used as
-fallback. A scene with only `T_cam_to_lidar.txt` gets no overlay: that matrix is
-the camera in the raw lidar frame, not the base frame the clouds are in.
+fallback. A scene without `T_cam_to_base.txt` gets no overlay.
 
 ## The scene page's two strips
 
@@ -258,10 +257,8 @@ thing itself -- because a tooltip is not an answer on a touch device and not a
 place anyone looks on a desktop.
 
 The **ground-truth timeline** draws one block per segment over the scene's own
-time span, and each block is a link to that segment's page. Amber blocks are
-filled ground truth, green is this root's own run; the tooltip names the
-segment, how long it is, how many poses it carries and where it came from or
-why it ended. A segment a second or two long is under two pixels wide on a
+time span, and each block is a link to that segment's page; the tooltip names
+the segment, how long it is and how many poses it carries. A segment a second or two long is under two pixels wide on a
 card-width track, so the block keeps its honest width and only its hit area is
 widened, by two pixels either side; the tooltip says which one the pointer
 found. A scene whose segment file cannot be read (a curated-only root) falls
@@ -453,9 +450,9 @@ looks exactly as before. Both files are re-read when they change.
 
 ## The train/val split: which scenes a model is scored on
 
-A root that declares its hold-out itself is tagged without any export: from
-HELHEST v2.1 the manifest names the held-out session (`held_out.scenes`), and
-from v2.3 the root carries `keyframes_train.lst` beside `keyframes.lst`. The
+A root that declares its hold-out itself is tagged without any export: the
+manifest names the held-out session (`held_out.scenes`), and the root carries
+`keyframes_train.lst` beside `keyframes.lst`. The
 viewer reads those as a `held_out` split (held out as validation, the training
 list's scenes as training, a scene in neither unassigned) whenever there is no
 `splits.json`; the file still wins when present, because it carries the window
@@ -716,7 +713,7 @@ path itself, and above the threshold the sidecar records (0.9, as DRIFT trained)
 where DRIFT trusts its prediction. It is a feature match and not a terrain
 class, and the features are known to encode range and viewpoint as well as
 terrain, so a band of high similarity around the robot is the sensor's
-geometry, not grass. Measured on 2026-09-30 over 37 held-out v2.1 keyframes
+geometry, not grass. Measured on 2026-09-30 over 37 held-out keyframes
 (WI_v8 backbone, `v20_wi8` at epoch 39): the 0.9 gate admits 0.92 / 0.61 / 0.26
 of ground-level cells at 0-2 / 2-4 / 4-6.4 m from the robot against 0.79 / 0.12
 / 0.03 of cells more than a metre tall, and 25 % of random cell pairs. Beyond
@@ -769,11 +766,10 @@ until asked for:
   the window, aggregated in the world frame. The terrain surface stays; it is
   drawn over the points and describes the same ground, so switch the terrain
   off in *Terrain Options* to see the points under it.
-- **wheel-odometry ghost**, in the panel, with its explanation as its tooltip —
-  an amber, translucent marker at the pose wheel odometry alone would give.
-  The gap between it and the robot is the drift plotted as `wheel_odom_drift`;
-  it grows without bound and routinely ends up a hundred metres off the path,
-  which is why it is not shown unasked.
+- **frame-odometry ghost**, in the panel, with its explanation as its tooltip —
+  an amber, translucent marker at the pose `transforms.npy` gives, aligned at
+  the window's first frame. The gap between it and the robot is plotted as
+  `wheel_odom_drift`; it is not shown unasked.
 
 The robot stays a solid mesh throughout: the cloud is drawn independently of
 SimView's global body-visualization mode rather than by switching the whole

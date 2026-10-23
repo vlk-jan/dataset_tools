@@ -20,7 +20,7 @@
 # (--delete-after: a frame now too sparse loses its old map). Before writing, a
 # sample of the scene's own maps is rebuilt at its recorded settings and must match
 # (VERIFY=0 skips that, e.g. after the clouds changed). HM_ARGS passes settings,
-# e.g. HM_ARGS="--set statistic=p90 --set tie_jitter=none" (v2.0-v2.4; the defaults are v2.5's).
+# e.g. HM_ARGS="--set statistic=p90 --set tie_jitter=none" (v2.4; the defaults are v2.5's).
 set -uo pipefail
 
 ROOT=${1:?usage: sbatch --array=N-M slurm/heightmaps.batch ROOT}

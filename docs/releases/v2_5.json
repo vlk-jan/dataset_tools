@@ -10,7 +10,7 @@
   "kicker": "HELHEST · new rig (Odin1 + Fixposition) · Stromovka, Lipník and Temešvár, 2026-09/10",
   "intro": "36 scenes from the HELHEST jr. The scenes are composed of: two Robotour test runs in Stromovka, one autonomous Robotour finals run also in Stromovka, the UGV testing polygon at Lipník, the Temešvár field tests of 2026-09-28, 09-29 and 10-02, and Stromovka again on 2026-10-07, off the paths. Each card shows three sample frames (10 / 50 / 90 % of the scene) and a green bar marking where ground truth exists.",
   "root_note": "This dataset shows a mix of the possible terrains the Helhest robot might encounter - from more urban places, roads and footpaths in the Stromovka park, to heavier terrain and tall grass and forested areas in Lipník and Temešvár. The dataset was created with the use case of navigation and driving in rough environments in mind, and the data pool was selected accordingly. The data captured contain RGB images, LiDAR point-clouds, GNSS, odometry, wheel states, and more.",
-  "footer": "Extracted from the raw bags on subtdata.felk.cvut.cz with dataset_tools (slurm/extract_v2.batch, CSV=docs/v2_4_bags.csv, Odin1 odometry as ground truth, each sweep deskewed). 25 scenes are v2.3's, linked; 0003, 0004, 0007, 0013 and 0029-0035 are new in v2.4. Selection and survey in docs/V2_0_SELECTION.md.",
+  "footer": "Extracted from the raw bags on subtdata.felk.cvut.cz with dataset_tools (slurm/extract_v2.batch, CSV=docs/v2_4_bags.csv, Odin1 odometry as ground truth, each sweep deskewed). 25 scenes are v2.3's, linked; 0003, 0004, 0007, 0013 and 0029-0035 are new in v2.4.",
   "groups": [
    {
     "title": "2026-09-14 — cobbles, gravel and the open plaza",
