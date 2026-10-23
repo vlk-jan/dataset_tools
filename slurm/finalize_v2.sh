@@ -33,7 +33,7 @@ column -s, -t "$OUT/scenes.csv"
 run -m dataset_tools.validate_scene "$OUT" --csv "$OUT/validation.csv"
 vrc=$?
 
-# --bags must be this release's list: v1's numbers its scenes the same way.
+# --bags must be this release's list: every list numbers its scenes from 0000.
 run "$REPO/scripts/make_atlas.py" "$OUT" --bags "$BAGS" \
     || echo "atlas generation reported problems"
 

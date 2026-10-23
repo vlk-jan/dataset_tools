@@ -153,7 +153,7 @@
   },
   "gravity_align_pitch": {
    "what": "gravity_align.npy (from the Fixposition attitude, as in v2 beta-v2.1) leaves the paved ground of scene 0000 climbing +1.77 deg of pitch after levelling, where the Odin1 odometry's attitude (v2.3) leaves +0.03. Measured 2026-10-01 by a heading-separated fit that passes a +-2 deg control; the standstill accelerometer of /odin1/imu puts the Fixposition 1.45 deg off gravity in two bags. The two attitude streams track each other frame by frame (pitch correlation +0.995 in 0000 and 0009, difference sd 0.1-0.3 deg), so the error is a RIGID OFFSET PER SCENE: the Fixposition's pitch differs from the Odin1's by 1.68 deg in 0000 and 1.16 deg in 0009 (roll by 0.2 deg, opposite signs in the two), in the direction that makes the levelled ground climb, varying between sessions. Every height map and compression label of a scene in this root is therefore tilted by the same constant angle, 1.2-1.7 deg of pitch, 2.0-2.9 cm per metre ahead, 13-19 cm at the map edge: a known, constant, correctable distortion, not a per-frame one. Supersedes the '-2.2 deg plaza figure' of the v2.0 selection doc. Per-scene values for all 18 scenes: HELHEST_v2_3/manifest.json -> scenes.*.gravity_pitch_bias_v2_2_deg = roll/pitch angle of v2.2's gravity_align minus v2.3's, time-matched (pitch_mean negative = the v2.2 levelling climbs by that much).",
-   "decision": "not corrected in this root; v2.3 levels from the Odin1 attitude (see /mnt/personal/vlkjan6/HELHEST_v2_3 and dataset_tools docs/NEW_RIG_READINESS.md)",
+   "decision": "not corrected in this root; v2.3 levels from the Odin1 attitude",
    "found_by": "dataset_extraction and Fix DRIFT sessions, 2026-10-01"
   },
   "gnss_ins_not_initialised": {

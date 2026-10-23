@@ -51,8 +51,8 @@ The long lines that remain are deliberate and held by `# fmt: off`; see the
 - `scripts/` are tools run against a root or a bag from a checkout, not
   installed; `scripts/README.md` lists them.
 - `slurm/` are the CTU RCI job files, kept as working examples; `slurm/README.md`.
-- `docs/` holds the user documentation and the dated campaign records;
-  `docs/README.md` says which is which.
+- `docs/` holds the documentation site's pages (`mkdocs.yml`), the release
+  specs and bag lists, and reference documents; `docs/README.md` lists them.
 
 The version is declared in two places that must agree -- `pyproject.toml` and
 `CITATION.cff`.

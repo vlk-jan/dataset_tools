@@ -99,6 +99,28 @@ products are built after extraction. If a re-extraction produces the same
 `height_maps.json` is renamed whole to `<name>.stale-YYYYmmdd-HHMMSS`, so no
 product is left misaligned with the new frames.
 
+### Caveats of the raw bags
+
+- **Publish latency.** The Odin1 stamps some messages on publish rather than
+  capture; on the 2026-09 recordings the poses run ahead of the images and
+  clouds by up to about 0.69 s, varying with load within one bag.
+  `--time_align auto` measures and removes it per scene (`time_align.txt`).
+- **A GNSS/INS without a fix keeps publishing.** After a roll-over the
+  Fixposition can fill its odometry with a reset state hundreds of metres away
+  and no flag. `--gnss_guard` drops such stretches (`gnss_guard.txt`, `fix_lost`
+  in `odometry_segments.txt`).
+- **The Odin1 re-estimates its own extrinsics** on `/tf_static`, drifting
+  across and within bags. `--tf_pins` (default) replaces them with one
+  constant.
+- **`/imu/data` is mounted tilted** and has no TF to `base_link`: do not pass
+  it as `--imu`.
+- **The 2026-08 bags are not dataset material.** Their TF tree lacks the
+  `base_link -> odin1_base_link` edge, so a scene fails unless
+  `--lidar_extrinsic` or `--allow_frame_fallback` is given.
+
+[`docs/EXTRACTION_GUARDS.md`](https://github.com/vlk-jan/dataset_tools/blob/main/docs/EXTRACTION_GUARDS.md)
+in the repository explains how the latency and GNSS guards decide.
+
 ## helhest-odom-frame
 
 The Odin1 computes its odometry with an online estimate of the lidar-to-IMU

@@ -12,32 +12,18 @@ the virtualenv the checkout is installed into (`pip install -e .`):
 
 | Script | What it does |
 | --- | --- |
-| `make_atlas.py` | Generate `<root>/atlas/atlas.json` and its thumbnails from the root itself, merging the hand-written prose in `atlas/curation.json`; `--check` reports a stale atlas without writing. `--bags` names the bag list the sessions and bag sizes come from (`docs/scene_bags.csv` for v1, `docs/v2_<n>_bags.csv` for v2, as `slurm/finalize_v2.sh` does); without it those two fields are left out. There is no default because the v1 and v2 lists number their scenes the same way. The viewer's index page renders it. |
+| `make_atlas.py` | Generate `<root>/atlas/atlas.json` and its thumbnails from the root itself, merging the hand-written prose in `atlas/curation.json`; `--check` reports a stale atlas without writing. `--bags` names the bag list the sessions and bag sizes come from (`docs/v2_<n>_bags.csv`, as `slurm/finalize_v2.sh` does); without it those two fields are left out. There is no default because every list numbers its scenes from 0000. The viewer's index page renders it. |
 | `measure_time_offset.py` | Audit an extracted scene's frame clock against its poses: was `--time_align` applied, is the scene still off, and by how much over its course. |
 | `probe_clock_skew.py` | Every publisher's clock against the recorder's, straight out of a bag (`recv - header` per message), to see *when* a sensor's clock moved. |
 | `survey_gt_coverage.py` | How much of a root's frame time has ground truth, every gap over a threshold with the wheel distance driven through it, and every frozen run inside a segment. |
 | `split_segments_at_gaps.py` | Cut a root's segments at the holes `gt_gaps` finds and re-anchor each side, in place, keeping the input beside it. |
 | `cut_segments_at_map_mismatch.py` | Cut a root's segments where the ground-truth path leaves the lidar's ground (`gt_map`), the same way. |
 
-## The v1 ground-truth regeneration (2026-09)
+## Left from the v1 ground-truth regeneration (2026-09)
 
-The odometry of the first-generation HELHEST scenes was re-run from the raw
-bags through FAST-LIO and post-filtered; the holes the estimator left were then
-replayed one at a time. These scripts are that campaign's tooling, kept so the
-next one does not start from nothing. They assume the layout the campaign used
-(`<scene>/regen/` provenance, the recorder branch, the RCI cluster); the record
-of what was done and why is [`docs/ODOMETRY_REGEN.md`](../docs/ODOMETRY_REGEN.md)
-and [`docs/GT_HOLE_REPLAY.md`](../docs/GT_HOLE_REPLAY.md).
-
-| Script | Stage |
+| Script | What it does |
 | --- | --- |
-| `filter_segments.py` | post-hoc filter of a regenerated `odometry.txt` against the live `/odom`, the acceptance every later step reuses |
-
-The drivers (`dgx07_regen.sh`, `slurm/regen_scene.batch`), the hole-replay
-scripts and their inventory (`find_gt_holes.py`, whose output is
-`docs/v13_gt_holes.csv`), the v1.1 fill, the fill-root builder, the one-off
-segment relabel (`relabel_segments.py`) and the v1 vs v1.2 comparison were
-removed once the campaign finished; see git history.
+| `filter_segments.py` | post-hoc filter of a regenerated `odometry.txt` against the live `/odom`; first-generation rig only (`<scene>/regen/` layout). The rest of that campaign's tooling and its records were removed; see git history. |
 
 ## Viewer launchers
 

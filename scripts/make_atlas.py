@@ -579,7 +579,7 @@ def main() -> int:
     ap.add_argument(
         "--bags",
         type=Path,
-        help="the root's bag list (docs/scene_bags.csv for v1, docs/v2_<n>_bags.csv for v2) for session/bag size; "
+        help="the root's bag list (docs/v2_<n>_bags.csv) for session/bag size; "
         "without it those two fields are left out",
     )
     ap.add_argument("--scenes", nargs="*", default=[], help="limit to these scene ids")
