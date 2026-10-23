@@ -435,7 +435,9 @@ def verify_against(ref_root: Path, p: Params, n_frames: int = 12) -> tuple[list[
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("root", type=Path)
-    ap.add_argument("--scenes", default="", help="comma-separated; default every scene with clouds")
+    ap.add_argument(
+        "--scenes", default="", help="comma-separated scene directories (3 means 0003); default every scene with clouds"
+    )
     ap.add_argument("--workers", type=int, default=usable_cpus(), help="default: the CPUs this process may use")
     ap.add_argument(
         "--overwrite", action="store_true", help="rebuild every map, dropping maps of frames now too sparse"
@@ -487,7 +489,12 @@ def main(argv=None) -> int:
         print(f"KNOWN-ANSWER: {checked}/{checked} frames of {a.verify_against} reproduce")
 
     root = a.root
-    scenes = a.scenes.split(",") if a.scenes else sorted(d for d in os.listdir(root) if d.isdigit())
+    # "3" means 0003: an unpadded index would otherwise skip silently as "no clouds".
+    scenes = (
+        [s.zfill(4) if s.isdigit() else s for s in a.scenes.split(",")]
+        if a.scenes
+        else sorted(d for d in os.listdir(root) if d.isdigit())
+    )
     print(f"BUILD {root}: {json.dumps(p.to_dict())}", flush=True)
     bad = 0
     for scene in scenes:

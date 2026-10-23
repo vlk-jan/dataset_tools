@@ -1,9 +1,10 @@
 """Scene-level train/val assignment, read from the root, never derived.
 
-Source: ``<root>/splits.json`` (written by DRIFT's ``scripts/data/dump_split.py``;
-short keys ``val``/``train``/``excluded``/``name`` also accepted), else the root's
-own declaration (``manifest.held_out.scenes`` + ``keyframes_train.lst``). Scene ids
-only mean something within one tree, hence `split_warning`.
+Source: ``<root>/splits.json`` (written by ``helhest-release``, before 2026-10 by
+DRIFT's ``scripts/data/dump_split.py``; short keys ``val``/``train``/``excluded``/
+``name`` also accepted), else the root's own declaration
+(``manifest.held_out.scenes`` + ``keyframes_train.lst``). Scene ids only mean
+something within one tree, hence `split_warning`.
 """
 
 from __future__ import annotations
@@ -265,7 +266,7 @@ def split_warning(
         return (
             f"{SPLITS_FILE} was exported against {declared}, this root is {root_path} - "
             "scene ids only mean the same thing inside one tree, so the train/val marks "
-            f"may be wrong; regenerate it for this root (DRIFT scripts/data/dump_split.py)"
+            f"may be wrong; regenerate it for this root with helhest-release"
         )
     if scene_ids is not None:
         unknown = [s for s in sorted(scene_ids) if splits.of(s) is None]
@@ -274,7 +275,7 @@ def split_warning(
             return (
                 f"{SPLITS_FILE} says nothing about {len(unknown)} scene(s) in this root "
                 f"({shown}) - they are shown unmarked rather than assumed to be training "
-                "data; regenerate it for this root (DRIFT scripts/data/dump_split.py)"
+                "data; regenerate it for this root with helhest-release"
             )
     theirs = splits.dataset_version
     ours = (manifest or {}).get("dataset_version")

@@ -119,3 +119,9 @@ def test_tie_jitter_makes_the_map_immune_to_a_1um_anchor_nudge():
     hm2, val2 = hmap.build_frame(d["cloud_2"], d["R_align_2"], nudged)
     assert np.abs(hm2 - hm).max() < 1e-4 and np.array_equal(val, val2)
     assert hmap.Params.from_dict(p.to_dict()) == p
+
+
+def test_scenes_accepts_unpadded_index(tmp_path, capsys):
+    (tmp_path / "0003").mkdir()
+    hmap.main([str(tmp_path), "--scenes", "3", "--workers", "1"])
+    assert "0003: no clouds" in capsys.readouterr().out

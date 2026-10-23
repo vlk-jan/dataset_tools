@@ -8,19 +8,19 @@
 #SBATCH --partition=cpu
 #SBATCH --output=slurm/slurm_out/skew_%A_%a.out
 #
-# scripts/probe_clock_skew.py over one v2 bag; array index = row of docs/v2_bags.csv.
+# scripts/probe_clock_skew.py over one v2 bag; array index = row of $CSV.
 #
-#   sbatch --array=0 slurm/probe_clock_v2.batch          # just scene 0000
-#   sbatch --array=0-16%4 slurm/probe_clock_v2.batch     # the whole rig
+#   CSV=docs/v2_4_bags.csv sbatch --array=0 slurm/probe_clock_v2.batch OUT_DIR       # just scene 0000
+#   CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/probe_clock_v2.batch OUT_DIR  # every bag
 #
 # writes <out>/<scene>_skew.csv plus the per-topic summary in the slurm log.
 set -uo pipefail
 
-OUT=${1:-/mnt/personal/$USER/HELHEST_v2_beta/.clock_skew}
+OUT=${1:?usage: CSV=docs/v2_<n>_bags.csv sbatch --array=N-M slurm/probe_clock_v2.batch OUT_DIR}
 # Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 . "$REPO/slurm/common.sh" || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-CSV=${CSV:-$REPO/docs/v2_bags.csv}
+CSV=${CSV:?set CSV to a bag list, e.g. CSV=docs/v2_4_bags.csv}
 
 read_row
 scene=$(echo "$row" | cut -d, -f1)

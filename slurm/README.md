@@ -26,10 +26,10 @@ they name is missing -- hence the `mkdir`.
 
 | File | What it does | Array index |
 | --- | --- | --- |
-| `extract_v2.batch` | v2 rig (Odin1 + Fixposition): fetch one bag to node-local scratch, extract, rotate the odometry onto the clouds' frame (`odom_frame`), build the height maps (`dataset_tools.heightmap`), validate, copy the finished scene out and swap it in; per-bag extractor options come from the bag list's `extract_args` column | row of the bag list (`CSV=`, default `docs/v2_bags.csv`; each release has its own cumulative `docs/v2_<n>_bags.csv`, so a root that reuses an earlier release's scenes is submitted with the array range of its new rows only -- v2.1, linked into v2.0, as `--array=12-17`) = scene number |
+| `extract_v2.batch` | v2 rig (Odin1 + Fixposition): fetch one bag to node-local scratch, extract, rotate the odometry onto the clouds' frame (`odom_frame`), build the height maps (`dataset_tools.heightmap`), validate, copy the finished scene out and swap it in; per-bag extractor options come from the bag list's `extract_args` column, height-map settings from `HM_ARGS` (the defaults are not v2.4's: `HM_ARGS="--set statistic=p90 --set tie_jitter=none"`) | row of the bag list (`CSV=`, required; each release has its own cumulative `docs/v2_<n>_bags.csv`, so a root that reuses an earlier release's scenes is submitted with the array range of its new rows only -- v2.1, linked into v2.0, as `--array=12-17`) = scene number |
 | `finalize_v2.sh` | after a v2 array run: with a release spec (third argument, `docs/releases/<n>.json`) write the root-level files with `dataset_tools.release` (scenes.csv, keyframe lists, manifest, splits, curation, README); without one only `scenes.csv` and the image format. Then validate the whole root and regenerate the atlas (second argument: the bag list). Run directly on a login node, not through `sbatch` | -- |
 | `heightmaps.batch` | rebuild the height maps of scenes already in a root (after clouds or `gravity_align.npy` changed): build on node-local scratch, check a sample of the scene's own maps first (`VERIFY=0` skips), replace both directories | scene number |
-| `probe_clock_v2.batch` | `scripts/probe_clock_skew.py` over one v2 bag: every publisher's clock against the recorder's | row of `docs/v2_bags.csv` |
+| `probe_clock_v2.batch` | `scripts/probe_clock_skew.py` over one v2 bag: every publisher's clock against the recorder's | row of the bag list (`CSV=`, required) |
 | `viewer.batch` | run `helhest-viewer` on a compute node, on a Unix socket in a private `/tmp` directory (other users share the node); `scripts/viewer_connect.sh` opens the tunnel from a laptop | -- |
 
 ## Site-specific values
@@ -45,9 +45,10 @@ environment rather than the file:
 | `SUBTDATA` | `$USER@subtdata.felk.cvut.cz` | the fetching jobs |
 | `VIEWER_CACHE` | `/mnt/personal/$USER/viewer_cache` | `viewer.batch` |
 
-The root is the first positional argument of every job, defaulting to
-`/mnt/personal/$USER/<release>` (`heightmaps.batch` requires it; for
-`viewer.batch` it is the root to serve).
+The root is the first positional argument of every job and is required (for
+`viewer.batch` it is the root to serve, for `probe_clock_v2.batch` the output
+directory); so is the bag list, `CSV=` for the array jobs and the second
+argument of `finalize_v2.sh`.
 
 Nothing here calls another repository: extraction, the odom_frame correction,
 the height maps and the root files are all this one's.

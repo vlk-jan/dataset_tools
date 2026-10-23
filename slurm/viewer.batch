@@ -11,7 +11,7 @@
 # Run the dataset viewer on a compute node instead of the login node, and reach
 # it from a laptop over an SSH tunnel.
 #
-#   sbatch slurm/viewer.batch [dataset_root]
+#   sbatch slurm/viewer.batch dataset_root
 #   scripts/viewer_connect.sh          # from the laptop, opens the tunnel
 #
 # Partition walltimes: cpufast 4 h, cpu 1 d, cpulong 3 d, cpuextralong 42 d,
@@ -23,7 +23,7 @@ set -uo pipefail
 # Submit from the repository root: slurm runs a spooled copy, so $0 is useless.
 REPO=${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}
 [ -f "$REPO/pyproject.toml" ] || { echo "not a dataset_tools checkout: $REPO -- submit from the repository root"; exit 1; }
-ROOT=${1:-/mnt/personal/$USER/HELHEST_v1_3}
+ROOT=${1:?usage: sbatch slurm/viewer.batch DATASET_ROOT}
 VIEWER="$REPO/.venv-viewer/bin/helhest-viewer"
 
 # Persistent cache, off $HOME (quota) and node-local disk (wiped). One subdir per
