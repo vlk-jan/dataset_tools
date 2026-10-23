@@ -1045,8 +1045,7 @@ def _frame_grid(access: SceneAccess, index: int) -> dict[str, Any] | None:
 
 
 def _overlay_possible(access: SceneAccess) -> bool:
-    """Can this scene's clouds be drawn on its images? Needs ``K`` and
-    ``T_cam_to_base.txt`` (v1's ``T_cam_to_lidar.txt`` is in the wrong frame)."""
+    """Can this scene's clouds be drawn on its images? Needs ``K`` and ``T_cam_to_base.txt``."""
     p = access.probe
     if not (p.has("images") and p.has("clouds") and p.has("camera_intrinsics") and p.has("T_cam_to_base")):
         return False

@@ -121,7 +121,7 @@ def _two_frames_apart(tmp_path, height_maps, masks=()):
             T[0, 3] = 6.0 * i
             fh.write(" ".join(f"{v:.9f}" for v in [t, *T.reshape(-1)]) + "\n")
     with open(scene / "odometry_segments.txt", "w") as fh:
-        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 filtered:end_of_run\n")
+        fh.write(f"0 {ts[0]:.6f} {ts[-1]:.6f} 2 end_of_run\n")
     for i, hm in enumerate(height_maps):
         np.savez_compressed(scene / "height_maps" / f"{i:05d}.npz", height_map=hm)
     for i, validity in enumerate(masks):
@@ -286,8 +286,8 @@ def test_a_scene_without_gravity_alignment_has_nothing_to_compare_against(tmp_pa
 
 
 def test_a_short_window_gets_exactly_the_budgets_it_asked_for():
-    """Most windows are short -- the median segment of HELHEST v1.3 is 43
-    frames -- and nothing about them should change."""
+    """Most windows are short -- a median segment of a few dozen frames -- and
+    nothing about them should change."""
     from dataset_tools.viewer.build import BuildOptions, budgets_for_window
 
     opts = BuildOptions()
@@ -324,7 +324,7 @@ def test_a_long_window_keeps_the_terrain_resolution_its_parts_had(tmp_path):
     from dataset_tools.viewer.build import BuildOptions, _make_grid, budgets_for_window
 
     # A 160 m x 30 m traverse: 766k cells at 0.1 m, over the default budget and
-    # inside the scaled one, which is where v1.3's merged windows land.
+    # inside the scaled one, which is where long merged windows land.
     positions = np.stack(
         [np.linspace(0, 160, 400), np.linspace(0, 30, 400), np.zeros(400)],
         axis=1,

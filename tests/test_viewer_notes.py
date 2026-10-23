@@ -308,20 +308,20 @@ def test_notes_written_against_another_dataset_version_are_flagged(tmp_path):
     """Frame numbers mean the same thing only while the extraction does. The
     same check, for the same reason, as the atlas's `dataset_version`."""
     root_path = make_root(tmp_path, frames=12)
-    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "v1.3"}))
+    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "v2.5"}))
     (root_path / "notes").mkdir()
     (root_path / "notes" / "0000.json").write_text(
         json.dumps(
             {
                 "scene": "0000",
-                "dataset_version": "v1.2",
+                "dataset_version": "v2.4",
                 "notes": [{"frames": [1, 3], "text": "older run"}],
             }
         )
     )
     _, client = _notes_client(tmp_path, root_path=root_path)
-    assert client.get("/api/scene/0000/notes").json()["stale_version"] == "v1.2"
-    assert "written against dataset v1.2" in client.get("/scene/0000").text
+    assert client.get("/api/scene/0000/notes").json()["stale_version"] == "v2.4"
+    assert "written against dataset v2.4" in client.get("/scene/0000").text
 
     # A note written now carries this root's version, and the warning goes.
     client.post("/api/scene/0000/notes", json={"frames": [5, 5], "text": "current"})

@@ -11,7 +11,6 @@ import logging
 import math
 import re
 import time
-from collections import Counter
 from typing import Any
 from urllib.parse import urlencode
 
@@ -42,7 +41,7 @@ from .loaders import read_text
 from .probe import ARTEFACTS_BY_KEY, DatasetRoot, _npy_shape
 from .signals import _speed, signal_charts
 from .splits import DECLARED_FILES
-from .windows import describe_marks, describe_reason, span_fractions
+from .windows import describe_reason, span_fractions
 
 logger = logging.getLogger("dataset_tools.viewer.scene_page")
 
@@ -215,18 +214,13 @@ def timeline_marks(access: SceneAccess) -> list[dict[str, Any]]:
     for seg in segments:
         lo, hi = span_fractions(seg, base, span)
         width = min(max(hi - lo, MIN_MARK_FRAC), 1.0 - lo)
-        # The hover names where filled poses came from, not why the segment ended.
-        described = describe_reason(seg.reason)
-        why = described.split("; ends because", 1)[0] if described.startswith("filled") else ""
-        title = f"segment {seg.index} - {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses"
         marks.append(
             {
                 "index": seg.index,
                 "left": round(lo * 100, 3),
                 "width": round(width * 100, 3),
-                "fill": "fill" in (seg.reason or "").lower(),
                 "href": f"/scene/{p.scene_id}/segment/{seg.index}",
-                "title": f"{title}; {why}" if why else title,
+                "title": f"segment {seg.index} - {fmt_duration(seg.duration)}, {fmt_count(seg.n_poses)} GT poses",
             }
         )
     return marks
@@ -259,14 +253,10 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         )
         poses = sum(s.n_poses for s in segments)
         if poses:
-            # "of N raw" only when N >= poses (filled scenes have more than their own run).
-            raw = a.get("poses_unf") or a.get("poses_raw")
-            sub = f"of {fmt_count(raw)} raw" if raw and raw >= poses else None
-            stats.append(stat("poses", fmt_count(poses), sub))
+            stats.append(stat("poses", fmt_count(poses)))
         reasons = sorted(p.segment_reasons.items(), key=lambda kv: -kv[1])
-        # Fills are not end reasons; the fill note covers them.
         ends = [(describe_reason(r), n) for r, n in reasons]
-        ends = [(d, n) for d, n in ends if d and not d.startswith("filled")]
+        ends = [(d, n) for d, n in ends if d]
         if ends:
             parts = [f"{d} ({n}×)" for d, n in ends[:3]]
             notes.append("Segments end because " + "; ".join(parts) + ".")
@@ -285,27 +275,11 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
             stats.append(stat("path in GT", f"{derived[0]:.0f} m", "from odometry.txt"))
             stats.append(stat("moving", f"{derived[1] * 100:.0f}%", f"over {MOVING_M_S} m/s"))
 
-    if a.get("win_med") is not None and a.get("win_p95") is not None:
-        stats.append(
-            stat("2 s err med / p95", f"{a['win_med']:.2f} / {a['win_p95']:.2f} m", "vs the robot's own odometry")
-        )
-    if a.get("flags") is not None:
-        stats.append(stat("divergence flags", a["flags"]))
-
     if not p.has("odometry") and p.has("transforms"):
-        notes.append("Wheel odometry only (transforms.npy): continuous, drifty, not ground truth.")
+        notes.append("Frame odometry only (transforms.npy): one track, not split at breaks, not ground truth.")
 
-    spans, fill = segment_timeline(p, a)
+    spans = segment_timeline(p, a)
     marks = timeline_marks(access)
-    if fill:
-        # Name the fill sources this root holds, then count the marks.
-        filled = [s for s in segments if "fill" in (s.reason or "").lower()]
-        sources = sorted({describe_reason((s.reason or "").split("+")[0]) for s in filled})
-        mark_counts = Counter(m for s in filled for m in describe_marks(s.reason or "", brief=True))
-        detail = "; ".join(sources) if sources else "filled from another root through the same quality gate"
-        for text, n in sorted(mark_counts.items(), key=lambda kv: -kv[1]):
-            detail += f"; {n} of them {text}"
-        notes.append(f"{len(fill)} segment{'s' if len(fill) != 1 else ''} (amber): {detail}.")
 
     return {
         "title": "Ground truth",
@@ -316,7 +290,6 @@ def ground_truth_card(access: SceneAccess, a: dict) -> dict[str, Any]:
         "timeline": (
             {
                 "spans": spans,
-                "fill": fill,
                 "marks": marks,
                 "label": fmt_duration(p.duration or a.get("dur_s")),
             }
@@ -362,8 +335,7 @@ def calibration_card(access: SceneAccess, info: dict | None) -> dict[str, Any] |
         T = np.asarray(T, dtype=float)
         t = T[:3, 3]
         stats.append(stat("camera → base", f"{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}", "x, y, z (m)"))
-        source = "T_cam_to_base.txt" if access.probe.has("T_cam_to_base") else "T_cam_to_lidar.txt"
-        matrices.append({"label": f"{source} (4×4)", "rows": T.round(4).tolist(), "fmt": "%9.4f"})
+        matrices.append({"label": "T_cam_to_base.txt (4×4)", "rows": T.round(4).tolist(), "fmt": "%9.4f"})
 
     if len(stats) < MIN_CARD_STATS and not matrices:
         return None
@@ -785,7 +757,7 @@ FILE_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
                    "data_ts", "pcd_ts", "transforms", "gravity_align")),
     ("Ground truth", ("odometry", "odometry_segments")),
     ("Robot & GNSS", ("joint_states", "joint_setpoints", "cmd_vel", "gps")),
-    ("Calibration", ("camera_intrinsics", "camera_info", "T_cam_to_base", "T_cam_to_lidar")),
+    ("Calibration", ("camera_intrinsics", "camera_info", "T_cam_to_base")),
     ("Extraction", ("source_bag", "time_align", "gnss_guard", "tf_pins")),
 )  # fmt: skip
 

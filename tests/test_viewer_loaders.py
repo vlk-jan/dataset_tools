@@ -58,15 +58,10 @@ def test_odometry_reads_as_timestamps_and_poses(tmp_path):
 
 def test_segments_parse_and_sort(tmp_path):
     path = tmp_path / "segments.txt"
-    path.write_text(
-        "# id start_ts end_ts n_poses reason\n"
-        "1 20.0 30.0 100 filtered:pose_jump\n"
-        "0 0.0 10.0 50 v11_fill\n"
-        "garbage line\n"
-    )
+    path.write_text("# id start_ts end_ts n_poses reason\n1 20.0 30.0 100 teleport\n0 0.0 10.0 50 gap\ngarbage line\n")
     segs = loaders.read_segments(path)
     assert [s.index for s in segs] == [0, 1]
-    assert segs[0].reason == "v11_fill"
+    assert segs[0].reason == "gap"
     assert segs[1].duration == pytest.approx(10.0)
 
 

@@ -38,12 +38,12 @@
         <div class="track" title="{{ card.timeline.title or 'where ground truth exists inside the scene' }}">
           {% if card.timeline.marks %}
             {% for m in card.timeline.marks %}
-            <a class="seg{{ ' fill' if m.fill }}" href="{{ m.href }}"
+            <a class="seg" href="{{ m.href }}"
                title="{{ m.title }}" aria-label="{{ m.title }}"
                style="left:{{ "%.3f"|format(m.left) }}%;width:{{ "%.3f"|format(m.width) }}%"></a>
             {% endfor %}
           {% else %}
-            {{ ui.spans(card.timeline.spans, card.timeline.fill) }}
+            {{ ui.spans(card.timeline.spans) }}
           {% endif %}
         </div>
         <div class="barcap"><span>0</span><span>{{ card.timeline.label }}</span></div>

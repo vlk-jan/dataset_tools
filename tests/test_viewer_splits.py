@@ -73,8 +73,8 @@ def test_the_exporter_s_own_spelling_is_what_is_read():
     parsed = splits.parse_splits(
         {
             "split_mode": "scene_strat",
-            "root": "/data/HELHEST_v1_5",
-            "dataset_version": "1.5",
+            "root": "/data/HELHEST_v2_5",
+            "dataset_version": "2.5",
             "n_folds_note": "two-way train/val only; there is no test split",
             "val_scenes": ["0000", "0019"],
             "train_scenes": ["0001", "0002"],
@@ -88,7 +88,7 @@ def test_the_exporter_s_own_spelling_is_what_is_read():
         }
     )
     assert parsed.name == "scene_strat"
-    assert parsed.dataset_version == "1.5"
+    assert parsed.dataset_version == "2.5"
     assert parsed.source == "datasets/helhest.py SCENE_STRAT_VAL"
     assert parsed.note == "two-way train/val only; there is no test split"
     assert parsed.of("0019") == "val"
@@ -191,7 +191,7 @@ def test_a_malformed_splits_file_costs_the_colours_not_the_page(tmp_path, caplog
 
 
 def test_a_split_exported_against_another_tree_is_not_believed_silently(tmp_path):
-    """The ScaLR copy numbers scenes differently past 0030; a file from one tree
+    """Two trees may number scenes differently past some point; a file from one
     labels the other right up to there and wrong after it, plausibly."""
     root_path = make_root(tmp_path, scenes=("0000", "0001"))
     write_splits(root_path, val=("0000",), train=("0001",), root="/somewhere/else/HELHEST")
@@ -216,22 +216,22 @@ def test_a_split_that_has_not_heard_of_a_scene_in_the_root_says_so(tmp_path):
 
 
 def test_a_stale_version_is_flagged_as_probably_still_right(tmp_path):
-    """Ids survived v1.2 through v1.5: worth saying, not worth alarming about."""
+    """Scene ids usually survive a release: worth saying, not worth alarming about."""
     root_path = make_root(tmp_path, scenes=("0000", "0001"))
-    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "1.5"}))
-    write_splits(root_path, val=("0000",), train=("0001",), dataset_version="1.3")
+    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "2.5"}))
+    write_splits(root_path, val=("0000",), train=("0001",), dataset_version="2.4")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache")
 
     warning = index_page.build_index(root, root.probe_all())["split_warning"]
-    assert "1.3" in warning and "1.5" in warning
+    assert "2.4" in warning and "2.5" in warning
     assert "still right" in warning
 
 
 def test_a_split_exported_against_this_very_root_raises_nothing(tmp_path):
     root_path = make_root(tmp_path, scenes=("0000", "0001"))
-    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "1.5"}))
+    (root_path / "manifest.json").write_text(json.dumps({"dataset_version": "2.5"}))
     resolved = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache").path
-    write_splits(root_path, val=("0000",), train=("0001",), root=str(resolved), dataset_version="1.5")
+    write_splits(root_path, val=("0000",), train=("0001",), root=str(resolved), dataset_version="2.5")
     root = probe.DatasetRoot(root_path, cache_dir=tmp_path / "cache2")
 
     assert index_page.build_index(root, root.probe_all())["split_warning"] is None
@@ -439,7 +439,7 @@ def _declare(root_path, held=("0002",), train_list=True):
 
 
 def test_a_manifest_hold_out_and_a_training_list_are_a_split_without_the_file(tmp_path):
-    """v2.3: no splits.json, but the manifest holds a session out and the root
+    """No splits.json, but the manifest holds a session out and the root
     carries keyframes_train.lst, which is what DRIFT's loader enforces too."""
     root_path = make_root(tmp_path, scenes=("0000", "0001", "0002"))
     _declare(root_path)

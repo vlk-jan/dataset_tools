@@ -34,12 +34,9 @@
 {%- endmacro %}
 
 {# Ground-truth spans as fractions of the scene, inside a .track. #}
-{% macro spans(own, borrowed) -%}
+{% macro spans(own) -%}
 {% for span in own %}
 <i style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
-{% endfor %}
-{% for span in borrowed %}
-<i class="fill" title="segment borrowed from an earlier root" style="left:{{ "%.3f"|format(span[0] * 100) }}%;width:{{ "%.3f"|format((span[1] - span[0]) * 100) }}%"></i>
 {% endfor %}
 {%- endmacro %}
 

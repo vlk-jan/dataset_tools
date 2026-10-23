@@ -34,7 +34,7 @@ COLUMN_TITLES: dict[str, str] = {
     "Duration": "time from the window's first frame to its last",
     "Pose source": (
         "where the 3D view takes the robot's pose from: odometry is ground truth, "
-        "transforms is wheel odometry (drifts), none has no pose at all"
+        "transforms is the per-frame odometry track (not ground truth), none has no pose at all"
     ),
     "GT poses": (
         "ground-truth poses behind the window, and their rate; a window cut from a longer segment gets "
@@ -47,7 +47,7 @@ COLUMN_TITLES: dict[str, str] = {
         "has diverged; - when there is no ground truth or no gravity to compare"
     ),
     "Notes": "notes whose frame range touches this window, with any verdict they carry",
-    "Note": "for a ground-truth segment, why it ends (or where its poses were filled from); otherwise what the window's pose is",
+    "Note": "for a ground-truth segment, why it ends; otherwise what the window's pose is",
     "Ends": "why the ground-truth segment stops where it does",
 }
 
@@ -113,9 +113,7 @@ def segment_card(access: SceneAccess, seg: Segment, position: int, frames: tuple
 
     reason = describe_reason(seg.reason)
     if reason:
-        notes.append(
-            f"Ends because {reason}." if not reason.startswith("filled") else f"{reason[0].upper()}{reason[1:]}."
-        )
+        notes.append(f"Ends because {reason}.")
     if rate and rate < THIN_POSE_RATE:
         notes.append(
             f"Anchored at {rate:.1f} Hz: the trajectory between two poses is a straight line over "

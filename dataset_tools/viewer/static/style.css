@@ -273,7 +273,6 @@ header > .split-tag { align-self: center; }
 /* GT timeline: blocks over the scene's span; `a.seg` links, `i` plain marks. */
 .bar .track { position: relative; height: 14px; background: var(--track); overflow: hidden; }
 .bar i, .bar a.seg { position: absolute; top: 0; bottom: 0; background: var(--ok); }
-.bar i.fill, .bar a.seg.fill { background: var(--warn); }
 .bar a.seg { cursor: pointer; }
 /* Widen only the hit area of tiny segments, not the drawn block. */
 .bar a.seg::after { content: ""; position: absolute; top: 0; bottom: 0; left: -2px; right: -2px; }

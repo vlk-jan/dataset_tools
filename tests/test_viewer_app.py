@@ -91,9 +91,9 @@ def test_the_cloud_is_projected_into_the_image_only_where_the_calibration_allows
     assert client.get("/api/scene/0000/frame/9999/overlay.jpg").status_code == 404
     page = client.get("/scene/0000/frame/0").text
     assert "overlay.jpg" in page and "Cloud on image" in page
-    # A v1 root has T_cam_to_lidar.txt only, which is the wrong frame to project from.
+    # Without T_cam_to_base.txt there is nothing to project with.
     scene = tmp_path / "root" / "0001"
-    (scene / "T_cam_to_base.txt").rename(scene / "T_cam_to_lidar.txt")
+    (scene / "T_cam_to_base.txt").unlink()
     assert client.get("/api/scene/0001/frame/0/overlay.jpg").status_code == 404
     assert "overlay.jpg" not in client.get("/scene/0001/frame/0").text
 
@@ -127,7 +127,7 @@ def test_the_viewer_page_pages_between_a_scene_s_windows(client):
 
 def test_a_scene_without_optional_files_still_builds(tmp_path):
     """The degradation contract: no height maps, no gravity alignment, no
-    proprioception, no wheel odometry -- the window must still build."""
+    proprioception, no transforms.npy -- the window must still build."""
     pytest.importorskip("simview")
     pytest.importorskip("torch")
 
@@ -393,7 +393,7 @@ def test_the_overlay_offers_the_cloud_and_the_ghost_as_separate_toggles(client):
     assert 'id="dt-ghost"' in page
     assert "dt-seg" not in page  # the either/or switch is gone
     # Each toggle says what it is; the ghost is the one nobody recognises.
-    assert "wheel-odometry ghost" in page
+    assert "frame-odometry ghost" in page
     assert "wheel_odom_drift" in page
     # And the panel's own toggle is a single edge tab, not the old pair.
     assert 'id="dt-edge"' in page
@@ -490,14 +490,14 @@ def test_the_aggregated_cloud_carries_no_per_frame_pose(client):
 
 
 def test_the_frame_page_reads_the_segment_tag_out_in_words(client):
-    """Every other page renders `filtered:pose_jump` through `describe_reason`;
+    """Every other page renders `teleport` through `describe_reason`;
     the frame page printed the raw tag."""
     import html
 
     body = html.unescape(client.get("/scene/0000/frame/2").text)
     assert "Ends because" in body
-    assert windows.describe_reason("filtered:pose_jump") in body
-    assert "filtered:pose_jump" not in body
+    assert windows.describe_reason("teleport") in body
+    assert "teleport" not in body
 
 
 def test_back_to_the_frame_strip_lands_on_the_page_the_frame_is_on(tmp_path):

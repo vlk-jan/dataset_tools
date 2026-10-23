@@ -114,10 +114,7 @@ def _curated_stats(a: dict) -> list[dict[str, Any]]:
     if a.get("pts_mean"):
         stats.append(stat("points / cloud", fmt_count(a["pts_mean"])))
     if a.get("poses") is not None:
-        # "of N raw" only when N >= poses (filled scenes have more than their own run).
-        raw = a.get("poses_unf") or a.get("poses_raw")
-        keep = raw and raw >= a["poses"]
-        stats.append(stat("poses", fmt_count(a["poses"]), f"of {fmt_count(raw)} raw" if keep else None))
+        stats.append(stat("poses", fmt_count(a["poses"])))
     if a.get("segments") is not None:
         longest = ", ".join(f"{v:.0f}" for v in (a.get("seg_lens") or [])[:3])
         stats.append(stat("segments", a["segments"], f"longest {longest} s" if longest else None))
@@ -156,28 +153,24 @@ def _probed_stats(p: SceneProbe) -> list[dict[str, Any]]:
     return stats
 
 
-def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> tuple[list, list]:
-    """``(normal spans, filled spans)`` for a scene's ground-truth timeline.
+def segment_timeline(probe: SceneProbe, atlas_entry: dict) -> list:
+    """The spans of a scene's ground-truth timeline.
 
-    Both halves come from ONE source: the live segment file if it has any span
-    (the atlas may be stale), else the atlas. Never mix the two.
+    From ONE source: the live segment file if it has any span (the atlas may be
+    stale), else the atlas. Never mix the two.
     """
     if probe.segment_spans:
-        # `fill_spans` is a subset of `segment_spans`; removed below.
-        spans, fill = list(probe.segment_spans), list(probe.fill_spans)
-    else:
-        fill = [list(s) for s in (atlas_entry.get("fill_spans") or [])]
-        spans = [list(s) for s in (atlas_entry.get("seg_spans") or [])] + fill
-    return [s for s in spans if s not in fill], fill
+        return list(probe.segment_spans)
+    return [list(s) for s in (atlas_entry.get("seg_spans") or [])]
 
 
 def thumb_slots(atlas_entry: dict) -> list[str]:
     """The slots the atlas curates for a scene, in slot order.
 
-    ``{"a": 196}`` (slot -> frame) or the older bare ``["a", "b", "c"]``.
+    ``{"a": 196}``: slot -> frame.
     """
     raw = atlas_entry.get("thumbs")
-    keys = raw.keys() if isinstance(raw, dict) else (raw or ())
+    keys = raw.keys() if isinstance(raw, dict) else ()
     return [s for s in THUMB_SLOTS if s in keys]
 
 
@@ -299,7 +292,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
     a = root.atlas_scene(probe.scene_id)
     coverage = a.get("cov", probe.segment_coverage)
 
-    normal, fill = segment_timeline(probe, a)
+    spans = segment_timeline(probe, a)
     stats = _curated_stats(a) if a else _probed_stats(probe)
     disk = root.disk_usage_scene(probe.scene_id)
     if isinstance(disk.get("bytes"), int):
@@ -317,8 +310,7 @@ def build_row(root: DatasetRoot, probe: SceneProbe) -> dict[str, Any]:
         "coverage_class": coverage_class(coverage),
         "thumbs": _thumbs(probe.scene_id, probe, a),
         "stats": stats,
-        "spans": normal,
-        "fill_spans": fill,
+        "spans": spans,
         "span_label": fmt_duration(a.get("dur_s") or probe.duration),
     }
 
