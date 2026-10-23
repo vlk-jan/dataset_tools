@@ -136,7 +136,7 @@ Nothing in the viewer is specific to a sensor generation. A scene is any
   from the aggregated cloud instead, no `joint_states.npy` means no wheel-velocity
   plots and no wheel spin, no `transforms.npy` means no drift comparison.
 - Odometry is parsed from the columns, not from a rig's conventions. Segment
-  `reason` tags (`filtered:pose_jump`, `v11_fill`, `fixposition:fix_lost`, …)
+  `reason` tags (`filtered:pose_jump`, `fixposition:fix_lost`, …)
   are read out in words where they are shown (`windows.describe_reason`); a tag
   it does not recognise passes through verbatim.
 
@@ -188,13 +188,12 @@ windows.
 The cap counts seconds rather than frames because that is what a longer window
 actually costs. Building one window reads a bounded number of per-frame files
 whatever its length -- `hm_frames` and `cloud_frames` pick a fixed subset -- and
-the bundle grows barely at all: on v1.3's longest segment (0019/0, 29 minutes),
-twelve times the frames cost 1.9x the bytes and no extra build time. What does
-scale is how thinly those fixed samples are spread over the ground driven, which
-is a cost per second, and the budgets are scaled with the window to hold it
-roughly constant (below). Counting frames also meant one cap with two meanings:
-v1.3 holds scenes at 3.2 Hz and at 10 Hz, so the old 1500-frame cap left a 462 s
-window whole in one scene while halving a 180 s segment in the next.
+the bundle grows barely at all. What does scale is how thinly those fixed
+samples are spread over the ground driven, which is a cost per second, and the
+budgets are scaled with the window to hold it roughly constant (below). Counting
+frames also meant one cap with different meanings across scenes recorded at
+different frame rates: a fixed frame ceiling can leave a long duration whole
+in a low-rate scene while splitting a much shorter segment in a high-rate one.
 
 No window reaches past the last line of `data_ts.txt`. A scene's frame count is
 the largest of several counts that can disagree — a directory built in flight
@@ -244,14 +243,13 @@ fetched only once asked for). It starts off on every page; the zoom dialog,
 on the frame page and in the 3D view's panel, carries the same toggle. It is a
 calibration check: a
 road that lands beside the road, or a trunk that lands a metre from its
-picture, is a wrong extrinsic -- the error that shifted every v1 cloud by
-0.34 m, and the one the Odin1's own extrinsic estimate wanders by between
-boots. Metres of error are pixels of misalignment at any range. Where
-`camera_info.yaml` is present, its distortion model (e.g. `equidistant` fisheye
-for Odin1 or `plumb_bob` / `rational_polynomial` for pinhole rigs) is applied;
-otherwise, uncorrected pinhole projection is used as fallback. A root that has only
-`T_cam_to_lidar.txt` (v1) gets no overlay: that matrix is the camera in the raw
-lidar frame, not the base frame the clouds are in.
+picture, is a wrong extrinsic, like the error the Odin1's own extrinsic
+estimate wanders by between boots. Metres of error are pixels of misalignment
+at any range. Where `camera_info.yaml` is present, its distortion model (e.g.
+`equidistant` fisheye for Odin1 or `plumb_bob` / `rational_polynomial` for
+pinhole rigs) is applied; otherwise, uncorrected pinhole projection is used as
+fallback. A scene with only `T_cam_to_lidar.txt` gets no overlay: that matrix is
+the camera in the raw lidar frame, not the base frame the clouds are in.
 
 ## The scene page's two strips
 
@@ -281,12 +279,11 @@ or a click outside, with no script involved. The scene number in the header
 opens the same kind of popover, a list of the root's scenes to jump to.
 
 Segment reasons are translated before they are shown anywhere -- in these
-tooltips, in the window table, on the segment page. A reason accumulates tags
-(`regen_fill:t194+refined`): the part before the first `+` says where the
-segment came from or why it ended, each `+` tail says what was then done to its
-poses, and both halves are turned into plain language by
-`windows.describe_reason`. Nothing that reads as a tag the tooling invented for
-itself should reach a page.
+tooltips, in the window table, on the segment page. A reason accumulates tags:
+the part before the first `+` says where the segment came from or why it ended,
+each `+` tail says what was then done to its poses, and both halves are turned
+into plain language by `windows.describe_reason`. Nothing that reads as a tag
+the tooling invented for itself should reach a page.
 
 The **tabs** under the cards, and the pager of every frame strip, switch in
 place: a click fetches the same page with the new query and swaps in only the
@@ -314,7 +311,7 @@ of its own frames.
 The number in the URL is the segment's number in `odometry_segments.txt`, not
 its position in the file — the same number the window keys carry (`seg003`),
 so a link from a window and a link from a frame resolve to the same page even
-after `scripts/filter_segments.py` has renumbered the table. Every figure on
+after a segment table is rewritten. Every figure on
 the page stops at the segment's own boundaries: poses either side of one share
 no reference frame, so nothing is ever accumulated across a boundary.
 
@@ -388,10 +385,8 @@ three thumbnails per card. It is entirely optional — without it the same page
 renders from the probe alone.
 
 Only the prose in it is editorial. Everything else on those cards is a rendered
-number, and rendered numbers go stale: HELHEST v1.3 shipped with `atlas/`
-symlinked to v1.2's (v1.3 refines odometry in place, so almost every other file
-is legitimately shared) and the index quietly showed v1.2's poses, segments,
-coverage and path lengths under a v1.2 title. So the two halves live in two
+number, and rendered numbers go stale: atlas numbers are generated from the
+data, never copied or linked across releases. So the two halves live in two
 files, and only one of them is written by hand:
 
 | file | who writes it |
@@ -402,15 +397,12 @@ files, and only one of them is written by hand:
 ```sh
 python3 scripts/make_atlas.py <root>            # regenerate atlas.json + thumbnails
 python3 scripts/make_atlas.py <root> --check    # recompute and diff; writes nothing
-python3 scripts/make_atlas.py <root> --bags docs/v2_3_bags.csv   # session and bag size from the root's bag list (left out without one)
+python3 scripts/make_atlas.py <root> --bags docs/v2_4_bags.csv   # session and bag size from the root's bag list (left out without one)
 ```
 
 Numbers come from the same code the pages use (`SceneProbe`,
 `scene_page.path_and_motion`), so the atlas cannot disagree with the page it
-feeds. The 2 s window error and the pose and flag counts come from
-`<scene>/regen/` (`odom_ref.txt`, the live `/odom`), which only the v1
-regeneration wrote: the v2 extractor never writes it, and a scene without it
-simply has no such figures. Run it after anything that changes odometry,
+feeds. Run it after anything that changes odometry,
 frames or clouds — and when the atlas's `dataset_version` stops matching
 `manifest.json`, the index says so above the masthead rather than showing the
 old numbers silently.
@@ -490,21 +482,13 @@ training scene and none is a validation scene, so there is nothing to colour.
 `scene_strat` is the fold that holds out whole scenes, and it is the one this
 reads.
 
-**It is declared, never derived.** A release root gets its `splits.json` from
-`helhest-release` (`split_mode: held_out`, the manifest's `held_out.scenes` as
-`val_scenes`, every other scene as `train_scenes`, `labels_per_scene` where the
-scenes carry `proprio_labels/`), so it says exactly what the manifest says.
-A DRIFT fold such as `scene_strat` is decided in DRIFT
-(`datasets/helhest.py`, `SCENE_STRAT_VAL`) and *serialised* by its exporter —
-never retyped here. A hand-copied duplicate is how DRIFT's own `train.py` came
-to reject the mode name it had just gained, and mirroring the constant into this
-repo would set up the same failure across two projects:
-
-```sh
-# in the DRIFT checkout
-python3 scripts/data/dump_split.py --rootdir <root> --out <root>/splits.json
-python3 scripts/data/dump_split.py --rootdir <root> --out <root>/splits.json --no_windows   # ~2 s, no window counts
-```
+**It is declared, never derived.** `splits.json` is written by
+`helhest-release` (with the release's `manifest.json` and keyframe lists):
+`split_mode: held_out`, the manifest's `held_out.scenes` as `val_scenes`,
+every other scene as `train_scenes`, and `labels_per_scene` where the scenes
+carry `proprio_labels/`, so it says exactly what the manifest says. A DRIFT
+fold such as `scene_strat` is decided in DRIFT (`datasets/helhest.py`,
+`SCENE_STRAT_VAL`) and serialised into `splits.json` — never retyped here.
 
 | key | what the viewer does with it |
 | --- | --- |
@@ -519,15 +503,13 @@ A hand-written file may use the short key names `val`, `train`, `excluded` and
 `name` instead, and may write scene ids as integers (`[0, 9, 15]`) or digit
 strings (`["9"]`), both read as the four-digit directory name.
 
-**Scene ids are only meaningful inside one tree.** They survive root *versions*
-— v1.2 through v1.5 renumbered segments, never scenes — but not *trees*: the
-ScaLR copy of HELHEST carries rear-camera scenes DRIFT's does not, and the two
-part company from `0030` on. A file exported against one tree therefore labels
-the other correctly up to that scene and wrongly after it, plausibly and with
-nothing else on the page to reveal it. So the index says so above the masthead
-when the file names a different root, when it says nothing about a scene this
-root has, or when its `dataset_version` has gone stale. A scene the file does
-not mention is left **unmarked** rather than assumed to be training data.
+**Scene ids are only meaningful inside one tree.** They survive root versions,
+but not different trees: a file exported against one tree might label another
+wrongly, plausibly and with nothing else on the page to reveal it. So the index
+says so above the masthead when the file names a different root, when it says
+nothing about a scene this root has, or when its `dataset_version` has gone
+stale. A scene the file does not mention is left **unmarked** rather than
+assumed to be training data.
 
 **The held-out share always names its unit.** The same fold is 23.7 % of the
 proprio labels and 25.8 % of the loader windows, and one scene (`0019`, fallow
@@ -566,9 +548,9 @@ table marks the windows a verdict touches, and `/api/notes.csv` exports every
 note with its frame range *and* the same range as frame times (`t_start`,
 `t_end` from `data_ts.txt`), so whatever applies the verdicts needs neither the
 viewer nor the scene's clock. The range is the anchor because it is the most durable identifier a
-scene has: segment indices are renumbered whenever `scripts/filter_segments.py`
-or another cutting pass rewrites `odometry_segments.txt`, so a note
-anchored to "segment 7" would afterwards point at different driving. Both ends
+scene has: segment indices are renumbered whenever a segment table is
+rewritten, so a note anchored to "segment 7" would afterwards point at
+different driving. Both ends
 of the range are **inclusive** — "frames 1204–1388" means what a person writing
 that means, which is deliberately not `windows.Window`'s convention, where
 `frame_end` is exclusive.
@@ -576,7 +558,7 @@ that means, which is deliberately not `windows.Window`'s convention, where
 ```json
 {
   "scene": "0007",
-  "dataset_version": "HELHEST_v1_3",
+  "dataset_version": "2.4",
   "notes": [
     {
       "id": "3f9a1c",
@@ -940,7 +922,7 @@ what was *asked for*, which does not change when the builder does, so
 than served. Without that, a window anyone had already opened would go on
 serving the old metadata forever. The same goes for the data: `meta.json`
 records the scene's fingerprint it was built from (`build.data`), and a window
-whose scene has changed since -- re-extracted, a regenerated `odometry.txt`,
+whose scene has changed since -- re-extracted, an updated `odometry.txt`,
 new height maps -- is rebuilt on its next request.
 
 **The terrain looks flat, or blockier than 0.1 m.** Check the panel's build

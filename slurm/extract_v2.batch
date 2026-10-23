@@ -12,7 +12,7 @@
 # odom_frame, the height maps and validation: a finished scene leaves this
 # task. Staged on node-local NVMe; NFS is touched only for the sif, the repo
 # and the final copy. Timing (--time_align auto) and the GNSS guard
-# (--gnss_guard auto) are the extractor's defaults; see docs/NEW_RIG_READINESS.md.
+# (--gnss_guard auto) are the extractor's defaults; see docs/EXTRACTION_GUARDS.md.
 #
 #   CSV=docs/v2_4_bags.csv sbatch --array=0-35%4 slurm/extract_v2.batch /mnt/personal/$USER/HELHEST_v2_4
 #

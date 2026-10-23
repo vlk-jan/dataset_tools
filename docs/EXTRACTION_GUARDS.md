@@ -40,8 +40,7 @@ which is what separates a latency from a spatial error such as a wrong lidar
 mount. A window is believed on the depth of its minimum against its own
 shoulders rather than on how far that minimum beats zero, so a stretch that
 is *already* right counts as evidence for zero instead of falling silent and
-inheriting its neighbour's offset. On HELHEST v1.3, whose ground truth comes
-off the same lidar, the profile comes back flat at zero, as it must.
+inheriting its neighbour's offset.
 
 ## Reset GNSS/INS solutions (`--gnss_guard`)
 
