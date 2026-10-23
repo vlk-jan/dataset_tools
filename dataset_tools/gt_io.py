@@ -1,4 +1,4 @@
-"""Reading and writing the ground-truth odometry files (HELHEST v1.2 contract).
+"""Reading and writing the ground-truth odometry files of a HELHEST root.
 
 ``odometry.txt``: ``timestamp`` + row-major 4x4 pose, 17 columns per line.
 ``odometry_segments.txt``: ``segment start_ts end_ts n_poses reason``. Each
@@ -7,10 +7,8 @@ segment is anchored at its own first pose; never interpolate across segments.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
-import shutil
 import warnings
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -24,7 +22,7 @@ LOG = logging.getLogger("helhest.gt_io")
 GT_HEADER = "# Timestamp(sec) r11 r12 r13 tx r21 r22 r23 ty r31 r32 r33 tz 0 0 0 1"
 SEGMENTS_HEADER = "# segment start_ts end_ts n_poses reason"
 
-#: First segment number in written tables. Older roots (v1.2-v1.5) start at zero;
+#: First segment number in written tables. Tables that start at zero are read as written;
 #: segments are always addressed by their number in the file, not their position.
 FIRST_SEGMENT = 1
 
@@ -96,7 +94,7 @@ def write_trajectory(dest: Path | str, ts: Iterable[float], poses: Iterable[np.n
 
 def _write_trajectory(fh: TextIO, ts: Iterable[float], poses: Iterable[np.ndarray]) -> None:
     fh.write(GT_HEADER + "\n")
-    for t, T in zip(ts, poses, strict=True):  # %.6f throughout: byte-compatible with v1
+    for t, T in zip(ts, poses, strict=True):  # %.6f throughout
         fh.write(" ".join(f"{v:.6f}" for v in (t, *np.asarray(T).ravel())) + "\n")
 
 
@@ -158,48 +156,3 @@ def _write_segments(fh: TextIO, rows: Iterable[SegmentRow]) -> None:
     fh.write(SEGMENTS_HEADER + "\n")
     for k, row in enumerate(rows):
         fh.write(f"{FIRST_SEGMENT + k} {row.start_ts:.6f} {row.end_ts:.6f} {row.n_poses} {row.reason}".rstrip() + "\n")
-
-
-# ---------------------------------------------------------------------------
-# What a post-processing pass last wrote
-# ---------------------------------------------------------------------------
-# Post-processing passes rebuild from their regen/ backup on re-run; a digest of what
-# they wrote tells them whether something else has changed the files since.
-def published_digest(scene: Path) -> str:
-    """sha256 over the scene's ``odometry.txt`` and ``odometry_segments.txt``."""
-    h = hashlib.sha256()
-    for name in ("odometry.txt", "odometry_segments.txt"):
-        h.update((Path(scene) / name).read_bytes())
-    return h.hexdigest()
-
-
-def _written_record(scene: Path, backup: str) -> Path:
-    return Path(scene) / "regen" / f"{backup}.written.sha256"
-
-
-def record_written(scene: Path, backup: str) -> None:
-    """Note what the pass that keeps ``regen/<backup>`` just published."""
-    _written_record(scene, backup).write_text(published_digest(scene) + "\n")
-
-
-def changed_since_written(scene: Path, backup: str) -> bool:
-    """True when the published files differ from what that pass last wrote (False without a record)."""
-    record = _written_record(scene, backup)
-    if not record.is_file():
-        return False
-    return record.read_text().strip() != published_digest(scene)
-
-
-def publish_with_backup(scene: Path, src_traj: Path, backups: tuple[str, str], ts, poses, rows) -> None:
-    """Publish odometry + segments, first copying the inputs to ``regen/<backups>`` unless read from there."""
-    scene = Path(scene)
-    regen = scene / "regen"
-    if src_traj == scene / "odometry.txt" and not regen.is_symlink():
-        regen.mkdir(exist_ok=True)
-        for src, name in zip(("odometry.txt", "odometry_segments.txt"), backups, strict=True):
-            (regen / name).unlink(missing_ok=True)  # a derived root links its parent's: don't write through
-            shutil.copy2(scene / src, regen / name)
-    write_trajectory(scene / "odometry.txt", ts, poses)
-    write_segments(scene / "odometry_segments.txt", rows)
-    if not regen.is_symlink():
-        record_written(scene, backups[0])

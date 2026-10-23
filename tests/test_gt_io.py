@@ -56,7 +56,7 @@ def test_an_empty_trajectory_is_empty_arrays_not_an_error(tmp_path):
 
 
 def test_segments_round_trip_and_fold_trailing_columns_into_the_reason(tmp_path):
-    rows = [gt_io.SegmentRow(0, 1.0, 2.5, 16, "filtered:pose_jump"), gt_io.SegmentRow(1, 3.0, 4.0, 11, "end_of_run")]
+    rows = [gt_io.SegmentRow(0, 1.0, 2.5, 16, "teleport"), gt_io.SegmentRow(1, 3.0, 4.0, 11, "end_of_run")]
     gt_io.write_segments(tmp_path / "seg.txt", rows)
     text = (tmp_path / "seg.txt").read_text()
     assert text.startswith(gt_io.SEGMENTS_HEADER + "\n")
@@ -79,9 +79,8 @@ def test_segments_are_numbered_from_one(tmp_path):
     assert [r.index for r in gt_io.read_segments(tmp_path / "seg.txt")] == [1, 2]
 
 
-def test_a_table_written_before_the_renumbering_still_reads_as_written(tmp_path):
-    """Reading stays faithful: HELHEST v1.2 through v1.5 are numbered from zero
-    and a segment is addressed by the number in its own file."""
+def test_a_zero_based_table_reads_as_written(tmp_path):
+    """Reading stays faithful: a segment is addressed by the number in its own file."""
     (tmp_path / "seg.txt").write_text(gt_io.SEGMENTS_HEADER + "\n0 1.0 2.0 5 gap\n1 3.0 4.0 5 end_of_run\n")
     assert [r.index for r in gt_io.read_segments(tmp_path / "seg.txt")] == [0, 1]
 
@@ -91,18 +90,6 @@ def test_anchor_to_first_puts_the_identity_first():
     assert np.allclose(anchored[0], np.eye(4))
     assert np.allclose(anchored[:, 0, 3], [0.0, 0.5, 1.0, 1.5])
     assert np.allclose(anchored[:, 1, 3], 0.0)
-
-
-def test_a_pass_notices_when_someone_else_rewrote_its_output(tmp_path):
-    scene = tmp_path / "0000"
-    (scene / "regen").mkdir(parents=True)
-    gt_io.write_trajectory(scene / "odometry.txt", [1.0, 2.0], [np.eye(4), np.eye(4)])
-    gt_io.write_segments(scene / "odometry_segments.txt", [gt_io.SegmentRow(1, 1.0, 2.0, 2, "end_of_run")])
-    assert not gt_io.changed_since_written(scene, "backup.txt")  # no record yet: as before
-    gt_io.record_written(scene, "backup.txt")
-    assert not gt_io.changed_since_written(scene, "backup.txt")
-    gt_io.write_segments(scene / "odometry_segments.txt", [gt_io.SegmentRow(1, 1.0, 2.0, 2, "gap")])
-    assert gt_io.changed_since_written(scene, "backup.txt")
 
 
 def test_a_failed_write_leaves_no_temp_file_and_the_old_file_intact(tmp_path):

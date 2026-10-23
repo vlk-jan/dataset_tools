@@ -8,10 +8,9 @@ col = y left]``), interpolated, filled and smoothed. The mask says where each
 cell's value came from (``VALIDITY_*``). A frame with fewer than
 ``min_points`` returns left after the radius and canopy cuts gets no map.
 
-The defaults of :class:`Params` are HELHEST v2.5's; v2.0-v2.4 were built with
+The defaults of :class:`Params` are HELHEST v2.5's; v2.4 was built with
 ``statistic="p90", tie_jitter=None`` and the rest unchanged. Until 2026-10 this lived in DRIFT (``scripts/data/build_heightmaps.py``
-and ``utils/pcd.py``, run by its ``slurm/build_heightmaps_v2_beta.batch``);
-the code here reproduces those maps to within float rounding
+and ``utils/pcd.py``); the code here reproduces those maps to within float rounding
 (``tests/test_heightmap.py`` holds frames DRIFT built). Each scene records the
 settings it was built with in ``height_maps.json``.
 
@@ -38,7 +37,7 @@ Why the settings are what they are
 - ``fill`` ground: cells outside the hull of returns take the median measured
   height within ``fill_radius`` of the robot, not whatever stands at the
   field-of-view rim.
-- ``tie_jitter`` (on since v2.5, off in v2.0-v2.4): the cell centres are co-circular, so
+- ``tie_jitter`` (on since v2.5, off in v2.4): the cell centres are co-circular, so
   Delaunay breaks ties by input order and a 1 um anchor nudge changed ~28 cells
   a frame by over 1 cm (up to 0.77 m). A fixed seeded table of +-0.1 mm xy
   offsets, looked up by each point's cell, moves only the points the
@@ -69,7 +68,7 @@ from scipy.spatial import Delaunay, cKDTree
 from scipy.stats import binned_statistic_2d
 
 from dataset_tools.gt_io import _replace_atomically
-from dataset_tools.gt_map import WHEEL_RADIUS, WHEELS
+from dataset_tools.robot import WHEEL_RADIUS, WHEELS
 from dataset_tools.time_align import usable_cpus
 
 #: Outside the hull of returns: filled, not measured.
@@ -94,7 +93,7 @@ TIE_JITTER_V1 = {"seed": 12345, "amplitude_m": 1e-4, "shape": [130, 130, 2], "rn
 
 @dataclass(frozen=True)
 class Params:
-    """How a map is built. The defaults are HELHEST v2.5's (see the module docstring for v2.0-v2.4)."""
+    """How a map is built. The defaults are HELHEST v2.5's (see the module docstring for v2.4)."""
 
     resolution_m: float = 0.1
     extents_m: float = 6.4

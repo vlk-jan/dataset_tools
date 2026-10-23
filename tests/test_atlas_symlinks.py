@@ -1,7 +1,7 @@
 """make_atlas never writes through a link into another release's atlas.
 
-HELHEST v1.5 has a real ``atlas/`` whose ``thumbs`` is a link into v1.4's, so
-the guard on ``atlas/`` alone let a thumbnail rewrite land in v1.4.
+A root may have a real ``atlas/`` whose ``thumbs`` is a link into another
+release's, so a guard on ``atlas/`` alone would let a thumbnail rewrite land there.
 """
 
 import pytest
