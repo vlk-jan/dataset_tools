@@ -315,7 +315,12 @@ def build_readme(manifest: dict, spec: dict) -> str:
         "Height maps: built with other settings per scene"
         if "per_scene" in hp
         else f"Height maps: cell statistic {hp['statistic']}, canopy clip {hp['canopy_clip_m']} m, "
-        f"min radius {hp['min_radius_m']} m, wheel radius {hp['wheel_radius_m']} m"
+        f"min radius {hp['min_radius_m']} m, wheel radius {hp['wheel_radius_m']} m, "
+        + (
+            f"Delaunay tie-break jitter seed {tj['seed']} +-{tj['amplitude_m']} m"
+            if (tj := hp.get("tie_jitter"))
+            else "no tie-break jitter"
+        )
     ) + " (all settings: `manifest.json` -> `height_maps.parameters`)."
     parts = [
         f"# {manifest.get('title') or 'HELHEST ' + manifest['dataset_version']}",
