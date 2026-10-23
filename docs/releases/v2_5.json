@@ -1,0 +1,295 @@
+{
+ "_note": "HELHEST v2.5: v2.4's scenes unchanged (clouds, images, odometry, segments linked to their owners), height maps rebuilt with another cell statistic. Variant roots HELHEST_v2_5_median and HELHEST_v2_5_p75 share this spec until one is chosen; the statistic each was built with is in its manifest's height_maps.parameters.",
+ "inherit": "v2_4.json",
+ "dataset_version": "2.5",
+ "title": "HELHEST v2.5",
+ "curation": {
+  "schema": "dataset_tools.viewer/curation@1",
+  "note": "Hand-edited: everything here has to be written by someone who looked at the data. atlas.json is generated from this file plus the root -- run scripts/make_atlas.py after editing, and never edit atlas.json.",
+  "title": "HELHEST v2.5",
+  "kicker": "HELHEST · new rig (Odin1 + Fixposition) · Stromovka, Lipník and Temešvár, 2026-09/10",
+  "intro": "36 scenes from the HELHEST jr. The scenes are composed of: two Robotour test runs in Stromovka, one autonomous Robotour finals run also in Stromovka, the UGV testing polygon at Lipník, the Temešvár field tests of 2026-09-28, 09-29 and 10-02, and Stromovka again on 2026-10-07, off the paths. Each card shows three sample frames (10 / 50 / 90 % of the scene) and a green bar marking where ground truth exists.",
+  "root_note": "This dataset shows a mix of the possible terrains the Helhest robot might encounter - from more urban places, roads and footpaths in the Stromovka park, to heavier terrain and tall grass and forested areas in Lipník and Temešvár. The dataset was created with the use case of navigation and driving in rough environments in mind, and the data pool was selected accordingly. The data captured contain RGB images, LiDAR point-clouds, GNSS, odometry, wheel states, and more.",
+  "footer": "Extracted from the raw bags on subtdata.felk.cvut.cz with dataset_tools (slurm/extract_v2.batch, CSV=docs/v2_4_bags.csv, Odin1 odometry as ground truth, each sweep deskewed). 25 scenes are v2.3's, linked; 0003, 0004, 0007, 0013 and 0029-0035 are new in v2.4. Selection and survey in docs/V2_0_SELECTION.md.",
+  "groups": [
+   {
+    "title": "2026-09-14 — cobbles, gravel and the open plaza",
+    "blurb": "Two scenes from the Stromovka park: the cobbled approach and the wide paved plaza with its pavilions (0000), and a cobbled and gravel route across the park (0001). No RTK for the scene 0001. Both runs were driven with autonomy stack, and as a part of testing for the Robotour competition.",
+    "scenes": [
+     "0000",
+     "0001"
+    ]
+   },
+   {
+    "title": "2026-09-19 — Robotour finals",
+    "blurb": "The first finals run, driven by the autonomy stack: 1.5 km of cobbles, worn asphalt, gravel and leaf litter through the park at around 1 m/s, with the crowd and other robots at the start, and during the run.",
+    "scenes": [
+     "0002"
+    ]
+   },
+   {
+    "title": "2026-09-22 — Lipník, the UGV testing polygon",
+    "blurb": "250 km east of Prague: a ploughed field, rutted mud tracks, grass mounds and banks, gravel and railway ballast, a felled log, and other obstacles worthy of a testing polygon for military grade UGVs. Tilt reaches 27 deg, the roughest upright driving in any HELHEST v2 root. A Bluetooth antenna for follow-me scenarios sits in front of the chassis, green in every frame. RTK throughout; the receiver was silent for 525 s of 0006, which v2.3 keeps on the Odin1 odometry. Two more drives of the same course from that morning (0003, 0004) were added in v2.4; the Odin1 recorded only their first five to six minutes.",
+    "scenes": [
+     "0003",
+     "0004",
+     "0005",
+     "0006"
+    ]
+   },
+   {
+    "title": "2026-09-28 — Temešvár",
+    "blurb": "Nine short scenes from one afternoon. A meadow of knee-high grass, weeds and thistles driven into a low sun, where the lidar sees the grass tops rather than the soil, the robot is sprinted at over 5 m/s and rolls over twice (0011, 0012). Then a reed bed taller than the robot (0014) and a forest gravel track between pines, which ends with the robot flipped onto its roof (0015). 0007 (the meadow edge) and 0013 (the forest track) were added in v2.4: the GNSS/INS had not initialised during them, which no longer matters with the Odin1 odometry as ground truth.",
+    "scenes": [
+     "0007",
+     "0008",
+     "0009",
+     "0010",
+     "0011",
+     "0012",
+     "0013",
+     "0014",
+     "0015"
+    ]
+   },
+   {
+    "title": "2026-09-29 — Temešvár",
+    "blurb": "Six scenes, late afternoon into dusk, driven almost without stopping: tight loops in knee-high grass beside an asphalt lane, old fruit trees, open grass under a white evening sky. 90 % of the track lies more than 10 m from anything driven the day before; only 0020 and 0021 cross that patch.",
+    "scenes": [
+     "0016",
+     "0017",
+     "0018",
+     "0019",
+     "0020",
+     "0021"
+    ]
+   },
+   {
+    "title": "2026-10-02 — Temešvár, the forest and the meadow",
+    "blurb": "Seven scenes from one morning, driven from the joystick. Most of it is forest east of the meadow: pine and mixed woodland on gravel and dirt tracks, leaf litter, dry grass and undergrowth, a clearing with a hunting shelter, two tip-overs (0024, 0025). 0022 and 0023 re-drive the forest track and reed-bed edge of 09-28; 0027 is the open meadow by a raised hide, and 0028 crosses the whole meadow and runs down the lane to the base. Four of these scenes are validation (0024-0027).",
+    "scenes": [
+     "0022",
+     "0023",
+     "0024",
+     "0025",
+     "0026",
+     "0027",
+     "0028"
+    ]
+   },
+   {
+    "title": "2026-10-07 — Stromovka off the paths",
+    "blurb": "Back in Stromovka, this time off the made paths: a lawn loop (0029), a woodland corridor along an embankment on leaf litter, dirt and slopes (0030-0033, driven out and back, ending on an asphalt path), and a patch of tall weeds and steep grass banks (0034, 0035), held out for validation. Stops longer than a minute were cut to their first 10 s; two parked bags of that day are not in the dataset.",
+    "scenes": [
+     "0029",
+     "0030",
+     "0031",
+     "0032",
+     "0033",
+     "0034",
+     "0035"
+    ]
+   }
+  ],
+  "scenes": {
+   "0000": {
+    "description": "Stromovka: Asphalt and cobbles under tall trees into the wide treeless paved plaza with pavilions; walkers and cyclists about",
+    "thumbs": {
+     "a": 2009,
+     "b": 10039,
+     "c": 18070
+    }
+   },
+   "0001": {
+    "description": "Stromovka: Cobbled and flagstone paths, gravel avenues and lawn edges on the park's western loop; late-afternoon sun",
+    "thumbs": {
+     "a": 1203,
+     "b": 6011,
+     "c": 10821
+    }
+   },
+   "0002": {
+    "description": "Stromovka: Robotour finals run 1, the start line with other robots and spectators, cobbles, cracked asphalt, gravel and leaf litter through the park, autonomous",
+    "thumbs": {
+     "a": 2866,
+     "b": 14325,
+     "c": 25785
+    }
+   },
+   "0003": {
+    "description": "Lipník: from the hardstanding past a felled log and a rubble heap, over ploughed soil and a mound onto the grass of the polygon; raindrops on the lens"
+   },
+   "0004": {
+    "description": "Lipník: the dirt track between logs, ploughed ground, the rubble ramp and a grassy bank, then the open grass past the spectators"
+   },
+   "0005": {
+    "description": "Lipník: off the gravel hardstanding onto a ploughed field and rutted mud, grass mounds, a railway-ballast crossing, spectators and tents at the edge",
+    "thumbs": {
+     "a": 1601,
+     "b": 7495,
+     "c": 13390
+    }
+   },
+   "0006": {
+    "description": "Lipník: the same field and mud ruts, steep grass banks, a felled log across the track, ballast and rails, the finish gate",
+    "thumbs": {
+     "a": 1718,
+     "b": 7202,
+     "c": 12680
+    }
+   },
+   "0007": {
+    "description": "Temešvár: the meadow edge into a low sun -- tall weeds and thistles, knee-high grass, the gravel path and the asphalt lane"
+   },
+   "0008": {
+    "description": "Temešvár: across the meadow through knee-high grass, thistles and dry weeds, past marker signs",
+    "thumbs": {
+     "a": 654,
+     "b": 3243,
+     "c": 5831
+    }
+   },
+   "0009": {
+    "description": "Temešvár: the long-grass meadow driven straight into the low sun, tilt to 23 deg",
+    "thumbs": {
+     "a": 442,
+     "b": 2207,
+     "c": 3972
+    }
+   },
+   "0010": {
+    "description": "Temešvár: the meadow edge in tall weeds with people standing by; half of it stationary",
+    "thumbs": {
+     "a": 166,
+     "b": 832,
+     "c": 1498
+    }
+   },
+   "0011": {
+    "description": "Temešvár: sprints across the meadow, roll-over of the robot; tests of wheel slip",
+    "thumbs": {
+     "a": 244,
+     "b": 1216,
+     "c": 2260
+    }
+   },
+   "0012": {
+    "description": "Temešvár: sprinting again at over 5 m/s, second roll-over, kept in the scene; degraded fix afterwards (RTK 54 %)",
+    "thumbs": {
+     "a": 99,
+     "b": 481,
+     "c": 863
+    }
+   },
+   "0013": {
+    "description": "Temešvár: a forest gravel and dirt track between pines, dappled light"
+   },
+   "0014": {
+    "description": "Temešvár: off the forest track into a reed bed over the robot's head, many frames have no map",
+    "thumbs": {
+     "a": 365,
+     "b": 1823,
+     "c": 3281
+    }
+   },
+   "0015": {
+    "description": "Temešvár: a gravel track between pines in low sun with one sprint; testing wheel spin on sand at high speed; flips onto its roof at 80 s and lies there to the end",
+    "thumbs": {
+     "a": 90,
+     "b": 448,
+     "c": 806
+    }
+   },
+   "0016": {
+    "description": "Temešvár: along the asphalt lane and its verge, then tight loops through knee-high grass and weeds beside it; low sun",
+    "thumbs": {
+     "a": 440,
+     "b": 2198,
+     "c": 3956
+    }
+   },
+   "0017": {
+    "description": "Temešvár: loops through the meadow by a lone tree with people standing by; the robot tips onto its side once",
+    "thumbs": {
+     "a": 351,
+     "b": 1749,
+     "c": 3148
+    }
+   },
+   "0018": {
+    "description": "Temešvár: tall grass under old fruit trees, pushing into the low branches of one",
+    "thumbs": {
+     "a": 351,
+     "b": 1751,
+     "c": 3150
+    }
+   },
+   "0019": {
+    "description": "Temešvár: a long straight run and then loops over open mid-high grass at dusk, flat white sky",
+    "thumbs": {
+     "a": 406,
+     "b": 1952,
+     "c": 3498
+    }
+   },
+   "0020": {
+    "description": "Temešvár: open meadow at dusk towards a line of trees, over a grass bank",
+    "thumbs": {
+     "a": 262,
+     "b": 1307,
+     "c": 2353
+    }
+   },
+   "0021": {
+    "description": "Temešvár: across the patch driven the day before, past a large tree and tall weeds, onto the lane",
+    "thumbs": {
+     "a": 552,
+     "b": 2754,
+     "c": 4956
+    }
+   },
+   "0022": {
+    "description": "Temešvár: pine forest on gravel tracks, then off them over needles, leaf litter and dry grass tussocks to a stump on sandy ground"
+   },
+   "0023": {
+    "description": "Temešvár: from the stump along mixed-forest gravel roads with leaf-litter verges and clumps of tall grass; passes the forest track of 09-28"
+   },
+   "0024": {
+    "description": "Temešvár: forest gravel track into tall grass and reeds, a clearing with a hunting shelter, dry grass under trees; tips past 90 deg once"
+   },
+   "0025": {
+    "description": "Temešvár: deciduous forest off the gravel track into nettles, undergrowth and leaf litter over a stump; ends rolled over"
+   },
+   "0026": {
+    "description": "Temešvár: forest dirt and gravel roads with leaf-litter and dry-grass verges, ending on an asphalt road"
+   },
+   "0027": {
+    "description": "Temešvár: the open meadow of short and mid grass by a raised hunting hide, a sand patch, people standing by"
+   },
+   "0028": {
+    "description": "Temešvár: across the whole meadow, along the asphalt lane and onto the gravel yard of the base with vans and people"
+   },
+   "0029": {
+    "description": "Stromovka: a loop over mown lawn among old park trees, past a picnic bench with people"
+   },
+   "0030": {
+    "description": "Stromovka: woodland along an embankment, deep leaf litter, dirt paths and the foot of the slope; long stops trimmed"
+   },
+   "0031": {
+    "description": "Stromovka: the woodland dirt path past an operator, leaf litter under the trees, out onto the open lawn"
+   },
+   "0032": {
+    "description": "Stromovka: the woodland corridor out and back, leaf-strewn grass and dirt under the trees to the picnic area"
+   },
+   "0033": {
+    "description": "Stromovka: a gravel path, a steep weedy bank climbed at a strong tilt into the sun, then the asphalt path with people"
+   },
+   "0034": {
+    "description": "Stromovka: tall grass and weeds, a meadow edge under trees, into dead branches and brushwood; validation"
+   },
+   "0035": {
+    "description": "Stromovka: dense weeds and long grass over steep grass banks, people watching; validation"
+   }
+  }
+ }
+}
