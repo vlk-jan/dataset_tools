@@ -6,7 +6,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: var(--fs-md)/1.55 var(--sans);
+  font: var(--fs-md)/1.58 var(--sans);
 }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -22,16 +22,21 @@ html { scroll-padding-top: calc(var(--headh, 0px) + var(--sp-3)); }
 /* Sticky header; theme.js writes its height to --headh for sticky table headings. */
 body > header {
   position: sticky; top: 0; z-index: 1100;
-  padding: var(--sp-4) var(--sp-5);
+  padding: var(--sp-3) var(--sp-5);
   border-bottom: 1px solid var(--line);
   background: var(--panel);
   display: flex;
   align-items: baseline;
-  gap: var(--sp-4);
+  gap: var(--sp-3);
   flex-wrap: wrap;
 }
-header h1 { font-size: var(--fs-xl); margin: 0; font-weight: 600; }
+header h1 {
+  font-family: var(--display); font-size: var(--fs-lg); margin: 0;
+  font-weight: 700; letter-spacing: -.01em;
+}
 header nav { margin-left: auto; display: flex; gap: var(--sp-4); }
+header nav a { font-size: var(--fs-sm); color: var(--muted); }
+header nav a:hover { color: var(--fg); }
 /* The "open 3D" button takes over the theme toggle's push to the right. */
 header .open3d { margin-left: auto; align-self: center; }
 header :is(nav, .open3d) ~ .theme-toggle { margin-left: 0; }
@@ -40,10 +45,15 @@ header :is(nav, .open3d) ~ .theme-toggle { margin-left: 0; }
 :root[data-theme="dark"] header .open3d:hover { background: color-mix(in srgb, var(--accent) 82%, white); }
 header .path { color: var(--muted); font-family: var(--mono); font-size: var(--fs-base); }
 main { padding: var(--sp-5) var(--sp-5) var(--sp-8); width: 100%; }
-h2 { font-size: var(--fs-lg); margin: var(--sp-5) 0 var(--sp-3); font-weight: 600; }
+h2 { font-family: var(--display); font-size: var(--fs-2xl); margin: var(--sp-6) 0 var(--sp-3); font-weight: 700; letter-spacing: -.015em; }
+h3 { font-family: var(--display); font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em; }
 table { border-collapse: collapse; width: 100%; font-size: var(--fs-base); }
-th, td { text-align: left; padding: 6px var(--sp-3); border-bottom: 1px solid var(--line); }
-th { color: var(--muted); font-weight: 500; position: sticky; top: var(--headh, 0); background: var(--panel); }
+th, td { text-align: left; padding: 7px var(--sp-3); border-bottom: 1px solid var(--line); }
+th {
+  color: var(--muted); font-weight: 500; font-family: var(--mono);
+  font-size: var(--fs-2xs); letter-spacing: .07em; text-transform: uppercase;
+  position: sticky; top: var(--headh, 0); background: var(--panel);
+}
 th[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 tr:hover td { background: var(--panel-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -54,8 +64,8 @@ td.prose { white-space: normal; width: 100%; }
 /* The rate under a count in a numeric cell: same column, quieter, on its own line. */
 td.num small { display: block; font-size: var(--fs-sm); font-family: var(--mono); }
 .chip {
-  display: inline-block; padding: 1px 6px; border-radius: 2px;
-  font: 400 var(--fs-xs) var(--mono); border: 1px solid var(--line); color: var(--muted);
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font: 400 var(--fs-xs)/1.7 var(--mono); border: 1px solid var(--line); color: var(--muted);
 }
 .chip.yes { color: var(--ok); border-color: var(--ok-line); }
 .chip.no { color: color-mix(in srgb, var(--bad) 55%, var(--muted)); border-color: color-mix(in srgb, var(--bad) 25%, var(--panel)); text-decoration: line-through; }
@@ -104,13 +114,13 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
   text-transform: uppercase; color: var(--accent);
 }
 .masthead-title {
-  font-size: clamp(26px, 3.4vw, 38px); font-weight: 700;
-  letter-spacing: -.01em; margin: var(--sp-2) 0 var(--sp-3);
+  font-size: var(--fs-3xl); font-weight: 700;
+  letter-spacing: -.02em; margin: var(--sp-2) 0 var(--sp-3);
 }
 .lede { max-width: 78ch; color: var(--muted); margin: 0 0 var(--sp-4); }
 .totals {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 var(--sp-2);
+  gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 var(--sp-3);
   border-radius: 8px; overflow: hidden;
 }
 .totals > div { background: var(--panel); padding: var(--sp-3) var(--sp-3); }
@@ -119,9 +129,9 @@ button.btn:active, a.btn:not(.disabled):active { transform: translateY(1px); }
   text-transform: uppercase; color: var(--muted);
 }
 .totals dd {
-  margin: 2px 0 0; font: 600 var(--fs-lg)/1.2 var(--display); font-variant-numeric: tabular-nums;
+  margin: var(--sp-1) 0 0; font: 600 var(--fs-xl)/1.15 var(--display); font-variant-numeric: tabular-nums;
 }
-.totals dd small { display: block; margin-top: 2px; font: 400 var(--fs-xs)/1.3 var(--sans); color: var(--muted); }
+.totals dd small { display: block; margin-top: var(--sp-1); font: 400 var(--fs-xs)/1.3 var(--sans); color: var(--muted); }
 /* Disk usage by modality, Catppuccin Latte / Mocha; "other" is neutral grey.
    Hues picked for max worst-pair dE, still low, so the bar also has gaps,
    a legend and titles rather than relying on colour alone. */
@@ -157,7 +167,7 @@ section { margin-top: var(--sp-6); }
   display: flex; align-items: baseline; gap: var(--sp-4);
   border-bottom: 1px solid var(--line); padding-bottom: 6px;
 }
-.shead h2 { font-size: var(--fs-xl); font-weight: 600; margin: 0; }
+.shead h2 { font-size: var(--fs-xl); font-weight: 700; margin: 0; }
 .scount { font: 500 var(--fs-xs) var(--mono); color: var(--muted); }
 .sblurb { color: var(--muted); font-size: var(--fs-base); max-width: 78ch; margin: var(--sp-2) 0 var(--sp-4); }
 
@@ -166,7 +176,7 @@ section { margin-top: var(--sp-6); }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(620px, 1fr)); gap: var(--sp-4);
 }
 .scene {
-  display: grid; grid-template-columns: 224px 1fr;
+  display: grid; grid-template-columns: 240px 1fr;
   background: var(--panel); border: 1px solid var(--line); min-width: 0;
   border-radius: 8px; overflow: hidden;
 }
@@ -179,11 +189,11 @@ section { margin-top: var(--sp-6); }
 }
 .scene > .body { padding: var(--sp-3) var(--sp-4) var(--sp-4); min-width: 0; }
 .scene .body > header, .card > header { display: flex; align-items: baseline; gap: var(--sp-3); flex-wrap: wrap; }
-.scene h3 { font-size: var(--fs-xl); font-weight: 700; font-variant-numeric: tabular-nums; margin: 0; }
+.scene h3 { font-family: var(--display); font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -.015em; font-variant-numeric: tabular-nums; margin: 0; }
 .scene h3 a { color: var(--fg); }
 .date { font: 400 var(--fs-sm) var(--mono); color: var(--muted); }
 .cov {
-  margin-left: auto; font: 500 var(--fs-xs) var(--mono); padding: 2px var(--sp-2); border-radius: 2px;
+  margin-left: auto; font: 500 var(--fs-xs) var(--mono); padding: 1px var(--sp-2); border-radius: 999px;
 }
 .cov.hi { background: var(--ok-soft); color: var(--ok); }
 .cov.mid { background: var(--track); color: var(--muted); }
@@ -215,7 +225,7 @@ section { margin-top: var(--sp-6); }
 
 /* The scene page's split tag in the site header. */
 .split-tag {
-  font: 600 var(--fs-xs) var(--mono); padding: 3px var(--sp-2); border-radius: 2px;
+  font: 600 var(--fs-xs) var(--mono); padding: 2px var(--sp-2); border-radius: 999px;
   text-transform: uppercase; letter-spacing: .08em;
 }
 header > .split-tag { align-self: center; }
@@ -230,14 +240,14 @@ header > .split-tag { align-self: center; }
 .sf {
   display: inline-flex; align-items: baseline; gap: 7px; padding: 7px var(--sp-3);
   font: var(--fs-base) var(--sans); color: var(--muted); cursor: pointer;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
 }
 .sf:hover { color: var(--fg); border-color: var(--muted); text-decoration: none; }
 .sf[aria-current] { color: var(--fg); border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
 .sf:is(.val, .train)[aria-current] { border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); }
 .sf b { font: 600 var(--fs-base) var(--display); color: var(--fg); font-variant-numeric: tabular-nums; }
 .sf small { font: var(--fs-xs) var(--mono); color: var(--muted); }
-.sf i { align-self: center; width: 11px; height: 11px; border-radius: 2px; background: var(--c); }
+.sf i { align-self: center; width: 10px; height: 10px; border-radius: 50%; background: var(--c); }
 /* The same shares as the buttons, drawn: how lopsided the fold is. */
 .splitbar { display: flex; gap: 2px; height: 8px; margin: var(--sp-3) 0 0; background: var(--track); }
 .splitbar i { background: var(--c); }
@@ -283,12 +293,12 @@ dl.stats {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
   gap: var(--sp-2) var(--sp-4); margin: var(--sp-4) 0 0;
 }
-dl.stats > div { border-top: 1px solid var(--line); padding-top: 4px; min-width: 0; }
+dl.stats > div { border-top: 1px solid var(--line); padding-top: var(--sp-1); min-width: 0; }
 dl.stats dd {
-  margin: 1px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; font-size: var(--fs-base);
+  margin: var(--sp-1) 0 0; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; font-size: var(--fs-md);
 }
 dl.stats dd small {
-  display: block; font-weight: 400; font-size: var(--fs-xs); color: var(--muted);
+  display: block; font-weight: 400; font-family: var(--sans); font-size: var(--fs-xs); color: var(--muted);
 }
 
 .chips { margin-top: var(--sp-3); display: flex; flex-wrap: wrap; gap: 4px; }

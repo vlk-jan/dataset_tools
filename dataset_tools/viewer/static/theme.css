@@ -39,7 +39,8 @@
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
   --display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", monospace;
-  /* Type scale; the two smallest are for mono labels. */
+  /* Type scale. Headings (h1-h3 / .masthead-title) size down so dense tables
+     - the real content - stay the biggest numbers on a page. */
   --fs-2xs: 10.5px;
   --fs-xs: 11.5px;
   --fs-sm: 13px;
@@ -47,7 +48,10 @@
   --fs-md: 16px;
   --fs-lg: 18px;
   --fs-xl: 22px;
-  /* Spacing scale for 8px and up; smaller values stay literal. */
+  --fs-2xl: 28px;
+  --fs-3xl: 32px;
+  /* Spacing scale: 4px half-step kept literal elsewhere, 8px and up here. */
+  --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
