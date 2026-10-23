@@ -16,10 +16,10 @@ def test_maps_match_drifts_builder():
     ``height_map_*``: at the HELHEST v2.5 settings in ``parameters``, which DRIFT's builder must reproduce."""
     d = np.load(FIXTURE)
     p = hmap.Params.from_dict(json.loads(str(d["parameters"])))
-    assert p == hmap.Params(statistic="median", tie_jitter=hmap.TIE_JITTER_V1)
+    assert p == hmap.Params()
     assert str(d["tie_jitter_sha256"]) == hashlib.sha256(hmap.tie_jitter_table(p.tie_jitter).tobytes()).hexdigest()
     for k in range(3):
-        for params, suffix in ((hmap.Params(), "v24_"), (p, "")):
+        for params, suffix in ((hmap.Params(statistic="p90", tie_jitter=None), "v24_"), (p, "")):
             hm, val = hmap.build_frame(d[f"cloud_{k}"], d[f"R_align_{k}"], params)
             np.testing.assert_allclose(hm, d[f"height_map_{suffix}{k}"], atol=1e-9, rtol=0)
             np.testing.assert_array_equal(val, d[f"validity_{suffix}{k}"])
@@ -59,7 +59,7 @@ def test_build_scene_writes_maps_and_records_the_settings(tmp_path):
 def test_other_settings_need_overwrite_and_drop_maps_gone_sparse(tmp_path):
     d = _scene(tmp_path)
     hmap.build_scene(d, workers=1)
-    other = hmap.Params(statistic="median")
+    other = hmap.Params(statistic="p90")
     with pytest.raises(SystemExit):
         hmap.build_scene(d, other, workers=1)
     sparse = hmap.Params(min_points=10**6)

@@ -70,7 +70,7 @@ def test_a_release_from_its_spec_and_its_scenes(tmp_path):
     assert json.loads((root / "atlas" / "curation.json").read_text())["title"] == "Test"
     readme = (root / "README.md").read_text()
     assert "| 0001 | val | bag_b |" in readme
-    assert "Height maps: cell statistic p90" in readme
+    assert "Height maps: cell statistic median" in readme
     assert (root / "scenes.csv").exists()
 
 

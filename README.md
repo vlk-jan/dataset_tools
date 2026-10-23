@@ -265,7 +265,7 @@ helhest-heightmap <root> --scenes 3 --overwrite                                #
 
 The batch job first checks a sample of the scene's existing maps against a
 rebuild (`VERIFY=0` skips), passes `HM_ARGS` through (e.g.
-`--set statistic=median`). `helhest-heightmap` refuses to mix maps built at
+`--set statistic=p90 --set tie_jitter=none`, the v2.0-v2.4 build; the defaults are v2.5's). `helhest-heightmap` refuses to mix maps built at
 other settings than `height_maps.json` records, and to write through a linked
 scene's `height_maps`, `height_masks` or `height_maps.json` symlink (build in
 the root that owns them).
@@ -431,7 +431,7 @@ index-aligned.
 | `extract_meta.json` | — | JSON | seconds since the bag began | the run (git commit and dirty flag, argv, every resolved option, library versions), the bag (path, duration, every topic's type and message count), the decisions (GPS topic, ground truth, guard), **each stream read: messages, first/last stamp and every gap over 1 s** -- the first place to look when a scene has a hole, to see which sensor went quiet -- and the frame bookkeeping (`frames`): messages, pairs, pairs over `--max_sync_dt`, `deskew`, `pose_check`, `idle_trim`, what the guard removed and where, frames trimmed after the clock correction, frames written. Also `unset_stamps`, `malformed_joint_messages` and `frame_fallbacks`. Since 2026-10-01 |
 | `source_bag.txt` | 1 line | text | — | source bag directory name; doubles as the completion marker |
 | `odom_frame.txt` | — | text + JSON last line | rotation, degrees | written by `helhest-odom-frame apply` (and removed by a re-extraction): the rotation `C` (cloud frame -> Odin1 pose frame) that `odometry.txt`, `transforms.npy` and `gravity_align.npy` were re-expressed by, and how it was measured (ICP between clouds 1.4-3 s apart). Absent where it was not applied |
-| `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: p90 of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated, filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns, or with fewer than 4 cells they fall in, has none |
+| `height_maps/NNNNN.npz` | 128 x 128 | `float64` (`height_map`) | m, gravity-aligned base frame, `[row = x forward, col = y left]`, 0.1 m cells, +-6.4 m | `helhest-heightmap`: median of the returns per cell (0.65 m < r, z < 1.0 m), Delaunay-interpolated (fixed tie-break jitter since v2.5; v2.0-v2.4: p90, no jitter), filled, smoothed (`dataset_tools/heightmap.py` says why each setting). A frame with fewer than 250 such returns, or with fewer than 4 cells they fall in, has none |
 | `height_masks/NNNNN.npz` | 128 x 128 | `uint8` (`validity`) | — | where each cell's value came from: 0 extrapolated, 1 interpolated, 2 measured, 3 a wheel-contact anchor |
 | `height_maps.json` | — | JSON | — | the settings the maps were built with and their counts; `helhest-heightmap` refuses to add maps at other settings to them |
 | `../keyframes.lst`, `../keyframes_train.lst`, `../keyframes_heldout.lst` | — | text | — | `helhest-keyframes`: `<scene>/clouds/NNNNN.npy <scene>/images/NNNNN.<ext>` per frame with a cloud, image, map and mask, minus frames within 4 s before a tilt past 45 deg; all scenes / all but `manifest.json` -> `held_out.scenes` / only those |

@@ -8,8 +8,8 @@ col = y left]``), interpolated, filled and smoothed. The mask says where each
 cell's value came from (``VALIDITY_*``). A frame with fewer than
 ``min_points`` returns left after the radius and canopy cuts gets no map.
 
-The settings in :class:`Params` are the ones every HELHEST v2 root was built
-with. Until 2026-10 this lived in DRIFT (``scripts/data/build_heightmaps.py``
+The defaults of :class:`Params` are HELHEST v2.5's; v2.0-v2.4 were built with
+``statistic="p90", tie_jitter=None`` and the rest unchanged. Until 2026-10 this lived in DRIFT (``scripts/data/build_heightmaps.py``
 and ``utils/pcd.py``, run by its ``slurm/build_heightmaps_v2_beta.batch``);
 the code here reproduces those maps to within float rounding
 (``tests/test_heightmap.py`` holds frames DRIFT built). Each scene records the
@@ -20,9 +20,10 @@ Why the settings are what they are
 - ``min_radius`` 0.65: the Odin1 sees the robot's own front wheels at
   r 0.5-0.6 and a near-range ramp of ground that reads 5-13 cm high.
 - ``clip`` 1.0 m above base_link: canopy above that is not terrain.
-- ``statistic`` p90: the median puts a trunk or a person at the middle of its
-  visible extent (+0.7 m whatever its height); p90 reads +1.1 m there and costs
-  ~1 cm on ground.
+- ``statistic`` median (p90 until v2.4): the nearest-rank p90 reads 2-5 cm
+  high at 0-1 m, where cells are dense, yet takes the lower return of a
+  2-return cell, so it is no high quantile at range. The median reads a trunk
+  or a person lower (~+0.7 m against +1.1 m).
 - ``max_edge`` 1.0: Delaunay triangles with a longer edge bridge the blind
   region under and behind the robot and invent a ~0.2 m wall in front of the
   rear wheel; their cells are dropped to the fill and marked extrapolated.
@@ -37,7 +38,7 @@ Why the settings are what they are
 - ``fill`` ground: cells outside the hull of returns take the median measured
   height within ``fill_radius`` of the robot, not whatever stands at the
   field-of-view rim.
-- ``tie_jitter`` (off in v2.0-v2.4): the cell centres are co-circular, so
+- ``tie_jitter`` (on since v2.5, off in v2.0-v2.4): the cell centres are co-circular, so
   Delaunay breaks ties by input order and a 1 um anchor nudge changed ~28 cells
   a frame by over 1 cm (up to 0.77 m). A fixed seeded table of +-0.1 mm xy
   offsets, looked up by each point's cell, moves only the points the
@@ -92,14 +93,14 @@ TIE_JITTER_V1 = {"seed": 12345, "amplitude_m": 1e-4, "shape": [130, 130, 2], "rn
 
 @dataclass(frozen=True)
 class Params:
-    """How a map is built. The defaults are HELHEST v2's (every v2.x root)."""
+    """How a map is built. The defaults are HELHEST v2.5's (see the module docstring for v2.0-v2.4)."""
 
     resolution_m: float = 0.1
     extents_m: float = 6.4
     canopy_clip_m: float = 1.0
     min_radius_m: float = 0.65
     min_points: int = 250
-    statistic: str = "p90"
+    statistic: str = "median"
     max_edge_m: float | None = 1.0
     fill: str = "ground"
     fill_radius_m: float = 2.0
@@ -114,7 +115,7 @@ class Params:
     #: Wheel centres in base_link, which is the front axle: left, right, rear.
     wheel_centres_m: tuple = field(default=((0.0, 0.36), (0.0, -0.36), (-0.697, 0.0)))
     #: None: off. Else a table like TIE_JITTER_V1, applied to the points the triangulation is built from.
-    tie_jitter: dict | None = None
+    tie_jitter: dict | None = field(default_factory=lambda: dict(TIE_JITTER_V1))
 
     def __post_init__(self):
         if self.statistic not in STATISTICS:
