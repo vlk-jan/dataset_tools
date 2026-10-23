@@ -21,19 +21,23 @@ helhest-viewer /path/to/root --open                          # serves http://127
 helhest-viewer http://subtdata.felk.cvut.cz/HELHEST/ --open  # a root published on a web server
 ```
 
-When a root is provided as a URL, files are mirrored into local cache as you
-browse, and reviewer notes are stored there.
+When a root is provided as a URL, files are mirrored into the local cache as
+you browse, and reviewer notes default to `<cache-dir>/notes`.
+`scripts/viewer_public.sh [viewer flags]` starts the viewer on the public
+release and opens a browser; `VIEWER_URL` points it at another root.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--host`, `--port` | `127.0.0.1`, `8080` | address and port to listen on |
-| `--uds PATH` | off | listen on a Unix socket instead, in a directory with restricted permissions |
+| `--uds PATH` | off | listen on a Unix socket instead, in a directory with restricted permissions; reach it with `ssh -L 8080:PATH host` (`--open` has no effect with it) |
 | `--max-seconds`, `--max-frames` | `600`, `12000` | split segments longer than this into equal viewing windows |
-| `--cache-dir` | `~/.cache/dataset_tools_viewer/<root>-<hash>` | directory where precomputed 3D windows are cached |
-| `--cache-max-gb` | `5.0` | cache size limit in gigabytes; least recently used windows are evicted first |
-| `--clear-cache` | | empty this root's cache before starting |
+| `--cache-dir` | `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root-name>-<hash>` | directory for cached probes, built 3D windows and a URL root's mirror |
+| `--cache-max-gb` | `5.0` | size limit for the built 3D windows in gigabytes; least recently used windows are evicted first |
+| `--clear-cache` | | empty this root's cache (probes, 3D windows, URL mirror) before starting; reviewer notes are kept |
 | `--no-prefetch` | | do not build subsequent windows in the background |
-| `--notes-dir`, `--no-notes`, `--author` | `<root>/notes`, on, `$USER` | reviewer note directory, disable note writing, or set author username |
+| `--notes-dir PATH` | `<root>/notes`; `<cache-dir>/notes` for a URL root | directory for reviewer notes |
+| `--no-notes` | | do not read or write notes |
+| `--author NAME` | your login name | author recorded on new notes |
 | `--open`, `-v` | | open a browser automatically; enable debug logging |
 
 !!! warning "No authentication"
@@ -42,7 +46,7 @@ browse, and reviewer notes are stored there.
     `--no-notes` before binding to `0.0.0.0`. On a machine shared with other
     users, use `--uds`, as local users can access loopback ports.
 
-## On the CTU cluster
+## On the CTU RCI cluster { #on-the-ctu-cluster }
 
 The viewer can run as a Slurm job on a compute node next to the data, with an SSH
 tunnel forwarding the interface to your laptop.
@@ -51,7 +55,7 @@ tunnel forwarding the interface to your laptop.
 
     ```bash
     mkdir -p slurm/slurm_out
-    sbatch slurm/viewer.batch /mnt/personal/$USER/HELHEST_v2_5    # 8 h
+    sbatch slurm/viewer.batch /mnt/personal/$USER/HELHEST_v2_4    # 8 h
     ```
 
 2. On your laptop:
@@ -59,6 +63,16 @@ tunnel forwarding the interface to your laptop.
     ```bash
     scripts/viewer_connect.sh     # [local_port=8080] [job_id]; newest viewer job by default
     ```
+
+    It needs ssh access to the login node and runs from a checkout on your
+    laptop. It reads these environment variables:
+
+    | Variable | Default | Meaning |
+    | --- | --- | --- |
+    | `VIEWER_USER` | `$USER` | your RCI account name |
+    | `VIEWER_LOGIN` | `login3.rci.cvut.cz` | login node |
+    | `VIEWER_REPO` | `/home/$VIEWER_USER/projects/dataset_tools` | the checkout on the cluster the job was submitted from |
+    | `VIEWER_KNOWN_HOSTS` | `~/.ssh/known_hosts_rci_nodes` | known-hosts file for the compute nodes |
 
     This locates the job's compute node and socket, keeping the tunnel open
     until you press Ctrl-C. The viewer runs until the Slurm job walltime
@@ -70,17 +84,17 @@ tunnel forwarding the interface to your laptop.
 
 | URL | Shows |
 | --- | --- |
-| `/` | one card per scene, filterable by validation status, note verdict, and split |
-| `/segments` | every ground-truth segment in one table |
-| `/notes` | all reviewer notes |
+| `/` | one card per scene, filterable by validation status, note verdict, and split (filters are linkable: `?status=`, `?verdict=`, `?split=`) |
+| `/segments` | every ground-truth segment with a viewable window in one table |
+| `/notes` | all reviewer notes, downloadable as CSV |
 | `/scene/<id>` | ground-truth timeline, file inventory, map, extraction/disk/validation cards, signals, and 3D windows |
 | `/scene/<id>/segment/<n>` | one ground-truth segment: robot activity, map, notes, and frames |
-| `/scene/<id>/frame/<n>` | image, height map, validity mask, point cloud, and lidar projection onto the camera image |
+| `/scene/<id>/frame/<n>` | image, height map, validity mask, a top-down cloud render, and lidar projection onto the camera image |
 | `/view/<scene>/<window>` | interactive 3D view: Space plays and pauses; `[` and `]` step to the previous and next window |
 
 A 3D view never spans two segments because each segment has its own coordinate
-origin. The first time a window is opened, its 3D assets are built (taking a
-few seconds); afterwards they load directly from cache.
+origin. The first time a window is opened, its 3D assets are built; afterwards
+they load from the cache.
 
 ## Optional root files
 
