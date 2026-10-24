@@ -1,0 +1,1292 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Tools for extracting the HELHEST robot dataset from ROS 2 bags">
+      
+      
+        <meta name="author" content="Jan Vlk">
+      
+      
+        <link rel="canonical" href="https://vlk-jan.github.io/dataset_tools/tools/">
+      
+      
+        <link rel="prev" href="../installation/">
+      
+      
+        <link rel="next" href="../building/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Tools - HELHEST dataset_tools</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#tools" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HELHEST dataset_tools" class="md-header__button md-logo" aria-label="HELHEST dataset_tools" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HELHEST dataset_tools
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Tools
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/vlk-jan/dataset_tools" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    vlk-jan/dataset_tools
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Tools
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../building/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Building a release root
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../dataset/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Dataset layout
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../viewer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Viewer
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HELHEST dataset_tools" class="md-nav__button md-logo" aria-label="HELHEST dataset_tools" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HELHEST dataset_tools
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/vlk-jan/dataset_tools" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    vlk-jan/dataset_tools
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-extract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="helhest-extract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#main-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caveats-of-the-raw-bags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats of the raw bags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-odom-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-odom-frame
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-heightmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-heightmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-keyframes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-keyframes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-disk-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-disk-usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-image-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-image-format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-sort-bag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-sort-bag
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../building/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a release root
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-extract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-extract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="helhest-extract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#main-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Main options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caveats-of-the-raw-bags" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caveats of the raw bags
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-odom-frame" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-odom-frame
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-heightmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-heightmap
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-keyframes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-keyframes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-validate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-disk-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-disk-usage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-image-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-image-format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#helhest-sort-bag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        helhest-sort-bag
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="tools">Tools<a class="headerlink" href="#tools" title="Permanent link">&para;</a></h1>
+<p>Every tool is a command installed with the package. Run any of them with
+<code>--help</code> for the full list of options.</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#helhest-extract"><code>helhest-extract</code></a></td>
+<td>Extracts ROS 2 bags into scene directories</td>
+</tr>
+<tr>
+<td><a href="#helhest-odom-frame"><code>helhest-odom-frame</code></a></td>
+<td>Aligns odometry with the lidar cloud coordinate frame</td>
+</tr>
+<tr>
+<td><a href="#helhest-heightmap"><code>helhest-heightmap</code></a></td>
+<td>Generates height maps and validity masks from a scene's clouds</td>
+</tr>
+<tr>
+<td><a href="#helhest-keyframes"><code>helhest-keyframes</code></a></td>
+<td>Generates keyframe lists for a root</td>
+</tr>
+<tr>
+<td><a href="#helhest-release"><code>helhest-release</code></a></td>
+<td>Generates root-level release files from a specification</td>
+</tr>
+<tr>
+<td><a href="#helhest-validate"><code>helhest-validate</code></a></td>
+<td>Validates scenes and complete roots</td>
+</tr>
+<tr>
+<td><a href="../viewer/"><code>helhest-viewer</code></a></td>
+<td>Browses a root in a web browser</td>
+</tr>
+<tr>
+<td><a href="#helhest-disk-usage"><code>helhest-disk-usage</code></a></td>
+<td>Summarises disk usage per scene and modality</td>
+</tr>
+<tr>
+<td><a href="#helhest-image-format"><code>helhest-image-format</code></a></td>
+<td>Declares or checks the image format stored in a root</td>
+</tr>
+<tr>
+<td><a href="#helhest-sort-bag"><code>helhest-sort-bag</code></a></td>
+<td>Rewrites a bag sorted by header timestamp</td>
+</tr>
+</tbody>
+</table>
+<h2 id="helhest-extract">helhest-extract<a class="headerlink" href="#helhest-extract" title="Permanent link">&para;</a></h2>
+<p>Extracts ROS 2 bags into scene directories (<code>0000/</code>, <code>0001/</code>, etc.), producing
+one scene per bag. See the <a href="../dataset/">dataset layout</a> for details on all
+generated files.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>helhest-extract<span class="w"> </span>&lt;dir-with-bags&gt;<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--jobs<span class="w"> </span><span class="m">8</span>
+</span></code></pre></div>
+<p><code>&lt;dir-with-bags&gt;</code> can be a directory containing multiple bags or a single bag
+directory. Only directories containing <code>metadata.yaml</code> are recognised as bags.
+Scenes are numbered sequentially according to the sorted names of the bag
+directories.</p>
+<p>By default, the extractor reads the robot's primary sensors: the Odin1
+lidar-camera unit and the Fixposition GNSS/INS. Spelled out in full, the default
+arguments are:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>--cam /odin1/image/compressed --lidar /odin1/cloud_filtered/cloudini \
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>--odom /odin1/odometry --imu /odin1/odometry --deskew_imu /odin1/imu \
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>--check_odom /fixposition/odometry_enu --gps auto
+</span></code></pre></div>
+<p><strong>Processing pipeline.</strong> Camera and lidar frames are matched by mutual nearest
+neighbour on their header timestamps, and unpaired frames are dropped. Each
+lidar sweep that carries per-point times and is bracketed by odometry is
+deskewed to its frame's instant; other sweeps are written as recorded and
+counted in <code>extract_meta.json</code>. Odometry is interpolated onto each frame. With
+<code>--time_align auto</code>, the publish latency is then measured from the written
+clouds and subtracted from the frame clock. See <a href="../dataset/#timing">Timing in the dataset
+layout</a> for clock details.</p>
+<p><strong>Resuming.</strong> A scene counts as complete when <code>source_bag.txt</code>, written last,
+is present and its image, cloud and timestamp counts agree. Completed scenes
+are skipped by default, allowing an interrupted run to be resumed cleanly;
+<code>--overwrite</code> re-extracts them. If an existing scene corresponds to a different
+bag than expected, the run stops before extracting anything (exit code <code>2</code>) to
+prevent indexing conflicts from an altered bag list.</p>
+<p><strong>Failures.</strong> If a bag fails, its traceback is logged and the run continues
+with remaining bags. The summary at the end lists every failed and empty scene,
+and the command exits with code <code>1</code> if any bag failed. It exits with <code>2</code> when
+no bag is found, <code>--scenes</code> selects none, or an existing scene holds a
+different bag.</p>
+<h3 id="main-options">Main options<a class="headerlink" href="#main-options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--jobs N</code></td>
+<td>Number of worker processes, processing one bag each (default: 4; <code>1</code> runs in-process)</td>
+</tr>
+<tr>
+<td><code>--scenes 0 3 5-9 &lt;bag-name&gt;</code></td>
+<td>Extract only specified scene indices, ranges, or bag directory names</td>
+</tr>
+<tr>
+<td><code>--start_index N</code></td>
+<td>Number the first scene <code>N</code> instead of <code>0000</code></td>
+</tr>
+<tr>
+<td><code>--overwrite</code></td>
+<td>Re-extract scenes that are already complete</td>
+</tr>
+<tr>
+<td><code>--base_frame</code></td>
+<td>Target coordinate frame for clouds, odometry, and gravity alignment (default: <code>base_link</code>)</td>
+</tr>
+<tr>
+<td><code>--gt auto/on/off</code></td>
+<td>Write ground-truth <code>odometry.txt</code> and <code>odometry_segments.txt</code> (<code>auto</code>: enables this for Odin1 and Fixposition odometry)</td>
+</tr>
+<tr>
+<td><code>--time_align auto/off/S</code></td>
+<td>Correct frame timestamps for publish latency: measured per scene (<code>auto</code>, default), fixed duration in seconds, or disabled (<code>off</code>)</td>
+</tr>
+<tr>
+<td><code>--deskew auto/off</code></td>
+<td>Motion-compensate each lidar return to the robot's pose at the frame timestamp, where the sweep has per-point times and odometry covers it (default: <code>auto</code>)</td>
+</tr>
+<tr>
+<td><code>--deskew_imu TOPIC</code></td>
+<td>IMU topic providing angular velocity for intra-sweep deskewing (default: <code>/odin1/imu</code>; <code>off</code> interpolates poses instead)</td>
+</tr>
+<tr>
+<td><code>--imu TOPIC</code></td>
+<td>Orientation source for <code>gravity_align.npy</code> (default: <code>/odin1/odometry</code>)</td>
+</tr>
+<tr>
+<td><code>--check_odom TOPIC</code></td>
+<td>Reference odometry stream compared against primary odometry in <code>pose_check.txt</code> (default: <code>/fixposition/odometry_enu</code>; <code>off</code> skips)</td>
+</tr>
+<tr>
+<td><code>--gnss_guard auto/on/off</code></td>
+<td>Drop frames the pose stream does not cover and stretches of transient GNSS/INS reset solutions. <code>auto</code> (default) runs the full guard for Fixposition odometry, the coverage-only part for <code>/odin1/odometry</code>; recorded in <code>gnss_guard.txt</code></td>
+</tr>
+<tr>
+<td><code>--trim_idle MAX_S KEEP_S</code></td>
+<td>Cut every stop (odometry under 0.15 m/s and 5 deg/s) longer than <code>MAX_S</code> seconds to its first <code>KEEP_S</code> seconds of frames; <code>odometry.txt</code> is kept whole (off by default)</td>
+</tr>
+<tr>
+<td><code>--gps TOPIC</code></td>
+<td>GNSS fix topic for <code>gps.npy</code>; <code>auto</code> (default) selects the active <code>NavSatFix</code> topic, <code>off</code> records none</td>
+</tr>
+<tr>
+<td><code>--tf_pins on/off</code></td>
+<td>Replace online Odin1 lidar and camera extrinsic estimates (which drift across and within bags) with one constant: the median of what 42 bags published (default: <code>on</code>)</td>
+</tr>
+<tr>
+<td><code>--lidar_extrinsic X Y Z ROLL PITCH YAW</code></td>
+<td>Fixed lidar-to-base transform when unavailable from the TF tree, in metres and radians</td>
+</tr>
+<tr>
+<td><code>--allow_frame_fallback</code></td>
+<td>Extract even when TF does not reach <code>--base_frame</code>, leaving that stream in its native frame (otherwise the scene fails)</td>
+</tr>
+<tr>
+<td><code>--max_sync_dt S</code></td>
+<td>Maximum allowable timestamp difference between synchronised camera and lidar frames (default: <code>0.1</code>)</td>
+</tr>
+<tr>
+<td><code>--cam_time_offset S</code></td>
+<td>Seconds added to the camera stamps before pairing; unlike <code>--time_align</code>, this changes which camera and lidar frames are paired (default: <code>0</code>)</td>
+</tr>
+<tr>
+<td><code>--image_format camera/png</code></td>
+<td>Store raw compressed JPEG bytes from the camera (default) or decode to PNG</td>
+</tr>
+<tr>
+<td><code>-v</code></td>
+<td>Enable verbose/debug logging</td>
+</tr>
+</tbody>
+</table>
+<p>All options used during extraction, along with automatic decisions, are
+recorded in each scene's <code>extract_meta.json</code>.</p>
+<p><strong>Preserving derived files on re-extraction.</strong> Height maps and other derived
+products are built after extraction. If a re-extraction produces the same
+<code>data_ts.txt</code>, they are kept. If the timestamps differ, each derived directory
+(<code>height_maps/</code>, <code>height_masks/</code>, <code>proprio_labels/</code>, <code>driven_similarity/</code>) and
+<code>height_maps.json</code> is renamed whole to <code>&lt;name&gt;.stale-YYYYmmdd-HHMMSS</code>, so no
+product is left misaligned with the new frames.</p>
+<h3 id="caveats-of-the-raw-bags">Caveats of the raw bags<a class="headerlink" href="#caveats-of-the-raw-bags" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Publish latency.</strong> The Odin1 stamps some messages on publish rather than
+  capture; on the 2026-09 recordings the poses run ahead of the images and
+  clouds by up to about 0.69 s, varying with load within one bag.
+  <code>--time_align auto</code> measures and removes it per scene (<code>time_align.txt</code>).</li>
+<li><strong>A GNSS/INS without a fix keeps publishing.</strong> After a roll-over the
+  Fixposition can fill its odometry with a reset state hundreds of metres away
+  and no flag. <code>--gnss_guard</code> drops such stretches (<code>gnss_guard.txt</code>, <code>fix_lost</code>
+  in <code>odometry_segments.txt</code>).</li>
+<li><strong>The Odin1 re-estimates its own extrinsics</strong> on <code>/tf_static</code>, drifting
+  across and within bags. <code>--tf_pins</code> (default) replaces them with one
+  constant.</li>
+<li><strong><code>/imu/data</code> is mounted tilted</strong> and has no TF to <code>base_link</code>: do not pass
+  it as <code>--imu</code>.</li>
+<li><strong>The 2026-08 bags are not dataset material.</strong> Their TF tree lacks the
+  <code>base_link -&gt; odin1_base_link</code> edge, so a scene fails unless
+  <code>--lidar_extrinsic</code> or <code>--allow_frame_fallback</code> is given.</li>
+</ul>
+<p><a href="https://github.com/vlk-jan/dataset_tools/blob/main/docs/EXTRACTION_GUARDS.md"><code>docs/EXTRACTION_GUARDS.md</code></a>
+in the repository explains how the latency and GNSS guards decide.</p>
+<h2 id="helhest-odom-frame">helhest-odom-frame<a class="headerlink" href="#helhest-odom-frame" title="Permanent link">&para;</a></h2>
+<p>The Odin1 computes its odometry with an online estimate of the lidar-to-IMU
+extrinsic. The clouds use the fixed value <code>--tf_pins</code> sets. Consequently, a
+scene's odometry frame and cloud frame can differ by up to 0.8 degrees. This
+tool measures that angular offset by registering clouds against each other
+(ICP) and rotates <code>odometry.txt</code>, <code>transforms.npy</code>, and <code>gravity_align.npy</code>
+into the cloud frame. Only <code>measure</code> needs the <code>build</code> extra. Both subcommands
+take <code>--scenes</code>. <code>apply</code> refuses a scene that already has <code>odom_frame.txt</code> or a
+correction over 3 degrees. After <code>apply</code>, rebuild the scene's height maps and
+the keyframe lists.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>helhest-odom-frame<span class="w"> </span>measure<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--fits<span class="w"> </span>fits.json<span class="w">   </span><span class="c1"># every scene with clouds and no odom_frame.txt</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>helhest-odom-frame<span class="w"> </span>apply<span class="w">   </span>&lt;root&gt;<span class="w"> </span>--fits<span class="w"> </span>fits.json
+</span></code></pre></div>
+<p>The result is recorded in each scene's <code>odom_frame.txt</code>. Re-extracting a scene
+removes this file, so rerun <code>measure</code> and <code>apply</code> afterwards.</p>
+<h2 id="helhest-heightmap">helhest-heightmap<a class="headerlink" href="#helhest-heightmap" title="Permanent link">&para;</a></h2>
+<p>Builds a height map and validity mask for each frame. The cloud is levelled
+using <code>gravity_align.npy</code> and binned onto a 128 x 128 grid of 0.1 m cells around
+<code>base_link</code>, then interpolated, filled, and smoothed.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>helhest-heightmap<span class="w"> </span>&lt;root&gt;<span class="w">                           </span><span class="c1"># every scene</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>helhest-heightmap<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--scenes<span class="w"> </span><span class="m">0003</span><span class="w"> </span>--overwrite<span class="w">    </span><span class="c1"># rebuild one scene</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>helhest-heightmap<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--workers<span class="w"> </span><span class="m">16</span><span class="w"> </span>--set<span class="w"> </span><span class="nv">statistic</span><span class="o">=</span>p90<span class="w"> </span>--set<span class="w"> </span><span class="nv">tie_jitter</span><span class="o">=</span>none
+</span></code></pre></div>
+<p>The parameters used are recorded in each scene's <code>height_maps.json</code>. The tool's
+defaults are not the settings HELHEST v2.4 was built with: v2.4's maps use
+<code>--set statistic=p90 --set tie_jitter=none</code>. Frames that already have a map are
+kept unless <code>--overwrite</code> is passed; adding maps with different settings to a scene
+is refused, so rebuild the whole scene with <code>--overwrite</code>. Frames with too few
+lidar returns receive no map.</p>
+<h2 id="helhest-keyframes">helhest-keyframes<a class="headerlink" href="#helhest-keyframes" title="Permanent link">&para;</a></h2>
+<p>Writes the root's three keyframe lists: <code>keyframes.lst</code> (all scenes),
+<code>keyframes_train.lst</code> (training scenes), and <code>keyframes_heldout.lst</code> (held-out
+scenes). Each line lists one frame that contains a cloud, an image, a height map,
+and a mask:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>0003/clouds/00042.npy 0003/images/00042.jpg
+</span></code></pre></div>
+<p>Frames tilted more than 45 degrees, and the 4 s before such a tilt, are
+excluded (<code>--max_tilt_deg</code>, <code>--tilt_horizon</code>; a negative <code>--max_tilt_deg</code>
+disables the gate). <code>--out_dir</code> writes the lists elsewhere. Held-out scenes are
+determined from <code>manifest.json</code>. The image extension comes from <code>manifest.json</code>
+(<code>images.extension</code>). <code>helhest-release</code> runs this step automatically.</p>
+<h2 id="helhest-release">helhest-release<a class="headerlink" href="#helhest-release" title="Permanent link">&para;</a></h2>
+<p>Generates a release's root-level files from its specification and scenes:
+<code>scenes.csv</code>, the keyframe lists, <code>manifest.json</code>, <code>splits.json</code>,
+<code>atlas/curation.json</code>, and <code>README.md</code>.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>helhest-release<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--spec<span class="w"> </span>docs/releases/v2_4.json
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>helhest-release<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--spec<span class="w"> </span>docs/releases/v2_4.json<span class="w"> </span>--out_dir<span class="w"> </span>/tmp/compare
+</span></code></pre></div>
+<p>With <code>--out_dir</code>, the files go to that directory, except <code>scenes.csv</code>, which is
+only updated in the root itself.</p>
+<p>The specification holds curated metadata that cannot be derived automatically:
+the bag list, held-out scene selections and rationales, session groupings, and
+known defects. The spec's descriptive blocks and keys such as <code>bag_host</code>, <code>images</code>
+and <code>corrections</code> are copied or merged into the manifest; everything else is
+measured from the scenes. The tool rejects a root whose scene directories do
+not match the bag list (a missing, extra or mismatched scene), or where a
+designated held-out scene is missing from disk. See
+<a href="../building/#1-describe-the-release">Building a release root</a>.</p>
+<h2 id="helhest-validate">helhest-validate<a class="headerlink" href="#helhest-validate" title="Permanent link">&para;</a></h2>
+<p>Validates extracted scenes and prints a diagnostic report.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>helhest-validate<span class="w"> </span>&lt;root&gt;<span class="w">                                </span><span class="c1"># a whole root</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>helhest-validate<span class="w"> </span>&lt;root&gt;/0000<span class="w"> </span>&lt;root&gt;/0001<span class="w">               </span><span class="c1"># single scenes</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>helhest-validate<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--csv<span class="w"> </span>&lt;root&gt;/validation.csv<span class="w">    </span><span class="c1"># the report the viewer shows</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>helhest-validate<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--json<span class="w"> </span>&lt;root&gt;/validation.json<span class="w"> </span>--strict
+</span></code></pre></div>
+<p>The validator verifies that required files are present, that frame counts agree
+across images, clouds, timestamps, poses, and gravity alignment, that
+timestamps are monotonic, that a sample of clouds (8 per scene,
+<code>--sample-clouds N</code>, <code>0</code> skips them) has the expected <code>(N, 4)</code> shape and a
+consistent float dtype, that rotation matrices are valid, and that camera
+calibration parameters and extrinsics are reasonable. It also checks
+ground-truth segments, proprioception and GNSS streams, per-frame products,
+and, for a whole root, the manifest and keyframe lists.</p>
+<p>Findings are reported at three severity levels:</p>
+<ul>
+<li><strong><code>ERROR</code></strong>: Structural defects. Exit code <code>1</code>.</li>
+<li><strong><code>WARN</code></strong>: Data-quality issues, such as NaNs, implausible speeds, or
+  extreme tilt. Passing <code>--strict</code> causes warnings to fail with exit code <code>1</code>
+  as well.</li>
+<li><strong><code>INFO</code></strong>: Informational notices that do not indicate defects, such as a gap
+  in the frame clock. Displayed with <code>-v</code>.</li>
+</ul>
+<p>Exit code <code>2</code> means a path was not found or the expect file is unreadable.</p>
+<p>Every finding has a stable identifier printed in brackets. To use <code>--strict</code> on
+a root with known acceptable anomalies, list them in
+<code>&lt;root&gt;/validation_expect.json</code>:</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span><span class="nt">"expected"</span><span class="p">:</span><span class="w"> </span><span class="p">[[</span><span class="s2">"0008"</span><span class="p">,</span><span class="w"> </span><span class="s2">"TILT"</span><span class="p">],</span><span class="w"> </span><span class="p">[</span><span class="s2">"*"</span><span class="p">,</span><span class="w"> </span><span class="s2">"CLOUD_EMPTY"</span><span class="p">]]}</span>
+</span></code></pre></div>
+<p>Expected findings no longer fail the run; they stay in <code>--json</code> output and are
+printed with <code>-v</code>. An entry that matches nothing is reported as an <code>INFO</code> finding
+<code>EXPECT_UNUSED</code> (shown with <code>-v</code>), so stale exceptions are noticed. <code>--expect PATH</code>
+reads another file.</p>
+<h2 id="helhest-disk-usage">helhest-disk-usage<a class="headerlink" href="#helhest-disk-usage" title="Permanent link">&para;</a></h2>
+<p>Generates <code>&lt;root&gt;/disk_usage.json</code>, recording bytes and file counts per scene
+and modality for the viewer's disk-usage panels. It scans only scenes not yet
+present in the file, unless scenes are specified explicitly or <code>--all</code> is
+passed. Use <code>--all</code> to refresh sizes after a scene changed. Extraction runs
+update this file automatically for the scenes they process.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>helhest-disk-usage<span class="w"> </span>&lt;root&gt;<span class="w"> </span><span class="o">[</span>scene<span class="w"> </span>...<span class="o">]</span><span class="w"> </span><span class="o">[</span>--all<span class="o">]</span>
+</span></code></pre></div>
+<h2 id="helhest-image-format">helhest-image-format<a class="headerlink" href="#helhest-image-format" title="Permanent link">&para;</a></h2>
+<p>Declares in <code>manifest.json</code> whether a root stores raw camera JPEG bytes or PNG
+images. Any scene containing images in a format different from the declared one
+is reported as an error. <code>helhest-extract</code> runs the declaration at the end of
+every run, so <code>manifest.json</code> can exist before the release step. A JPEG root is
+declared as <code>images.extension: jpg</code>; a root without the declaration is read as
+PNG. Both modes exit <code>1</code> when the scenes do not hold one format or disagree
+with the declaration.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>helhest-image-format<span class="w"> </span>&lt;root&gt;<span class="w">            </span><span class="c1"># declare what the scenes hold</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>helhest-image-format<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--check<span class="w">    </span><span class="c1"># report only</span>
+</span></code></pre></div>
+<h2 id="helhest-sort-bag">helhest-sort-bag<a class="headerlink" href="#helhest-sort-bag" title="Permanent link">&para;</a></h2>
+<p>Rewrites a bag with its messages sorted by header timestamp; messages without a
+usable header stamp keep their bag receive time. The extractor already sorts
+timestamps before pairing frames, so this tool is rarely needed. The entire bag
+is loaded into memory during sorting. An existing output is refused unless
+<code>--overwrite</code> is passed.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>helhest-sort-bag<span class="w"> </span>&lt;input-bag&gt;<span class="w"> </span>&lt;output-bag&gt;<span class="w"> </span><span class="o">[</span>--overwrite<span class="o">]</span>
+</span></code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 <a href="https://vlk-jan.github.io">Jan Vlk</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "navigation.top", "toc.follow", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

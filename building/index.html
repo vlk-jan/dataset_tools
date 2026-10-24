@@ -1,0 +1,1001 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Tools for extracting the HELHEST robot dataset from ROS 2 bags">
+      
+      
+        <meta name="author" content="Jan Vlk">
+      
+      
+        <link rel="canonical" href="https://vlk-jan.github.io/dataset_tools/building/">
+      
+      
+        <link rel="prev" href="../tools/">
+      
+      
+        <link rel="next" href="../dataset/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Building a release root - HELHEST dataset_tools</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#building-a-release-root" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="HELHEST dataset_tools" class="md-header__button md-logo" aria-label="HELHEST dataset_tools" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            HELHEST dataset_tools
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Building a release root
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="teal"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/vlk-jan/dataset_tools" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    vlk-jan/dataset_tools
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../tools/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Tools
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Building a release root
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../dataset/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Dataset layout
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../viewer/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Viewer
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="HELHEST dataset_tools" class="md-nav__button md-logo" aria-label="HELHEST dataset_tools" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    HELHEST dataset_tools
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/vlk-jan/dataset_tools" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    vlk-jan/dataset_tools
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a release root
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Building a release root
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-describe-the-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Describe the release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-extract-every-bag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Extract every bag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-finalise-the-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Finalise the root
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Check it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#without-slurm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Without Slurm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rebuilding-only-the-height-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebuilding only the height maps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../dataset/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Dataset layout
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../viewer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Viewer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-describe-the-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Describe the release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-extract-every-bag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Extract every bag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-finalise-the-root" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Finalise the root
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-check-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Check it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#without-slurm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Without Slurm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rebuilding-only-the-height-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rebuilding only the height maps
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="building-a-release-root">Building a release root<a class="headerlink" href="#building-a-release-root" title="Permanent link">&para;</a></h1>
+<p>A release root is built entirely using tools in this repository, in two stages.
+The first stage operates per bag: extracting the data, rotating odometry into
+the cloud coordinate frame, generating height maps, and validating each scene.
+The second stage operates on the whole root: producing the manifest, dataset
+splits, keyframe lists, README, full validation report, and atlas.</p>
+<p>The steps below use the Slurm jobs in <code>slurm/</code> on the CTU RCI cluster. The same
+steps <a href="#without-slurm">without Slurm</a> follow at the end.</p>
+<h2 id="1-describe-the-release">1. Describe the release<a class="headerlink" href="#1-describe-the-release" title="Permanent link">&para;</a></h2>
+<p>A release is described by two tracked files in <code>docs/</code>. These files live in
+the repository, not on this site:</p>
+<p><strong>The bag list</strong>,
+<a href="https://github.com/vlk-jan/dataset_tools/tree/main/docs"><code>docs/v2_&lt;n&gt;_bags.csv</code></a>
+(e.g.
+<a href="https://github.com/vlk-jan/dataset_tools/blob/main/docs/v2_4_bags.csv"><code>docs/v2_4_bags.csv</code></a>):
+one row per scene, in scene order, with the header</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>scene,session,bag_dir_on_subtdata,bag_size_gb,bag_start_utc,duration_s,lidar_msgs,camera_msgs[,extract_args]
+</span></code></pre></div>
+<p>The jobs parse columns by position, so <code>scene</code> must be the first column and the
+bag directory the third. The optional <code>extract_args</code> column holds extractor
+options for that bag alone, such as <code>--trim_idle 60 10</code>. Bag lists are
+cumulative: each release lists every scene in its root, including those from
+earlier releases. The jobs split rows on raw commas (not quoted CSV), so no
+field, <code>extract_args</code> included, may contain a comma.</p>
+<p><strong>The spec</strong>,
+<a href="https://github.com/vlk-jan/dataset_tools/tree/main/docs/releases"><code>docs/releases/v2_&lt;n&gt;.json</code></a>:</p>
+<ul>
+<li>Required: <code>dataset_version</code>, <code>bags</code> (the list above, relative to the
+  repository root) and <code>held_out.scenes</code>.</li>
+<li>Optional: <code>inherit</code> (a spec to merge under this one; <a href="https://github.com/vlk-jan/dataset_tools/blob/main/docs/releases/helhest_v2.json"><code>helhest_v2.json</code></a>
+  holds text shared across releases for this rig), <code>title</code>, <code>summary</code>,
+  <code>held_out.decision</code> and extra <code>held_out</code> keys (e.g. <code>held_out.support</code>),
+  <code>bag_host</code>, <code>images</code>, <code>corrections</code>, <code>sessions</code>, <code>excluded</code>, <code>terrain_notes</code>,
+  <code>defects</code>, <code>open_items</code> and <code>curation</code> (becomes <code>atlas/curation.json</code>).</li>
+</ul>
+<p>Use
+<a href="https://github.com/vlk-jan/dataset_tools/blob/main/docs/releases/v2_4.json"><code>docs/releases/v2_4.json</code></a>
+as a template. The spec's descriptive blocks (<code>rig</code>, <code>camera</code>, <code>gps</code>,
+<code>odometry</code>, <code>sessions</code>, ...) and <code>bag_host</code>, <code>images</code>, <code>corrections</code> and
+<code>held_out</code> are copied or merged into the manifest; everything else is measured
+from the scenes.</p>
+<h2 id="2-extract-every-bag">2. Extract every bag<a class="headerlink" href="#2-extract-every-bag" title="Permanent link">&para;</a></h2>
+<p>From the repository root on a login node, with <code>.venv</code> built inside the
+container (see <a href="../installation/#container-ctu-cluster">Installation</a>), and
+key-based ssh from the cluster to subtdata: each task rsyncs its bag from
+<code>$SUBTDATA</code> (default <code>$USER@subtdata.felk.cvut.cz</code>). <code>EXTRACT_ARGS</code> adds
+extractor options to every task of a submission, after the row's own
+<code>extract_args</code>.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>slurm/slurm_out
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">CSV</span><span class="o">=</span>docs/v2_4_bags.csv<span class="w"> </span><span class="nv">HM_ARGS</span><span class="o">=</span><span class="s2">"--set statistic=p90 --set tie_jitter=none"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>sbatch<span class="w"> </span>--array<span class="o">=</span><span class="m">0</span>-35%4<span class="w"> </span>slurm/extract_v2.batch<span class="w"> </span>/mnt/personal/<span class="nv">$USER</span>/HELHEST_v2_4
+</span></code></pre></div>
+<p>The array range covers the rows of the bag list (<code>0</code> to rows - 1); <code>%4</code> caps
+how many jobs run at once. <code>CSV=</code> and the root are required. <code>HM_ARGS</code> sets
+the height-map settings; the tool's defaults are not v2.4's, so a v2.4 build
+passes the p90 settings shown. A root that links in an
+earlier release's scenes is submitted with the range of its new rows only.</p>
+<p>Each array task produces one finished scene:</p>
+<ol>
+<li>copies its bag with <code>rsync</code> from <code>subtdata</code> to node-local scratch;</li>
+<li>runs <code>helhest-extract</code> on it, with the row's <code>extract_args</code>;</li>
+<li>runs <code>helhest-odom-frame measure</code>, then <code>apply</code> if the measurement succeeded
+   (a scene it cannot measure keeps the Odin1's own odometry and gravity alignment,
+   with a warning);</li>
+<li>runs <code>helhest-heightmap</code> with <code>HM_ARGS</code>;</li>
+<li>validates the scene, moves it into <code>&lt;root&gt;/&lt;scene&gt;/</code>, and writes the report
+   to <code>&lt;root&gt;/.validation/&lt;scene&gt;.csv</code>.</li>
+</ol>
+<p>A task skips a scene whose <code>source_bag.txt</code> already names the same bag, so
+resubmitting the same range resumes. The job checks only that file, not the
+frame counts. A scene that holds a <em>different</em> bag stops the task. <code>FORCE=1</code>
+re-extracts the scene in both cases. A scene that fails validation is not
+published unless
+<code>FORCE_PUBLISH=1</code> is set. The exit code names the failing step:</p>
+<table>
+<thead>
+<tr>
+<th>Exit code</th>
+<th>Step</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10</td>
+<td>fetching the bag</td>
+</tr>
+<tr>
+<td>11</td>
+<td>extraction</td>
+</tr>
+<tr>
+<td>12</td>
+<td>publishing the scene</td>
+</tr>
+<tr>
+<td>13</td>
+<td>the scene holds a different bag</td>
+</tr>
+<tr>
+<td>14</td>
+<td>validation</td>
+</tr>
+<tr>
+<td>15</td>
+<td>the odometry-frame rotation (<code>apply</code>)</td>
+</tr>
+<tr>
+<td>16</td>
+<td>the height maps</td>
+</tr>
+</tbody>
+</table>
+<p>Logs go to <code>slurm/slurm_out/</code>. <code>SIF</code> and <code>REPO</code> override the container image
+and the checkout; <code>slurm/README.md</code> lists every site-specific value.</p>
+<h2 id="3-finalise-the-root">3. Finalise the root<a class="headerlink" href="#3-finalise-the-root" title="Permanent link">&para;</a></h2>
+<p>On the login node, not through <code>sbatch</code>:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>slurm/finalize_v2.sh<span class="w"> </span>/mnt/personal/<span class="nv">$USER</span>/HELHEST_v2_4<span class="w"> </span>docs/v2_4_bags.csv<span class="w"> </span>docs/releases/v2_4.json
+</span></code></pre></div>
+<p>This runs <code>helhest-release</code> (root-level files), validates the whole root into
+<code>&lt;root&gt;/validation.csv</code>, and draws the viewer's atlas with
+<code>scripts/make_atlas.py</code>. It exits 2 if <code>helhest-release</code> fails; otherwise with
+the validation step's exit code. Atlas problems are logged but do not change
+the exit code. The spec (third argument) is optional: without it the script
+only rewrites <code>scenes.csv</code> and declares the image format, with no manifest or
+keyframe lists.</p>
+<h2 id="4-check-it">4. Check it<a class="headerlink" href="#4-check-it" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>helhest-validate<span class="w"> </span>&lt;root&gt;<span class="w"> </span>-v<span class="w">           </span><span class="c1"># include INFO findings</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>helhest-disk-usage<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--all<span class="w">     </span><span class="c1"># rescan every scene for the viewer</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>helhest-viewer<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--open<span class="w">         </span><span class="c1"># look at it</span>
+</span></code></pre></div>
+<h2 id="without-slurm">Without Slurm<a class="headerlink" href="#without-slurm" title="Permanent link">&para;</a></h2>
+<p>Extract one bag per bag-list row, each with <code>--start_index</code> set to its scene
+number and that row's <code>extract_args</code> (bags fetched into one local directory
+<code>&lt;bags&gt;</code>, keeping their directory names):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>tail<span class="w"> </span>-n<span class="w"> </span>+2<span class="w"> </span>docs/v2_4_bags.csv<span class="w"> </span><span class="p">|</span><span class="w"> </span><span class="k">while</span><span class="w"> </span><span class="nv">IFS</span><span class="o">=</span>,<span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>scene<span class="w"> </span>_<span class="w"> </span>bag<span class="w"> </span>_<span class="w"> </span>_<span class="w"> </span>_<span class="w"> </span>_<span class="w"> </span>_<span class="w"> </span>args<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">    </span>helhest-extract<span class="w"> </span><span class="s2">"&lt;bags&gt;/</span><span class="k">$(</span>basename<span class="w"> </span><span class="s2">"</span><span class="nv">$bag</span><span class="s2">"</span><span class="k">)</span><span class="s2">"</span><span class="w"> </span>&lt;root&gt;<span class="w"> </span>--start_index<span class="w"> </span><span class="s2">"</span><span class="k">$((</span><span class="m">10#</span><span class="nv">$scene</span><span class="k">))</span><span class="s2">"</span><span class="w"> </span><span class="nv">$args</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">done</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>helhest-odom-frame<span class="w"> </span>measure<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--fits<span class="w"> </span>fits.json
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>helhest-odom-frame<span class="w"> </span>apply<span class="w">   </span>&lt;root&gt;<span class="w"> </span>--fits<span class="w"> </span>fits.json
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>helhest-heightmap<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--set<span class="w"> </span><span class="nv">statistic</span><span class="o">=</span>p90<span class="w"> </span>--set<span class="w"> </span><span class="nv">tie_jitter</span><span class="o">=</span>none
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>helhest-release<span class="w">   </span>&lt;root&gt;<span class="w"> </span>--spec<span class="w"> </span>docs/releases/v2_4.json
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>helhest-validate<span class="w">  </span>&lt;root&gt;<span class="w"> </span>--csv<span class="w"> </span>&lt;root&gt;/validation.csv
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>.venv/bin/python<span class="w"> </span>scripts/make_atlas.py<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--bags<span class="w"> </span>docs/v2_4_bags.csv
+</span></code></pre></div>
+<p>Run <code>helhest-odom-frame</code> before <code>helhest-heightmap</code>, because <code>apply</code> rotates
+<code>gravity_align.npy</code>, which the height maps are levelled with; if odom-frame is
+re-run on a scene that already has maps, rebuild them with <code>--overwrite</code>.</p>
+<h2 id="rebuilding-only-the-height-maps">Rebuilding only the height maps<a class="headerlink" href="#rebuilding-only-the-height-maps" title="Permanent link">&para;</a></h2>
+<p>After a root's clouds or <code>gravity_align.npy</code> change:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">HM_ARGS</span><span class="o">=</span><span class="s2">"--set statistic=p90 --set tie_jitter=none"</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">    </span>sbatch<span class="w"> </span>--array<span class="o">=</span><span class="m">0</span>-35<span class="w"> </span>slurm/heightmaps.batch<span class="w"> </span>/mnt/personal/<span class="nv">$USER</span>/HELHEST_v2_4<span class="w">   </span><span class="c1"># array index = scene</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>helhest-heightmap<span class="w"> </span>&lt;root&gt;<span class="w"> </span>--scenes<span class="w"> </span><span class="m">0003</span><span class="w"> </span>--overwrite<span class="w">                            </span><span class="c1"># or by hand</span>
+</span></code></pre></div>
+<p>The batch job first checks a sample of the existing maps against a rebuild
+(<code>VERIFY=0</code> skips this) and passes <code>HM_ARGS</code> through to <code>helhest-heightmap</code>.
+The tool's defaults are not the settings v2.4 was built with; v2.4's maps use
+<code>statistic=p90</code> and no tie jitter, so pass
+<code>HM_ARGS="--set statistic=p90 --set tie_jitter=none"</code> to the batch job and
+<code>--set statistic=p90 --set tie_jitter=none</code> by hand. Each scene's
+<code>height_maps.json</code> records the settings it was built with. <code>--scenes</code> takes
+comma-separated scene directory names, e.g. <code>0003,0004</code>. The tool will not
+write through a scene whose height maps are linked from another root; build them
+in the root that owns them.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 <a href="https://vlk-jan.github.io">Jan Vlk</a>
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.tabs", "navigation.sections", "navigation.top", "toc.follow", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
