@@ -22,7 +22,11 @@ helhest-viewer http://subtdata.felk.cvut.cz/HELHEST/ --open  # a root published 
 ```
 
 When a root is provided as a URL, files are mirrored into the local cache as
-you browse, and reviewer notes default to `<cache-dir>/notes`.
+you browse, and reviewer notes default to `<cache-dir>/notes`. The first index
+lists every scene's per-frame directories (about 15 s for the 36-scene public
+release); a root published with `listings/`, written by
+`python -m dataset_tools.viewer.remote /path/to/root` just before publishing,
+needs one request per scene for that instead.
 `scripts/viewer_public.sh [viewer flags]` starts the viewer on the public
 release and opens a browser; `VIEWER_URL` points it at another root.
 
@@ -94,8 +98,9 @@ tunnel forwarding the interface to your laptop.
 | `/view/<scene>/<window>` | interactive 3D view: Space plays and pauses; `[` and `]` step to the previous and next window |
 
 A 3D view never spans two segments because each segment has its own coordinate
-origin. The first time a window is opened, its 3D assets are built; afterwards
-they load from the cache.
+origin. The first time a window is opened, its 3D assets are built (2-4 s);
+afterwards they load from the cache, and the next window is built in the
+background while you look at this one.
 
 ## Optional root files
 
@@ -108,6 +113,7 @@ re-read automatically when modified:
 | `disk_usage.json` | sizes and disk bars | `helhest-extract`, `helhest-disk-usage` |
 | `manifest.json`, `splits.json`, `keyframes*.lst` | dataset version, train/validation split tags and filters | `helhest-release` |
 | `atlas/` | index page's curated header and thumbnails | `scripts/make_atlas.py` |
+| `listings/` | nothing: a faster first index when the root is opened by URL | `python -m dataset_tools.viewer.remote` |
 | `notes/` | reviewer notes on scenes and frame ranges, with verdicts (`keep`, `drop`, `fix`) | the viewer |
 
 The viewer automatically detects re-extracted scenes. The `--clear-cache` flag

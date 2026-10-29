@@ -833,9 +833,17 @@ Dataset roots usually live on contended network storage, so:
   the directory and every entry directly in it (about thirty `stat` calls), so
   a file added to `height_maps/` or `odometry.txt` rewritten in place is seen.
   A URL root's scene is fingerprinted by the listing it was last synced from,
-  so fetching its frames never moves it.
+  so fetching its frames never moves it. A cold probe is mostly listing
+  per-frame directories, one network round trip each, so scenes are probed 16
+  at a time (43 scenes on NFS: 69 s -> 6 s). A URL root lists those
+  directories rather than mirroring each file as an empty placeholder, and
+  reads them from a published `listings/` when the root has one (see
+  [A root on a web server](#a-root-on-a-web-server)).
 - Scenes are built per window, on demand, and cached on disk under
   `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>/`.
+  A build reads its per-frame files 16 at a time and adds each frame's map
+  cells into the terrain grid directly: 1.5-2.5 s with the files in the page
+  cache, 3-4 s from cold network storage.
 - One window aggregates a bounded number of clouds and height maps -- chosen
   evenly across the window rather than from its start -- and the terrain is
   coarsened rather than clipped when a long traverse would exceed the cell
@@ -857,7 +865,11 @@ Dataset roots usually live on contended network storage, so:
   outside the range are clamped, not rejected, and each distinct combination is
   cached separately.
 - Camera frames are served one at a time as downscaled JPEG, not shipped with
-  the scene.
+  the scene. A JPEG is decoded at 1/2, 1/4 or 1/8 size when that still covers
+  the asked width: a frame-strip thumbnail costs ~10 ms, not ~25 ms.
+- Through `scripts/viewer_connect.sh` the SSH tunnel is compressed
+  (`VIEWER_COMPRESS=0` turns it off): a 3D window's ~37 MB of blobs and JSON
+  cross it as ~13 MB, which pays below ~100 Mbit/s and costs on wired gigabit.
 - Opening a window starts building the next one in the background, with the
   same build options, so paging with <kbd>]</kbd> does not wait. A scene page
   likewise starts its first window (default options; one such build at a time),
