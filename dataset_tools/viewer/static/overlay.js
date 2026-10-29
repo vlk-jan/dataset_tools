@@ -150,7 +150,7 @@ function update(force) {
   if (!app || !app.animationController || !meta) return;
 
   // SimView's states are this window's frames, one for one (build.py).
-  const index = app.animationController.getCurrentStateIndex();
+  const index = app.animationController.currentStateIndex;
   if (index < 0 || index >= meta.frames.length) return;
   if (index === lastFrame && !force) return;
   lastFrame = index;

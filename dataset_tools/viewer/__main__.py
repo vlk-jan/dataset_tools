@@ -106,7 +106,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 #: Keep in step with pyproject.toml's simview requirement.
-SIMVIEW_MIN = (6, 1, 1)
+SIMVIEW_MIN = (6, 4, 0)
 
 
 def _is_loopback(host: str) -> bool:

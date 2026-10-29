@@ -13,7 +13,7 @@ python -m dataset_tools.viewer /path/to/dataset_root     # or: helhest-viewer <r
 ```
 
 The viewer pulls in
-[SimView](https://pypi.org/project/simview/) (`>=6.1.1`, with its `authoring`
+[SimView](https://pypi.org/project/simview/) (`>=6.4.0`, with its `authoring`
 extra: torch + einops), FastAPI, uvicorn and Jinja2. Torch is the heavy
 one, so the viewer lives in its own virtualenv next to the extraction one:
 
@@ -843,7 +843,10 @@ Dataset roots usually live on contended network storage, so:
   `${XDG_CACHE_HOME:-~/.cache}/dataset_tools_viewer/<root name>-<hash>/`.
   A build reads its per-frame files 16 at a time and adds each frame's map
   cells into the terrain grid directly: 1.5-2.5 s with the files in the page
-  cache, 3-4 s from cold network storage.
+  cache, 3-4 s from cold network storage. The terrain carries no normals (the
+  browser computes its own; 5.7 MB less per window), so SimView's normal-arrow
+  view has nothing to draw. The view page lists SimView's ~50 modules as
+  `modulepreload` links, so they download while the window builds.
 - One window aggregates a bounded number of clouds and height maps -- chosen
   evenly across the window rather than from its start -- and the terrain is
   coarsened rather than clipped when a long traverse would exceed the cell
@@ -868,8 +871,8 @@ Dataset roots usually live on contended network storage, so:
   the scene. A JPEG is decoded at 1/2, 1/4 or 1/8 size when that still covers
   the asked width: a frame-strip thumbnail costs ~10 ms, not ~25 ms.
 - Through `scripts/viewer_connect.sh` the SSH tunnel is compressed
-  (`VIEWER_COMPRESS=0` turns it off): a 3D window's ~37 MB of blobs and JSON
-  cross it as ~13 MB, which pays below ~100 Mbit/s and costs on wired gigabit.
+  (`VIEWER_COMPRESS=0` turns it off): a 3D window's ~26 MB of blobs and JSON
+  cross it as ~10 MB, which pays below ~100 Mbit/s and costs on wired gigabit.
 - Opening a window starts building the next one in the background, with the
   same build options, so paging with <kbd>]</kbd> does not wait. A scene page
   likewise starts its first window (default options; one such build at a time),

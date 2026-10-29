@@ -70,14 +70,19 @@ def render_viewer_page(
 ) -> str:
     """Render SimView's own ``index.html`` against our asset and data URLs.
 
-    Read from the installed package at request time so it always matches that
+    Read from the installed package (once per process) so it always matches that
     SimView version; adds ``__simviewStaticBase`` (before the module script) and our markup.
     SimView's ``main.js`` tag becomes ``window.__dtSimviewEntry``, its URL, for the
     overlay to insert once the bundle is built (it fetches data as soon as it runs).
     """
     from importlib.resources import files
 
-    template = (files("simview") / "templates" / "index.html").read_text()
+    from simview.preload import render_index
+
+    # With its modulepreload links: the browser fetches SimView's ~50 modules at
+    # once, while the window builds, instead of one import level at a time.
+    package = files("simview")
+    template = render_index(str(package / "templates" / "index.html"), str(package))
 
     # Page-relative "./static/" would resolve under /view/<scene>/; point it at our mount.
     page = template.replace('"./static/', f'"{static_prefix.rstrip("/")}/')

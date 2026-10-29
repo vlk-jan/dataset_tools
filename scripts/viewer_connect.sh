@@ -13,7 +13,7 @@ RCI_USER=${VIEWER_USER:-$USER}
 LOGIN=$RCI_USER@${VIEWER_LOGIN:-login3.rci.cvut.cz}
 REPO=${VIEWER_REPO:-/home/$RCI_USER/projects/dataset_tools}
 NODE_HOSTS=${VIEWER_KNOWN_HOSTS:-$HOME/.ssh/known_hosts_rci_nodes}
-# A 3D window is ~37 MB raw, ~13 MB compressed: a win below ~100 Mbit/s,
+# A 3D window is ~26 MB raw, ~10 MB compressed: a win below ~100 Mbit/s,
 # a loss on wired gigabit (zlib runs at ~37 MB/s). 0 turns it off.
 [ "${VIEWER_COMPRESS:-1}" = 0 ] && COMPRESSION=no || COMPRESSION=yes
 LOCAL_PORT=${1:-8080}

@@ -45,7 +45,7 @@ viewer = [
     "fastapi>=0.132",
     "uvicorn[standard]>=0.27",
     "jinja2>=3.1",
-    "simview[authoring]>=6.1.1",
+    "simview[authoring]>=6.4.0",
     # Listed directly only so the index below applies: uv honours an index
     # override for direct dependencies, not for simview's transitive torch.
     "torch",

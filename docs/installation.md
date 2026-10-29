@@ -41,7 +41,7 @@ python3 -m venv .venv-viewer
 .venv-viewer/bin/pip install -e ".[viewer]"
 ```
 
-The viewer requires SimView 6.1.1 or newer and refuses to start with earlier
+The viewer requires SimView 6.4.0 or newer and refuses to start with earlier
 versions.
 
 ## Container (CTU RCI cluster) { #container-ctu-cluster }

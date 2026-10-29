@@ -59,10 +59,11 @@ def _read_all(paths: Sequence, loader: Callable) -> list:
         return list(pool.map(loader, paths))
 
 
-#: Bump when :func:`build_scene`'s ``meta`` changes a field the overlay reads, or a
-#: window key comes to mean different frames: the bundle cache is keyed by request
-#: and would otherwise serve stale bundles after an upgrade.
-META_VERSION = 12
+#: Bump when :func:`build_scene`'s ``meta`` changes a field the overlay reads, a
+#: window key comes to mean different frames, or the bundle's content changes (13:
+#: no terrain normals): the bundle cache is keyed by request and would otherwise
+#: serve stale bundles after an upgrade.
+META_VERSION = 13
 
 #: Descriptions of our terrain colour modes (SimView shows none), rendered by the
 #: overlay panel from the scene metadata.
@@ -1185,6 +1186,9 @@ def build_scene(access: SceneAccess, window_key: str, opts: BuildOptions):
         grid_res=grid.res,
         properties={k: torch.from_numpy(np.ascontiguousarray(v, dtype=np.float32)) for k, v in layers.items()} or None,
         property_bounds=bounds or None,
+        # 5.7 MB less per window: the viewer shades from normals it computes
+        # itself; only SimView's normal-arrow view is left with nothing to draw.
+        compute_normals=False,
     )
 
     # ---- bodies --------------------------------------------------------

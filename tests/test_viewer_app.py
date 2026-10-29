@@ -438,7 +438,8 @@ def test_the_view_opens_with_the_robot_in_shot(client):
 def test_the_panel_follows_simviews_events_not_a_polling_loop(client):
     overlay = client.get("/viewer-static/overlay.js").text
     assert 'addEventListener("simview:frame"' in overlay
-    assert "getCurrentStateIndex()" in overlay
+    # SimView >= 6.2.2 exposes the index as a property; the method is gone.
+    assert "animationController.currentStateIndex" in overlay and "getCurrentStateIndex" not in overlay
     assert "requestAnimationFrame(tick)" not in overlay
     assert "__debugSimView" not in overlay
     patch = client.get("/viewer-static/simview_patch.js").text
