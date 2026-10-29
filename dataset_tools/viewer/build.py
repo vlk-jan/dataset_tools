@@ -312,10 +312,10 @@ class SceneAccess:
 
         def held() -> str:
             try:
-                return image_format.of_scene(self.dir)
+                return image_format.of_scene(self.dir, listdir=remote.listdir)
             except image_format.ImageFormatError:
                 # A scene the validator fails. Show what most of it is.
-                have = image_format.held(self.dir)
+                have = image_format.held(self.dir, remote.listdir)
                 return max(have, key=have.get) if have else image_format.DEFAULT
 
         return self.cached("image_suffix", held)  # type: ignore[return-value]
@@ -326,7 +326,7 @@ class SceneAccess:
     def nearest_frame(self, kind: str, index: int) -> int | None:
         """``index`` when it has a ``kind`` file, else the nearest frame that has
         one (a sparse directory), else None."""
-        if self.frame_path(kind, index).is_file():
+        if remote.is_file(self.frame_path(kind, index)):
             return index
         available = sorted(self.available_frames(kind))
         return min(available, key=lambda i: abs(i - index)) if available else None
@@ -605,7 +605,7 @@ def read_driven_similarity(path: Path) -> dict[str, Any] | None:
 
     ``driven``, ``max_sim``, ``threshold`` (default 0.9) and optional ``max_sim_geom``.
     """
-    if not path.is_file():
+    if not remote.is_file(path):
         return None
     try:
         with np.load(remote.local(path)) as d:

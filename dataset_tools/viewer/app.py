@@ -565,7 +565,7 @@ def create_app(
             image = access.frame_path("images", index)
             cloud_path = access.frame_path("clouds", index)
             cloud = load_cloud(cloud_path)
-            if cloud is None or not image.is_file():
+            if cloud is None or not remote.is_file(image):
                 return cloud_path if cloud is None else image
             info = access.camera_info or {}
             return (
@@ -1080,7 +1080,7 @@ def _unreadable_tile() -> bytes:
 
 def _absent_or_unreadable(path: Path | None, what: str) -> Response:
     """404 for a missing file; 422 with a red tile for one that exists but won't load."""
-    if path is not None and path.is_file():
+    if path is not None and remote.is_file(path):
         logger.warning("%s: %s exists but cannot be read", what, path)
         return Response(_unreadable_tile(), status_code=422, media_type="image/png")
     raise HTTPException(404, f"no {what}")
@@ -1205,7 +1205,7 @@ def _frame_details(access: SceneAccess, index: int) -> dict[str, Any]:
 
     present: dict[str, bool] = {}
     for kind in COUNTED_DIRS:
-        present[kind] = probe.has(kind) and access.frame_path(kind, index).is_file()
+        present[kind] = probe.has(kind) and remote.is_file(access.frame_path(kind, index))
     details["present"] = present
     # The cloud-on-image check needs both per-frame files and the calibration.
     details["overlay"] = present["images"] and present["clouds"] and _overlay_possible(access)

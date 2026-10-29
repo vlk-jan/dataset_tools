@@ -8,7 +8,6 @@ Height maps are ``[row=x, col=y]``; SimView's terrain wants ``[row=y, col=x]``, 
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -298,7 +297,7 @@ def resample_series(src_ts: np.ndarray, src_vals: np.ndarray, query_ts: np.ndarr
 def frame_indices_dir(path: Path, suffix: str) -> list[int]:
     """Sorted integer frame indices of ``NNNNN<suffix>`` files in a directory."""
     try:
-        names = os.listdir(path)
+        names = remote.listdir(path)
     except OSError:
         return []
     out = []

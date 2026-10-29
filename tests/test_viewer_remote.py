@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -50,9 +51,11 @@ def test_a_url_root_probes_and_builds_like_the_local_one(served, tmp_path):
     got, want = remote_root.probe("0000"), local_root.probe("0000")
     assert (got.n_frames, got.counts, got.present) == (want.n_frames, want.counts, want.present)
     # Probed from the arrays' headers alone, by range reads.
-    assert got.counts["transforms"] == 12 and (mirror / "0000" / "transforms.npy").stat().st_size == 0
+    assert got.counts["transforms"] == 12 and not (mirror / "0000" / "transforms.npy").exists()
+    # Listed, not written: no placeholder files, yet present to the viewer.
     cloud = mirror / "0000" / "clouds" / "00000.npy"
-    assert cloud.stat().st_size == 0
+    assert not cloud.exists() and remote.is_file(cloud) and "00000.npy" in remote.listdir(cloud.parent)
+    assert not remote.is_file(cloud.with_name("99999.npy"))
 
     fingerprint = probe.scene_fingerprint(mirror / "0000")
     client = viewer_client(mirror, tmp_path / "cache")
@@ -61,8 +64,20 @@ def test_a_url_root_probes_and_builds_like_the_local_one(served, tmp_path):
     assert meta.status_code == 200, meta.text
     assert client.get("/api/scene/0000/frame/0/image.jpg").status_code == 200
     assert cloud.read_bytes() == (root / "0000" / "clouds" / "00000.npy").read_bytes()
+    cloud.write_bytes(b"")  # the empty placeholder an older mirror left: still fetched
+    assert remote.local(cloud).read_bytes() == (root / "0000" / "clouds" / "00000.npy").read_bytes()
     # Fetching frames must not invalidate the scene's probe or built windows.
     assert probe.scene_fingerprint(mirror / "0000") == fingerprint
+
+
+def test_the_parsed_listings_kept_are_bounded(served, tmp_path, monkeypatch):
+    root, url = served
+    mirror = remote.mount(url, tmp_path / "cache")
+    probe.DatasetRoot(mirror, cache_dir=tmp_path / "cache").probe_all()  # syncs the scenes
+    monkeypatch.setattr(remote, "LISTINGS_KEPT", 1)
+    for scene in ("0000", "0001", "0000"):
+        assert sorted(remote.listdir(mirror / scene / "clouds")) == sorted(os.listdir(root / scene / "clouds"))
+    assert list(remote._listings) == [mirror / "0000" / "clouds"]
 
 
 def test_a_mirror_refuses_a_foreign_directory_an_oversized_body_and_an_off_host_redirect(served, tmp_path, monkeypatch):

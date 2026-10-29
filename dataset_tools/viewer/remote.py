@@ -9,11 +9,14 @@ a local mirror directory, which is then used as the root:
 - files directly in the root, a scene or another top-level directory (manifest,
   odometry, calibration, ``atlas/atlas.json``, ...) are downloaded by the sync;
 - files deeper down (``clouds/00000.npy``, ``images/``, atlas thumbnails) and
-  every ``.npy`` (a long scene's ``joint_states.npy`` alone is 15 MB) are empty
-  placeholders until :func:`local` is asked for one; :func:`head` reads the
-  start of one without fetching it.
+  every ``.npy`` (a long scene's ``joint_states.npy`` alone is 15 MB) are only
+  listed until :func:`local` is asked for one; :func:`head` reads the start of
+  one without fetching it. Not writing them as empty placeholders spares ~1.2M
+  file creations: a cold index of the 36-scene public root went 78 s -> 16 s.
 
-Each mirrored directory keeps the listing it was synced from in ``.listing.json``.
+Each mirrored directory keeps the listing it was synced from in ``.listing.json``;
+:func:`listdir` and :func:`is_file` answer from it, so a file not fetched yet
+looks present to the rest of the viewer.
 A scene's fingerprint is that file's digest, so fetching a frame never moves it.
 """
 
@@ -50,6 +53,11 @@ _mount: tuple[str, Path] | None = None
 _synced: dict[Path, float] = {}
 _locks: dict[Path, threading.Lock] = {}
 _locks_guard = threading.Lock()
+#: Parsed ``.listing.json`` of the most recently used mirrored directories, with the
+#: file's (mtime, inode). Bounded: a cold index reads every one (36 scenes: ~90 MB).
+_listings: dict[Path, tuple[tuple[int, int], dict[str, list]]] = {}
+_listings_guard = threading.Lock()
+LISTINGS_KEPT = 64
 _pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="remote-fetch")
 
 
@@ -136,25 +144,43 @@ def refresh(path: Path) -> None:
 
 
 def local(path: Path) -> Path:
-    """``path``, downloaded first when it is a mirrored placeholder.
+    """``path``, downloaded first when it is a mirrored file not fetched yet.
 
     Raises ``OSError`` when the download fails; a missing file is left to the reader.
     """
     parts = _parts(path)
-    if _placeholder(path, parts):
+    if _unfetched(path, parts):
         _download(_url(parts), path)
     return path
 
 
 def head(path: Path) -> bytes | None:
-    """The first 4 KiB of a mirrored placeholder, by a range request.
+    """The first 4 KiB of a mirrored file not fetched yet, by a range request.
 
     ``None`` for any other path: read that one directly.
     """
     parts = _parts(path)
-    if not _placeholder(path, parts):
+    if not _unfetched(path, parts):
         return None
     return _get(_url(parts), {"Range": "bytes=0-4095"})[:4096]
+
+
+def listdir(path: Path) -> list[str]:
+    """``os.listdir(path)``; for a synced mirrored directory, the names in its listing."""
+    entries = _listing(Path(path))
+    return os.listdir(path) if entries is None else list(entries)
+
+
+def is_file(path: Path) -> bool:
+    """``path.is_file()``, also true for a listed mirrored file not fetched yet."""
+    path = Path(path)
+    parts = _parts(path)
+    if parts and _lazy(parts):
+        entries = _listing(path.parent)
+        if entries is not None:
+            entry = entries.get(path.name)
+            return entry is not None and not entry[0]
+    return path.is_file()
 
 
 def fingerprint(scene_dir: Path) -> str | None:
@@ -183,13 +209,35 @@ def _lazy(parts: tuple[str, ...]) -> bool:
     return len(parts) > 2 or parts[-1].endswith(".npy")  # deeper than a scene's own files, or an array
 
 
-def _placeholder(path: Path, parts: tuple[str, ...] | None) -> bool:
+def _unfetched(path: Path, parts: tuple[str, ...] | None) -> bool:
     if not parts or not _lazy(parts):
         return False
     try:
-        return path.stat().st_size == 0
+        return path.stat().st_size == 0  # an empty placeholder, as mirrors before 2026-10-29 wrote
     except FileNotFoundError:
-        return False
+        return is_file(path)
+
+
+def _listing(path: Path) -> dict[str, list] | None:
+    """The synced listing of a mirrored directory; ``None`` outside the mirror or before a sync."""
+    if _parts(path) is None:
+        return None
+    try:
+        st = (path / LISTING).stat()
+    except OSError:
+        return None
+    stamp = (st.st_mtime_ns, st.st_ino)
+    with _listings_guard:
+        cached = _listings.pop(path, None)
+        if cached is None or cached[0] != stamp:
+            try:
+                cached = (stamp, json.loads((path / LISTING).read_text()))
+            except (OSError, ValueError):
+                return None
+        _listings[path] = cached  # most recent last
+        while len(_listings) > LISTINGS_KEPT:
+            del _listings[next(iter(_listings))]
+    return cached[1]
 
 
 def _url(parts: tuple[str, ...], is_dir: bool = False) -> str:
@@ -252,13 +300,14 @@ def _sync(path: Path, parts: tuple[str, ...]) -> None:
                     _synced.pop(dest, None)
             elif changed or not (dest / LISTING).is_file():
                 _sync(dest, (*parts, name))
+        elif _lazy((*parts, name)):
+            if changed and name in old:
+                dest.unlink(missing_ok=True)  # fetched again by local()
+            synced[name] = entry
         elif not changed and dest.is_file():
             synced[name] = entry
-        elif not _lazy((*parts, name)):
-            fetch.append(name)
         else:
-            open(dest, "wb").close()  # placeholder: fetched by local()
-            synced[name] = entry
+            fetch.append(name)
 
     def get(name: str) -> str | None:
         try:

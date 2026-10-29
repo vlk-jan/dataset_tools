@@ -299,7 +299,7 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
         probe.fingerprint = ""
 
     try:
-        entries = set(os.listdir(scene_dir))
+        entries = set(remote.listdir(scene_dir))
     except OSError as exc:
         probe.warnings.append(f"cannot list scene directory: {exc}")
         return probe
@@ -316,9 +316,10 @@ def probe_scene(scene_dir: Path, scene_id: str | None = None) -> SceneProbe:
             art = ARTEFACTS_BY_KEY[key]
             try:
                 if key == "images":  # .jpg or .png, by what the root holds
-                    probe.counts[key] = sum(image_format.held(scene_dir).values())
+                    probe.counts[key] = sum(image_format.held(scene_dir, remote.listdir).values())
                 else:
-                    probe.counts[key] = sum(1 for n in os.listdir(scene_dir / art.relpath) if n.endswith(art.suffix))
+                    names = remote.listdir(scene_dir / art.relpath)
+                    probe.counts[key] = sum(1 for n in names if n.endswith(art.suffix))
             except OSError:
                 probe.counts[key] = 0
 
@@ -602,7 +603,7 @@ class DatasetRoot:
         if not inside:
             logger.warning("atlas thumbnail %s points outside %s; ignored", path, self.atlas_dir)
             return None
-        return path if path.is_file() else None
+        return path if remote.is_file(path) else None
 
     def csv_rows(self) -> dict[str, dict]:
         """``scenes.csv`` indexed by scene id ({} when the file is absent)."""

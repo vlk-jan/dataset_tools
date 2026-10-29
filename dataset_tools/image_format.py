@@ -74,11 +74,14 @@ def declared(root) -> str | None:
     return _normalise(block["extension"], path)
 
 
-def held(scene_dir) -> dict[str, int]:
-    """Image files in ``<scene>/images`` per known extension; absent ones are not listed."""
+def held(scene_dir, listdir=os.listdir) -> dict[str, int]:
+    """Image files in ``<scene>/images`` per known extension; absent ones are not listed.
+
+    ``listdir``: the viewer's mirror of a URL root passes its own.
+    """
     counts: dict[str, int] = {}
     try:
-        names = os.listdir(Path(scene_dir) / "images")
+        names = listdir(Path(scene_dir) / "images")
     except OSError:
         return counts
     for name in names:
@@ -88,13 +91,13 @@ def held(scene_dir) -> dict[str, int]:
     return counts
 
 
-def of_scene(scene_dir, root=None) -> str:
+def of_scene(scene_dir, root=None, listdir=os.listdir) -> str:
     """The extension of this scene's images (``root`` defaults to the scene's parent).
 
     Raises `ImageFormatError` for mixed formats or one the root does not declare.
     """
     scene_dir = Path(scene_dir)
-    have = held(scene_dir)
+    have = held(scene_dir, listdir)
     want = declared(scene_dir.parent if root is None else root)
     if len(have) > 1:
         found = ", ".join(f"{n} {e}" for e, n in sorted(have.items()))
