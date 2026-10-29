@@ -272,14 +272,39 @@ def render_cloud_bev(cloud: np.ndarray, size: int = 384) -> bytes:
     return _png(draw_robot_silhouette(rgb, px_per_m=n / (2 * extent)))
 
 
+#: libjpeg decodes straight to 1/8, 1/4 or 1/2 size: a 192 px thumbnail of a
+#: 1600 px frame in ~10 ms instead of ~25 ms.
+_REDUCED = ((8, cv2.IMREAD_REDUCED_COLOR_8), (4, cv2.IMREAD_REDUCED_COLOR_4), (2, cv2.IMREAD_REDUCED_COLOR_2))
+
+
+def _jpeg_width(data: bytes) -> int | None:
+    """Pixel width from a JPEG's frame header (SOFn), or None if there is none."""
+    i = 2
+    while i + 9 <= len(data) and data[i] == 0xFF:
+        marker = data[i + 1]
+        if marker == 0xFF:  # fill byte
+            i += 1
+        elif 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            return int.from_bytes(data[i + 7 : i + 9], "big")
+        else:
+            i += 2 + int.from_bytes(data[i + 2 : i + 4], "big")
+    return None
+
+
 def render_camera_image(path: Path, width: int = 640, quality: int = JPEG_QUALITY) -> bytes:
     """JPEG of a camera frame, downscaled to at most ``width`` pixels across.
 
     A JPEG source that needs no downscale is served as is (no re-encode loss).
     """
     data = remote.local(path).read_bytes()
-    bgr = _decode(data)
-    if data[:3] == b"\xff\xd8\xff" and not (width and bgr.shape[1] > width):
+    full = _jpeg_width(data) if width and data[:3] == b"\xff\xd8\xff" else None
+    # Never below ``width``: INTER_AREA still does the last step.
+    flag = next((f for s, f in _REDUCED if full and full // s >= width), None)
+    if flag is None:
+        bgr = _decode(data)
+    elif (bgr := cv2.imdecode(np.frombuffer(data, np.uint8), flag)) is None:
+        raise ValueError("not a decodable image")
+    if data[:3] == b"\xff\xd8\xff" and not (width and (full or bgr.shape[1]) > width):
         return data
     return _jpeg(_shrink(bgr, width), quality)
 

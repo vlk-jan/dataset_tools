@@ -50,6 +50,24 @@ def test_the_cameras_own_jpeg_is_served_untouched_when_no_downscale_is_needed(tm
     assert decode_rgb(smaller).shape[:2] == (20, 32)
 
 
+def test_a_thumbnail_decoded_at_reduced_size_matches_a_full_decode(tmp_path):
+    import cv2
+
+    rng = np.random.default_rng(0)
+    # Smooth content, like a camera frame; noise would differ by aliasing alone.
+    small = rng.integers(0, 255, (13, 16, 3), dtype=np.uint8)
+    frame = cv2.resize(small, (1600, 1296), interpolation=cv2.INTER_CUBIC)
+    for name, params in (("base.jpg", []), ("prog.jpg", [cv2.IMWRITE_JPEG_PROGRESSIVE, 1])):
+        path = tmp_path / name
+        path.write_bytes(cv2.imencode(".jpg", frame, params)[1].tobytes())
+        assert render._jpeg_width(path.read_bytes()) == 1600
+        thumb = decode_rgb(render.render_camera_image(path, width=192))
+        assert thumb.shape[:2] == (156, 192)
+        want = decode_rgb(render._jpeg(render._shrink(render._decode(path.read_bytes()), 192)))
+        assert np.abs(thumb.astype(int) - want.astype(int)).mean() < 2.0
+    assert render._jpeg_width(b"\xff\xd8\xff\xd9") is None
+
+
 def test_a_known_point_lands_on_its_pixel_when_projected_into_the_image(tmp_path):
     path = tmp_path / "00000.png"
     write_image(path, (200, 100), (0, 0, 0))
