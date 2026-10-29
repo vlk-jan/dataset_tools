@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,9 @@ logger = logging.getLogger("dataset_tools.viewer.probe")
 
 #: Bump whenever ``SceneProbe``'s fields change, so older caches are discarded.
 PROBE_CACHE_FORMAT = 6
+#: Scenes probed at once: a cold probe is mostly listing per-frame directories,
+#: network-storage round trips that release the GIL (43 cold scenes on NFS: 69 s -> 6 s).
+PROBE_WORKERS = 16
 
 
 def scene_fingerprint(scene_dir: Path) -> str:
@@ -631,8 +635,9 @@ class DatasetRoot:
         return probe
 
     def probe_all(self) -> list[SceneProbe]:
-        """Probe every scene (re-listing the root), writing the cache once."""
-        probes = [self.probe(sid, persist=False) for sid in self.scene_ids(refresh=True)]
+        """Probe every scene (re-listing the root) in threads, writing the cache once."""
+        with ThreadPoolExecutor(max_workers=PROBE_WORKERS) as pool:
+            probes = list(pool.map(lambda sid: self.probe(sid, persist=False), self.scene_ids(refresh=True)))
         self.save_probe_cache()
         return probes
 
