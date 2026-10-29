@@ -20,6 +20,9 @@ dist/
 
 # Local agent tooling
 .opencode/
+.claude/
+.codex/
 AGENTS.md
+CLAUDE.md
 graphify-out/
 /site
