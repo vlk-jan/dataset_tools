@@ -73,6 +73,7 @@ tunnel forwarding the interface to your laptop.
     | `VIEWER_LOGIN` | `login3.rci.cvut.cz` | login node |
     | `VIEWER_REPO` | `/home/$VIEWER_USER/projects/dataset_tools` | the checkout on the cluster the job was submitted from |
     | `VIEWER_KNOWN_HOSTS` | `~/.ssh/known_hosts_rci_nodes` | known-hosts file for the compute nodes |
+    | `VIEWER_COMPRESS` | `1` | compress the tunnel: a 3D window is ~37 MB raw, ~13 MB compressed; `0` is faster on wired gigabit |
 
     This locates the job's compute node and socket, keeping the tunnel open
     until you press Ctrl-C. The viewer runs until the Slurm job walltime
