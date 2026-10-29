@@ -539,6 +539,11 @@ class TerrainGrid:
         flat = np.bincount(row * self.nx + col, weights=weights, minlength=self.ny * self.nx)
         return flat.reshape(self.ny, self.nx)
 
+    def add(self, layer: np.ndarray, cell: np.ndarray, weights: np.ndarray | int = 1) -> None:
+        """``layer.flat[cell] += weights``, repeated cells summed. For one frame's few cells
+        ~3x :meth:`binned`, which sums over the whole grid (numpy >= 1.25: flat ufunc.at)."""
+        np.add.at(layer.reshape(-1), cell, weights)
+
 
 def _make_grid(positions: np.ndarray, opts: BuildOptions) -> TerrainGrid:
     """A grid covering the window's path plus a margin, at a resolution that
@@ -663,11 +668,11 @@ def splat_height_maps(
         world, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
             continue
-        r, c = row[inside], col[inside]
+        cell = row[inside] * grid.nx + col[inside]
         w = np.exp(-((np.hypot(local[inside, 0], local[inside, 1]) / HM_BLEND_SIGMA) ** 2))
-        grid.sum_wz += grid.binned(r, c, world[inside, 2] * w)
-        grid.sum_w += grid.binned(r, c, w)
-        grid.count += grid.binned(r, c)
+        grid.add(grid.sum_wz, cell, world[inside, 2] * w)
+        grid.add(grid.sum_w, cell, w)
+        grid.add(grid.count, cell)
         stats["used"] += 1
 
         if mask is not None and mask.shape == hm.shape:
@@ -676,11 +681,11 @@ def splat_height_maps(
             code = np.clip(np.asarray(mask, dtype=np.intp), 0, len(L.VALIDITY_RANK) - 1)
             ranked = L.VALIDITY_RANK[code]
             flat = ranked.astype(np.float64).ravel()[finite][inside]
-            grid.sum_wv += grid.binned(r, c, flat * w)
-            grid.sum_w_v += grid.binned(r, c, w)
+            grid.add(grid.sum_wv, cell, flat * w)
+            grid.add(grid.sum_w_v, cell, w)
             wm = w * (flat == 2)
-            grid.sum_wz_m += grid.binned(r, c, world[inside, 2] * wm)
-            grid.sum_w_m += grid.binned(r, c, wm)
+            grid.add(grid.sum_wz_m, cell, world[inside, 2] * wm)
+            grid.add(grid.sum_w_m, cell, wm)
             stats["with_masks"] += 1
     return stats
 
@@ -722,9 +727,10 @@ def splat_driven_similarity(
         _, row, col, inside = _place(local, poses[i], ga, frame, grid)
         if not inside.any():
             continue
-        r, c = row[inside], col[inside]
-        np.maximum.at(driven_layer, (r, c), drv[keep][inside].astype(np.float64))
-        np.maximum.at(drivable_layer, (r, c), sim[keep][inside])
+        # Flat indices into a view: ufunc.at's fast path, ~10x the (row, col) form.
+        cell = row[inside] * grid.nx + col[inside]
+        np.maximum.at(driven_layer.reshape(-1), cell, drv[keep][inside].astype(np.float64))
+        np.maximum.at(drivable_layer.reshape(-1), cell, sim[keep][inside])
         stats["used"] += 1
     return stats
 
@@ -763,11 +769,12 @@ def aggregate_clouds(
 
         row, col, inside = grid.cell_of(world_xyz[:, 0], world_xyz[:, 1])
         if inside.any():
-            r, c = row[inside], col[inside]
-            sum_i += grid.binned(r, c, intensity[inside])
-            cnt_i += grid.binned(r, c)
-            np.maximum.at(max_z, (r, c), world_xyz[inside, 2])
-            np.minimum.at(min_z, (r, c), world_xyz[inside, 2])
+            # Flat indices into a view: ufunc.at's fast path, ~10x the (row, col) form.
+            cell = row[inside] * grid.nx + col[inside]
+            grid.add(sum_i, cell, intensity[inside])
+            grid.add(cnt_i, cell)
+            np.maximum.at(max_z.reshape(-1), cell, world_xyz[inside, 2])
+            np.minimum.at(min_z.reshape(-1), cell, world_xyz[inside, 2])
 
         if len(cloud) > per_frame:
             keep = rng.choice(len(cloud), per_frame, replace=False)
