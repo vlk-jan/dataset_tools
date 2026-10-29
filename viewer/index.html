@@ -740,7 +740,11 @@ files indicated.</p>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>helhest-viewer<span class="w"> </span>http://subtdata.felk.cvut.cz/HELHEST/<span class="w"> </span>--open<span class="w">  </span><span class="c1"># a root published on a web server</span>
 </span></code></pre></div>
 <p>When a root is provided as a URL, files are mirrored into the local cache as
-you browse, and reviewer notes default to <code>&lt;cache-dir&gt;/notes</code>.
+you browse, and reviewer notes default to <code>&lt;cache-dir&gt;/notes</code>. The first index
+lists every scene's per-frame directories (about 15 s for the 36-scene public
+release); a root published with <code>listings/</code>, written by
+<code>python -m dataset_tools.viewer.remote /path/to/root</code> just before publishing,
+needs one request per scene for that instead.
 <code>scripts/viewer_public.sh [viewer flags]</code> starts the viewer on the public
 release and opens a browser; <code>VIEWER_URL</code> points it at another root.</p>
 <table>
@@ -916,8 +920,9 @@ expires.</p>
 </tbody>
 </table>
 <p>A 3D view never spans two segments because each segment has its own coordinate
-origin. The first time a window is opened, its 3D assets are built; afterwards
-they load from the cache.</p>
+origin. The first time a window is opened, its 3D assets are built (2-4 s);
+afterwards they load from the cache, and the next window is built in the
+background while you look at this one.</p>
 <h2 id="optional-root-files">Optional root files<a class="headerlink" href="#optional-root-files" title="Permanent link">&para;</a></h2>
 <p>Each of these optional files adds information to the pages when present and is
 re-read automatically when modified:</p>
@@ -949,6 +954,11 @@ re-read automatically when modified:</p>
 <td><code>atlas/</code></td>
 <td>index page's curated header and thumbnails</td>
 <td><code>scripts/make_atlas.py</code></td>
+</tr>
+<tr>
+<td><code>listings/</code></td>
+<td>nothing: a faster first index when the root is opened by URL</td>
+<td><code>python -m dataset_tools.viewer.remote</code></td>
 </tr>
 <tr>
 <td><code>notes/</code></td>
