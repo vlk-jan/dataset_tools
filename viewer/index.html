@@ -861,6 +861,11 @@ laptop. It reads these environment variables:</p>
 <td><code>~/.ssh/known_hosts_rci_nodes</code></td>
 <td>known-hosts file for the compute nodes</td>
 </tr>
+<tr>
+<td><code>VIEWER_COMPRESS</code></td>
+<td><code>1</code></td>
+<td>compress the tunnel: a 3D window is ~37 MB raw, ~13 MB compressed; <code>0</code> is faster on wired gigabit</td>
+</tr>
 </tbody>
 </table>
 <p>This locates the job's compute node and socket, keeping the tunnel open

@@ -931,7 +931,8 @@ per second.</p>
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── README.md                the release described in prose
 </span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── validation.csv           helhest-validate's report
 </span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>├── disk_usage.json          sizes per scene and modality
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>└── atlas/                   the viewer's curated index and thumbnails
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── atlas/                   the viewer's curated index and thumbnails
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>└── listings/                optional: per-scene file lists for viewers opening the root by URL
 </span></code></pre></div>
 <p>The held-out scenes are listed in <code>manifest.json</code> under <code>held_out.scenes</code>.
 A loader that trains on a root must keep them out of every training fold; the
