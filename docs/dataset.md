@@ -34,7 +34,8 @@ per second.
 ├── README.md                the release described in prose
 ├── validation.csv           helhest-validate's report
 ├── disk_usage.json          sizes per scene and modality
-└── atlas/                   the viewer's curated index and thumbnails
+├── atlas/                   the viewer's curated index and thumbnails
+└── listings/                optional: per-scene file lists for viewers opening the root by URL
 ```
 
 The held-out scenes are listed in `manifest.json` under `held_out.scenes`.

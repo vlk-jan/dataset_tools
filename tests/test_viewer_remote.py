@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import functools
+import html
+import io
 import os
 import threading
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import quote
 
 import pytest
 from helpers_viewer import make_root, viewer_client
@@ -78,6 +82,64 @@ def test_the_parsed_listings_kept_are_bounded(served, tmp_path, monkeypatch):
     for scene in ("0000", "0001", "0000"):
         assert sorted(remote.listdir(mirror / scene / "clouds")) == sorted(os.listdir(root / scene / "clouds"))
     assert list(remote._listings) == [mirror / "0000" / "clouds"]
+
+
+def _apache(root, listed: list[str]):
+    """A server over ``root`` whose directory pages carry an Apache index's date and
+    size columns; the paths of the pages it serves go into ``listed``."""
+
+    class Apache(SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def list_directory(self, path):
+            listed.append(self.path)
+            rows = []
+            for name in sorted(os.listdir(path)):
+                st = os.stat(os.path.join(path, name))
+                slash = "/" if os.path.isdir(os.path.join(path, name)) else ""
+                date = time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))
+                rows.append(
+                    f'<tr><td><a href="{quote(name)}{slash}">{html.escape(name)}{slash}</a></td>'
+                    f'<td align="right">{date}  </td><td align="right">{"-" if slash else st.st_size}</td></tr>'
+                )
+            body = ("<table>" + "\n".join(rows) + "</table>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Apache, directory=str(root)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_published_listings_stand_in_for_the_per_directory_index_pages(tmp_path):
+    root = make_root(tmp_path, scenes=("0000", "0001"))
+    past = time.time() - 600
+    for d in root.glob("0*/*/"):
+        os.utime(d, (past, past))  # extracted well before the listings are written
+    assert remote.write_listings(root) == sum(len(os.listdir(d)) for d in root.glob("0*/*/"))
+    listed: list[str] = []
+    server = _apache(root, listed)
+    try:
+        mirror = remote.mount(f"http://127.0.0.1:{server.server_port}/", tmp_path / "cache")
+        got = probe.DatasetRoot(mirror, cache_dir=tmp_path / "cache").probe("0000")
+        want = probe.DatasetRoot(root, cache_dir=tmp_path / "local-cache").probe("0000")
+        assert (got.n_frames, got.counts, got.present) == (want.n_frames, want.counts, want.present)
+        assert not [p for p in listed if p.startswith("/0000/") and p != "/0000/"]
+        cloud = mirror / "0000" / "clouds" / "00000.npy"
+        assert remote.local(cloud).read_bytes() == (root / "0000" / "clouds" / "00000.npy").read_bytes()
+
+        # A directory written after the listings is listed by the server instead.
+        future = time.time() + 600
+        os.utime(root / "0001" / "clouds", (future, future))
+        assert probe.DatasetRoot(mirror, cache_dir=tmp_path / "cache").probe("0001").counts["clouds"] == 12
+        assert "/0001/clouds/" in listed and "/0001/images/" not in listed
+    finally:
+        server.shutdown()
+        remote._mount = None
 
 
 def test_a_mirror_refuses_a_foreign_directory_an_oversized_body_and_an_off_host_redirect(served, tmp_path, monkeypatch):

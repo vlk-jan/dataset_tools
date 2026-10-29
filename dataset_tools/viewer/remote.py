@@ -14,6 +14,13 @@ a local mirror directory, which is then used as the root:
   one without fetching it. Not writing them as empty placeholders spares ~1.2M
   file creations: a cold index of the 36-scene public root went 78 s -> 16 s.
 
+A root can publish its scenes' per-frame directory listings as
+``listings/<scene>.json.gz`` (:func:`write_listings`, ``python -m
+dataset_tools.viewer.remote ROOT``): one request per scene instead of an index
+page per directory, which the server is slow to build at 16k entries (a cold
+index of the 36-scene public root: 15 s). A directory newer than its scene's
+file is listed by the server as before.
+
 Each mirrored directory keeps the listing it was synced from in ``.listing.json``;
 :func:`listdir` and :func:`is_file` answer from it, so a file not fetched yet
 looks present to the rest of the viewer.
@@ -22,6 +29,8 @@ A scene's fingerprint is that file's digest, so fetching a frame never moves it.
 
 from __future__ import annotations
 
+import argparse
+import gzip
 import hashlib
 import html
 import json
@@ -58,6 +67,14 @@ _locks_guard = threading.Lock()
 _listings: dict[Path, tuple[tuple[int, int], dict[str, list]]] = {}
 _listings_guard = threading.Lock()
 LISTINGS_KEPT = 64
+
+#: Root directory of the published per-scene listings, and their format.
+PUBLISHED_DIR = "listings"
+PUBLISHED_FORMAT = 1
+#: The minute an Apache index prints as an entry's date.
+_MINUTE = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d")
+#: A name that stays in its directory and is not hidden, as :func:`parse_listing` keeps.
+_NAME = re.compile(r"[^./\\\0][^/\\\0]*")
 _pool = ThreadPoolExecutor(max_workers=16, thread_name_prefix="remote-fetch")
 
 
@@ -206,7 +223,8 @@ def _parts(path: Path) -> tuple[str, ...] | None:
 
 
 def _lazy(parts: tuple[str, ...]) -> bool:
-    return len(parts) > 2 or parts[-1].endswith(".npy")  # deeper than a scene's own files, or an array
+    # Deeper than a scene's own files, an array, or a scene's published listing (fetched with the scene).
+    return len(parts) > 2 or parts[-1].endswith(".npy") or parts[0] == PUBLISHED_DIR
 
 
 def _unfetched(path: Path, parts: tuple[str, ...] | None) -> bool:
@@ -272,14 +290,17 @@ def _remove(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def _sync(path: Path, parts: tuple[str, ...]) -> None:
-    """Bring one mirrored directory (and its non-scene subdirectories) in line with its listing.
+def _sync(path: Path, parts: tuple[str, ...], entries: dict[str, list] | None = None) -> None:
+    """Bring one mirrored directory (and its non-scene subdirectories) in line with its
+    listing: ``entries``, else the server's index page.
 
     ponytail: Apache stamps are to the minute with rounded sizes, so a file
     rewritten within a minute at the same size is missed; fine for a published
     release, add ETags if a root is ever rewritten in place.
     """
-    entries = parse_listing(_get(_url(parts, True)).decode("utf-8", "replace"))
+    if entries is None:
+        entries = parse_listing(_get(_url(parts, True)).decode("utf-8", "replace"))
+    published = _published(parts[0], entries) if len(parts) == 1 and parts[0].isdigit() else {}
     try:
         old = json.loads((path / LISTING).read_text())
     except (OSError, ValueError):
@@ -290,21 +311,21 @@ def _sync(path: Path, parts: tuple[str, ...]) -> None:
     synced: dict[str, list] = {}
     fetch: list[str] = []
     for name, entry in entries.items():
-        dest = path / name
         changed = old.get(name) != entry
         if entry[0]:
+            dest = path / name
             dest.mkdir(exist_ok=True)
             synced[name] = entry
             if not parts and name.isdigit():  # a scene: synced when it is looked at
                 if changed:
                     _synced.pop(dest, None)
             elif changed or not (dest / LISTING).is_file():
-                _sync(dest, (*parts, name))
-        elif _lazy((*parts, name)):
+                _sync(dest, (*parts, name), published.get(name))
+        elif _lazy((*parts, name)):  # no Path per entry: 166k of them in a long scene
             if changed and name in old:
-                dest.unlink(missing_ok=True)  # fetched again by local()
+                (path / name).unlink(missing_ok=True)  # fetched again by local()
             synced[name] = entry
-        elif not changed and dest.is_file():
+        elif not changed and (path / name).is_file():
             synced[name] = entry
         else:
             fetch.append(name)
@@ -324,3 +345,90 @@ def _sync(path: Path, parts: tuple[str, ...]) -> None:
         tmp = path / f"{LISTING}.{os.getpid()}.tmp"
         tmp.write_text(json.dumps(synced, sort_keys=True))
         os.replace(tmp, path / LISTING)
+        st = (path / LISTING).stat()
+        with _listings_guard:  # read next by listdir/is_file: spare parsing it again
+            _listings[path] = ((st.st_mtime_ns, st.st_ino), synced)
+            while len(_listings) > LISTINGS_KEPT:
+                del _listings[next(iter(_listings))]
+
+
+def _published(scene: str, entries: dict[str, list]) -> dict[str, dict[str, list]]:
+    """Listings of the scene's subdirectories from ``listings/<scene>.json.gz``, for
+    those the file is newer than (both by the dates the server prints); {} without one."""
+    root = _mount[1]
+    name = f"{scene}.json.gz"
+    try:
+        stamp = json.loads((root / PUBLISHED_DIR / LISTING).read_text())[name][1]
+        z = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = z.decompress(local(root / PUBLISHED_DIR / name).read_bytes(), MAX_BYTES)
+        if z.unconsumed_tail:
+            raise ValueError(f"{name} inflates past {MAX_BYTES >> 20} MB")
+        doc = json.loads(raw)
+        dirs = doc["dirs"] if doc.get("format") == PUBLISHED_FORMAT else {}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, zlib.error) as exc:
+        if not isinstance(exc, FileNotFoundError | KeyError):
+            logger.warning("ignoring %s/%s: %s", PUBLISHED_DIR, name, exc)
+        return {}
+    if not _MINUTE.match(stamp):
+        return {}
+    out: dict[str, dict[str, list]] = {}
+    for sub, files in dirs.items() if isinstance(dirs, dict) else ():
+        entry = entries.get(sub)
+        # To the minute: the same minute could be either order, so it is not trusted.
+        if not (entry and entry[0] and _MINUTE.match(entry[1]) and stamp[:16] > entry[1][:16]):
+            continue
+        if isinstance(files, dict):
+            # Already listing entries, [False, mtime]; held to parse_listing's names.
+            out[sub] = {
+                n: e for n, e in files.items() if _NAME.fullmatch(n) and type(e) is list and len(e) == 2 and not e[0]
+            }
+    return out
+
+
+def write_listings(root: Path, workers: int = 16) -> int:
+    """Write ``listings/<scene>.json.gz`` for every scene of a local root: each
+    subdirectory holding only files, as listing entries ``{name: [false, mtime]}``
+    (the mtime says when to fetch a file again; sizes would only cost bytes). Returns the
+    number of files listed. Run it last, after anything else writes into the scenes."""
+    root = Path(root)
+    out = root / PUBLISHED_DIR
+    out.mkdir(exist_ok=True)
+    scenes = sorted(d.name for d in root.iterdir() if d.name.isdigit() and d.is_dir())
+
+    def one(scene: str) -> int:
+        dirs: dict[str, dict[str, list]] = {}
+        with os.scandir(root / scene) as entries:
+            for d in entries:
+                if not d.is_dir() or d.name.startswith("."):
+                    continue
+                files: dict[str, list] | None = {}
+                with os.scandir(d.path) as inner:
+                    for f in inner:
+                        if f.name.startswith("."):
+                            continue
+                        if not f.is_file():
+                            files = None  # nested: left to the server's index
+                            break
+                        st = f.stat()
+                        files[f.name] = [False, int(st.st_mtime)]
+                if files is not None:
+                    dirs[d.name] = files
+        doc = json.dumps({"format": PUBLISHED_FORMAT, "dirs": dirs}, separators=(",", ":"))
+        tmp = out / f".{scene}.{os.getpid()}.tmp"
+        tmp.write_bytes(gzip.compress(doc.encode(), 6))
+        os.replace(tmp, out / f"{scene}.json.gz")
+        return sum(len(f) for f in dirs.values())
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:  # network storage: overlap the stats
+        listed = sum(pool.map(one, scenes))
+    for stale in out.glob("*.json.gz"):
+        if stale.name.split(".")[0] not in scenes:
+            stale.unlink()
+    return listed
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Write a root's listings/ for viewers that open it by URL.")
+    ap.add_argument("root", type=Path)
+    a = ap.parse_args()
+    print(f"{a.root / PUBLISHED_DIR}: {write_listings(a.root)} files listed")

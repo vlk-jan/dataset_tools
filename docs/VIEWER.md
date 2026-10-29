@@ -67,7 +67,25 @@ every `.npy` are downloaded when something reads them; the probe reads only the
 arrays' headers, by range requests. A first index of a release therefore costs
 a few listings per scene (a 28k-frame scene: 6 x 250 kB gzipped), a scene page
 its arrays (up to ~50 MB for the longest scenes), and a 3D window its 40-160
-clouds and height maps. After that it is as fast as a local root.
+clouds and height maps. After that it is as fast as a local root. Files not
+fetched yet exist only in their directory's `.listing.json`, not on disk.
+
+A root published with `listings/` spares the first index most of those listings:
+
+```bash
+python -m dataset_tools.viewer.remote /path/to/root   # writes <root>/listings/NNNN.json.gz
+```
+
+One gzipped file per scene holds its per-frame directories' file names (a
+36-scene root: 6 MB, written in about a minute on network storage); the viewer
+fetches it in one request when it first probes the scene, instead of an index
+page per directory, which Apache is slow to build at 16k entries. Run it last,
+after anything else writes into the scenes (DRIFT's sidecars included), and
+publish it with the root. A directory the server dates later than its scene's
+file -- written into after the listings, or in the same minute -- is listed by
+the server as before, so a stale file costs speed, not correctness; a file
+rewritten in place without a new name is the exception, so rewrite the
+listings after that too.
 
 - Changes on the server show up after the 5-minute refresh. They are seen by
   the date and size the index prints: to the minute and rounded, which is fine
